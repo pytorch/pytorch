@@ -1,9 +1,9 @@
 #ifndef THC_TENSOR_RANDOM_CUH
 #define THC_TENSOR_RANDOM_CUH
 
-#include "THCNumerics.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorMathReduce.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 #include <curand_kernel.h>
 

@@ -36,7 +36,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& dataInput = Input(DATA);
     auto& lengthsInput = Input(LENGTHS);
-    auto* output = Output(0);
+
     auto* scale_bias = Input(SCALE_BIAS).template data<float>();
     CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t outputSize = lengthsInput.size(0);
@@ -58,7 +58,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     const int* lengths = lengthsInput.template data<int>();
     vector<int64_t> shape = dataInput.sizes().vec();
     shape[0] = outputSize;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<OutDataT>());
     const float* w = nullptr;
     if (USE_WEIGHTS) {
       w = Input(WEIGHTS).template data<float>();
@@ -102,12 +102,11 @@ class FloatToRowwiseQuantized8BitsOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(FloatToRowwiseQuantized8BitsOp);
   bool RunOnDevice() override {
     auto& input = Input(DATA_FLOAT);
-    auto* output = Output(DATA_UINT8);
-    auto* scale_bias = Output(SCALE_BIAS);
+
     auto* input_data = input.template data<float>();
-    output->ResizeLike(input);
+    auto* output = Output(DATA_UINT8, input.sizes(), at::dtype<uint8_t>());
     vector<int64_t> scale_bias_dims = {input.size(0), 2};
-    scale_bias->Resize(scale_bias_dims);
+    auto* scale_bias = Output(SCALE_BIAS, scale_bias_dims, at::dtype<float>());
     auto* output_data = output->template mutable_data<uint8_t>();
     float* scale_bias_data = scale_bias->template mutable_data<float>();
     size_t n_blocks = input.size(0);
@@ -148,7 +147,7 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(DATA_UINT8);
     auto& scale_bias = Input(SCALE_BIAS);
-    auto* output = Output(DATA_FLOAT);
+
     CAFFE_ENFORCE_EQ(2, scale_bias.dim(), "scale_bias has to be matrix");
     CAFFE_ENFORCE_EQ(
         input.size(0),
@@ -158,7 +157,7 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
         2,
         scale_bias.size(1),
         "the second dim of scale_bias has to be equal to 2");
-    output->ResizeLike(input);
+    auto* output = Output(DATA_FLOAT, input.sizes(), at::dtype<float>());
     auto* input_data = input.template data<uint8_t>();
     auto* scale_bias_data = scale_bias.template data<float>();
 

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathReduce.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
 void THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
@@ -66,6 +66,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   if (numel > 0) {
     ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
     dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
+    // NOTE: only with this specific number of threads can this work on GPUs with a warp size != 32 (such as AMD). Do not alter w/o changing buffer size in kernel.
     dim3 threads(32);
 
     THCTensor_kernel_renorm<scalar_t, accreal>
@@ -88,11 +89,13 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
+  WelfordData<accreal, scalar_t> init;
+  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, true},
-                           WelfordData<accreal, scalar_t>{},
+                           init,
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -105,11 +108,13 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
+  WelfordData<accreal, scalar_t> init;
+  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, false},
-                           WelfordData<accreal, scalar_t>{},
+                           init,
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -265,7 +270,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
 
   if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),
@@ -273,7 +278,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
   } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(INFINITY),
@@ -281,7 +286,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
   } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),
@@ -289,7 +294,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(0)));
   } else {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),

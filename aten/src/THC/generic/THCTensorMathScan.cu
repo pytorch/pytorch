@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathScan.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathScan.cu"
 #else
 
 #ifndef THC_REAL_IS_HALF
@@ -15,7 +15,7 @@ __host__ void THCTensor_(scanThrust)(
   thrust::device_ptr<scalar_t> dst_data(THCTensor_(data)(state, dst));
   ptrdiff_t size = THCTensor_(nElement)(state, src);
   thrust::inclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       src_data, src_data + size, dst_data,

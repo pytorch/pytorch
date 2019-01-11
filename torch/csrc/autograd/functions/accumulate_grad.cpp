@@ -1,10 +1,10 @@
-#include "torch/csrc/autograd/functions/accumulate_grad.h"
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/functions/tensor.h"
-#include "torch/csrc/autograd/functions/utils.h"
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/functions/utils.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -44,11 +44,14 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     if (!GradMode::is_enabled()
         && !new_grad.is_sparse()
         && new_grad.is_contiguous()
-        && new_grad.use_count() == 1) {
+        && new_grad.use_count() <= 1 + !post_hooks().empty()) {
       // first check it is in first-order grad only mode
       // then check not sparse before is_contiguous
       // then check contiguous, otherwise later in place accumulation may fail
-      // and lastly, check it is the last reference before we grab it
+      // and lastly, check it is the last reference before we grab it.
+      // If the function has post hooks (for example, a DDP allreduce hook),
+      // call_function in Engine.cpp will temporarily bump the refcount by one, hence the
+      // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
       variable.grad() = new_grad.clone();
@@ -61,7 +64,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     // a thing never promised and documented, but used in some hacks seen
     // on the internet.
     if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
-      grad_variable.data() = new_grad.data() + grad_variable.data();
+      grad_variable.set_data(new_grad.data() + grad_variable.data());
     } else {
       grad_variable.data() += new_grad.data();
     }

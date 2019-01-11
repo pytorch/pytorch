@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
   while (std::getline(f_in, line)) {
     caffe2::TensorProto* data = tensor_protos.add_protos();
     data->set_data_type(caffe2::TensorProto::STRING);
-    data->add_dims(0);
+    data->add_dims(1);
     data->add_string_data(line);
     data->set_name("text");
   }

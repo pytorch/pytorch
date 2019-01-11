@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/Config.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -19,11 +19,11 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 
 #else // AT_MKL_ENABLED
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
 
 #include <algorithm>
 #include <vector>
@@ -218,7 +218,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   } else {
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
-       << at::toString(input.type().scalarType());
+       << toString(input.type().scalarType());
     AT_ERROR(ss.str());
   }
   // signal type

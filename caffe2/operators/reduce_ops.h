@@ -29,7 +29,7 @@ class ReduceOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -46,7 +46,7 @@ class ReduceOp final : public Operator<Context> {
           "Axes ids must be smaller than the dimensions of input.");
     }
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int> Y_dims;
+    std::vector<int64_t> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
@@ -59,7 +59,7 @@ class ReduceOp final : public Operator<Context> {
         Y_dims.push_back(X_dims[i]);
       }
     }
-    Y->Resize(Y_dims);
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
     return reducer_.template Forward<T>(
         X_dims,
         axes_,
@@ -92,7 +92,7 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& dY = Input(0);
     const auto& X = Input(1);
     const auto& Y = Input(2);
-    auto* dX = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -113,7 +113,7 @@ class ReduceGradientOp final : public Operator<Context> {
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return reducer_.template Backward<T>(
         dY_dims,
         dX_dims,

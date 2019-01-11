@@ -1,6 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathBlas.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathBlas.cu"
 #else
+
+#include "ATen/cuda/CUDAContext.h"
 
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
@@ -687,8 +689,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
         THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
   }
 #else
-  cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+#ifndef __HIP_PLATFORM_HCC__
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5){
+#endif
 
   THCudaBlas_HgemmStridedBatched(
       state,
@@ -703,6 +707,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
       beta,
       THCTensor_(data)(state, result_), ldc, result_->stride(0),
       num_batches);
+#ifndef __HIP_PLATFORM_HCC__
    } else {
       for (int64_t i = 0; i < num_batches; ++i) {
         THCudaBlas_Hgemm(
@@ -719,6 +724,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
         THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
       }
    }
+#endif
 
 #endif
 #endif
@@ -777,7 +783,8 @@ void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTensor *rpiv
 
   if (!pivot) {
     THCudaIntTensor *t = THCudaIntTensor_new(state);
-    THCudaIntTensor_range(state, t, 1, n, 1);
+    auto t_aten = THTensor_wrap(t);
+    at::range_out(t_aten, 1, n, 1);
     THCudaIntTensor_unsqueeze1d(state, t, t, 0);
     THCudaIntTensor** ptrs = (THCudaIntTensor**) THAlloc(sizeof(THCudaIntTensor*)*num_batches);
     for (int64_t i=0; i<num_batches; i++) {

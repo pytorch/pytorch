@@ -33,12 +33,18 @@ class OnnxifiOp final : public Operator<Context> {
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
 
     // Setup input/output descriptor templates
-    for (const auto& input : operator_def.input()) {
+    input_names_ =
+        this->template GetRepeatedArgument<std::string>("input_names");
+    output_names_ =
+        this->template GetRepeatedArgument<std::string>("output_names");
+    CAFFE_ENFORCE_EQ(input_names_.size(), operator_def.input_size());
+    CAFFE_ENFORCE_EQ(output_names_.size(), operator_def.output_size());
+    for (const auto& input : input_names_) {
       input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
     int output_idx = 0;
-    for (const auto& output : operator_def.output()) {
+    for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
@@ -83,23 +89,27 @@ class OnnxifiOp final : public Operator<Context> {
         &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
 
     // Build the Onnxifi engine
-    // TODO: In spec, backends are hot-pluggable, so two calls to
-    // onnxGetBackendIDs may result in different number of backend. And we
-    // should retry until it get consistent. For now, we don't do that.
+    int idx = this->template GetSingleArgument<int>("backend_id", 0);
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(nullptr, &num_backends_),
         ONNXIFI_STATUS_FALLBACK);
     CAFFE_ENFORCE_GT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
+    CAFFE_ENFORCE_LT(
+        idx,
+        num_backends_,
+        "Backend idx out of bound: ",
+        idx,
+        ", #backends: ",
+        num_backends_);
     backend_ids_.resize(num_backends_);
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends_),
         ONNXIFI_STATUS_SUCCESS);
 
-    // TODO: choose backend id
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitBackend(
-            backend_ids_[0], property_pointers.data(), &backend_),
+            backend_ids_[idx], property_pointers.data(), &backend_),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
@@ -174,6 +184,14 @@ class OnnxifiOp final : public Operator<Context> {
   // input/output descriptors
   std::vector<onnxTensorDescriptorV1> input_desc_;
   std::vector<onnxTensorDescriptorV1> output_desc_;
+
+  // We bind the op input/output by position while ONNXIFI binds input/output by
+  // names. In addition, op input/output names can be writtten by, for example,
+  // memonger. We cache the original input/output name of ONNX object here and
+  // bind them by position.
+  std::vector<std::string> input_names_;
+  std::vector<std::string> output_names_;
+
   std::vector<std::vector<uint64_t>> input_shapes_;
   std::vector<std::vector<uint64_t>> output_shapes_;
 

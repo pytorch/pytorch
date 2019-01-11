@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathPairwise.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.h"
 #else
 
 THC_API void THCTensor_(add)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);

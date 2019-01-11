@@ -52,7 +52,7 @@ def create_derivative(declaration, formula, var_names):
         # "output" so that it can be referred to in derivative definitions.
         if r['name'] == 'self':
             r = copy.deepcopy(r)
-            r['name'] = 'output'
+            r['name'] = 'result'
         return r
 
     returns = [transform_return(r) for r in declaration['returns']]

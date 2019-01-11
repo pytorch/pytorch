@@ -1,11 +1,11 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "TH/THHalf.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorMathCompareT.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorMathCompareT.cuh>
+#include <THC/THCTensor.hpp>
 
 template <typename T>
 struct TensorAddConstantOp {
@@ -301,5 +301,5 @@ struct TensorBitXorConstantOp {
   const T val;
 };
 
-#include "generic/THCTensorMathPairwise.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorMathPairwise.cu>
+#include <THC/THCGenerateAllTypes.h>

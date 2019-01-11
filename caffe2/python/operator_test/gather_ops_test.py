@@ -11,9 +11,32 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
 
+# Basic implementation of gather for axis == 0, shich is lookup of indices
+# in the outer dimention. Keeping it for reference here, although is similar
+# to more general funciton below.
+def ref_gather_axis0():
+    def inner(data, ind):
+        if ind.size == 0 or data.shape[0] == 0:
+            return [np.zeros((0, 10, 20)).astype(np.float32)]
+        output = [data[i] for i in ind]
+        return [output]
+    return inner
+
+# Returns axis-based lookup. We just use numpy take() which handles different
+# axis values as we want.
+def ref_gather(axis):
+    def inner(data, ind):
+        if ind.size == 0 or data.shape[axis] == 0:
+            shape = list(data.shape)
+            shape[0] = 0
+            return [np.zeros(tuple(shape)).astype(np.float32)]
+        # np.take() does axis lookup same as gather
+        output = data.take(ind, axis).astype(np.float32)
+        return [output]
+    return inner
 
 class TestGatherOps(serial.SerializedTestCase):
-    @serial.given(rows_num=st.integers(0, 10000),
+    @given(rows_num=st.integers(0, 10000),
            index_num=st.integers(0, 5000),
            **hu.gcs)
     def test_gather_ops(self, rows_num, index_num, gc, dc):
@@ -28,22 +51,37 @@ class TestGatherOps(serial.SerializedTestCase):
             ['data', 'ind'],
             ['output'])
 
-        def ref_gather(data, ind):
-            if ind.size == 0 or rows_num == 0:
-                return [np.zeros((0, 10, 20)).astype(np.float32)]
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather_axis0())
+        self.assertDeviceChecks(dc, op, [data, ind], [0])
+        return
 
-            output = [data[i] for i in ind]
-            return [output]
+    # Test axis == 2, this keeps outer dimension but will replace data
+    # within axis by lookup of index array (repeated for each outer entry)
+    @given(batch_num=st.integers(1, 4000),
+        rows_num=st.integers(1, 6),
+        index_num=st.integers(1, 20),
+        **hu.gcs)
+    def test_gather_ops_axis2(self, batch_num, rows_num, index_num, gc, dc):
+        data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
+        ind = np.random.randint(5, size=(index_num, )).astype('int32')
+        op = core.CreateOperator(
+            'Gather',
+            ['data', 'ind'],
+            ['output'],
+            axis=2)
 
-        self.assertReferenceChecks(gc, op, [data, ind], ref_gather)
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather(axis=2))
+        self.assertDeviceChecks(dc, op, [data, ind], [0])
+        return
 
 
+# Generates data arrays of max dims 10x100x2 and indexing array up to rows_num
 @st.composite
 def _inputs(draw):
-    rows_num = draw(st.integers(1, 100))
-    index_num = draw(st.integers(1, 10))
     batch_size = draw(st.integers(2, 10))
+    rows_num = draw(st.integers(1, 100))
     block_size = draw(st.integers(1, 2))
+    index_num = draw(st.integers(1, 10))
     return (
         draw(hnp.arrays(
             np.float32,
@@ -57,9 +95,8 @@ def _inputs(draw):
         )),
     )
 
-
-class TestBatchGatherOps(serial.SerializedTestCase):
-    @serial.given(inputs=_inputs(),
+class TestBatchGatherOps(hu.HypothesisTestCase):
+    @given(inputs=_inputs(),
            **hu.gcs)
     def test_batch_gather_ops(self, inputs, gc, dc):
         data, ind = inputs
@@ -67,14 +104,7 @@ class TestBatchGatherOps(serial.SerializedTestCase):
             'BatchGather',
             ['data', 'ind'],
             ['output'])
-
-        def ref_batch_gather(data, ind):
-            output = []
-            for b in range(data.shape[0]):
-                output.append([data[b][i] for i in ind])
-            return [output]
-
-        self.assertReferenceChecks(gc, op, [data, ind], ref_batch_gather)
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather(axis=1))
         self.assertGradientChecks(gc, op, [data, ind], 0, [0])
 
 

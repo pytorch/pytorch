@@ -11,8 +11,8 @@
 #include <iostream>
 #include <cstring>
 
-#include "err.h"
-#include "alloc_info.h"
+#include <libshm/err.h>
+#include <libshm/alloc_info.h>
 
 class Socket {
 public:

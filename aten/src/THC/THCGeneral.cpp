@@ -1,13 +1,14 @@
-#include "THCGeneral.h"
-#include "TH.h"
-#include "THCAllocator.h"
-#include "THCCachingHostAllocator.h"
-#include "THCTensorRandom.h"
-#include "THCGeneral.hpp"
+#include <THC/THCGeneral.h>
+#include <TH/TH.h>
+#include <THC/THCAllocator.h>
+#include <THC/THCCachingHostAllocator.h>
+#include <THC/THCTensorRandom.h>
+#include <THC/THCGeneral.hpp>
 
-#include "ATen/cuda/CUDAStream.h"
+#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAContext.h>
 
-#include "THCCachingAllocator.h"
+#include <THC/THCCachingAllocator.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -33,8 +34,7 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
 
 THCState* THCState_alloc(void)
 {
-  THCState* state = (THCState*) malloc(sizeof(THCState));
-  memset(state, 0, sizeof(THCState));
+  THCState* state = (THCState*) calloc(1, sizeof(THCState));
   return state;
 }
 
@@ -55,11 +55,7 @@ void THCudaInit(THCState* state)
   THCudaCheck(cudaGetDevice(&device));
 
   state->resourcesPerDevice = (THCCudaResourcesPerDevice*)
-    malloc(numDevices * sizeof(THCCudaResourcesPerDevice));
-  memset(state->resourcesPerDevice, 0, numDevices * sizeof(THCCudaResourcesPerDevice));
-
-  state->deviceProperties =
-    (struct cudaDeviceProp*)malloc(numDevices * sizeof(struct cudaDeviceProp));
+    calloc(numDevices, sizeof(THCCudaResourcesPerDevice));
 
   state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
   THCRandom_init(state, numDevices, device);
@@ -69,14 +65,12 @@ void THCudaInit(THCState* state)
   // "-1" (unknown).
   // Currently the max number of gpus in P2P group is 8, so if there are more
   // we enable P2P in groups of 8
-  state->p2pAccessEnabled = (int**) malloc(sizeof(int*) * numDevices);
+  state->p2pAccessEnabled = (int**) calloc(numDevices, sizeof(int*));
   for (int i = 0; i < numDevices; ++i) {
-    state->p2pAccessEnabled[i] = (int*) malloc(sizeof(int) * numDevices);
+    state->p2pAccessEnabled[i] = (int*) calloc(numDevices, sizeof(int));
     for (int j = 0; j < numDevices; ++j)
       if (i == j)
         state->p2pAccessEnabled[i][j] = 1;
-      else if (j / THC_CUDA_MAX_PEER_SIZE != i / THC_CUDA_MAX_PEER_SIZE)
-        state->p2pAccessEnabled[i][j] = 0;
       else
         state->p2pAccessEnabled[i][j] = -1;
   }
@@ -84,14 +78,13 @@ void THCudaInit(THCState* state)
   for (int i = 0; i < numDevices; ++i) {
     THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, i);
     THCudaCheck(cudaSetDevice(i));
-    THCudaCheck(cudaGetDeviceProperties(&state->deviceProperties[i], i));
 
     /* The scratch space that we want to have available per each device is
        based on the number of SMs available per device. We guarantee a
        minimum of 128kb of space per device, but to future-proof against
        future architectures that may have huge #s of SMs, we guarantee that
        we have at least 16 bytes for each SM. */
-    int numSM = state->deviceProperties[i].multiProcessorCount;
+    int numSM = at::cuda::getDeviceProperties(i)->multiProcessorCount;
     size_t sizePerStream =
       MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE >= numSM * MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM ?
       MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE :
@@ -108,7 +101,6 @@ void THCudaShutdown(THCState* state)
   THCRandom_shutdown(state);
 
   free(state->rngState);
-  free(state->deviceProperties);
 
   int deviceCount = 0;
   int prevDev = -1;
@@ -181,20 +173,6 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
   return state->p2pAccessEnabled[dev][devToAccess];
 }
 
-struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
-{
-  int curDev = -1;
-  THCudaCheck(cudaGetDevice(&curDev));
-
-  return &(state->deviceProperties[curDev]);
-}
-
-struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device)
-{
-  THAssert(device >= 0 && device < state->numDevices);
-  return &(state->deviceProperties[device]);
-}
-
 struct THCRNGState* THCState_getRngState(THCState *state)
 {
   return state->rngState;
@@ -222,30 +200,14 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   return &(state->resourcesPerDevice[device]);
 }
 
-THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::cuda::detail::CUDAStream_getCurrentStream(device);
-}
-
-void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::cuda::detail::CUDAStream_setStream(stream);
-}
-
-THC_API void THCState_setStream(THCState *state, THCStream* stream) {
-  at::cuda::detail::CUDAStream_setStream(stream);
-}
-
+// TODO: delete me
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStream(device));
+  return at::cuda::getCurrentCUDAStream(device).stream();
 }
 
+// TODO: delete me
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStream());
-}
-
-THCStream* THCState_getStream(THCState *state) {
-  return at::cuda::detail::CUDAStream_getCurrentStream();
+  return at::cuda::getCurrentCUDAStream().stream();
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -436,8 +398,7 @@ at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 
 void THCudaHostRecord(THCState *state, void *ptr) {
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCStream* stream = THCState_getStream(state);
-    THCCachingHostAllocator_recordEvent(ptr, stream);
+    THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
   }
 }
 
@@ -472,5 +433,5 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
-#include "THCStorage.cpp"
-#include "THCAllocator.cpp"
+#include <THC/THCStorage.cpp>
+#include <THC/THCAllocator.cpp>

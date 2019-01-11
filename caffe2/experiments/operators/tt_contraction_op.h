@@ -40,7 +40,6 @@ class TTContractionOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* C = Output(0);
 
     CAFFE_ENFORCE(A.dim() == 2, A.dim());
 
@@ -58,7 +57,7 @@ class TTContractionOp final : public Operator<Context> {
     int64_t D_ = B_size / (K_ * N_);
 
     int64_t C_size = D_ * M_ * N_;
-    C->Resize(vector<int64_t>{C_size});
+    auto* C = Output(0, vector<int64_t>{C_size}, at::dtype<T>());
 
     int64_t B_stride = K_ * N_;
     int64_t C_stride = M_ * N_;
@@ -103,16 +102,14 @@ class TTContractionGradientOp final : public Operator<Context> {
     const auto& G = Input(0);
     const auto& A = Input(1);
     const auto& B = Input(2);
-    auto* dA = Output(0);
-    auto* dB = Output(1);
 
     int64_t G_size = G.numel();
     int64_t D_ = G_size / (M_ * N_);
 
     int64_t dB_size = D_ * K_ * N_;
 
-    dA->Resize(A.sizes());
-    dB->Resize(B.sizes());
+    auto* dA = Output(0, A.sizes(), at::dtype<T>());
+    auto* dB = Output(1, B.sizes(), at::dtype<T>());
 
     int64_t B_stride = K_ * N_;
     int64_t G_stride = M_ * N_;

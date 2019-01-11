@@ -3,9 +3,9 @@
 // ${generated_comment}
 
 #include <ATen/Context.h>
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/TensorMethods.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
@@ -13,9 +13,11 @@
 #include <tuple>
 #include <vector>
 
+namespace c10 {
+class Scalar;
+}
 namespace at {
 struct Generator;
-class Scalar;
 class Tensor;
 struct Type;
 } // namespace at
@@ -38,13 +40,6 @@ inline Tensor from_blob(
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
   return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntList sizes,
-    const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
 // These functions are defined in native/TensorFactories.cpp.

@@ -168,10 +168,10 @@ class MapToKeyValueOp final : public Operator<Context> {
     using key_type = typename MAP_T::key_type;
     using mapped_type = typename MAP_T::mapped_type;
     auto& map_data = this->template Input<MAP_T>(MAP);
-    auto* key_output = Output(KEYS);
-    auto* value_output = Output(VALUES);
-    key_output->Resize(map_data.size());
-    value_output->Resize(map_data.size());
+
+    auto* key_output = Output(KEYS, {static_cast<int64_t>(map_data.size())}, at::dtype<key_type>());
+    auto* value_output =
+      Output(VALUES, {static_cast<int64_t>(map_data.size())}, at::dtype<mapped_type>());
     auto* key_data = key_output->template mutable_data<key_type>();
     auto* value_data = value_output->template mutable_data<mapped_type>();
 
@@ -245,9 +245,8 @@ class MapDeserializer : public BlobDeserializerBase {
         tensor_protos.ParseFromString(proto.content()),
         "Fail to parse TensorProtos");
     TensorDeserializer deser;
-    Tensor key_tensor(CPU), value_tensor(CPU);
-    deser.Deserialize(tensor_protos.protos(0), &key_tensor);
-    deser.Deserialize(tensor_protos.protos(1), &value_tensor);
+    Tensor key_tensor = deser.Deserialize(tensor_protos.protos(0));
+    Tensor value_tensor = deser.Deserialize(tensor_protos.protos(1));
     auto* key_data = key_tensor.data<KEY_T>();
     auto* value_data = value_tensor.data<VALUE_T>();
 

@@ -6,8 +6,8 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/hip/common_miopen.h"
-#include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/hip/operator_fallback_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
+#include "caffe2/operators/hip/operator_fallback_gpu.h"
 #include "caffe2/python/pybind_state_registry.h"
 
 namespace caffe2 {
@@ -18,8 +18,8 @@ REGISTER_HIP_OPERATOR(
     PythonGradient,
     GPUFallbackOp);
 
-REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
-REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
+REGISTER_HIP_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_HIP_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
