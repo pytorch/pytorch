@@ -9,6 +9,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
+      type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -366,6 +367,11 @@ void AliasDb::analyze(Node* node) {
       continue;
     }
 
+    // If this type cannot alias, continue. Can occur with a VarType schema
+    if (!shouldAnnotate(actualValue)) {
+      continue;
+    }
+
     // We don't support composite types for alias analysis yet.
     JIT_ASSERT(formal->containedTypes().size() == 0);
     // TODO neither unions nor wildcards make sense on an input. We should
@@ -398,6 +404,11 @@ void AliasDb::analyze(Node* node) {
     if (!formal) {
       // This is a fresh tensor
       giveFreshAlias(actual);
+      continue;
+    }
+
+    // If this type cannot alias, continue. Can occur with a VarType schema
+    if (!shouldAnnotate(actual)) {
       continue;
     }
 

@@ -698,7 +698,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        "aten::_unwrap_optional(t? optional) -> t",
+        "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);
