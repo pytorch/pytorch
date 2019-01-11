@@ -119,7 +119,7 @@ void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse);
 void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-        return v->node()->kind() == prim::Constant;
+        return v->node()->kind() == prim::Constant || v->node()->kind() == prim::None;
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
