@@ -82,7 +82,7 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
   auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   counts_.ResizeLike(X);
   losses_.ResizeLike(X);
-  normalizer_.Resize(vector<int64_t>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -124,7 +124,7 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   dX->ResizeLike(X);
   counts_.ResizeLike(X);
-  normalizer_.Resize(vector<int64_t>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossGradientKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
