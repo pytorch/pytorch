@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <c10/core/dispatch/Dispatcher.h>
-#include <c10/core/dispatch/OpSchema.h>
+#include <c10/core/impl/dispatch/Dispatcher.h>
+#include <c10/core/impl/dispatch/OpSchema.h>
 
 /**
  * To register your own kernel for an operator, do in one (!) cpp file:
@@ -12,6 +12,8 @@
  */
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 // TODO Test different order for builder
 // TODO Test no dispatch key defined
@@ -133,9 +135,11 @@ private:
   }
 };
 
+} // namespace impl
+} // namespace core
 } // namespace c10
 
 // TODO Can the builder logic be moved to compile time?
 // NB: Semicolon after applying this macro is MANDATORY
 #define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \
-  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, 0>()
+  static c10::core::impl::KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = c10::core::impl::KernelRegistrationBuilder<OpSchemaDef, 0>()

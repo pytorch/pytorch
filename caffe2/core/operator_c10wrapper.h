@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/Dispatcher.h>
+#include <c10/core/impl/dispatch/Dispatcher.h>
 #include "caffe2/core/operator.h"
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Metaprogramming.h>
@@ -42,7 +42,7 @@ template <
     bool use_array_input,
     class ParameterDefTuple>
 class C10OperatorWrapper final : public Operator<Context> {
-  using Schema = c10::OpSchema<OpSchemaDef>;
+  using Schema = c10::core::impl::OpSchema<OpSchemaDef>;
 
  public:
   static_assert(
@@ -115,7 +115,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
+    c10::core::impl::Dispatcher<OpSchemaDef>::call(
         C10Tensor(Input(InputIndex))...,
         C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
@@ -134,7 +134,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
+    c10::core::impl::Dispatcher<OpSchemaDef>::call(
         C10Tensor(Input(InputIndex))...,
         C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...);
@@ -152,7 +152,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
+    c10::core::impl::Dispatcher<OpSchemaDef>::call(
         at::ArrayRef<C10Tensor>(array_inputs_()),
         C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
@@ -171,7 +171,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
+    c10::core::impl::Dispatcher<OpSchemaDef>::call(
         at::ArrayRef<C10Tensor>(array_inputs_()),
         C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...);

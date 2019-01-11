@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/core/dispatch/DeviceId.h>
-#include <c10/core/dispatch/LayoutId.h>
+#include <c10/core/impl/dispatch/DeviceId.h>
+#include <c10/core/impl/dispatch/LayoutId.h>
 #include <c10/util/typeid.h>
 
 #include <vector>
@@ -10,6 +10,8 @@
 #include <c10/util/Array.h>
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 namespace details {
 
@@ -29,19 +31,25 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorParameterDispa
 }
 
 }  // namespace details
+}  // namespace impl
+}  // namespace core
 }  // namespace c10
 
 namespace std {
   template<>
-  struct hash<c10::details::TensorParameterDispatchKey> {
+  struct hash<c10::core::impl::details::TensorParameterDispatchKey> {
     // TODO constexpr hashing
-    size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
-      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
+    size_t operator()(const c10::core::impl::details::TensorParameterDispatchKey& obj) const {
+      return std::hash<c10::core::impl::DeviceTypeId>()(obj.deviceTypeId)
+           ^ std::hash<c10::core::impl::LayoutId>()(obj.layoutId)
+           ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
     }
   };
 }  // namespace std
 
 namespace c10 {
+namespace core {
+namespace impl {
 /**
  * The dispatch key encodes the runtime type identity of a function call arguments,
  * specifying what aspects of this identity can be dynamically dispatched on.
@@ -79,17 +87,19 @@ inline std::ostream& operator<<(std::ostream& stream, const DispatchKey<num_disp
   return stream << ")";
 }
 
+}  // namespace impl
+}  // namespace core
 }  // namespace c10
 
 namespace std {
   template<size_t num_dispatch_args>
-  struct hash<c10::DispatchKey<num_dispatch_args>> {
+  struct hash<c10::core::impl::DispatchKey<num_dispatch_args>> {
     // TODO constexpr hashing
-    size_t operator()(const c10::DispatchKey<num_dispatch_args>& obj) const {
+    size_t operator()(const c10::core::impl::DispatchKey<num_dispatch_args>& obj) const {
       size_t hash_value = 0;
       for (const auto& argType : obj.argTypes) {
         hash_value *= 10883; // prime
-        hash_value += std::hash<c10::details::TensorParameterDispatchKey>()(argType);
+        hash_value += std::hash<c10::core::impl::details::TensorParameterDispatchKey>()(argType);
       }
       return hash_value;
     }

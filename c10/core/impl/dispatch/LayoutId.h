@@ -3,6 +3,8 @@
 #include <c10/util/IdWrapper.h>
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 class LayoutId final : public at::IdWrapper<LayoutId, uint8_t> {
 public:
@@ -18,5 +20,7 @@ public:
 };
 
 }
+}
+}
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::LayoutId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::core::impl::LayoutId)

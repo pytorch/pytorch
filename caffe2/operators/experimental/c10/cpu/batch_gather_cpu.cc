@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/batch_gather.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -59,23 +59,23 @@ void batch_gather_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
     .kernel(&caffe2::batch_gather_op_cpu_impl<int64_t>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
+    .dispatchKey(c10::core::impl::DispatchKey<2>{
+        c10::core::impl::details::TensorParameterDispatchKey{core::impl::DeviceTypeId::CPU,
+                                                 core::impl::LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
+        c10::core::impl::details::TensorParameterDispatchKey{
+            core::impl::DeviceTypeId::CPU,
+            core::impl::LayoutId(0),
             caffe2::TypeMeta::Id<int64_t>()}});
 
 C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
     .kernel(&caffe2::batch_gather_op_cpu_impl<int32_t>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
+    .dispatchKey(c10::core::impl::DispatchKey<2>{
+        c10::core::impl::details::TensorParameterDispatchKey{core::impl::DeviceTypeId::CPU,
+                                                 core::impl::LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
+        c10::core::impl::details::TensorParameterDispatchKey{
+            core::impl::DeviceTypeId::CPU,
+            core::impl::LayoutId(0),
             caffe2::TypeMeta::Id<int32_t>()}});
 } // namespace c10

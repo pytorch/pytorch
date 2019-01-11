@@ -1,8 +1,10 @@
 #pragma once
 
-#include <c10/core/dispatch/DispatchTable.h>
+#include <c10/core/impl/dispatch/DispatchTable.h>
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
@@ -57,4 +59,6 @@ public:
   }
 };
 
+} // namespace impl
+} // namespace core
 } // namespace c10

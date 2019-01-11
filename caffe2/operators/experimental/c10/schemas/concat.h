@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/DeviceId.h>
+#include <c10/core/impl/dispatch/DeviceId.h>
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
@@ -24,13 +24,13 @@ struct Concat final {
   static constexpr c10::guts::array<const char*, 5> parameter_names = {
       {"inputs", "output", "split_info_output", "add", "add_axis"}};
 
-  static c10::DeviceTypeId dispatch_key(
+  static c10::core::impl::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
       const C10Tensor& output,
       const C10Tensor& split_info,
       int add,
       int add_axis) {
-    return c10::DeviceTypeId::CPU;
+    return c10::core::impl::DeviceTypeId::CPU;
   }
 };
 

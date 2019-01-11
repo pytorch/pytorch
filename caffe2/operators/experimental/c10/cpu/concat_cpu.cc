@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/concat.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -109,5 +109,5 @@ void concat_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Concat)
     .kernel(&caffe2::concat_op_cpu_impl<float, CPUContext>)
-    .dispatchKey(c10::DeviceTypeId::CPU);
+    .dispatchKey(c10::core::impl::DeviceTypeId::CPU);
 } // namespace c10

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/OpSchema.h>
+#include <c10/core/impl/dispatch/OpSchema.h>
 #include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
@@ -13,6 +13,8 @@
 #include <unordered_map>
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 namespace details {
 /// Kernel implementations in a thread-safe hash table.
@@ -143,6 +145,8 @@ class DispatchTable final {
       kernels_;
 };
 
+} // namespace impl
+} // namespace core
 } // namespace c10
 
 /*
@@ -151,4 +155,4 @@ class DispatchTable final {
  * we can't rely on the one-definition-rule.
  */
 template <class OpSchemaDef>
-C10_API c10::DispatchTable<OpSchemaDef>& c10_dispatch_table();
+C10_API c10::core::impl::DispatchTable<OpSchemaDef>& c10_dispatch_table();

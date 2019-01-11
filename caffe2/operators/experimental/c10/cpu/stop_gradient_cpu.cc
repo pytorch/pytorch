@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/stop_gradient.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -24,7 +24,7 @@ void stop_gradient_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::StopGradient)
     .kernel(&caffe2::stop_gradient_op_cpu_impl<float>)
-    .dispatchKey({DeviceTypeId::CPU,
-                  LayoutId(0),
+    .dispatchKey({core::impl::DeviceTypeId::CPU,
+                  core::impl::LayoutId(0),
                   caffe2::TypeMeta::Id<float>()});
 } // namespace c10

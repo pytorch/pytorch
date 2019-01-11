@@ -1,12 +1,14 @@
 #pragma once
 
-#include <c10/core/dispatch/DispatchKey.h>
+#include <c10/core/impl/dispatch/DispatchKey.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Tensor.h>
 
 namespace c10 {
+namespace core {
+namespace impl {
 
 namespace details {
 
@@ -260,4 +262,6 @@ public:
 };
 
 // TODO test OpSchema::dispatch stuff
+}  // namespace impl
+}  // namespace core
 }  // namespace c10

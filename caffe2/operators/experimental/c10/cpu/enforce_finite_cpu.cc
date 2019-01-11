@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/enforce_finite.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -29,7 +29,7 @@ void enforce_finite_op_impl_cpu(const C10Tensor& input_) {
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::EnforceFinite)
     .kernel(&caffe2::enforce_finite_op_impl_cpu<float>)
-    .dispatchKey({DeviceTypeId::CPU,
-                  LayoutId(0),
+    .dispatchKey({core::impl::DeviceTypeId::CPU,
+                  core::impl::LayoutId(0),
                   caffe2::TypeMeta::Id<float>()});
 } // namespace c10

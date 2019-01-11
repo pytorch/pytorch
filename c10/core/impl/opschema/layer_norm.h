@@ -5,6 +5,7 @@
 
 namespace c10 {
 namespace core {
+namespace impl {
 namespace opschema {
 
 // TODO This op schema should probably not live in c10 since it's not a method
@@ -36,5 +37,6 @@ struct LayerNorm final {
 };
 
 } // namespace opschema
+} // namespace impl
 } // namespace core
 } // namespace c10

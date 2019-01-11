@@ -40,7 +40,7 @@ C10_API bool isValidDeviceType(DeviceType d);
 
 C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 
-} // namespace at
+} // namespace c10
 
 namespace std {
 template <> struct hash<c10::DeviceType> {

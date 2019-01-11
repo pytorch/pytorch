@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -75,12 +75,12 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SigmoidCrossEntropyWithLogits)
     .kernel(&caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
+    .dispatchKey(c10::core::impl::DispatchKey<2>{
+        c10::core::impl::details::TensorParameterDispatchKey{core::impl::DeviceTypeId::CPU,
+                                                 core::impl::LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
+        c10::core::impl::details::TensorParameterDispatchKey{
+            core::impl::DeviceTypeId::CPU,
+            core::impl::LayoutId(0),
             caffe2::TypeMeta::Id<float>()}});
 } // namespace c10

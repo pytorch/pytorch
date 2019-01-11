@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/DeviceId.h>
+#include <c10/core/impl/dispatch/DeviceId.h>
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
@@ -35,14 +35,14 @@ struct GivenTensorFill final {
 
    static constexpr size_t num_outputs() {return 1;}
 
-   static c10::DeviceTypeId dispatch_key(
+   static c10::core::impl::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
       const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       const C10Tensor& values) {
-    return c10::DeviceTypeId::CPU;
+    return c10::core::impl::DeviceTypeId::CPU;
   }
 };
 
@@ -75,7 +75,7 @@ struct ConstantFill final {
        "dtype",
        "value"}};
 
-  static c10::DeviceTypeId dispatch_key(
+  static c10::core::impl::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
       const C10Tensor& output,
       const std::vector<int64_t>& shape,
@@ -83,7 +83,7 @@ struct ConstantFill final {
       bool input_as_shape,
       int dtype,
       Value value) {
-    return c10::DeviceTypeId::CPU;
+    return c10::core::impl::DeviceTypeId::CPU;
   }
 };
 
@@ -110,7 +110,7 @@ struct UniformFill final {
        "min",
        "max"}};
 
-  static c10::DeviceTypeId dispatch_key(
+  static c10::core::impl::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
       const C10Tensor& output,
       const std::vector<int64_t>& shape,
@@ -118,7 +118,7 @@ struct UniformFill final {
       bool input_as_shape,
       float min,
       float max) {
-    return c10::DeviceTypeId::CPU;
+    return c10::core::impl::DeviceTypeId::CPU;
   }
 };
 

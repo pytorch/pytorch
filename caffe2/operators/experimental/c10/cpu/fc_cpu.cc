@@ -1,5 +1,5 @@
 #include "caffe2/core/context.h"
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <c10/core/impl/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"
@@ -127,15 +127,15 @@ void fc_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
     .kernel(&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>)
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
+    .dispatchKey(c10::core::impl::DispatchKey<3>{
+        c10::core::impl::details::TensorParameterDispatchKey{core::impl::DeviceTypeId::CPU,
+                                                 core::impl::LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
+        c10::core::impl::details::TensorParameterDispatchKey{core::impl::DeviceTypeId::CPU,
+                                                 core::impl::LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
+        c10::core::impl::details::TensorParameterDispatchKey{
+            core::impl::DeviceTypeId::CPU,
+            core::impl::LayoutId(0),
             caffe2::TypeMeta::Id<float>()}});
 } // namespace c10
