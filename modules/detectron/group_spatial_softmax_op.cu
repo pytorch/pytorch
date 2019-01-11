@@ -95,7 +95,6 @@ __global__ void SubSumKernel(
 template <>
 bool GroupSpatialSoftmaxOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Logits
-  auto* P = Output(0); // Probabilities from softmax
 
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -103,7 +102,7 @@ bool GroupSpatialSoftmaxOp<float, CUDAContext>::RunOnDevice() {
   int W = X.dim32(3);
   int A = D / num_classes_;
 
-  P->ResizeLike(X);
+  auto* P = Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
   DCHECK_EQ(X.ndim(), 4);
 
   const float* Xdata = X.data<float>();
@@ -121,7 +120,7 @@ template<>
 bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);  // Probabilities from softmax
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
 
   DCHECK_EQ(Y.ndim(), 4);
 
@@ -131,7 +130,7 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   int W = Y.dim32(3);
   int A = D / num_classes_;
 
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
 
   if (sum_probs_.size() != N * A * H * W) {
     ReinitializeTensor(&sum_probs_, {N * A * H * W}, at::dtype<float>().device(CUDA));
