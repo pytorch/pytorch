@@ -3,17 +3,18 @@
 #include <ATen/ExpandUtils.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-#include <unordered_map>
 
-#ifdef USE_CUDA
-#include <cuda.h> // for CUDA_VERSION
-#endif
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -68,6 +69,7 @@ bool isSimpleMap(Node* node) {
       //"aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
+      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       "aten::remainder(Tensor self, Tensor other) -> Tensor",
       "aten::round(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
@@ -116,6 +118,44 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
+RegisterOperators reg_bn_unsqueeze({Operator(
+    "aten::_ncf_unsqueeze(Tensor self, int ndim) -> Tensor",
+    [](const Node* node) {
+      return [](Stack& stack) {
+        const int64_t ndim = pop(stack).toInt();
+        auto self = pop(stack).toTensor();
+        c10::SmallVector<int64_t, 8> sizes(ndim, 1);
+        JIT_ASSERT(self.dim() == 1);
+        sizes.at(1) = self.size(0);
+        push(stack, self.reshape(sizes));
+        return 0;
+      };
+    })});
+
+// Yes, no, or no value if we can't tell
+c10::optional<bool> isDefined(Value* tensor) {
+  if (tensor->type()->isSubtypeOf(DynamicType::get())) {
+    return true;
+  }
+  if (tensor->node()->kind() == prim::None ||
+      tensor->node()->kind() == prim::Undefined) {
+    return false;
+  }
+  return {};
+}
+
+bool isFusableBatchNorm(Node* batch_norm) {
+  if (!batch_norm->matches(
+          "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+    return false;
+  }
+  // If we can't determine if weight and bias is defined statically there's
+  // really no point in decomposing batch norm into simpler ops, since it won't
+  // get fused into a single kernel.
+  return isDefined(batch_norm->namedInput(attr::weight)).has_value() &&
+      isDefined(batch_norm->namedInput(attr::bias)).has_value();
+}
+
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   JIT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
@@ -127,6 +167,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 
 struct GraphFuser {
   Block* block_;
+  c10::optional<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
@@ -139,6 +180,10 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
+    return isFusableMap(node) || isFusableBatchNorm(node);
+  }
+
+  bool isFusableMap(Node* node) {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
     if (node->owningBlock() != block_)
@@ -164,18 +209,6 @@ struct GraphFuser {
     return true;
   }
 
-  // Can this node produce an _output_ of a fusion group?
-  // all Fusable nodes can do this, but additionally Concat, which normally
-  // cannot be fused because it is not a simple map, can be put in a fusion
-  // group as long as no items in the group read the output of concat
-  bool isFusableAsExitNode(Node* node) {
-    return isFusable(node) || isFusableOnlyAsExitNode(node);
-  }
-
-  bool isFusableOnlyAsExitNode(Node* node) {
-    return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
-  }
-
   bool calculatesSize(Node* node) {
     return node->matches("aten::size(Tensor self) -> int[]");
   }
@@ -191,18 +224,62 @@ struct GraphFuser {
     return true;
   }
 
-  bool mustRemainAsFusionGroupOutput(Value* producer) {
-    if (producer->node()->kind() != prim::FusionGroup) {
-      return false;
-    }
-    auto subgraph = producer->node()->g(attr::Subgraph);
-    auto* node = subgraph->outputs().at(producer->offset())->node();
-    return isFusableOnlyAsExitNode(node);
-  }
-
   Graph& getSubgraph(Node* n) {
     JIT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
+  }
+
+  void decomposeBatchNorm(Node* batch_norm) {
+    static std::shared_ptr<Graph> bn_graph;
+    static std::once_flag flag;
+    std::call_once(
+        flag,
+        [](std::shared_ptr<Graph>* graph_ptr) {
+          static const char* source = R"SCRIPT(
+        def batch_norm(input : Tensor, running_mean : Optional[Tensor], running_var : Optional[Tensor], training : bool, momentum : float, eps : float) -> Tensor:
+            if training:
+                norm_mean, norm_var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
+            else:
+                norm_mean = torch._unwrap_optional(running_mean)
+                norm_var = torch._unwrap_optional(running_var)
+            norm_mean = torch._ncf_unsqueeze(norm_mean, input.dim())
+            norm_var = torch._ncf_unsqueeze(norm_var, input.dim())
+            norm_invstd = 1 / (eps + torch.sqrt(norm_var))
+            return ((input - norm_mean) * norm_invstd)
+      )SCRIPT";
+          auto module = std::make_shared<script::Module>();
+          defineMethodsInModule(
+              module, source, script::nativeResolver, /*self=*/nullptr);
+          *graph_ptr = module->get_method("batch_norm").graph();
+        },
+        &bn_graph);
+
+    JIT_ASSERT(isFusableBatchNorm(batch_norm));
+    WithInsertPoint insert_guard{batch_norm};
+    Value* input = batch_norm->namedInput(attr::input);
+    Value* input_dim = graph_->insert(aten::dim, {input});
+    std::vector<Value*> inputs{input,
+                               batch_norm->namedInput(attr::running_mean),
+                               batch_norm->namedInput(attr::running_var),
+                               batch_norm->namedInput(attr::training),
+                               batch_norm->namedInput(attr::momentum),
+                               batch_norm->namedInput(attr::eps)};
+    Value* new_output =
+        SubgraphUtils::inlineGraph(bn_graph, inputs, batch_norm).at(0);
+    auto weight = batch_norm->namedInput(attr::weight);
+    auto bias = batch_norm->namedInput(attr::bias);
+    if (isDefined(weight).value()) {
+      Value* expanded_weight =
+          graph_->insert(aten::_ncf_unsqueeze, {weight, input_dim});
+      new_output = graph_->insert(aten::mul, {new_output, expanded_weight});
+    }
+    if (isDefined(bias).value()) {
+      Value* expanded_bias =
+          graph_->insert(aten::_ncf_unsqueeze, {bias, input_dim});
+      new_output = graph_->insert(aten::add, {new_output, expanded_bias});
+    }
+    batch_norm->output()->replaceAllUsesWith(new_output);
+    batch_norm->destroy();
   }
 
   void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
@@ -349,10 +426,7 @@ struct GraphFuser {
     *insertion_point = n;
   }
 
-  at::optional<Node*> tryFuse(
-      Node* consumer,
-      Value* producer,
-      const AliasDb& aliasDb) {
+  at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -360,41 +434,29 @@ struct GraphFuser {
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not
     // done now
-    Node* real_consumer = consumer->kind() == aten::cat
-        ? consumer->namedInput(attr::tensors)->node()
-        : consumer;
     bool shouldFuse = isFusable(producer->node()) &&
         // Rearrange nodes such that all uses of producer are after the
         // consumer. Fusion will rewrite those later uses to use the version of
         // producer generated by the fused blob. In this case, producer becomes
         // an output of the fusion group.
-        producer->node()->moveBeforeTopologicallyValid(real_consumer, aliasDb);
+        producer->node()->moveBeforeTopologicallyValid(
+            consumer, aliasDb_.value());
 
     if (!shouldFuse) {
       return at::nullopt;
     }
 
     auto group = consumer;
-    if (consumer->kind() == aten::cat) {
-      Graph* graph = consumer->owningGraph();
-      Node* list_construct = consumer->namedInput(attr::tensors)->node();
-      int64_t dim = consumer->get<int64_t>(attr::dim).value();
-
-      Node* fused_cat =
-          graph->create(prim::FusedConcat, list_construct->inputs())
-              ->i_(attr::dim, dim);
-      fused_cat->insertBefore(list_construct);
-      fused_cat->output()->copyMetadata(consumer->output());
-      consumer->output()->replaceAllUsesWith(fused_cat->output());
-
-      // NB: this deletes the fused_cat node from the original graph
-      group = createSingletonFusionGroup(fused_cat);
-      consumer->destroy();
-      if (list_construct->output()->uses().empty()) {
-        list_construct->destroy();
-      }
-    } else if (consumer->kind() != prim::FusionGroup) {
+    if (consumer->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
+    }
+    if (producer->node()->matches(
+            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+      // We don't do any fusions in here, but simply decompose the batch norm
+      // into a kernel that computes the stats + pointwise ops which will be
+      // considered in this fusion next.
+      decomposeBatchNorm(producer->node());
+      return group;
     }
     if (producer->node()->kind() == prim::FusionGroup) {
       mergeFusionGroups(group, producer->node());
@@ -649,7 +711,7 @@ struct GraphFuser {
         chunk->inputs().begin(),
         chunk->inputs().end(),
         [&](Value* producer_for_chunk) {
-          return isFusable(producer_for_chunk->node()) &&
+          return isFusableMap(producer_for_chunk->node()) &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
@@ -777,27 +839,19 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning, and whether any fusion was made
-  std::pair<graph_node_list::iterator, bool> scanNode(
-      Node* consumer,
-      const AliasDb& aliasDb) {
-    if (isFusableAsExitNode(consumer)) {
-      auto consumer_inputs = consumer->kind() == aten::cat
-          ? consumer->namedInput(attr::tensors)->node()->inputs()
-          : consumer->inputs();
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
+    if (isFusable(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      auto inputs = sortReverseTopological(consumer_inputs);
+      auto inputs = sortReverseTopological(consumer->inputs());
       for (auto producer : inputs) {
-        // Don't fuse if producer must come from a FusionGroup exit node
-        if (mustRemainAsFusionGroupOutput(producer))
-          continue;
         if (tryToMoveChunk(consumer, producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-        auto fusion_group = tryFuse(consumer, producer, aliasDb);
+        auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
           // after fusion, consumer moves into a FusionGroup, so inputs is no
           // longer valid so we rescan the new FusionGroup for more fusions...
@@ -948,6 +1002,98 @@ struct GraphFuser {
     }
   }
 
+  void refreshAliasDb() {
+    aliasDb_ = AliasAnalysis(graph_);
+  }
+
+  bool canFuseWithConcat(Value* producer, Node* before_check) {
+    if (!isFusable(producer->node())) {
+      return false;
+    }
+    // NB: it is important that this check happens after isFusable, which checks
+    // that the blocks match, and it's not a special node like prim::Param
+    if (!producer->node()->couldMoveBeforeTopologically(
+            before_check, aliasDb_.value())) {
+      return false;
+    }
+    // Fusion groups can be merged with concat's group if and only if
+    // the value they produce isn't already coming from a concat.
+    if (producer->node()->kind() == prim::FusionGroup) {
+      auto subgraph = producer->node()->g(attr::Subgraph);
+      auto* node = subgraph->outputs().at(producer->offset())->node();
+      return node->kind() != prim::FusedConcat;
+    }
+    return true;
+  }
+
+  Node* createFusedConcat(Node* node) {
+    JIT_ASSERT(node->kind() == aten::cat);
+
+    Graph* graph = node->owningGraph();
+    Node* list_construct = node->namedInput(attr::tensors)->node();
+    int64_t dim = node->get<int64_t>(attr::dim).value();
+
+    Node* fused_cat = graph->create(prim::FusedConcat, list_construct->inputs())
+                          ->i_(attr::dim, dim);
+    fused_cat->insertBefore(list_construct);
+    fused_cat->output()->copyMetadata(node->output());
+
+    // NB: this deletes the fused_cat node from the original graph
+    return createSingletonFusionGroup(fused_cat);
+  }
+
+  void fuseConcats() {
+    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();
+         ++it) {
+      Node* cat = *it;
+      if (!isFusableCatNode(cat)) {
+        continue;
+      }
+      Node* list_construct = cat->namedInput(attr::tensors)->node();
+      Node* fused_cat = createFusedConcat(cat);
+      Value* fused_cat_out = fused_cat->output();
+
+      auto sorted_inputs = sortReverseTopological(fused_cat->inputs());
+      size_t input_idx = 0;
+      bool any_fused = false;
+      while (input_idx < sorted_inputs.size()) {
+        Value* input = sorted_inputs[input_idx++];
+        if (!canFuseWithConcat(input, fused_cat)) {
+          continue;
+        }
+        any_fused = true;
+        auto maybe_group = tryFuse(fused_cat, input);
+        JIT_ASSERT(maybe_group && maybe_group == fused_cat);
+        // We could have destroyed multiple inputs when performing this fusion,
+        // so we have to recompute the list and iterate over it again.
+        sorted_inputs = sortReverseTopological(fused_cat->inputs());
+        input_idx = 0;
+      }
+
+      if (any_fused) {
+        cat->output()->replaceAllUsesWith(fused_cat_out);
+        it.destroyCurrent();
+        if (list_construct->output()->uses().empty()) {
+          list_construct->destroy();
+        }
+      } else {
+        fused_cat->destroy();
+      }
+    }
+  }
+
+  void optimizeFusedGraphs() {
+    for (Node* node : block_->nodes()) {
+      if (node->kind() != prim::FusionGroup) {
+        continue;
+      }
+      auto subgraph = node->g(attr::Subgraph);
+      EliminateDeadCode(subgraph);
+      EliminateCommonSubexpression(subgraph);
+      ConstantPooling(subgraph);
+    }
+  }
+
   void run() {
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -968,13 +1114,18 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      auto aliasDb = AliasAnalysis(graph_);
+      refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
-        std::tie(it, changed) = scanNode(*it, aliasDb);
+        std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
     }
+    refreshAliasDb();
+
+    fuseConcats();
+
+    optimizeFusedGraphs();
 
     // The graph fuser can add intermediate prim::BroadcastingChunk nodes.
     // Replace them with broadcasts + chunks.
@@ -1053,19 +1204,16 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-// NYI on Windows
-#ifndef _WIN32
-
-  GraphFuser(graph->block(), graph).run();
-  // After FuseGraph some common subexpressions may come back
-  EliminateCommonSubexpression(graph);
-  // We might have emitted a fair amount of useless shape propagating code, so
-  // remove it
-  EliminateDeadCode(graph);
-  // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
-
-#endif
+  if (canFuseOnCPU() || canFuseOnGPU()) {
+    GraphFuser(graph->block(), graph).run();
+    // After FuseGraph some common subexpressions may come back
+    EliminateCommonSubexpression(graph);
+    // We might have emitted a fair amount of useless shape propagating code, so
+    // remove it
+    EliminateDeadCode(graph);
+    // Improve the quality of shape propagation code that was left
+    PeepholeOptimizeShapeExpressions(graph->block());
+  }
 }
 
 } // namespace jit

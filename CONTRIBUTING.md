@@ -434,6 +434,11 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   are too large. Splitting such files into separate files helps.
   (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
 
+* MSVC's preprocessor (but not the standard compiler) has a bug
+  where it incorrectly tokenizes raw string literals, ending when it sees a `"`.
+  This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
+  treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
+
 ### Running Clang-Tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
