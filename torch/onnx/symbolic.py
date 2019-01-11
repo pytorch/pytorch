@@ -1060,6 +1060,16 @@ for k, v in cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
 
+pytorch_type_to_scalar_type = [
+    torch.uint8,    # 0
+    torch.int8,     # 1
+    torch.short,    # 2
+    torch.int,      # 3
+    torch.int64,    # 4
+    torch.half,     # 5
+    torch.float,    # 6
+    torch.double,   # 7
+]
 
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],
@@ -1082,8 +1092,9 @@ def zeros(g, sizes, dtype, layout, device):
 @parse_args('v', 'i', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
+    print(dtype, torch.float32)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(0, dtype=torch.float32))
+                value_t=torch.tensor(0, dtype=pytorch_type_to_scalar_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
@@ -1095,8 +1106,7 @@ def ones(g, sizes, dtype, layout, device):
 def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(1, dtype=torch.float32))
-
+                    value_t=torch.tensor(1, dtype=pytorch_type_to_scalar_type[dtype]))
 
 def full(g, sizes, value, dtype, layout, device):
     const_value = _maybe_get_const(value, 't')
@@ -1113,7 +1123,7 @@ def full(g, sizes, value, dtype, layout, device):
 def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(fill_value, dtype=torch.float32))
+                value_t=torch.tensor(fill_value, dtype=pytorch_type_to_scalar_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
