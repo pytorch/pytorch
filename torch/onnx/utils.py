@@ -20,7 +20,7 @@ from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType
-
+from collections import OrderedDict
 
 @contextlib.contextmanager
 def set_training(model, mode):
@@ -202,7 +202,47 @@ def _trace_and_get_graph_from_model(model, args, training):
 
     return trace.graph(), torch_out
 
+def _weight_transformation(param, name, type):
+    # return param + 1
+    if type is 'lstm':
+        num_gates = 4
+        gate_permutation = [0, 3, 1, 2]
+    elif type is 'gru':
+        num_gates = 3
+        gate_permutation = [1, 0, 2]
+    else:
+        raise RuntimeError("Parameter type must be either 'lstm' or 'gru'.")
 
+    param_size = param.size()
+    if((param_size[0] & (num_gates - 1) != 0 )):
+        print("Weight matrix size must be a multiple of 4 for LSTM.")
+    hidden_size = param_size[0] // num_gates;
+    start_indices = [x * hidden_size for x in gate_permutation]
+    end_indices = [x + hidden_size for x in start_indices]
+    reordered_indices = []
+    for (start_idx, end_idx) in zip(start_indices, end_indices):
+        reordered_indices.extend(list(range(start_idx, end_idx)))
+    return param[reordered_indices]
+    # print(a)
+
+
+def _rnn_unique_param_name_dict(module, destination=None, seen_names=None, prefix=''):
+    if destination is None:
+        destination = OrderedDict()
+        seen_names = set()
+    module_type = type(module)
+    if module_type in (torch.nn.LSTM, torch.nn.GRU):
+        rnn_type_string = 'lstm' if module_type is torch.nn.LSTM else 'gru'
+        for name, param in module._parameters.items():
+            qualified_name = prefix + name
+            if param is not None and qualified_name not in seen_names:
+                destination[qualified_name] = rnn_type_string
+                seen_names.add(qualified_name)
+    for name, submodule in module._modules.items():
+        if submodule is not None:
+            _rnn_unique_param_name_dict(submodule, destination, seen_names, prefix + name + '.')
+    return destination
+    
 def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -228,6 +268,11 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         params = list(_unique_state_dict(model).values())
+
+        all_names = list(_unique_state_dict(model).keys())
+        if (operator_export_type == OperatorExportTypes.ONNX):
+            rnn_param_dict = _rnn_unique_param_name_dict(model)
+            params = [_weight_transformation(param, name, rnn_param_dict[name]) if name in rnn_param_dict.keys() else param for (param, name) in zip(params, all_names)]
 
     graph = _optimize_graph(graph, operator_export_type)
 
