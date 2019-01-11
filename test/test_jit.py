@@ -1777,6 +1777,31 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
 
+    def test_onnx_transpose_incomplete_tensor_type(self):
+        # Smoke test to get us into the state where we are attempting to export
+        # a transpose op, where the input is a TensorType rather than a
+        # CompleteTensorType. This would previously not work, since we would
+        # take the size of the input and use the length of its sizes as the
+        # number of dimensions in the permutation.
+        class Foo(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.contiguous().transpose(0, 1).sum()
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        tm = TraceMe()
+        tm = torch.jit.trace(tm, torch.rand(3, 4))
+        example_outputs = (tm(torch.rand(3, 4)),)
+        f = io.BytesIO()
+        torch.onnx._export(tm, (torch.rand(3, 4),), f, example_outputs=example_outputs)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_cuda_export_restore(self):
         class Sub(torch.jit.ScriptModule):
