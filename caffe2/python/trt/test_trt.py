@@ -154,9 +154,9 @@ class TensorRTOpTest(TestCase):
     def test_inception_v1(self):
         self._test_onnx_importer('inception_v1', -3, 9)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Unsqueeze op")
     def test_inception_v2(self):
-        self._test_onnx_importer('inception_v2', 0, 3)
+        self._test_onnx_importer('inception_v2', 0, 9)
 
     @unittest.skip('Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor')
     def test_shufflenet(self):
