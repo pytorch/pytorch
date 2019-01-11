@@ -1,0 +1,461 @@
+From 0a3ccfd5af117d588d951ce178a0d09650652ef4 Mon Sep 17 00:00:00 2001
+From: andersj <anderspapitto@gmail.com>
+Date: Thu, 29 Nov 2018 10:33:15 -0800
+Subject: [PATCH] remove use of tmp_install
+
+---
+ .flake8                                 |  2 +-
+ .gitignore                              |  1 -
+ .jenkins/caffe2/build.sh                |  2 +-
+ .jenkins/caffe2/test.sh                 |  2 +-
+ aten/CMakeLists.txt                     |  2 +-
+ aten/src/ATen/CMakeLists.txt            | 11 +++++-
+ c10/CMakeLists.txt                      |  4 +--
+ c10/cuda/CMakeLists.txt                 |  4 +--
+ c10/hip/CMakeLists.txt                  |  4 +--
+ cmake/Codegen.cmake                     |  4 +--
+ docs/libtorch.rst                       | 23 ------------
+ setup.py                                |  6 ++--
+ tools/build_pytorch_libs.bat            | 11 ++----
+ tools/build_pytorch_libs.sh             | 48 ++++---------------------
+ tools/setup_helpers/generate_code.py    |  4 +--
+ torch/lib/c10d/README.md                |  2 +-
+ torch/lib/c10d/bin/test.sh              |  2 +-
+ torch/lib/libshm/CMakeLists.txt         |  2 +-
+ torch/lib/libshm_windows/CMakeLists.txt |  2 +-
+ 19 files changed, 40 insertions(+), 96 deletions(-)
+ delete mode 100644 docs/libtorch.rst
+
+diff --git a/.flake8 b/.flake8
+index 8510253ccec..61a7d5f29ab 100644
+--- a/.flake8
++++ b/.flake8
+@@ -1,4 +1,4 @@
+ [flake8]
+ max-line-length = 120
+ ignore = E203,E305,E402,E721,E741,F401,F403,F405,F821,F841,F999,W503,W504
+-exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,tools/amd_build/pyHIPIFY,torch/lib/include,torch/lib/tmp_install
++exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,tools/amd_build/pyHIPIFY,torch/lib/include
+diff --git a/.gitignore b/.gitignore
+index 0cb2aaa8083..63906c86e42 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -65,7 +65,6 @@ torch/lib/cmake
+ torch/lib/include
+ torch/lib/pkgconfig
+ torch/lib/protoc
+-torch/lib/tmp_install
+ torch/lib/torch_shm_manager
+ torch/lib/python*
+ torch/share/
+diff --git a/.jenkins/caffe2/build.sh b/.jenkins/caffe2/build.sh
+index 4beb22d9050..bc9e3de39d9 100755
+--- a/.jenkins/caffe2/build.sh
++++ b/.jenkins/caffe2/build.sh
+@@ -245,7 +245,7 @@ else
+   USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_TEST=1 BUILD_BINARY=1 python setup.py install --user
+ 
+   # This is to save test binaries for testing
+-  cp -r torch/lib/tmp_install $INSTALL_PREFIX
++  cp -r torch $INSTALL_PREFIX
+   mkdir -p "$INSTALL_PREFIX/cpp_test/"
+   cp -r caffe2/test/* "$INSTALL_PREFIX/cpp_test/"
+ 
+diff --git a/.jenkins/caffe2/test.sh b/.jenkins/caffe2/test.sh
+index 623639bd03f..13d1cd8f43c 100755
+--- a/.jenkins/caffe2/test.sh
++++ b/.jenkins/caffe2/test.sh
+@@ -95,7 +95,7 @@ pip install --user pytest-sugar
+   "$CAFFE2_PYPATH/python" \
+   "${EXTRA_TESTS[@]}"
+ 
+-cd ${INSTALL_PREFIX}
++cd /var/lib/jenkins
+ 
+ if [[ -n "$INTEGRATED" ]]; then
+   pip install --user torchvision
+diff --git a/aten/CMakeLists.txt b/aten/CMakeLists.txt
+index 1a53f9d96a1..727448ccf10 100644
+--- a/aten/CMakeLists.txt
++++ b/aten/CMakeLists.txt
+@@ -31,7 +31,7 @@ set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
+ set(ATen_PUBLIC_HIP_DEPENDENCY_LIBS)
+ SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
+ SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
+-SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
++SET(ATEN_INSTALL_INCLUDE_SUBDIR "lib/include" CACHE PATH "ATen install include subdirectory")
+ 
+ if(USE_CUDA)
+   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
+diff --git a/aten/src/ATen/CMakeLists.txt b/aten/src/ATen/CMakeLists.txt
+index 35e67b18fef..0daa985b951 100644
+--- a/aten/src/ATen/CMakeLists.txt
++++ b/aten/src/ATen/CMakeLists.txt
+@@ -12,7 +12,16 @@ ENDIF(NOT MSVC)
+ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
+   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
+   SET(AT_INSTALL_LIB_DIR "lib" CACHE PATH "AT install library subdirectory")
+-  SET(AT_INSTALL_INCLUDE_DIR "include" CACHE PATH "AT install include subdirectory")
++
++  # TODO: rather than set this to lib/include here, we could instead
++  # pass -DAT_INSTALL_INCLUDE_DIR to the cmake invocation when
++  # building pytorch. However doing so reliably produces a different
++  # result (ATen.h ends up in build/lib/include folder rather than
++  # torch/lib/include), so I'm leaving this as a minor unsolved
++  # mystery. Probably it has to do with some details of how CMake
++  # variables work.
++  SET(AT_INSTALL_INCLUDE_DIR "lib/include" CACHE PATH "AT install include subdirectory")
++
+   SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
+ ENDIF()
+ 
+diff --git a/c10/CMakeLists.txt b/c10/CMakeLists.txt
+index e80dd795c27..a75cb2bd197 100644
+--- a/c10/CMakeLists.txt
++++ b/c10/CMakeLists.txt
+@@ -94,7 +94,7 @@ endif()
+ # individual libraries like libc10.so and libcaffe2.so are still self-contained.
+ install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+-        DESTINATION include
++        DESTINATION lib/include
+         FILES_MATCHING PATTERN "*.h")
+ install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
+-        DESTINATION include/c10/macros)
++        DESTINATION lib/include/c10/macros)
+diff --git a/c10/cuda/CMakeLists.txt b/c10/cuda/CMakeLists.txt
+index 0b0b1d8a0e4..eabea3441b0 100644
+--- a/c10/cuda/CMakeLists.txt
++++ b/c10/cuda/CMakeLists.txt
+@@ -63,7 +63,7 @@ add_subdirectory(test)
+ install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
+ foreach(file ${C10_CUDA_HEADERS})
+   get_filename_component( dir ${file} DIRECTORY )
+-  install( FILES ${file} DESTINATION include/c10/cuda/${dir} )
++  install( FILES ${file} DESTINATION lib/include/c10/cuda/${dir} )
+ endforeach()
+ install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
+-  DESTINATION include/c10/cuda/impl)
++  DESTINATION lib/include/c10/cuda/impl)
+diff --git a/c10/hip/CMakeLists.txt b/c10/hip/CMakeLists.txt
+index 328d21470c2..f3a30ca86c7 100644
+--- a/c10/hip/CMakeLists.txt
++++ b/c10/hip/CMakeLists.txt
+@@ -57,7 +57,7 @@ add_subdirectory(test)
+ # ---[ Installation
+ install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
+ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+-        DESTINATION include
++        DESTINATION lib/include
+         FILES_MATCHING PATTERN "*.h")
+ install(FILES ${CMAKE_BINARY_DIR}/c10/hip/impl/hip_cmake_macros.h
+-  DESTINATION include/c10/hip/impl)
++  DESTINATION lib/include/c10/hip/impl)
+diff --git a/cmake/Codegen.cmake b/cmake/Codegen.cmake
+index 71be5683b70..702dda2fe39 100644
+--- a/cmake/Codegen.cmake
++++ b/cmake/Codegen.cmake
+@@ -48,7 +48,7 @@ configure_file(
+ 
+ # ---[ Installing the header files
+ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
+-        DESTINATION include
++        DESTINATION lib/include
+         FILES_MATCHING PATTERN "*.h")
+ if (BUILD_ATEN_MOBILE)
+   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
+@@ -56,7 +56,7 @@ if (BUILD_ATEN_MOBILE)
+           FILES_MATCHING PATTERN "*.h")
+ endif()
+ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
+-        DESTINATION include/caffe2/core)
++        DESTINATION lib/include/caffe2/core)
+ 
+ # ---[ ATen specific
+ if (NOT BUILD_ATEN_MOBILE)
+diff --git a/docs/libtorch.rst b/docs/libtorch.rst
+deleted file mode 100644
+index e11f1a0beab..00000000000
+--- a/docs/libtorch.rst
++++ /dev/null
+@@ -1,23 +0,0 @@
+-libtorch (C++-only)
+-===================
+-
+-The core of pytorch can be built and used without Python. A
+-CMake-based build system compiles the C++ source code into a shared
+-object, libtorch.so.
+-
+-Building libtorch
+------------------
+-
+-There is a script which wraps the CMake build. Invoke it with
+-
+-::
+-   cd pytorch
+-   BUILD_TORCH=ON ONNX_NAMESPACE=onnx_torch bash tools/build_pytorch_libs.sh --use-nnpack caffe2
+-   ls torch/lib/tmp_install # output is produced here
+-   ls torch/lib/tmp_install/lib/libtorch.so # of particular interest
+-
+-To produce libtorch.a rather than libtorch.so, set the environment variable `BUILD_SHARED_LIBS=OFF`.
+-
+-To use ninja rather than make, set `CMAKE_GENERATOR="-GNinja" CMAKE_INSTALL="ninja install"`.
+-
+-Future work will simplify this further.
+diff --git a/setup.py b/setup.py
+index fb743f486b2..d475a1b8e6a 100644
+--- a/setup.py
++++ b/setup.py
+@@ -230,7 +230,6 @@ def report(*args):
+ cwd = os.path.dirname(os.path.abspath(__file__))
+ lib_path = os.path.join(cwd, "torch", "lib")
+ third_party_path = os.path.join(cwd, "third_party")
+-tmp_install_path = lib_path + "/tmp_install"
+ caffe2_build_dir = os.path.join(cwd, "build")
+ # lib/pythonx.x/site-packages
+ rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
+@@ -447,7 +446,6 @@ def check_file(f):
+             if not same:
+                 shutil.copyfile(orig_file, sym_file)
+ 
+-        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
+         self.copy_tree('third_party/pybind11/include/pybind11/',
+                        'torch/lib/include/pybind11')
+ 
+@@ -597,7 +595,7 @@ def run(self):
+ 
+     def build_extensions(self):
+         # The caffe2 extensions are created in
+-        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
++        # build/caffe2/python/
+         # and need to be copied to build/lib.linux.... , which will be a
+         # platform dependent build folder created by the "build" command of
+         # setuptools. Only the contents of this folder are installed in the
+@@ -618,7 +616,7 @@ def build_extensions(self):
+             filename = self.get_ext_filename(fullname)
+             report("\nCopying extension {}".format(ext.name))
+ 
+-            src = os.path.join(tmp_install_path, rel_site_packages, filename)
++            src = os.path.join('build', filename)
+             if not os.path.exists(src):
+                 report("{} does not exist".format(src))
+                 del self.extensions[i]
+diff --git a/tools/build_pytorch_libs.bat b/tools/build_pytorch_libs.bat
+index 426db0a4c67..390f25e70f6 100755
+--- a/tools/build_pytorch_libs.bat
++++ b/tools/build_pytorch_libs.bat
+@@ -11,7 +11,7 @@ set BASIC_C_FLAGS=
+ set BASIC_CUDA_FLAGS=
+ 
+ IF NOT DEFINED INSTALL_DIR (
+-  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
++  set "INSTALL_DIR=%cd:\=/%/torch/"
+ ) ELSE (
+   set "INSTALL_DIR=%INSTALL_DIR:\=/%"
+ )
+@@ -23,8 +23,6 @@ set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
+ set LINK_FLAGS=/DEBUG:FULL
+ : End cmake variables
+ 
+-if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
+-
+ : Variable defaults
+ set /a USE_CUDA=0
+ set /a USE_FBGEMM=1
+@@ -146,11 +144,6 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
+ : Copy Artifacts
+ cd torch\lib
+ 
+-copy /Y "%INSTALL_DIR%\lib\*" .
+-IF EXIST "%INSTALL_DIR%\bin" (
+-  copy /Y "%INSTALL_DIR%\bin\*" .
+-)
+-xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
+ xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
+ xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
+ 
+@@ -243,6 +236,8 @@ goto:eof
+                   -DUSE_MKLDNN=%USE_MKLDNN% ^
+                   -DATEN_NO_CONTRIB=1 ^
+                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
++                  -DTORCH_INSTALL_BIN_DIR="lib" ^
++                  -DTORCH_INSTALL_INCLUDE_DIR="lib/include" ^
+                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
+                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
+                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
+diff --git a/tools/build_pytorch_libs.sh b/tools/build_pytorch_libs.sh
+index 5b593f91c8e..7a53e57c6c0 100755
+--- a/tools/build_pytorch_libs.sh
++++ b/tools/build_pytorch_libs.sh
+@@ -20,11 +20,6 @@ else
+   }
+ fi
+ 
+-SYNC_COMMAND="cp"
+-if [ -x "$(command -v rsync)" ]; then
+-    SYNC_COMMAND="rsync -lptgoD"
+-fi
+-
+ # We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
+ # and use the newer of cmake and cmake3 if so.
+ CMAKE_COMMAND="cmake"
+@@ -131,7 +126,7 @@ fi
+ 
+ BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
+ TORCH_LIB_DIR="$BASE_DIR/torch/lib"
+-INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
++INSTALL_DIR="$BASE_DIR/torch"
+ THIRD_PARTY_DIR="$BASE_DIR/third_party"
+ 
+ C_FLAGS=""
+@@ -175,13 +170,6 @@ fi
+ 
+ report "Building in $BUILD_TYPE mode"
+ 
+-function path_remove {
+-  # Delete path by parts so we can never accidentally remove sub paths
+-  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+-  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+-  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+-}
+-
+ # purposefully not using build() because we need Caffe2 to build the same
+ # regardless of whether it is inside PyTorch or not, so it
+ # cannot take any special flags
+@@ -249,6 +237,8 @@ function build_caffe2() {
+ 		       -DUSE_MKLDNN=$USE_MKLDNN \
+ 		       -DNCCL_EXTERNAL=$USE_CUDA \
+ 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
++		       -DTORCH_INSTALL_BIN_DIR="lib" \
++		       -DTORCH_INSTALL_INCLUDE_DIR="lib/include" \
+ 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
+ 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
+ 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+@@ -299,7 +289,6 @@ function build_caffe2() {
+ 
+   # Fix rpaths of shared libraries
+   if [[ $(uname) == 'Darwin' ]]; then
+-      # root/torch/lib/tmp_install/lib
+       report "Updating all install_names in $INSTALL_DIR/lib"
+       pushd "$INSTALL_DIR/lib"
+       for lib in *.dylib; do
+@@ -310,19 +299,7 @@ function build_caffe2() {
+   fi
+ }
+ 
+-# In the torch/lib directory, create an installation directory
+-mkdir -p $INSTALL_DIR
+-
+-# Build
+-for arg in "$@"; do
+-    if [[ "$arg" == "caffe2" ]]; then
+-        build_caffe2
+-    else
+-        pushd "$THIRD_PARTY_DIR"
+-        build $arg
+-        popd
+-    fi
+-done
++build_caffe2
+ 
+ pushd $TORCH_LIB_DIR > /dev/null
+ 
+@@ -333,20 +310,9 @@ report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
+ rm -rf "$INSTALL_DIR/lib/cmake"
+ rm -rf "$INSTALL_DIR/lib/python"
+ 
+-report "Copying $INSTALL_DIR/lib to $(pwd)"
+-$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
+-if [ -d "$INSTALL_DIR/lib64/" ]; then
+-    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
+-fi
+ report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
+-$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
+-$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+-
+-report "Copying $INSTALL_DIR/include to $(pwd)"
+-$SYNC_COMMAND -r "$INSTALL_DIR/include" .
+-if [ -d "$INSTALL_DIR/bin/" ]; then
+-    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
+-fi
++cp ../../aten/src/THNN/generic/THNN.h .
++cp ../../aten/src/THCUNN/generic/THCUNN.h .
+ 
+ # Copy the test files to pytorch/caffe2 manually
+ # They were built in pytorch/torch/lib/tmp_install/test
+@@ -363,7 +329,7 @@ fi
+ if [[ "$INSTALL_TEST" == "ON" ]]; then
+     echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
+     mkdir -p "$BASE_DIR/caffe2/cpp_test/"
+-    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
++    cp -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+ fi
+ 
+ popd > /dev/null
+diff --git a/tools/setup_helpers/generate_code.py b/tools/setup_helpers/generate_code.py
+index 5c10df448ca..db3084559a2 100644
+--- a/tools/setup_helpers/generate_code.py
++++ b/tools/setup_helpers/generate_code.py
+@@ -4,7 +4,7 @@
+ 
+ source_files = {'.py', '.cpp', '.h'}
+ 
+-DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
++DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
+ 
+ 
+ # TODO: This is a little inaccurate, because it will also pick
+@@ -22,7 +22,7 @@ def all_generator_source():
+ inputs = [
+     'torch/lib/THNN.h',
+     'torch/lib/THCUNN.h',
+-    'torch/lib/tmp_install/share/ATen/Declarations.yaml',
++    'torch/share/ATen/Declarations.yaml',
+     'tools/autograd/derivatives.yaml',
+     'tools/autograd/deprecated.yaml',
+ ]
+diff --git a/torch/lib/c10d/README.md b/torch/lib/c10d/README.md
+index 462e8f40769..9c4b169f8b5 100644
+--- a/torch/lib/c10d/README.md
++++ b/torch/lib/c10d/README.md
+@@ -9,7 +9,7 @@ See https://github.com/pytorch/pytorch/issues/7434 for the main issue.
+ 
+ This tree is intentionally not part of the main build and will be
+ buildable/testable in isolation, as long as ATen is available in
+-`<repository root>/torch/lib/tmp_install`.
++`<repository root>/torch/`.
+ 
+ To build and install ATen here, navigate to the root of this
+ repository and run:
+diff --git a/torch/lib/c10d/bin/test.sh b/torch/lib/c10d/bin/test.sh
+index cd0a119d5cf..961f17cc42f 100755
+--- a/torch/lib/c10d/bin/test.sh
++++ b/torch/lib/c10d/bin/test.sh
+@@ -4,5 +4,5 @@ set -ex
+ 
+ mkdir -p build
+ cd build
+-cmake ../ -DCMAKE_INSTALL_PREFIX="$PWD/../../tmp_install"
++cmake ../ -DCMAKE_INSTALL_PREFIX="$PWD/../"
+ make all test
+diff --git a/torch/lib/libshm/CMakeLists.txt b/torch/lib/libshm/CMakeLists.txt
+index 4bbbc6d0de6..b755b35d534 100644
+--- a/torch/lib/libshm/CMakeLists.txt
++++ b/torch/lib/libshm/CMakeLists.txt
+@@ -76,4 +76,4 @@ endif()
+ 
+ INSTALL(TARGETS shm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
+ INSTALL(FILES libshm.h DESTINATION "include")
+-INSTALL(TARGETS torch_shm_manager DESTINATION "bin")
++INSTALL(TARGETS torch_shm_manager DESTINATION "lib")
+diff --git a/torch/lib/libshm_windows/CMakeLists.txt b/torch/lib/libshm_windows/CMakeLists.txt
+index 27442b97096..7a5d5ad4cb5 100644
+--- a/torch/lib/libshm_windows/CMakeLists.txt
++++ b/torch/lib/libshm_windows/CMakeLists.txt
+@@ -1,5 +1,5 @@
+ IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
+-  SET(LIBSHM_INSTALL_BIN_SUBDIR "bin" CACHE PATH "libshm install binary directory")
++  SET(LIBSHM_INSTALL_BIN_SUBDIR "lib" CACHE PATH "libshm install binary directory")
+   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
+ ENDIF()
+ 
