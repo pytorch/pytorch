@@ -81,6 +81,8 @@ class ChunkDataSet final
   /// mechanism for the chunk dataset.
   virtual void reset() {
     chunk_reader_.reset();
+    // Temporary: for API only testing.
+    chunk_index_ = 0;
   }
 
   /// size is not used for chunk dataset.
