@@ -681,6 +681,9 @@
   device_guard: False
 
 - func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
+  dispatch:
+    CPU: empty_strided_cpu
+    CUDA: empty_strided_cuda
 
 - func: erf(Tensor self) -> Tensor
   variants: function, method
