@@ -737,7 +737,7 @@ def dropout(input, p=0.5, training=True, inplace=False):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is ``True``. Defualt: ``True``
+        training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0. or p > 1.:
@@ -777,7 +777,7 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
 
     Args:
         p: probability of a channel to be zeroed. Default: 0.5
-        training: apply dropout if is ``True``. Defualt: ``True``
+        training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     if p < 0. or p > 1.:
@@ -802,7 +802,7 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
 
     Args:
         p: probability of a channel to be zeroed. Default: 0.5
-        training: apply dropout if is ``True``. Defualt: ``True``
+        training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that

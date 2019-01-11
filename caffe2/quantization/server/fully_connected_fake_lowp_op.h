@@ -81,7 +81,7 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
   vector<int64_t> Y_shape_cache_;
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
 
   bool float16_compute_;
 };
@@ -130,7 +130,7 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
  protected:
   size_t axis_{1};
   size_t axis_w_{1};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
   bool float16_compute_;
 };
 
