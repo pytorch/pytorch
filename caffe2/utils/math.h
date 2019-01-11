@@ -19,6 +19,7 @@ extern "C" {
 
 namespace caffe2 {
 
+// TODO: Change dims related arguments to int64_t?
 class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
