@@ -167,3 +167,25 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   make VERBOSE=1
   popd
 fi
+
+# Test XLA build
+if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+  # XLA build requires Bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
+  chmod +x bazel-*.sh
+  ./bazel-*.sh --user
+  export PATH="$PATH:$HOME/bin"
+  BAZEL="$(which bazel)"
+  if [ -z "${BAZEL}" ]; then
+    echo "Unable to find bazel..."
+    exit 1
+  fi
+
+  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
+  export CC=/usr/bin/gcc CXX=/usr/bin/g++
+  git clone --recursive https://github.com/pytorch/xla.git
+  patch -p1 < xla/pytorch.patch
+  pushd xla
+  python setup.py install
+  popd
+fi
