@@ -108,6 +108,10 @@ class CAFFE2_API Tensor final {
     return C10Tensor(std::move(impl_));
   }
 
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
+  }
+
   Tensor Clone() const {
     Tensor x(GetDevice());
     x.CopyFrom(*this);
