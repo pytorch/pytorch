@@ -10416,6 +10416,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fuse_batch_norm(self):
 
         class ResLike(torch.jit.ScriptModule):
@@ -10456,6 +10457,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_threshold(self):
         def f(x):
             return torch.threshold(x, 0, -10) + x + x + x
