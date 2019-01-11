@@ -1,7 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
-
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
@@ -60,5 +57,3 @@ struct TORCH_API ArgSpec {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER

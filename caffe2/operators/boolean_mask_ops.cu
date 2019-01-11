@@ -82,7 +82,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-      
+
       auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
       indicesOut->template mutable_data<int64_t>();
     }
@@ -306,8 +306,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 

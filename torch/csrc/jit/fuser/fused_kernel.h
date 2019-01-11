@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/fuser/partition_desc.h>
@@ -95,5 +93,3 @@ struct FusedKernel {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER
