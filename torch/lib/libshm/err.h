@@ -1,5 +1,15 @@
 #pragma once
 
 #include <system_error>
+#include <cerrno>
 
-#define SYSCHECK(call) { auto __ret = (call); if (__ret < 0) { throw std::system_error(errno, std::system_category()); } }
+#define SYSCHECK(expr)                                      \
+{                                                           \
+  do {                                                      \
+    errno = 0;                                              \
+    auto ___output = (expr);                                \
+    (void)___output;                                        \
+    } while (errno == EINTR);                               \
+  if (errno != 0)                                           \
+    throw std::system_error(errno, std::system_category()); \
+}
