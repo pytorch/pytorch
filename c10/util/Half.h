@@ -9,7 +9,6 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
-#include <c10/util/bitcasts.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 
@@ -27,6 +26,7 @@
 
 #include <complex>
 #include <cstring>
+#include <cstdint>
 #include <iosfwd>
 #include <limits>
 #include <sstream>
@@ -46,13 +46,45 @@ namespace c10 {
 
 namespace detail {
 
+  inline float fp32_from_bits(uint32_t w) {
+  #if defined(__OPENCL_VERSION__)
+    return as_float(w);
+  #elif defined(__CUDA_ARCH__)
+    return __uint_as_float((unsigned int)w);
+  #elif defined(__INTEL_COMPILER)
+    return _castu32_f32(w);
+  #else
+    union {
+      uint32_t as_bits;
+      float as_value;
+    } fp32 = {w};
+    return fp32.as_value;
+  #endif
+  }
+
+  inline uint32_t fp32_to_bits(float f) {
+  #if defined(__OPENCL_VERSION__)
+    return as_uint(f);
+  #elif defined(__CUDA_ARCH__)
+    return (uint32_t)__float_as_uint(f);
+  #elif defined(__INTEL_COMPILER)
+    return _castf32_u32(f);
+  #else
+    union {
+      float as_value;
+      uint32_t as_bits;
+    } fp32 = {f};
+    return fp32.as_bits;
+  #endif
+  }
+
   /*
    * Convert a 16-bit floating-point number in IEEE half-precision format, in bit representation, to
    * a 32-bit floating-point number in IEEE single-precision format, in bit representation.
    *
    * @note The implementation doesn't use any floating-point operations.
    */
-  static inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+  inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
   	/*
   	 * Extend the half-precision floating-point number to 32 bits and shift to the upper part of the 32-bit word:
   	 *      +---+-----+------------+-------------------+
@@ -143,7 +175,7 @@ namespace detail {
    * @note The implementation relies on IEEE-like (no assumption about rounding mode and no operations on denormals)
    * floating-point operations and bitcasts between integer and floating-point variables.
    */
-  static inline float fp16_ieee_to_fp32_value(uint16_t h) {
+  inline float fp16_ieee_to_fp32_value(uint16_t h) {
   	/*
   	 * Extend the half-precision floating-point number to 32 bits and shift to the upper part of the 32-bit word:
   	 *      +---+-----+------------+-------------------+
@@ -258,7 +290,7 @@ namespace detail {
    * @note The implementation relies on IEEE-like (no assumption about rounding mode and no operations on denormals)
    * floating-point operations and bitcasts between integer and floating-point variables.
    */
-  static inline uint16_t fp16_ieee_from_fp32_value(float f) {
+  inline uint16_t fp16_ieee_from_fp32_value(float f) {
     // const float scale_to_inf = 0x1.0p+112f;
     // const float scale_to_zero = 0x1.0p-110f;
     uint32_t scale_to_inf_bits = (uint32_t) 239 << 23;
