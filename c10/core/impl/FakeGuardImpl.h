@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <array>
 

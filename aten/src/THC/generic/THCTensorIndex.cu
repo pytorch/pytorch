@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorIndex.cu"
 #else
 
+#include "ATen/cuda/CUDAContext.h"
+
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.
 static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
@@ -121,7 +123,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
-  int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
   indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>       \
@@ -309,7 +311,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
-  int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
   indexAddSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM> \
@@ -431,7 +433,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
-  int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)  \
   indexFillSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM> \
@@ -554,7 +556,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   int64_t srcSelectDimSize = THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   ptrdiff_t sliceSize = dstTotalSize / numIndices;
 
-  int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
   indexSelectSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \

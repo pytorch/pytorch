@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
 
