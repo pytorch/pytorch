@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
-
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
@@ -131,6 +130,26 @@ FusedKernelCPU::FusedKernelCPU(
 #pragma GCC diagnostic pop
 }
 
+static std::shared_ptr<FusedKernel> createFusionKernel(
+    int16_t device,
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random) {
+  return std::make_shared<FusedKernelCPU>(
+      std::move(name),
+      std::move(code),
+      std::move(input_desc),
+      std::move(output_desc),
+      std::move(chunk_desc),
+      std::move(concat_desc),
+      has_random);
+}
+
+RegisterFusionBackend reg(at::DeviceType::CPU, createFusionKernel);
 } // namespace cpu
 } // namespace fuser
 } // namespace jit
