@@ -14,9 +14,9 @@ __global__ void CeilKernel(const int N, const T* X, T* Y) {
 template <>
 bool CeilOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+  
   CAFFE_ENFORCE_GT(X.size(), 0);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   CeilKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,

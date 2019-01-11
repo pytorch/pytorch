@@ -945,12 +945,12 @@ tri_tests_args = [
 ]
 
 tri_large_tests_args = [
-    (1, 268435455),
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
     # they pass.
     #
+    # (1, 268435455),
     # (5000, 5000),
     # (10000, 10000),
     # (268435455, 1),
