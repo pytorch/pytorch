@@ -22,15 +22,14 @@ struct FullyConnected final {
       const C10Tensor& output,
       int axis,
       int axis_w,
-      Cache* cache,
-      BaseContext* context);
+      Cache* cache);
 
   static constexpr size_t num_dispatch_args() {return 3;}
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
-      {"X", "W", "b", "output", "axis", "axis_w", "cache", "context"}};
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+      {"X", "W", "b", "output", "axis", "axis_w", "cache"}};
 };
 
 } // namespace ops
