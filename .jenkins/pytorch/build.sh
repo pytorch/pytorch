@@ -170,6 +170,10 @@ fi
 
 # Test XLA build
 if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+  # TODO: Move this to Dockerfile.
+  # Bazel dependencies
+  sudo apt-get -qq update
+  sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
   wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
