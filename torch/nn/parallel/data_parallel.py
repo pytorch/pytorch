@@ -47,7 +47,7 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel EXCEPT Tensors. All tensors will be scattered on dim
+    DataParallel but tensors are specially handled. All tensors will be scattered on dim
     specified (default 0). Primitive types will be broadcasted, but all
     other types will be a shallow copy and can be corrupted if written to in
     the model's forward pass.
