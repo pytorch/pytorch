@@ -27,7 +27,7 @@ class NanCheckOp final : public Operator<Context> {
 
  private:
   TensorPrinter tensorPrinter_;
-  Tensor scratch_{Context::GetDeviceType()};
+  Tensor scratch_;
 };
 
 struct GetNanCheckGradient : public GradientMakerBase {
@@ -562,10 +562,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     }
     return true;
   }
-  Tensor x_data_host_{CPU};
-  Tensor weights_host_{CPU};
-  Tensor x_data_device_{Context::GetDeviceType()};
-  Tensor weights_device_{Context::GetDeviceType()};
+  Tensor x_data_host_;
+  Tensor weights_host_;
+  Tensor x_data_device_;
+  Tensor weights_device_;
 };
 
 /**
