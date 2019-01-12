@@ -6,6 +6,7 @@
 
 #include "caffe2/operators/pool_op_util.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -561,6 +562,48 @@ void RunMaxPool3D(
 
 } // namespace
 
+template <>
+template <>
+bool AveragePoolFunctor<CPUContext>::
+    GlobalPoolingForward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CPUContext* context) const {
+  const std::array<int, 2> dims = {N * C, HxW};
+  const int axis = 1;
+  math::ReduceMean<float, CPUContext>(
+      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+  return true;
+}
+
+template <>
+template <>
+bool AveragePoolFunctor<CPUContext>::
+    GlobalPoolingForward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CPUContext* context) const {
+  math::Set<float, CPUContext>(N * C, 0.0f, Y, context);
+  const float* X_ptr = X;
+  float* Y_ptr = Y;
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < HxW; ++j) {
+      math::Add<float, CPUContext>(C, Y_ptr, X_ptr + j * C, Y_ptr, context);
+    }
+    X_ptr += HxW * C;
+    Y_ptr += C;
+  }
+  math::Scale<float, float, CPUContext>(
+      N * C, 1.0f / static_cast<float>(HxW), Y, Y, context);
+  return true;
+}
+
 #define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(T, kOrder)           \
   template <>                                                                \
   template <>                                                                \
@@ -666,6 +709,49 @@ void RunMaxPool3D(
 CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(float, StorageOrder::NCHW)
 CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(float, StorageOrder::NHWC)
 #undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD
+
+template <>
+template <>
+bool MaxPoolFunctor<CPUContext>::
+    GlobalPoolingForward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CPUContext* context) const {
+  const std::array<int, 2> dims = {N * C, HxW};
+  const int axis = 1;
+  math::ReduceMax<float, CPUContext>(
+      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+  return true;
+}
+
+template <>
+template <>
+bool MaxPoolFunctor<CPUContext>::
+    GlobalPoolingForward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CPUContext* context) const {
+  math::Set<float, CPUContext>(
+      N * C, std::numeric_limits<float>::lowest(), Y, context);
+  const float* X_ptr = X;
+  float* Y_ptr = Y;
+  for (int i = 0; i < N; ++i) {
+    ConstEigenArrayMap<float> X_arr(X_ptr, C, HxW);
+    EigenVectorArrayMap<float> Y_arr(Y_ptr, C);
+    for (int j = 0; j < HxW; ++j) {
+      Y_arr = Y_arr.max(X_arr.col(j));
+    }
+    X_ptr += HxW * C;
+    Y_ptr += C;
+  }
+  return true;
+}
 
 #define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(T, kOrder)                \
   template <>                                                                 \
