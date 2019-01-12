@@ -274,14 +274,6 @@ RegisterOperators reg({
             return 0;
           };
         }),
-    Operator(
-        "aten::device(str a) -> Device",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            push(stack, c10::Device(pop(stack).toStringRef()));
-            return 0;
-          };
-        }),
     // reference function parse_to_conversion in python_arg_parsing.h
     Operator(
         "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",

@@ -4645,7 +4645,7 @@ a")
                 self.assertEqual(t1.device, t2.device)
 
     # adapted from test in test_torch
-    def test_to(self):
+    def test_tensor_to(self):
         template = dedent('''
         def func(t):
             device = "{device}"
@@ -4658,7 +4658,6 @@ a")
             non_blocking = non_blocking if non_blocking is not None else False
             code = template.format(to_str=to_str, device=device, non_blocking=non_blocking)
             scope = {}
-            exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             return cu.func(t)
 
