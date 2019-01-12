@@ -25,7 +25,7 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
       arguments_parsed_ = true;
     }
 
-    auto& input = OperatorBase::Input<int8::Int8TensorCPU>(0).t;
+    auto& input = this->template Input<int8::Int8TensorCPU>(0).t;
     auto& output = Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
     output.ResizeLike(input);
     functor_(
