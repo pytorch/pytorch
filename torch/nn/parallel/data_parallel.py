@@ -58,7 +58,7 @@ class DataParallel(Module):
 
     .. warning::
         In each forward, :attr:`module` is **replicated** on each device, so any
-        updates to the runing module in ``forward`` will be lost. For example,
+        updates to the running module in ``forward`` will be lost. For example,
         if :attr:`module` has a counter attribute that is incremented in each
         ``forward``, it will always stay at the initial value becasue the update
         is done on the replicas which are destroyed after ``forward``. However,
