@@ -1189,8 +1189,8 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     const auto& I = Input(3);
-    auto* dX = Output(0);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
     const int M = X.dim32(0);
     const int N = X.size_from_dim(1);
@@ -1687,7 +1687,6 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto& dataInput = Input(3);
     auto& indicesInput = Input(4);
 
-    auto* weightGradsOutput = Output(1);
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
 
@@ -1699,7 +1698,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
-    weightGradsOutput->ResizeLike(indicesInput);
+    auto* weightGradsOutput = Output(1, indicesInput.sizes(), at::dtype<T>());
     T* out_data_grads = dataGradsOutput->template mutable_data<T>();
     T* out_weight_grads = weightGradsOutput->template mutable_data<T>();
 
