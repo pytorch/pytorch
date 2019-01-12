@@ -1523,9 +1523,9 @@ class TestCuda(TestCase):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
-        mp.set_start_method('spawn')
-        p = mp.Process(target=TestCuda._test_event_handle_consumer,
-                       args=(e0.ipc_handle(),))
+        ctx = mp.get_context('spawn')
+        p = ctx.Process(target=TestCuda._test_event_handle_consumer,
+                        args=(e0.ipc_handle(),))
         p.start()
 
         torch.cuda._sleep(int(50 * get_cycles_per_ms()))  # spin for about 50 ms
