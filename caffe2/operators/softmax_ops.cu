@@ -284,15 +284,17 @@ template<>
 bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Logits
   auto& T = Input(1);  // Labels / targets
-  auto* P = Output(0); // Probabilities from softmax
 
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : NULL);
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
-  P->ResizeLike(X);
+
+  auto* P =
+      Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
+  total_weight_ptr_.Resize(1);
 
   if (label_prob_mode_) {
     CAFFE_ENFORCE_GE(T.ndim(), 2);
@@ -391,14 +393,16 @@ template <>
 bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Logits
   auto& T = Input(1); // Labels / targets
-  auto* P = Output(0); // Probabilities from softmax
 
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : NULL);
   int N, D;
   N = X.dim32(0);
   D = X.dim32(1);
-  P->ResizeLike(X);
+
+  auto* P =
+      Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
+
   CAFFE_ENFORCE_EQ(X.ndim(), 4);
   CAFFE_ENFORCE_EQ(T.ndim(), 3);
   CAFFE_ENFORCE_EQ(T.dim32(0), N);
@@ -685,11 +689,11 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 template <>
 bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* P = Output(0);
+
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
-  P->ResizeLike(X);
+  auto* P = Output(0, X.sizes(), at::dtype<float>());
   auto* P_data = P->mutable_data<float>();
   if (N == 0) {
     return true;
@@ -760,11 +764,11 @@ template <>
 bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   const auto canonical_axis = Y.canonical_axis_index(axis_);
   const int N = Y.size_to_dim(canonical_axis);
   const int D = Y.size_from_dim(canonical_axis);
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dX_data = dX->mutable_data<float>();
   if (N == 0) {
     return true;

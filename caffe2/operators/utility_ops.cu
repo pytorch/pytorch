@@ -217,8 +217,8 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
 
   for (int i = 0; i < OutputSize(); i++) {
     auto& input = Input(i + kInputStartOffset);
-    auto* grad_input = Output(i);
-    grad_input->ResizeLike(input);
+
+    auto* grad_input = Output(i, input.sizes(), at::dtype<float>());
     MaxMinGradKernel<<<
         CAFFE_GET_BLOCKS(input.size()),
         CAFFE_CUDA_NUM_THREADS,
