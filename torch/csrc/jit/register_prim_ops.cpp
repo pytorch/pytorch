@@ -315,6 +315,26 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "aten::cpu(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cpu());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::cuda(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cuda());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::Undefined() -> Tensor",
         [](const Node* node) {
           return [](Stack& stack) {
@@ -697,7 +717,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        "aten::_unwrap_optional(t? optional) -> t",
+        "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);

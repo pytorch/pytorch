@@ -108,6 +108,10 @@ class CAFFE2_API Tensor final {
     return C10Tensor(std::move(impl_));
   }
 
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
+  }
+
   Tensor Clone() const {
     Tensor x(GetDevice());
     x.CopyFrom(*this);
@@ -569,6 +573,11 @@ class CAFFE2_API Tensor final {
   }
 };
 
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
 CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(

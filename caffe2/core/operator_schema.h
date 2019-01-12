@@ -521,7 +521,7 @@ inline TensorShape CreateTensorShape(
     vector<T_I> dims,
     ::caffe2::TensorProto_DataType dt) {
   TensorShape ts;
-  for (int d : dims) {
+  for (T_I d : dims) {
     ts.add_dims(d);
   }
   ts.set_data_type(dt);

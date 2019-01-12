@@ -5,7 +5,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-
+#include <c10/macros/Macros.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -26,7 +26,7 @@
 namespace at { namespace native {
 
 template<int nt, int vt, typename func_t>
-__launch_bounds__(nt, 4)
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void elementwise_kernel(int N, func_t f) {
   int tid = threadIdx.x;
   int nv = nt * vt;
