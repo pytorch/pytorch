@@ -69,7 +69,7 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
   }
 
   const T* input = inputTensor.template data<T>();
-  thrust_unique_buffer_.Resize(N);
+  ReinitializeTensor(&thrust_unique_buffer_, {N}, at::dtype<T>().device(Context::GetDeviceType()));
   auto* buffer = thrust_unique_buffer_.template mutable_data<T>();
   context_.CopyItemsSameDevice(inputTensor.meta(), N, input, buffer);
 

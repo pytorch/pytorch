@@ -301,7 +301,10 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     assert(sampling_ratio_ >= 0);
 
     // only supports NHWC now
-    Y->t.Resize(R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3));
+    ReinitializeTensor(
+        &Y->t,
+        {R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3)},
+        at::dtype<uint8_t>().device(CPU));
     int output_size = Y->t.numel();
 
     ROIAlignForward(
