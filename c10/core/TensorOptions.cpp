@@ -28,6 +28,9 @@ namespace c10 {
 /// `.type()` can return non-Variable type when needed, even if the tensor being
 /// called on is a variable.
 
+/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
+/// thread_local is not supported. In that case, we don't provide
+/// `at::NonVariableTypeMode`.
 #if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 thread_local bool NonVariableTypeMode_enabled = false;
