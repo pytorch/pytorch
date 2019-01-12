@@ -487,20 +487,19 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : NULL);
 
-  Tensor* dX;
-  if (only_loss_) {
-    // Memory saving trick to share the buffer with the softmax output.
-    // Softmax output is thus overwritten.
-    dX = OutputTensorAlias(0, P);
-    dX->ResizeLike(X);
-  } else {
-    dX = Output(0, X.sizes(), at::dtype<float>());
-  }
+  auto* dX = Output(0);
+  dX->ResizeLike(X);
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
+
+  if (only_loss_) {
+    // Memory saving trick to share the buffer with the softmax output.
+    // Softmax output is thus overwritten.
+    dX->ShareData(P);
+  }
 
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
 
@@ -603,20 +602,19 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : NULL);
 
-  Tensor* dX;
-  if (only_loss_) {
-    // Memory saving trick to share the buffer with the softmax output.
-    // Softmax output is thus overwritten.
-    dX = OutputTensorAlias(0, P);
-    dX->ResizeLike(X);
-  } else {
-    dX = Output(0, X.sizes(), at::dtype<float>());
-  }
+  auto* dX = Output(0);
+  dX->ResizeLike(X);
 
   const auto canonical_axis = X.canonical_axis_index(1);
   int N, D;
   N = X.dim32(0);
   D = X.dim32(1);
+
+  if (only_loss_) {
+    // Memory saving trick to share the buffer with the softmax output.
+    // Softmax output is thus overwritten.
+    dX->ShareData(P);
+  }
 
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
   // Spatial mode, compute softmax for each x, y location
