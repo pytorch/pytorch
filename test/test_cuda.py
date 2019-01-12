@@ -1518,6 +1518,7 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @skipIfRocm
     def test_events_handle(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
