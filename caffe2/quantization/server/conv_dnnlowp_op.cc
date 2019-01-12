@@ -57,7 +57,7 @@ ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
   }
 
   quantize_groupwise_ =
-      OperatorBase::GetSingleArgument<bool>("quantize_groupwise", false);
+      this->template GetSingleArgument<bool>("quantize_groupwise", false);
 }
 
 template <typename T, bool ReluFused>
@@ -213,12 +213,12 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
       b_quantized_data_ = b_quantized_->data();
     } else {
       const auto& bias = InputTensorCPU_(BIAS);
-      if (OperatorBase::InputIsType<int8::Int8TensorCPU>(BIAS)) {
+      if (this->template InputIsType<int8::Int8TensorCPU>(BIAS)) {
         TensorQuantizationParams bias_qparams;
         bias_qparams.scale =
-            OperatorBase::Input<int8::Int8TensorCPU>(BIAS).scale;
+            this->template Input<int8::Int8TensorCPU>(BIAS).scale;
         bias_qparams.zero_point =
-            OperatorBase::Input<int8::Int8TensorCPU>(BIAS).zero_point;
+            this->template Input<int8::Int8TensorCPU>(BIAS).zero_point;
         CAFFE_ENFORCE_LE(
             std::abs(
                 bias_qparams.scale -
@@ -368,8 +368,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         static int log_occurences = 0;
         if (log_occurences < 32) {
           ++log_occurences;
-          LOG(WARNING) << "Conv with weight "
-                       << OperatorBase::debug_def().input(FILTER)
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(FILTER)
                        << " falls back to slow path because " << reason;
         }
       }
@@ -685,7 +684,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
         ++log_occurences;
         LOG(WARNING) << "Cannot do group-wise quantization without "
                         "static quantization of activations for "
-                     << OperatorBase::debug_def().output(0);
+                     << this->debug_def().output(0);
       }
     }
 
@@ -999,14 +998,14 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         N * Y_HxW * group_,
         kernel_dim,
         col_buffer_data,
-        OperatorBase::debug_def().input(INPUT));
+        this->debug_def().input(INPUT));
 
     // Dump weight
     StoreMatrixInMatrixMarketFormat(
         group_ * M,
         kernel_dim,
         W_quantized_.data(),
-        OperatorBase::debug_def().input(FILTER));
+        this->debug_def().input(FILTER));
   }
 
   if (TakeDepthWise3x3x3FastPath_()) {
@@ -1351,9 +1350,9 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
     double ops = 2. * N * Y_HxW * M * kernel_dim;
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
-    LOG(INFO) << "this=" << this << " " << OperatorBase::debug_def().type()
-              << " output=" << OperatorBase::debug_def().output(0) << " "
-              << N * Y_HxW << "x" << M << "x" << kernel_dim << " G=" << group_
+    LOG(INFO) << "this=" << this << " " << this->debug_def().type()
+              << " output=" << this->debug_def().output(0) << " " << N * Y_HxW
+              << "x" << M << "x" << kernel_dim << " G=" << group_
               << " C/G=" << C / group_ << " K/G=" << M / group_
               << " R=" << kernel_h() << " S=" << kernel_w() << " : " << dt * 1e3
               << " ms " << gops << " gops";
