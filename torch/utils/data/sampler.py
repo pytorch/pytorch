@@ -50,14 +50,11 @@ class RandomSampler(Sampler):
     def __init__(self, data_source, replacement=False, num_samples=None):
         self.data_source = data_source
         self.replacement = replacement
-        self.num_samples = num_samples
+        self._num_samples = num_samples
 
-        if self.num_samples is not None and replacement is False:
+        if self._num_samples is not None and replacement is False:
             raise ValueError("With replacement=False, num_samples should not be specified, "
                              "since a random permute will be performed.")
-
-        if self.num_samples is None:
-            self.num_samples = len(self.data_source)
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
             raise ValueError("num_samples should be a positive integeral "
@@ -65,6 +62,13 @@ class RandomSampler(Sampler):
         if not isinstance(self.replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(self.replacement))
+
+    @property
+    def num_samples(self):
+        # work round around growing dataset
+        if self._num_samples is None:
+            return len(self.data_source)
+        return self._num_samples
 
     def __iter__(self):
         n = len(self.data_source)
