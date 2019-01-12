@@ -27,7 +27,8 @@ at::Tensor _nnpack_spatial_convolution_backward_input(
 at::Tensor _nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
     at::IntList weight_size,
-    const at::Tensor& gradOutput) {
+    const at::Tensor& gradOutput,
+    IntList padding) {
   throw std::runtime_error(
       "nnpack_spatial_convolution_backward_weight: ATen not compiled with NNPACK support");
 }
