@@ -12,7 +12,10 @@ r1 = re.compile(r'\.\. autofunction:: (\w*)')
 class TestTorchDocCoverage(unittest.TestCase):
 
     def test_torch(self):
-        whitelist = []
+        whitelist = [
+            'all', 'any', 'as_strided', 'autograd', 'backends', 'clamp_max',
+            'clamp_min', 'complex128', 'complex32', 'complex64', 'cpp',
+        ]
         everything = set(whitelist)
         filename = os.path.join(path, 'torch.rst')
         with open(filename, 'r') as f:
@@ -25,6 +28,8 @@ class TestTorchDocCoverage(unittest.TestCase):
                 else:
                     continue
                 everything.add(name)
+        for p in everything:
+            self.assertIn(p, dir(torch))
         for p in dir(torch):
             if p.startswith('_') or p[0].isupper() or p.endswith('_'):
                 continue

@@ -17,7 +17,7 @@ from . import _VF
 from .._jit_internal import weak_script, List
 
 
-conv1d = _add_docstr(torch.conv1d, r"""
+conv1d = _add_docstr(torch._C._nn.conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
@@ -47,7 +47,7 @@ Examples::
     >>> F.conv1d(inputs, filters)
 """)
 
-conv2d = _add_docstr(torch.conv2d, r"""
+conv2d = _add_docstr(torch._C._nn.conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
@@ -78,7 +78,7 @@ Examples::
     >>> F.conv2d(inputs, filters, padding=1)
 """)  # noqa: E501
 
-conv3d = _add_docstr(torch.conv3d, r"""
+conv3d = _add_docstr(torch._C._nn.conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
@@ -108,7 +108,7 @@ Examples::
     >>> F.conv3d(inputs, filters)
 """)  # noqa: E501
 
-conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
+conv_transpose1d = _add_docstr(torch._C._nn.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 1D transposed convolution operator over an input signal
@@ -141,7 +141,7 @@ Examples::
     >>> F.conv_transpose1d(inputs, weights)
 """)
 
-conv_transpose2d = _add_docstr(torch.conv_transpose2d, r"""
+conv_transpose2d = _add_docstr(torch._C._nn.conv_transpose2d, r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 2D transposed convolution operator over an input image
@@ -176,7 +176,7 @@ Examples::
     >>> F.conv_transpose2d(inputs, weights, padding=1)
 """)  # noqa: E501
 
-conv_transpose3d = _add_docstr(torch.conv_transpose3d, r"""
+conv_transpose3d = _add_docstr(torch._C._nn.conv_transpose3d, r"""
 conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 3D transposed convolution operator over an input image
@@ -210,7 +210,7 @@ Examples::
     >>> F.conv_transpose3d(inputs, weights)
 """)  # noqa: E501
 
-conv_tbc = _add_docstr(torch.conv_tbc, r"""
+conv_tbc = _add_docstr(torch._C._nn.conv_tbc, r"""
 Applies a 1-dimensional sequence convolution over an input sequence.
 Input and output dimensions are (Time, Batch, Channels) - hence TBC.
 
@@ -223,7 +223,7 @@ Args:
 
 
 # Pooling
-avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
+avg_pool1d = _add_docstr(torch._C._nn.avg_pool1d, r"""
 avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies a 1D average pooling over an input signal composed of several
@@ -677,7 +677,7 @@ adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
     if_false=_adaptive_max_pool3d)
 
 
-adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
+adaptive_avg_pool1d = _add_docstr(torch._C._nn.adaptive_avg_pool1d, r"""
 adaptive_avg_pool1d(input, output_size) -> Tensor
 
 Applies a 1D adaptive average pooling over an input signal composed of
@@ -856,13 +856,13 @@ def relu(input, inplace=False):
     :class:`~torch.nn.ReLU` for more details.
     """
     if inplace:
-        result = torch.relu_(input)
+        result = torch._C._nn.relu_(input)
     else:
-        result = torch.relu(input)
+        result = torch._C._nn.relu(input)
     return result
 
 
-relu_ = _add_docstr(torch.relu_, r"""
+relu_ = _add_docstr(torch._C._nn.relu_, r"""
 relu_(input) -> Tensor
 
 In-place version of :func:`~relu`.
@@ -964,13 +964,13 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        result = torch.selu_(input)
+        result = torch._C._nn.selu_(input)
     else:
-        result = torch.selu(input)
+        result = torch._C._nn.selu(input)
     return result
 
 
-selu_ = _add_docstr(torch.selu_, r"""
+selu_ = _add_docstr(torch._C._nn.selu_, r"""
 selu_(input) -> Tensor
 
 In-place version of :func:`~selu`.
@@ -988,12 +988,12 @@ def celu(input, alpha=1., inplace=False):
     See :class:`~torch.nn.CELU` for more details.
     """
     if inplace:
-        result = torch.celu_(input, alpha)
+        result = torch._C._nn.celu_(input, alpha)
     else:
-        result = torch.celu(input, alpha)
+        result = torch._C._nn.celu(input, alpha)
     return result
 
-celu_ = _add_docstr(torch.celu_, r"""
+celu_ = _add_docstr(torch._C._nn.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
 
 In-place version of :func:`~celu`.
@@ -1036,7 +1036,7 @@ def prelu(input, weight):
 
     See :class:`~torch.nn.PReLU` for more details.
     """
-    return torch.prelu(input, weight)
+    return torch._C._nn.prelu(input, weight)
 
 
 @weak_script
@@ -1049,13 +1049,13 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
-        result = torch.rrelu_(input, lower, upper, training)
+        result = torch._C._nn.rrelu_(input, lower, upper, training)
     else:
-        result = torch.rrelu(input, lower, upper, training)
+        result = torch._C._nn.rrelu(input, lower, upper, training)
     return result
 
 
-rrelu_ = _add_docstr(torch.rrelu_, r"""
+rrelu_ = _add_docstr(torch._C._nn.rrelu_, r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
 
 In-place version of :func:`~rrelu`.
@@ -1080,7 +1080,7 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
-    return torch.hardshrink(input, lambd)
+    return torch._C._nn.hardshrink(input, lambd)
 
 
 @weak_script
@@ -1366,7 +1366,7 @@ def bilinear(input1, input2, weight, bias=None):
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
-        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+        return torch._C._nn.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
 @weak_script
@@ -1450,7 +1450,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
+    return torch._C._nn.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
 @weak_script
@@ -1581,7 +1581,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
-    ret, _, _, _ = torch.embedding_bag(
+    ret, _, _, _ = torch._C._nn.embedding_bag(
         weight,
         input,
         offsets,
@@ -1617,7 +1617,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         if size_prods == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
-    return torch.batch_norm(
+    return torch._C._nn.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
@@ -1633,7 +1633,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    return torch.instance_norm(
+    return torch._C._nn.instance_norm(
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
     )
@@ -1646,7 +1646,7 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    return torch.layer_norm(input, normalized_shape, weight, bias, eps,
+    return torch._C._nn.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
 
@@ -1657,7 +1657,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    return torch.group_norm(input, num_groups, weight, bias, eps,
+    return torch._C._nn.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
 
@@ -1728,7 +1728,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
-    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
+    return torch._C._nn.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
 
 
 @weak_script
@@ -1912,7 +1912,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         else:
             reduction_enum = _Reduction.get_enum(reduction)
 
-    reduced = torch.kl_div(input, target, reduction_enum)
+    reduced = torch._C._nn.kl_div(input, target, reduction_enum)
 
     if reduction == 'batchmean' and input.dim() != 0:
         reduced = reduced / input.size()[0]
@@ -2073,7 +2073,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
+    return torch._C._nn.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
@@ -2171,7 +2171,7 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
     if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
         raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
                             "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
-    return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
+    return torch._C._nn.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
 @weak_script
@@ -2186,7 +2186,7 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
+    return torch._C._nn.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
 @weak_script
@@ -2603,7 +2603,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     else:
         padding_mode_enum = 2
 
-    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
+    return torch._C._nn.grid_sampler(input, grid, mode_enum, padding_mode_enum)
 
 
 @weak_script
@@ -2725,7 +2725,7 @@ def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
-pdist = _add_docstr(torch.pdist, r"""
+pdist = _add_docstr(torch._C._nn.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
@@ -2756,7 +2756,7 @@ Args:
 """)
 
 
-cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
+cosine_similarity = _add_docstr(torch._C._nn.cosine_similarity, r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
 Returns cosine similarity between x1 and x2, computed along dim.
@@ -2844,7 +2844,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
+    return torch._C._nn.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
                                      swap, reduction_enum)
 
 

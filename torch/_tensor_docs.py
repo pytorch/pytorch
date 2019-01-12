@@ -1085,13 +1085,6 @@ gt_(other) -> Tensor
 In-place version of :meth:`~Tensor.gt`
 """)
 
-add_docstr_all('hardshrink',
-               r"""
-hardshrink(lambd=0.5) -> Tensor
-
-See :func:`torch.nn.functional.hardshrink`
-""")
-
 add_docstr_all('histc',
                r"""
 histc(bins=100, min=0, max=0) -> Tensor
