@@ -180,6 +180,7 @@ test_xla() {
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
   if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+    test_torchvision
     test_xla
   else
     test_torchvision
