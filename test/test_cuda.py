@@ -1511,7 +1511,7 @@ class TestCuda(TestCase):
 
     def _test_event_handle_consumer(handle):
         e1 = torch.cuda.Event(_handle=handle)
-        # synchronization here is not really necessary, as the torch.cuda.Event
+        # synchronization here is not really necessary, as the subprocess spawn
         # invocation above will block until the current device wakes up. This is
         # testing if event can be successfully created from a handle.
         e1.synchronize()
