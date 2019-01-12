@@ -115,6 +115,12 @@ if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
+# Patch required to build xla
+if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+  git clone --recursive https://github.com/pytorch/xla.git
+  patch -p1 < xla/pytorch.patch
+fi
+
 # ppc64le build fails when WERROR=1
 # set only when building other architectures
 # only use for "python setup.py install" line
@@ -187,8 +193,6 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   export CC=/usr/bin/gcc CXX=/usr/bin/g++
-  git clone --recursive https://github.com/pytorch/xla.git
-  patch -p1 < xla/pytorch.patch
   pushd xla
   python setup.py install
   popd
