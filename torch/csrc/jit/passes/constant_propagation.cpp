@@ -29,7 +29,11 @@ std::vector<IValue> runNode(Node* n) {
   auto op = getOperation(n);
   Stack stack;
   for (auto input : n->inputs()) {
-    stack.push_back(*(toIValue(input)));
+    if (input->node()->kind() == prim::None) {
+      stack.push_back(IValue());
+    } else {
+      stack.push_back(*(toIValue(input)));
+    }
   }
   op(stack);
   auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
