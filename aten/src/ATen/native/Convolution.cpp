@@ -466,10 +466,8 @@ at::Tensor _convolution_nogroup(
       } else {  /* dim == 4, non-dilated */
         if (params.use_nnpack(input)) {
 #if AT_NNPACK_ENABLED()
-          return at::nnpack_spatial_convolution(
-              input, weight, bias,
-              kernel_size[1], kernel_size[0],
-              params.padding[1], params.padding[0]);
+          return at::_nnpack_spatial_convolution(
+              input, weight, bias, padding);
 #endif
         } else {
           /* CPU implementation has specialized MM kernels

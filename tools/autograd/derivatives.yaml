@@ -1343,9 +1343,9 @@
 
 # nnpack
 
-- name: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH)
-  input: nnpack_spatial_convolution_backward_input(input, grad, weight, kW, kH, padW, padH)
-  weight: nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, kW, kH, padW, padH)
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor bias, IntList padding)
+  input: _nnpack_spatial_convolution_backward_input(input, grad, weight, padding)
+  weight: _nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, padding)
   bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
