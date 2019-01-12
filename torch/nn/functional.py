@@ -2631,7 +2631,7 @@ def pad(input, pad, mode='constant', value=0):
 
     Padding size:
         The number of dimensions to pad is :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor`
-        and the dimensions that get padded begins with the last dimension and moves forward.
+        and the dimensions that get padded begin with the last dimension and move forward.
         For example, to pad the last dimension of the input tensor, then `pad` has form
         `(padLeft, padRight)`; to pad the last 2 dimensions of the input tensor, then use
         `(padLeft, padRight, padTop, padBottom)`; to pad the last 3 dimensions, use
