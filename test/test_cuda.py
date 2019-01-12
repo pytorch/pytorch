@@ -1509,23 +1509,30 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    def _test_event_handle_consumer(handle):
+        e1 = torch.cuda.Event(_handle=handle)
+        # synchronization here is not really necessary, as the torch.cuda.Event
+        # invocation above will block until the current device wakes up. This is
+        # testing if event can be successfully created from a handle.
+        e1.synchronize()
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @skipIfRocm
     def test_events_handle(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
-        s = torch.cuda.current_stream()
-        e0 = s.record_event(e0)
-
-        handle = e0.ipc_handle()
-        torch.cuda._sleep(50000000)  # spin for about 50 ms
-        e0 = s.record_event(e0)
-
-        e1 = torch.cuda.Event(_handle=handle)
-        self.assertFalse(e0.query())
-        self.assertFalse(e1.query())
-
-        e1.synchronize()
         self.assertTrue(e0.query())
-        self.assertTrue(e1.query())
+
+        mp.set_start_method('spawn')
+        p = mp.Process(target=TestCuda._test_event_handle_consumer,
+                       args=(e0.ipc_handle(),))
+        p.start()
+
+        torch.cuda._sleep(int(50 * get_cycles_per_ms()))  # spin for about 50 ms
+        e0.record()
+        self.assertFalse(e0.query())
+        p.join()
+        self.assertTrue(e0.query())
 
     @skipIfRocm
     def test_record_stream(self):
