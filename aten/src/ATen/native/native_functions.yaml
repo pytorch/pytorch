@@ -1259,15 +1259,12 @@
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, IntList[2] padding, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
-  python_module: nn
 
 - func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, IntList[2] padding) -> Tensor
   variants: function
-  python_module: nn
 
 - func: _nnpack_spatial_convolution_backward_weight(Tensor input, IntList weightsize, Tensor grad_output, IntList[2] padding) -> Tensor
   variants: function
-  python_module: nn
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
