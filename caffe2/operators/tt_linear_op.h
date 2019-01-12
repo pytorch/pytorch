@@ -138,7 +138,10 @@ class TTLinearOp final : public Operator<Context> {
     // Add bias term
     if (bias_multiplier_.numel() != batch_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(batch_size);
+      ReinitializeTensor(
+          &bias_multiplier_,
+          {batch_size},
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           batch_size,
           static_cast<T>(1),
@@ -161,7 +164,7 @@ class TTLinearOp final : public Operator<Context> {
   }
 
  protected:
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
   std::vector<int> inp_sizes_;
   std::vector<int> out_sizes_;
   std::vector<int> tt_ranks_;

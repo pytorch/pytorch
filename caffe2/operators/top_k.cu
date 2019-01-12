@@ -166,9 +166,9 @@ class TopKCudaOp : public Operator<Context> {
   int axis_;
 
   // Buffers for CUDAContext.
-  Tensor input_transposed_buffer_{CUDA};
-  Tensor values_transposed_buffer_{CUDA};
-  Tensor indices_transposed_buffer_{CUDA};
+  Tensor input_transposed_buffer_;
+  Tensor values_transposed_buffer_;
+  Tensor indices_transposed_buffer_;
 
   // Shape tensors on device for CUDAContext.
   Tensor input_dims_device_{CUDA};
@@ -227,10 +227,9 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
                                      static_cast<int>(inner_size),
                                      static_cast<int>(next_size)};
     const std::array<int, 3> axes = {0, 2, 1};
-    input_transposed_buffer_.Resize(
-        std::vector<int64_t>{outer_size, inner_size});
-    values_transposed_buffer_.Resize(std::vector<int64_t>{outer_size, k_});
-    indices_transposed_buffer_.Resize(std::vector<int64_t>{outer_size, k_});
+    ReinitializeTensor(&input_transposed_buffer_,  std::vector<int64_t>{outer_size, inner_size}, at::dtype<T>().device(CUDA));
+    ReinitializeTensor(&values_transposed_buffer_, std::vector<int64_t>{outer_size, k_}, at::dtype<T>().device(CUDA));
+    ReinitializeTensor(&indices_transposed_buffer_, std::vector<int64_t>{outer_size, k_}, at::dtype<int64_t>().device(CUDA));
     math::Transpose(
         3,
         dims.data(),
