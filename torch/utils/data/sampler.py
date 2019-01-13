@@ -65,7 +65,7 @@ class RandomSampler(Sampler):
 
     @property
     def num_samples(self):
-        # work round around growing dataset
+        # dataset size might change at runtime
         if self._num_samples is None:
             return len(self.data_source)
         return self._num_samples
