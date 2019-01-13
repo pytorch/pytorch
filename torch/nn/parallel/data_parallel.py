@@ -47,9 +47,9 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel but some types are specially handled. All tensors will be 
+    DataParallel but some types are specially handled. tensors will be
     **scattered** on dim specified (default 0). tuple, list and dict types will
-    be shallow copied, but other types will be shared among different threads
+    be shallow copied. The other types will be shared among different threads
     and can be corrupted if written to in the model's forward pass.
 
     The parallelized :attr:`module` must have its parameters and buffers on
