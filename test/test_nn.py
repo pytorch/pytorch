@@ -6773,7 +6773,8 @@ class TestNN(NNTestCase):
                                               padding=0,
                                               bias=torch.randn(1, dtype=torch.float32))
         except RuntimeError as e:
-            if 'ATen not compiled with NNPACK support' in str(e):
+            if 'ATen not compiled with NNPACK support' in str(e) or \
+               '(unsupported hardware)' in str(e):
                 raise unittest.SkipTest('NNPack not available')
             else:
                 raise

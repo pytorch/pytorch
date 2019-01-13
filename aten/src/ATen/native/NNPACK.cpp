@@ -64,9 +64,11 @@ namespace native {
 
 // Stolen from Caffe2
 static pthreadpool_t nnpack_threadpool_ = nullptr;
+static bool called_nnpack_threadpool_ = false;
 
 pthreadpool_t nnpack_threadpool() {
-  if (nnpack_threadpool_ == nullptr) {
+  if (! called_nnpack_threadpool_) {
+    called_nnpack_threadpool_ = true;
     enum nnp_status nnpack_status = nnp_initialize();
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
@@ -89,6 +91,10 @@ pthreadpool_t nnpack_threadpool() {
     }
   }
   return nnpack_threadpool_;
+}
+
+bool nnpack_available() {
+  return nnpack_threadpool() != nullptr;
 }
 
 // Make thread_local for safety in cases where we have multiple threads running
