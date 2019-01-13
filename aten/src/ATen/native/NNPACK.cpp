@@ -94,6 +94,12 @@ pthreadpool_t nnpack_threadpool() {
 }
 
 bool nnpack_available() {
+  if (! called_nnpack_threadpool_) {
+    try {
+      return nnpack_threadpool() != nullptr;
+    } catch (std::runtime_error e) {
+    }
+  }
   return nnpack_threadpool() != nullptr;
 }
 
