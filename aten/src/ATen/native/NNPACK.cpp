@@ -68,8 +68,15 @@ static pthreadpool_t nnpack_threadpool_ = nullptr;
 pthreadpool_t nnpack_threadpool() {
   if (nnpack_threadpool_ == nullptr) {
     enum nnp_status nnpack_status = nnp_initialize();
-    if (nnpack_status != nnp_status_success)
-      throw std::runtime_error("could not initialize NNPack");
+    if (nnpack_status != nnp_status_success) {
+      if (nnpack_status == nnp_status_out_of_memory) {
+	throw std::runtime_error("could not initialize NNPack (out of memory)");
+      } else if (nnpack_status == nnp_status_unsupported_hardware) {
+	throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
+      } else {
+	throw std::runtime_error("could not initialize NNPack (unknown error)");
+      }
+    }
     unsigned int threads;
 #ifdef _OPENMP
     threads = omp_get_num_threads();
