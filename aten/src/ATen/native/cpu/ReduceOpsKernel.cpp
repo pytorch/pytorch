@@ -59,7 +59,7 @@ static void and_kernel_impl(TensorIterator& iter) {
     iter,
     [=](uint8_t a, uint8_t b) -> uint8_t { return a && b; },
     [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-      // adding the implementation here instead of in vec256_base becuase it is
+      // adding the implementation here instead of in vec256_base because it is
       // inconsistent with other vec256_base comparison operators which return
       // -1/0 instead of 1/0.
       Vec256<uint8_t> c = Vec256<uint8_t>();
