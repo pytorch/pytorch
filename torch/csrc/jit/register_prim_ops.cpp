@@ -59,6 +59,33 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
 }
 
+template <typename dtype> // int64_t, bool, double
+Operation listConstruct(int64_t num_inputs) {
+  return [=](Stack& stack) {
+    auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+    std::vector<dtype> vals = fmap(inputs, [](const IValue& v) {
+      return v.to<dtype>();
+    });
+    drop(stack, num_inputs);
+    push(stack, std::move(vals));
+    return 0;
+  };
+}
+
+static int64_t floordiv(int64_t a, int64_t b) {
+  if (b == 0) {
+    throw std::runtime_error("division by 0");
+  }
+  if ((a > 0) == (b > 0)) {
+    // simple case, both have same sign
+    return a / b;
+  } else {
+    // in python division rounds down, it doesnt not truncate like in c++
+    auto r = lldiv(a,  b);
+    return (r.rem) ? r.quot - 1 : r.quot;
+  }
+}
+
 RegisterOperators reg({
     Operator(
         prim::FusionGroup,
@@ -284,6 +311,26 @@ RegisterOperators reg({
             at::Tensor a;
             pop(stack, a);
             push(stack, a.is_cuda());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::cpu(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cpu());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::cuda(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cuda());
             return 0;
           };
         }),
@@ -637,24 +684,12 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           const auto num_inputs = node->inputs().size();
           ListTypePtr lt = node->output()->type()->expect<ListType>();
-          if (IntType::get() == lt->getElementType()) {
-            return [=](Stack& stack) {
-              auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-              std::vector<int64_t> vals =
-                  fmap(inputs, [](const IValue& v) { return v.toInt(); });
-              drop(stack, num_inputs);
-              push(stack, std::move(vals));
-              return 0;
-            };
-          } else if (FloatType::get() == lt->getElementType()) {
-            return [=](Stack& stack) {
-              auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-              std::vector<double> vals =
-                  fmap(inputs, [](const IValue& v) { return v.toDouble(); });
-              drop(stack, num_inputs);
-              push(stack, std::move(vals));
-              return 0;
-            };
+          if(IntType::get() == lt->getElementType()) {
+            return listConstruct<int64_t>(num_inputs);
+          } else if(FloatType::get() == lt->getElementType()) {
+            return listConstruct<double>(num_inputs);
+          } else if (lt->getElementType() == BoolType::get()) {
+            return listConstruct<bool>(num_inputs);
           } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
@@ -682,7 +717,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        "aten::_unwrap_optional(t? optional) -> t",
+        "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);
@@ -819,6 +854,16 @@ typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
   return list->elements()[normalized_idx];
 }
 
+// cannot return a reference to an element in a bool vector
+bool getBoolItem(const std::vector<bool>& list, int64_t idx) {
+  const int64_t list_size = list.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  return list[normalized_idx];
+}
+
 template <typename TList, typename TElement>
 Operation listAppend(const Node* node) {
   return [](Stack& stack) {
@@ -846,6 +891,21 @@ Operation listSelect(const Node* node) {
   };
 }
 
+// needs specialization because cannot return a pointer to a bool in an array
+template<>
+Operation listSelect<Shared<BoolList>>(const Node* node) {
+  return [=](Stack& stack) {
+    Shared<BoolList> list;
+    int64_t idx;
+    pop(stack, list, idx);
+
+    auto element = getBoolItem(list->elements(), idx);
+    push(stack, std::move(element));
+    return 0;
+  };
+}
+
+
 template <typename T>
 Operation listLen(const Node* node) {
   return [=](Stack& stack) {
@@ -856,6 +916,7 @@ Operation listLen(const Node* node) {
     return 0;
   };
 }
+
 
 template <typename T>
 Operation listEq(const Node* node) {
@@ -996,113 +1057,144 @@ Operation listSetItem(const Node* node) {
   };
 }
 
+
+template<>
+Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
+  return [](Stack& stack) {
+    Shared<BoolList> list;
+    int64_t idx;
+    bool value;
+
+    pop(stack, list, idx, value);
+
+    int64_t list_size = list->elements().size();
+    auto normalized_idx = normalizeIndex(idx, list_size);
+    if (normalized_idx < 0 || normalized_idx >= list_size) {
+      throw std::out_of_range("list index out of range");
+    }
+    list->elements()[normalized_idx] = value;
+
+    push(stack, list);
+    return 0;
+  };
+}
+
+
 RegisterOperators reg2({
 
-#define DEFINE_STRING_OP(op_name, string_op, result)                    \
-  Operator(#op_name "(str a, str b) ->" #result, [](const Node* node) { \
-    return [=](Stack& stack) {                                          \
-      auto b = pop(stack).toStringRef();                                \
-      auto a = pop(stack).toStringRef();                                \
-      push(stack, string_op);                                           \
-      return 0;                                                         \
-    };                                                                  \
-  })
+  #define DEFINE_STRING_OP(op_name, string_op, result)                    \
+    Operator(#op_name "(str a, str b) ->" #result, [](const Node* node) { \
+      return [=](Stack& stack) {                                          \
+        auto b = pop(stack).toStringRef();                                \
+        auto a = pop(stack).toStringRef();                                \
+        push(stack, string_op);                                           \
+        return 0;                                                         \
+      };                                                                  \
+    })
 
-    DEFINE_STRING_OP(aten::eq, a == b, bool),
-    DEFINE_STRING_OP(aten::ne, a != b, bool),
-    DEFINE_STRING_OP(aten::add, a + b, str),
-#undef DEFINE_STRING_OP
+      DEFINE_STRING_OP(aten::eq, a == b, bool),
+      DEFINE_STRING_OP(aten::ne, a != b, bool),
+      DEFINE_STRING_OP(aten::add, a + b, str),
+  #undef DEFINE_STRING_OP
 
-    // tensor length op (size of 1st dimension)
-    Operator(
-        "aten::len(Tensor t) -> int",
-        [](Stack& stack) {
-          at::Tensor t = pop(stack).toTensor();
-          if (t.dim() == 0) {
-            AT_ERROR("len() of a 0-d tensor");
-          }
-          push(stack, t.sizes()[0]);
-          return 0;
-        }),
-    Operator(
-        "aten::append(Tensor[](a!) self, Tensor(c) el) -> Tensor[](a!)",
-        listAppend<Shared<TensorList>, at::Tensor>),
-    Operator(
-        "aten::select(Tensor[](a) list, int idx) -> Tensor(*)",
-        listSelect<Shared<TensorList>>),
-    Operator(
-        "aten::_set_item(Tensor[](a!) l, int idx, Tensor el) -> Tensor[](a!)",
-        listSetItem<Shared<TensorList>, at::Tensor>),
+      // tensor length op (size of 1st dimension)
+      Operator(
+          "aten::len(Tensor t) -> int",
+          [](Stack& stack) {
+            at::Tensor t = pop(stack).toTensor();
+            if (t.dim() == 0) {
+              AT_ERROR("len() of a 0-d tensor");
+            }
+            push(stack, t.sizes()[0]);
+            return 0;
+          }),
+      Operator(
+          "aten::append(Tensor[](a!) self, Tensor(c) el) -> Tensor[](a!)",
+          listAppend<Shared<TensorList>, at::Tensor>),
+      Operator(
+          "aten::select(Tensor[](a) list, int idx) -> Tensor(*)",
+          listSelect<Shared<TensorList>>),
+      Operator(
+          "aten::_set_item(Tensor[](a!) l, int idx, Tensor el) -> Tensor[](a!)",
+          listSetItem<Shared<TensorList>, at::Tensor>),
 
-// Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
-  Operator(                                                            \
-      "aten::select(" decl_type "[] a, int b) -> " decl_type,          \
-      listSelect<Shared<c_type>>),                                     \
-      Operator(                                                        \
-          "aten::append(" decl_type "[](a!) self, " decl_type          \
-          " el) -> " decl_type "[](a!)",                               \
-          listAppend<Shared<c_type>, c_type::ElemType>),               \
-      Operator(                                                        \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
-          " el) -> " decl_type "[](a!)",                               \
-          listSetItem<Shared<c_type>, c_type::ElemType>)
+  // Mutable ops for lists containing immutable types.
+  #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
+    Operator(                                                            \
+        "aten::select(" decl_type "[] a, int b) -> " decl_type,          \
+        listSelect<Shared<c_type>>),                                     \
+        Operator(                                                        \
+            "aten::append(" decl_type "[](a!) self, " decl_type          \
+            " el) -> " decl_type "[](a!)",                               \
+            listAppend<Shared<c_type>, c_type::ElemType>),               \
+        Operator(                                                        \
+            "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
+            " el) -> " decl_type "[](a!)",                               \
+            listSetItem<Shared<c_type>, c_type::ElemType>)
 
-    CREATE_IMMUTABLE_LIST_OPS("int", IntList),
-    CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
-    CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
+      CREATE_IMMUTABLE_LIST_OPS("int", IntList),
+      CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
+      CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
+      CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
 
-#define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
-      Operator(                                                                     \
-          "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
-          "[]",                                                                     \
-          listAdd<Shared<c_type>, c_type::ElemType>),                               \
-      Operator(                                                                     \
-          "aten::slice(" decl_type                                                  \
-          "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
-          "[]",                                                                     \
-          listSlice<Shared<c_type>, c_type::ElemType>)
+  #define CREATE_LIST_OPS(decl_type, c_type)                                          \
+    Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+        Operator(                                                                     \
+            "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
+            "[]",                                                                     \
+            listAdd<Shared<c_type>, c_type::ElemType>),                               \
+        Operator(                                                                     \
+            "aten::slice(" decl_type                                                  \
+            "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
+            "[]",                                                                     \
+            listSlice<Shared<c_type>, c_type::ElemType>)
 
-    CREATE_LIST_OPS("int", IntList),
-    CREATE_LIST_OPS("float", DoubleList),
-    CREATE_LIST_OPS("Tensor", TensorList),
-    CREATE_LIST_OPS("t", GenericList),
-#undef CREATE_LIST_OPS
+      CREATE_LIST_OPS("int", IntList),
+      CREATE_LIST_OPS("float", DoubleList),
+      CREATE_LIST_OPS("Tensor", TensorList),
+      CREATE_LIST_OPS("t", GenericList),
+  #undef CREATE_LIST_OPS
 
-    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
-    Operator(
-        "aten::eq(float[] a, float[] b) -> bool",
-        listEq<Shared<DoubleList>>),
-    Operator(
-        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<Shared<TensorList>>),
-    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
-    Operator(
-        "aten::ne(float[] a, float[] b) -> bool",
-        listNe<Shared<DoubleList>>),
-    Operator(
-        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<Shared<TensorList>>),
+      Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
+      Operator(
+          "aten::eq(float[] a, float[] b) -> bool",
+          listEq<Shared<DoubleList>>),
+      Operator(
+          "aten::eq(Tensor[] a, Tensor[] b) -> bool",
+          listEq<Shared<TensorList>>),
+      Operator(
+          "aten::eq(bool[] a, bool[] b) -> bool",
+          listEq<Shared<BoolList>>),
+      Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+      Operator(
+          "aten::ne(float[] a, float[] b) -> bool",
+          listNe<Shared<DoubleList>>),
+      Operator(
+          "aten::ne(Tensor[] a, Tensor[] b) -> bool",
+          listNe<Shared<TensorList>>),
+      Operator(
+          "aten::ne(bool[] a, bool[] b) -> bool",
+          listNe<Shared<BoolList>>),
 
-#define CREATE_COPY_OP(other_type, c_type)                                 \
-  Operator(                                                                \
-      "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \
-      [](const Node* node) {                                               \
-        return [=](Stack& stack) {                                         \
-          at::Tensor t;                                                    \
-          c_type other;                                                    \
-          pop(stack, t, other);                                            \
-          std::move(t) = other; /* NOLINT(bugprone-use-after-move) */      \
-          push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
-          return 0;                                                        \
-        };                                                                 \
-      })
 
-    CREATE_COPY_OP(Tensor, at::Tensor),
-    CREATE_COPY_OP(int, int64_t),
-    CREATE_COPY_OP(float, double),
-#undef CREATE_COPY_OP
+  #define CREATE_COPY_OP(other_type, c_type)                                 \
+    Operator(                                                                \
+        "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \
+        [](const Node* node) {                                               \
+          return [=](Stack& stack) {                                         \
+            at::Tensor t;                                                    \
+            c_type other;                                                    \
+            pop(stack, t, other);                                            \
+            std::move(t) = other; /* NOLINT(bugprone-use-after-move) */      \
+            push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
+            return 0;                                                        \
+          };                                                                 \
+        })
+
+      CREATE_COPY_OP(Tensor, at::Tensor),
+      CREATE_COPY_OP(int, int64_t),
+      CREATE_COPY_OP(float, double),
+  #undef CREATE_COPY_OP
 
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
@@ -1124,12 +1216,9 @@ RegisterOperators reg2({
         float),
     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
 
-    // in c++ int division rounds to the integer closer to 0, in python floordiv
-    // rounds to lower integer
     DEFINE_GENERIC_OP(
         aten::floordiv,
-        static_cast<int64_t>(
-            std::floor(static_cast<double>(a) / static_cast<double>(b))),
+        floordiv(a, b),
         std::floor(a / b),
         int,
         float),

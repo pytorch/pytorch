@@ -15,16 +15,32 @@ class CAFFE2_API Caffe2InitializeRegistry {
   // multiple shared libraries loaded with RTLD_LOCAL
   static Caffe2InitializeRegistry* Registry();
 
-  void Register(InitFunction function, bool run_early,
-                const char* description) {
+  void
+  Register(InitFunction function, bool run_early, const char* description) {
     if (run_early) {
-      // Disallow late registration of early init functions
+      // Disallow registration after GlobalInit of early init functions
       CAFFE_ENFORCE(!early_init_functions_run_yet_);
       early_init_functions_.emplace_back(function, description);
     } else {
-      // Disallow late registration of init functions
-      CAFFE_ENFORCE(!init_functions_run_yet_);
-      init_functions_.emplace_back(function, description);
+      if (init_functions_run_yet_) {
+        // Run immediately, since GlobalInit already ran. This should be
+        // rare but we want to allow it in some cases.
+        LOG(WARNING) << "Running init function after GlobalInit: "
+                     << description;
+        // TODO(orionr): Consider removing argc and argv for non-early
+        // registration. Unfortunately that would require a new InitFunction
+        // typedef, so not making the change right now.
+        //
+        // Note that init doesn't receive argc and argv, so the function
+        // might fail and we want to raise an error in that case.
+        int argc = 0;
+        char** argv = nullptr;
+        bool success = (function)(&argc, &argv);
+        CAFFE_ENFORCE(success);
+      } else {
+        // Wait until GlobalInit to run
+        init_functions_.emplace_back(function, description);
+      }
     }
   }
 

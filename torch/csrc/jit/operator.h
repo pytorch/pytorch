@@ -94,6 +94,7 @@ TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
+
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
@@ -102,6 +103,9 @@ inline Operation getOperation(const Node* node) {
   // true so the call to selectVariant is always valid.
   return getOperatorFor(node).getOperation(node);
 }
+
+
+TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
 

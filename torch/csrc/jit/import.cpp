@@ -50,7 +50,7 @@ class ScriptModuleDeserializer final {
 
   void loadTensorTable(torch::ModelDef* model_def);
 
-  PyTorchStreamReader reader_;
+  caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
   // same as created in Python
   ModuleLookup moduleLookup_;

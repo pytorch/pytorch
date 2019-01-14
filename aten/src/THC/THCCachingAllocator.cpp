@@ -578,6 +578,12 @@ THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
   return caching_allocator.get_stats_for_device(device).max_amount_allocated;
 }
 
+THC_API void THCCachingAllocator_resetMaxMemoryAllocated(int device) {
+  assertValidDevice(device);
+  DeviceStats& stats = caching_allocator.get_stats_for_device(device);
+  stats.max_amount_allocated = stats.amount_allocated;
+}
+
 THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device)
 {
   assertValidDevice(device);
@@ -587,6 +593,12 @@ THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device)
 THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_cached;
+}
+
+THC_API void THCCachingAllocator_resetMaxMemoryCached(int device) {
+  assertValidDevice(device);
+  DeviceStats& stats = caching_allocator.get_stats_for_device(device);
+  stats.max_amount_cached = stats.amount_cached;
 }
 
 //

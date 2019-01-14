@@ -186,6 +186,11 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Tuple or
              getattr(ann, '__origin__', None) is tuple)
+
+    def is_list(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.List or
+             getattr(ann, '__origin__', None) is list)
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -213,6 +218,9 @@ except ImportError:
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
+
+    def is_list(ann):
+        return isinstance(ann, ListInstance)
 
 
 # allows BroadcastingList instance to be subscriptable

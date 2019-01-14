@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/common.h>
+#include "ATen/cuda/CUDAContext.h"
 
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
                         (THCState *state,
@@ -50,7 +51,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   THCDeviceTensor<scalar_t, 3> odata = toDeviceTensor<scalar_t, 3>(state, output);
 
   const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_3d_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
@@ -77,7 +78,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THCDeviceTensor<scalar_t, 3> data2 = toDeviceTensor<scalar_t, 3>(state, gradOutput);
 
   const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   nearest_neighbor_3d_kernel_backward<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads),

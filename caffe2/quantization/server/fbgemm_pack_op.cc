@@ -261,7 +261,7 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
           ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized));
       int outlier_cnt = Y->W_outlier->ColPtr()[N];
 
-      LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
+      LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
                 << this->debug_def().input(0) << " is "
                 << static_cast<float>(outlier_cnt) / W_quantized.size();
       LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_;
@@ -326,7 +326,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3FastPath_() {
       kernel_h() == 3 && kernel_w() == 3 && stride_h() == stride_w() &&
       (stride_h() == 1 || stride_h() == 2) && dilation_h() == 1 &&
       dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 && pad_l() == 1 &&
-      pad_r() == 1 && GetCpuId().avx2() && !quantize_groupwise_;
+      pad_r() == 1 && GetCpuId().avx2();
 }
 
 bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
@@ -345,7 +345,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
       this->dilation_[2] == 1 &&
       accumulate(
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
-      GetCpuId().avx2() && !quantize_groupwise_;
+      GetCpuId().avx2();
   return ret;
 }
 
@@ -397,7 +397,9 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   ComputeColumnOffsets(
       kernel_dim, M, W_quantized.data(), Y->qparams, *Y->column_offsets);
 
-  if (this->debug_def().engine() == "DNNLOWP_ACC16") {
+  // When nbits_in_non_outlier == 0, we fall back to acc32
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" &&
+      nbits_in_non_outlier_ > 0) {
     if (nbits_in_non_outlier_ < 8) {
       Y->W_outlier.reset(ExtractOutlierMatrix(
           group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
