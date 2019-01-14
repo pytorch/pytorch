@@ -28,7 +28,7 @@ def set_declaration_defaults(declaration):
     if "raw_string" in declaration:
         raw_string = declaration["raw_string"]
     if "is_jit_ir" in declaration:
-        is_jit_ir = True
+        is_jit_ir = declaration["is_jit_ir"]
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:

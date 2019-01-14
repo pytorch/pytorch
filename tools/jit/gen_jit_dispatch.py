@@ -461,6 +461,7 @@ def signature(decl):
     if "is_jit_ir" in decl and decl["is_jit_ir"]:
         if ret_val.strip() != decl["raw_string"].strip():
             print("ret_val.strip()")
+            print(decl["is_jit_ir"])
             print(ret_val.strip())
             print(decl["raw_string"].strip())
     if "raw_string" in decl and ret_val.strip() == decl["raw_string"].strip():
