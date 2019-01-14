@@ -722,8 +722,11 @@ if DEBUG:
         extra_link_args += ['-O0', '-g']
 
 if REL_WITH_DEB_INFO:
-    extra_compile_args += ['-g']
-    extra_link_args += ['-g']
+    if IS_WINDOWS:
+        extra_link_args.append('/DEBUG:FULL')
+    else:
+        extra_compile_args += ['-g']
+        extra_link_args += ['-g']
 
 
 def make_relative_rpath(path):
@@ -841,6 +844,7 @@ if __name__ == '__main__':
                 'lib/*.dylib*',
                 'lib/*.dll',
                 'lib/*.lib',
+                'lib/*.pdb',
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
