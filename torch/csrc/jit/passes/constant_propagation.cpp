@@ -30,7 +30,7 @@ std::vector<IValue> runNode(Node* n) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (input->node()->kind() == prim::None) {
-      stack.push_back(IValue());
+      stack.emplace_back(IValue());
     } else {
       stack.push_back(*(toIValue(input)));
     }
