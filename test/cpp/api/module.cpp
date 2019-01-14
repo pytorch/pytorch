@@ -37,7 +37,7 @@ TEST_F(ModuleTest, CanEnableAndDisableTrainingMode) {
 TEST_F(ModuleTest, ZeroGrad) {
   Linear module(3, 4);
   auto weight = torch::ones({8, 3}, torch::requires_grad());
-  auto loss = module->forward(weight).sum();
+  auto loss = module(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
     auto grad = parameter.grad();
@@ -830,4 +830,16 @@ TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
     auto module = std::make_shared<TestModule>(1);
     ASSERT_NO_THROW(module->modules());
   }
+}
+
+struct ModuleWithNonTensorForwardImpl : torch::nn::Module {
+  int64_t forward(torch::Tensor x) {
+    return x.numel();
+  }
+};
+TORCH_MODULE(ModuleWithNonTensorForward);
+
+TEST_F(ModuleTest, CanCallForwardOnNonTensorForwardThroughPimpl) {
+  ModuleWithNonTensorForward m;
+  ASSERT_EQ(m(torch::ones(123)), 123);
 }
