@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <aten/src/ATen/Context.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -83,6 +84,23 @@ static int64_t floordiv(int64_t a, int64_t b) {
     // in python division rounds down, it doesnt not truncate like in c++
     auto r = lldiv(a,  b);
     return (r.rem) ? r.quot - 1 : r.quot;
+  }
+}
+
+// reference function THPVariable_to in python_variable_methods.cpp
+static at::Tensor to_dispatch(at::Tensor self, c10::optional<at::Device> device,
+      c10::optional<at::ScalarType> scalarType, bool non_blocking, bool copy) {
+  if (device && device->is_cuda()) {
+    at::globalContext().lazyInitCUDA();
+  }
+  if (!device && !scalarType && !copy) {
+    return self;
+  } else if (!device) {
+    return self.to(*scalarType, non_blocking, copy);
+  } else if (!scalarType) {
+    return self.to(*device, non_blocking, copy);
+  } else {
+    return self.to(*device, *scalarType, non_blocking, copy);
   }
 }
 
@@ -253,6 +271,49 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             push(stack, c10::Device(pop(stack).toStringRef()));
+            return 0;
+          };
+        }),
+    // reference function parse_to_conversion in python_arg_parsing.h
+    Operator(
+        "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool non_blocking;
+            bool copy;
+            pop(stack, non_blocking, copy);
+            c10::optional<at::ScalarType> scalarType = pop(stack).toOptional<at::ScalarType>();
+            c10::optional<c10::Device> device = pop(stack).toOptional<c10::Device>();
+            at::Tensor self = pop(stack).toTensor();
+            push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool non_blocking;
+            bool copy;
+            pop(stack, non_blocking, copy);
+            c10::optional<at::ScalarType> scalarType = pop(stack).toOptional<at::ScalarType>();
+            c10::optional<c10::Device> device = c10::nullopt;
+            at::Tensor self = pop(stack).toTensor();
+            push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor self;
+            bool non_blocking;
+            bool copy;
+            pop(stack, self, non_blocking, copy);
+            c10::optional<c10::Device> device = c10::nullopt;
+            c10::optional<at::ScalarType> scalarType = c10::nullopt;
+            push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
             return 0;
           };
         }),
