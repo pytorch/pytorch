@@ -18,10 +18,6 @@ DECLARE_DISPATCH(lstm_packed_fn, lstm_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, gru_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
-DECLARE_DISPATCH(lstm_fn, lstm_mkldnn_stub);
-DECLARE_DISPATCH(rnn_fn, gru_mkldnn_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_tanh_mkldnn_stub);
-DECLARE_DISPATCH(rnn_fn, rnn_relu_mkldnn_stub);
 
 inline void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens) {
   auto input_device = input.device();

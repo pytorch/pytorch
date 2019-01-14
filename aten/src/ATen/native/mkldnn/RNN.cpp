@@ -720,43 +720,37 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
           pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
 }
 
-// The macro REGISTER_CPU_DISPATCH should be placed at DispatchStub.h
-// But currently it is only used in native/mkldnn/RNN.cpp 
-#define REGISTER_CPU_DISPATCH(name, fn)                                        \
-  REGISTER_ARCH_DISPATCH(name, DEFAULT, fn)                                    \
-  REGISTER_AVX_DISPATCH(name, fn)                                              \
-  REGISTER_AVX2_DISPATCH(name, fn)
+} // anonymous namespace
 
 #define ONE_HIDDEN_RNN(NAME, MODE)                                             \
-void NAME##_mkldnn(Tensor& output, Tensor& hy,                                 \
-      const Tensor& input, const Tensor& hx,                                   \
-      TensorList params, bool has_biases,                                      \
+std::tuple<Tensor, Tensor> NAME##_mkldnn_stub(                                 \
+    const Tensor& input, const Tensor& hx, TensorList params, bool has_biases, \
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
-  std::tie(output, hy) = mkldnn_impl(input, hx, params, has_biases,            \
-      MODE, num_layers, dropout_p, train, bidirectional, batch_first);         \
-}                                                                              \
                                                                                \
-REGISTER_CPU_DISPATCH(NAME##_mkldnn_stub, &NAME##_mkldnn);
+  auto result = mkldnn_impl(input, hx, params, has_biases,                     \
+      MODE, num_layers, dropout_p, train, bidirectional, batch_first);         \
+  auto output = result.first;                                                  \
+  auto hy = result.second;                                                     \
+                                                                               \
+  return std::make_tuple(output, hy);                                          \
+}
 
 ONE_HIDDEN_RNN(gru, MKLDNN_GRU)
 ONE_HIDDEN_RNN(rnn_tanh, MKLDNN_RNN_TANH)
 ONE_HIDDEN_RNN(rnn_relu, MKLDNN_RNN_RELU)
 
-void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
-    const Tensor& input, TensorList hx,
-    TensorList params, bool has_biases,
+std::tuple<Tensor, Tensor, Tensor> lstm_mkldnn_stub(
+    const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
 
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       MKLDNN_LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-  output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  auto output = result.first;
+  auto hy = std::get<0>(result.second);
+  auto cy = std::get<1>(result.second);
+
+  return std::make_tuple(output, hy, cy);
 }
-
-REGISTER_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
-
-} // anonymous namespace
 
 }} // namespace at::native
 
