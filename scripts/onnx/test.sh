@@ -41,5 +41,5 @@ pip freeze
 if [[ $PARALLEL == 1 ]]; then
     pytest -n 3 "${test_paths[@]}"
 else
-    pytest "${test_paths[@]}"
+    pytest -v "${test_paths[@]}"
 fi
