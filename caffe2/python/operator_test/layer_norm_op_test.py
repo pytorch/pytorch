@@ -11,6 +11,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
 import os
 import unittest
+import torch
 
 
 class TestLayerNormOp(serial.SerializedTestCase):

@@ -91,6 +91,20 @@
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
 #
+#   BLAS
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     then the build will fail if the requested BLAS is not found, otherwise
+#     the BLAS will be chosen based on what is found on your system.
+#
+#   USE_FBGEMM
+#     Enables use of FBGEMM
+#
+#   USE_REDIS
+#     Whether to use Redis for distributed workflows (Linux only)
+#
+#   USE_ZSTD
+#     Enables use of ZSTD, if the libraries are found
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -101,6 +115,9 @@
 #   CUDAHOSTCXX
 #     specify a different compiler than the system one to use as the CUDA
 #     host compiler for nvcc.
+#
+#   CUDA_NVCC_EXECUTABLE
+#     Specify a NVCC to use. This is used in our CI to point to a cached nvcc
 #
 #   CUDNN_LIB_DIR
 #   CUDNN_INCLUDE_DIR
