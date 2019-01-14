@@ -52,7 +52,14 @@ std::vector<IValue> runNode(Node* n) {
 }
 
 void propagateNode(Node* n) {
-  auto outputs = runNode(n);
+  std::vector<IValue> outputs;
+  try {
+    outputs = runNode(n);
+  } catch (const c10::Error& e) {
+    // catch AT_ASSERT errors. This op may not be run reached,
+    // so catch the error here & leave the op in the graph
+    return;
+  }
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
