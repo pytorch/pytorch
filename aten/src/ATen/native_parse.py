@@ -18,12 +18,14 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
-    elif s == '{}':
+    elif s == '[]':
         return '{}'
     elif re.match(r'{.*}', s):
         return s
     elif s == 'None':
         return 'c10::nullopt'
+    elif s == 'Mean':
+        return 'Reduction::Mean'
     try:
         return int(s)
     except Exception:
@@ -33,8 +35,22 @@ def parse_default(s):
             return s
 
 
+# We want to be able to move from the current custom func schema to the
+# JIT signature schema incrementally. So we do do raw type translations
+# to avoid having to change all downstream tools before absolutely necessary
+# due to fundamental changes.
+def temp_type_translations(typ):
+    if typ == 'Tensor[]':
+        return 'TensorList'
+    if typ == 'int':
+        return 'int64_t'
+    if typ == 'float':
+        return 'double'
+    return typ
+
+
 def sanitize_type(typ):
-    if typ == 'Generator*':
+    if typ == 'Generator?':
         return 'Generator *'
     return typ
 
@@ -78,10 +94,17 @@ def parse_arguments(args, func_decl, func_name, func_return):
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
-        match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
+        if argument_dict['is_nullable'] and argument_dict['type'] == 'Tensor' and default == "c10::nullopt":
+            default = "{}"
+        if argument_dict['type'] == 'Generator *' and default == "c10::nullopt":
+            default = "nullptr"
+        match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
             argument_dict['size'] = int(match.group(1))
+        if argument_dict['type'] == 'int[]':
+            argument_dict['type'] = 'IntList'
+        argument_dict['type'] = temp_type_translations(argument_dict['type'])
         if default is not None:
             argument_dict['default'] = default
         # TODO: convention is that the ith-argument correspond to the i-th return, but it would
@@ -122,6 +145,7 @@ def parse_return_arguments(return_decl, inplace):
         if field_name is not None:
             argument_dict['field_name'] = field_name
         argument_dict['output'] = True
+        argument_dict['type'] = temp_type_translations(argument_dict['type'])
 
         arguments.append(argument_dict)
     return arguments
