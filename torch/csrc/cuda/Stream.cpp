@@ -48,19 +48,19 @@ static void THCPStream_dealloc(THCPStream *self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THPVariable_get_device(THCPStream *self) {
+static PyObject * THCPStream_get_device(THCPStream *self) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(self->cuda_stream.device_index());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_get_cuda_stream(THCPStream *self) {
+static PyObject * THCPStream_get_cuda_stream(THCPStream *self) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_get_priority(THCPStream *self) {
+static PyObject * THCPStream_get_priority(THCPStream *self) {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(self->cuda_stream.priority());
   END_HANDLE_TH_ERRORS
@@ -68,17 +68,10 @@ static PyObject * THPVariable_get_priority(THCPStream *self) {
 
 static PyObject * THCPStream_priority_range(THCPStream *self) {
   HANDLE_TH_ERRORS
-  THPObjectPtr tuple(PyTuple_New(2));
-  if (!tuple) return nullptr;
-
   int least_priority, greatest_priority;
   std::tie(least_priority, greatest_priority) =
     self->cuda_stream.priority_range();
-
-  PyTuple_SET_ITEM(tuple.get(), 0, PyLong_FromLong(least_priority));
-  PyTuple_SET_ITEM(tuple.get(), 1, PyLong_FromLong(greatest_priority));
-
-  return tuple.release();
+  return Py_BuildValue("(ii)", least_priority, greatest_priority);
   END_HANDLE_TH_ERRORS
 }
 
@@ -106,11 +99,11 @@ static struct PyMemberDef THCPStream_members[] = {
   {nullptr}
 };
 
-static struct PyGetSetDef THPVariable_properties[] = {
-  {"device", (getter)THPVariable_get_device, nullptr, nullptr, nullptr},
+static struct PyGetSetDef THCPStream_properties[] = {
+  {"device", (getter)THCPStream_get_device, nullptr, nullptr, nullptr},
   {"cuda_stream",
-    (getter)THPVariable_get_cuda_stream, nullptr, nullptr, nullptr},
-  {"priority", (getter)THPVariable_get_priority, nullptr, nullptr, nullptr},
+    (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
+  {"priority", (getter)THCPStream_get_priority, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -154,7 +147,7 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
-  THPVariable_properties,                /* tp_getset */
+  THCPStream_properties,                /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -166,12 +159,17 @@ PyTypeObject THCPStreamType = {
 };
 
 
-bool THCPStream_init(PyObject *module)
+void THCPStream_init(PyObject *module)
 {
   THCPStreamClass = (PyObject*)&THCPStreamType;
-  if (PyType_Ready(&THCPStreamType) < 0)
-    return false;
+  if (PyType_Ready(&THCPStreamType) < 0) {
+    std::cout << "=== stream ready error\n";
+    throw python_error();
+  }
   Py_INCREF(&THCPStreamType);
-  PyModule_AddObject(module, "_CudaStreamBase", (PyObject *)&THCPStreamType);
-  return true;
+  if (PyModule_AddObject(
+      module, "_CudaStreamBase", (PyObject *)&THCPStreamType) < 0) {
+    std::cout << "=== stream add object error\n";
+    throw python_error();
+  }
 }

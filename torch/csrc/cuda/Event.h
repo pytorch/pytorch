@@ -11,7 +11,7 @@ struct THCPEvent {
 };
 extern PyObject *THCPEventClass;
 
-bool THCPEvent_init(PyObject *module);
+void THCPEvent_init(PyObject *module);
 
 inline bool THCPEvent_Check(PyObject* obj) {
   return THCPEventClass && PyObject_IsInstance(obj, THCPEventClass);

@@ -19,26 +19,27 @@ namespace at { namespace cuda {
 *
 * CUDAEvents are constructed lazily when recorded unless it is reconstructed
 * from a cudaIpcEventHandle_t. The events have a device, and this device is
-* acquired from the first recording stream or the stream where it is
-* reconstructed from a handle. Later streams that record to the event must share
-* this device, but streams on any device can wait on the event.
+* acquired from the first recording stream or passed in when reconstructed from
+* a handle. Later streams that record to the event must share this device, but
+* streams on any device can wait on the event.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
   // Constructors
-  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
+  explicit CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
   : flags_{flags} { }
 
-  CUDAEvent(const cudaIpcEventHandle_t* handle)
-  : CUDAEvent(getCurrentCUDAStream(), handle) { }
-
-  CUDAEvent(const CUDAStream& stream, const cudaIpcEventHandle_t* handle) {
+  // Note: the original event and the reconstructed event now share recorded
+  // activities. Users need to make sure the last recording event (either
+  // original or reconstructed) must not be destructed when synchronize() is
+  // called. Otherwise, the behavior is undefined.
+  explicit CUDAEvent(const cudaIpcEventHandle_t* handle) {
     #ifndef __HIP_PLATFORM_HCC__
-      CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+      device_index_ = getCurrentCUDAStream().device_index();
+      CUDAGuard guard(static_cast<int16_t>(device_index_));
 
-      device_index_ = stream.device_index();
       AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
       is_created_ = true;
     #else
@@ -93,14 +94,6 @@ struct AT_CUDA_API CUDAEvent {
     return false;
   }
 
-  bool happened() const {
-    if (was_recorded_) {
-      return query();
-    }
-
-    return false;
-  }
-
   void record() { record(getCurrentCUDAStream()); }
 
   void recordOnce(const CUDAStream& stream) {
@@ -114,9 +107,7 @@ struct AT_CUDA_API CUDAEvent {
     if (is_created_) {
       AT_ASSERT(device_index_ == stream.device_index());
     } else {
-      AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
-      is_created_ = true;
-      device_index_ = stream.device_index();
+      createEvent(stream.device_index());
     }
 
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
@@ -133,6 +124,8 @@ struct AT_CUDA_API CUDAEvent {
   }
 
   float elapsed_time(const CUDAEvent& other) const {
+    AT_CHECK(is_created_ && other.isCreated(),
+      "Both events must be recorded before calculating elapsed time.");
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
@@ -141,15 +134,19 @@ struct AT_CUDA_API CUDAEvent {
 
   void synchronize() const {
     if (is_created_) {
+      CUDAGuard guard(static_cast<int16_t>(device_index_));
       AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
 
   void ipc_handle(cudaIpcEventHandle_t * handle) {
     #ifndef __HIP_PLATFORM_HCC__
-      AT_CHECK(is_created_,
-        "Events must be recorded before creating IPC handles.");
-
+      if (!is_created_) {
+        // this CUDAEvent object was initially constructed from flags but event_
+        // is not created yet.
+        createEvent(getCurrentCUDAStream().device_index());
+      }
+      CUDAGuard guard(static_cast<int16_t>(device_index_));
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
     #else
       AT_ERROR("cuIpcGetEventHandle with HIP is not supported");
@@ -162,6 +159,13 @@ private:
   bool was_recorded_ = false;
   int64_t device_index_ = -1;
   cudaEvent_t event_;
+
+  void createEvent(const at::DeviceIndex deviceIndex) {
+    CUDAGuard guard(static_cast<int16_t>(deviceIndex));
+    AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+    is_created_ = true;
+    device_index_ = deviceIndex;
+  }
 
   void moveHelper(CUDAEvent&& other) {
     std::swap(flags_, other.flags_);

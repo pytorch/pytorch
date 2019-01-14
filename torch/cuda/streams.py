@@ -103,14 +103,22 @@ class Stream(torch._C._CudaStreamBase):
 
 
 class Event(torch._C._CudaEventBase):
-    r"""Wrapper around CUDA event.
+    r"""Wrapper around CUDA event. Every event is associated with a device index, which
+    is the device where the event is first recorded. However, if constructed from an
+    handle or ipc_handle() is called before it is ever recorded, the device index will
+    be the sames as the device of ``torch.cuda.current_stream()``.
 
     Arguments:
-        enable_timing (bool): indicates if the event should measure time
+        enable_timing (bool, optional): indicates if the event should measure time
             (default: ``False``)
-        blocking (bool): if ``True``, :meth:`wait` will be blocking (default: ``False``)
+        blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
+        _handle (bytes-like object, optional): acquired by calling Event.ipc_handle()
+            from another Event object. If given and not ``None``, all flags will be
+            ignored, and a new event will be reconstructed from the given handle.
+            Both the original and the reconstructed events must not be deconstructed
+            when calling methods (e.g., query(), synchronize()) on either event.
     """
 
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False,
@@ -120,19 +128,23 @@ class Event(torch._C._CudaEventBase):
             interprocess=interprocess, **kwargs)
 
     def record(self, stream=None):
-        r"""Records the event in a given stream."""
+        r"""Records the event in a given stream. Use
+        ``torch.cuda.current_stream()`` if not given. The stream's device must agree
+        with event's device."""
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).record(stream)
 
     def wait(self, stream=None):
-        r"""Makes a given stream wait for the event."""
+        r"""Makes a given stream wait for the event. Use
+        ``torch.cuda.current_stream()`` is not given."""
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).wait(stream)
 
     def query(self):
-        r"""Checks if all work currently captured by event has completed.
+        r"""Checks if all work currently captured by event has completed. This
+        can be called on any device.
 
         Returns:
             A boolean indicating if all work currently captured by event has
@@ -141,13 +153,14 @@ class Event(torch._C._CudaEventBase):
         return super(Event, self).query()
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed in milliseconds before the event was
-        recorded.
+        r"""Returns the time elapsed in milliseconds after the event was
+        recorded and before the end_event was recorded. The two events must be
+        on the same device.
         """
         return super(Event, self).elapsed_time(end_event)
 
     def synchronize(self):
-        r"""Synchronizes with the event."""
+        r"""Synchronizes with the event on the event's device."""
         super(Event, self).synchronize()
 
     def ipc_handle(self):

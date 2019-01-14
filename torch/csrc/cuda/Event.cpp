@@ -15,9 +15,6 @@ static PyObject * THCPEvent_pynew(
     PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
-  int current_device;
-  THCudaCheck(cudaGetDevice(&current_device));
-
   unsigned char enable_timing = 0;
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
@@ -45,8 +42,9 @@ static PyObject * THCPEvent_pynew(
     // no need to release the handle byte array as it is automatically managed
     // by the corresponding THCPEvent python object.
     // see https://docs.python.org/3/c-api/arg.html#strings-and-buffers
-    new (&self->cuda_event) at::cuda::CUDAEvent(
-      (const cudaIpcEventHandle_t *) handle_bytes);
+    cudaIpcEventHandle_t handle;
+    std::memcpy(&handle, handle_bytes, sizeof(handle));
+    new (&self->cuda_event) at::cuda::CUDAEvent(&handle);
   } else {
     unsigned int flags =
       (blocking ? cudaEventBlockingSync : cudaEventDefault) |
@@ -65,7 +63,7 @@ static void THCPEvent_dealloc(THCPEvent *self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THPVariable_get_cuda_event(THCPEvent *self) {
+static PyObject * THCPEvent_get_cuda_event(THCPEvent *self) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_event.event());
   END_HANDLE_TH_ERRORS
@@ -112,8 +110,8 @@ static PyObject * THCPEvent_ipc_handle(THCPEvent *self) {
   END_HANDLE_TH_ERRORS
 }
 
-static struct PyGetSetDef THPVariable_properties[] = {
-  {"cuda_event", (getter)THPVariable_get_cuda_event, nullptr, nullptr, nullptr},
+static struct PyGetSetDef THCPEvent_properties[] = {
+  {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -158,7 +156,7 @@ PyTypeObject THCPEventType = {
   0,                                     /* tp_iternext */
   THCPEvent_methods,                     /* tp_methods */
   0,                                     /* tp_members */
-  THPVariable_properties,                /* tp_getset */
+  THCPEvent_properties,                /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -169,11 +167,16 @@ PyTypeObject THCPEventType = {
   THCPEvent_pynew,                       /* tp_new */
 };
 
-bool THCPEvent_init(PyObject *module) {
+void THCPEvent_init(PyObject *module) {
   THCPEventClass = (PyObject*)&THCPEventType;
-  if (PyType_Ready(&THCPEventType) < 0)
-    return false;
+  if (PyType_Ready(&THCPEventType) < 0) {
+    std::cout << "=== event ready error\n";
+    throw python_error();
+  }
   Py_INCREF(&THCPEventType);
-  PyModule_AddObject(module, "_CudaEventBase", (PyObject *)&THCPEventType);
-  return true;
+  if (PyModule_AddObject(
+      module, "_CudaEventBase", (PyObject *)&THCPEventType) < 0) {
+    std::cout << "=== stream add object error\n";
+    throw python_error();
+  }
 }
