@@ -6392,7 +6392,7 @@ a")
             return list_stuff[0][0], list_stuff[1][1]
 
         traced = torch.jit.trace(bar, torch.rand(3, 4))
-        x = torch.rand(3, 4)
+        x = torch.rand(5, 6)
         self.assertEqual(bar(x), traced(x))
 
     @suppress_warnings
