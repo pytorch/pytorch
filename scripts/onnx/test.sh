@@ -35,6 +35,9 @@ test_paths=(
     "$top_dir/test/onnx"
 )
 
+echo "Running onnx tests with:"
+pip freeze
+
 if [[ $PARALLEL == 1 ]]; then
     pytest -n 3 "${test_paths[@]}"
 else
