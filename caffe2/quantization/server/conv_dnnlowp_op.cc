@@ -563,103 +563,91 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHW() {
   T* Y_data_T = Y->template mutable_data<T>();
   column_offsets_->resize(Y_HxW * dnnlowp_get_max_threads());
 
-  auto f = [&](Tensor* col_buffer) {
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
     col_buffer->Resize(buffer_shape);
     vector<int> buffer_shape_per_thread(
         buffer_shape.begin() + 1, buffer_shape.end());
     T* col_buffer_data = col_buffer->template mutable_data<T>();
 
-    auto f2 = [&](vector<int32_t>* Y_int32) {
-      Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
+    Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
 
-      // Im2Col, followed by gemm.
+    // Im2Col, followed by gemm.
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-      for (int image_id = 0; image_id < N; ++image_id) {
-        int tid = dnnlowp_get_thread_num();
-        for (int group_id = 0; group_id < group_; ++group_id) {
-          if (this->kernel_.size() == 2) {
-            math::Im2ColNCHW<T>(
-                C / group_,
-                input_dims[0],
-                input_dims[1],
-                kernel_h(),
-                kernel_w(),
-                dilation_h(),
-                dilation_w(),
-                pad_t(),
-                pad_l(),
-                pad_b(),
-                pad_r(),
-                stride_h(),
-                stride_w(),
-                Xdata + (group_ * image_id + group_id) * input_offset,
-                col_buffer_data + tid * col_buffer_size,
-                &context_,
-                in_qparams_[INPUT].zero_point);
-          } else {
-            math::Im2ColNdNCHW<T>(
-                this->kernel_.size(),
-                C * X_HxW,
-                col_buffer_size,
-                img_shape.data(),
-                buffer_shape_per_thread.data(),
-                this->kernel_.data(),
-                this->stride_.data(),
-                this->dilation_.data(),
-                this->pads_.data(),
-                Xdata + (group_ * image_id + group_id) * input_offset,
-                col_buffer_data + tid * col_buffer_size,
-                &context_,
-                in_qparams_[INPUT].zero_point);
-          }
+    for (int image_id = 0; image_id < N; ++image_id) {
+      int tid = dnnlowp_get_thread_num();
+      for (int group_id = 0; group_id < group_; ++group_id) {
+        if (this->kernel_.size() == 2) {
+          math::Im2ColNCHW<T>(
+              C / group_,
+              input_dims[0],
+              input_dims[1],
+              kernel_h(),
+              kernel_w(),
+              dilation_h(),
+              dilation_w(),
+              pad_t(),
+              pad_l(),
+              pad_b(),
+              pad_r(),
+              stride_h(),
+              stride_w(),
+              Xdata + (group_ * image_id + group_id) * input_offset,
+              col_buffer_data + tid * col_buffer_size,
+              &context_,
+              in_qparams_[INPUT].zero_point);
+        } else {
+          math::Im2ColNdNCHW<T>(
+              this->kernel_.size(),
+              C * X_HxW,
+              col_buffer_size,
+              img_shape.data(),
+              buffer_shape_per_thread.data(),
+              this->kernel_.data(),
+              this->stride_.data(),
+              this->dilation_.data(),
+              this->pads_.data(),
+              Xdata + (group_ * image_id + group_id) * input_offset,
+              col_buffer_data + tid * col_buffer_size,
+              &context_,
+              in_qparams_[INPUT].zero_point);
+        }
 
-          // quantize col_buffer
-          T* col_buffer_private = col_buffer_data + tid * col_buffer_size;
+        // quantize col_buffer
+        T* col_buffer_private = col_buffer_data + tid * col_buffer_size;
 
-          int32_t* Y_int32_temp =
-              Y_int32->data() + ((M / group_) * group_id + M * tid) * Y_HxW;
-          T_signed* W_quantized_group =
-              W_quantized_.data() + (M / group_) * group_id * kernel_dim;
+        int32_t* Y_int32_temp =
+            Y_int32->data() + ((M / group_) * group_id + M * tid) * Y_HxW;
+        T_signed* W_quantized_group =
+            W_quantized_.data() + (M / group_) * group_id * kernel_dim;
 
-          for (int i = 0; i < M / group_; ++i) {
-            for (int j = 0; j < Y_HxW; ++j) {
-              int32_t sum = 0;
-              for (int k = 0; k < kernel_dim; ++k) {
-                int w = W_quantized_group[i * kernel_dim + k];
-                int x = col_buffer_private[k * Y_HxW + j];
-                sum += w * x;
-              }
-              Y_int32_temp[i * Y_HxW + j] = sum;
-            } // j
-          } // i
+        for (int i = 0; i < M / group_; ++i) {
+          for (int j = 0; j < Y_HxW; ++j) {
+            int32_t sum = 0;
+            for (int k = 0; k < kernel_dim; ++k) {
+              int w = W_quantized_group[i * kernel_dim + k];
+              int x = col_buffer_private[k * Y_HxW + j];
+              sum += w * x;
+            }
+            Y_int32_temp[i * Y_HxW + j] = sum;
+          } // j
+        } // i
 
-          RunOnDeviceEpilogueNCHW_(
-              col_buffer_private,
-              Y_int32_temp,
-              Y_data_T + (M * image_id + M / group_ * group_id) * Y_HxW,
-              M / group_ * group_id,
-              group_id);
-        } // for each group
-      } // for each image_id
+        RunOnDeviceEpilogueNCHW_(
+            col_buffer_private,
+            Y_int32_temp,
+            Y_data_T + (M * image_id + M / group_ * group_id) * Y_HxW,
+            M / group_ * group_id,
+            group_id);
+      } // for each group
+    } // for each image_id
 
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-      MeasureQuantizationError_();
-    }; // f2
-
-    if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-      this->RunWithSharedInt32Buffer_(f2);
-    } else {
-      f2(&Y_int32_);
-    }
+    PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+    MeasureQuantizationError_();
   }; // f
 
-  if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
-    runWithSharedBuffer<CPUContext>(this->ws_, f);
-  } else {
-    f(&col_buffer_);
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &Y_int32_, f);
 
   return true;
 } // RunOnDeviceWithOrderNCHW
@@ -1324,68 +1312,55 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
 #endif
 
   bool no_im2col = NoIm2ColNHWC_();
-  auto f = [&](vector<int32_t>* Y_int32) {
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
     if (!TakeDepthWise3x3FastPath_() && !TakeDepthWise3x3x3FastPath_()) {
       Y_int32->resize(Y->numel());
     }
 
     // Im2col, followed by gemm.
-    auto f2 = [&](Tensor* col_buffer_) {
-      const T* Xdata = X.template data<T>();
-      const T* col_buffer_data = no_im2col ? Xdata : Im2ColNHWC_(col_buffer_);
+    const T* Xdata = X.template data<T>();
+    const T* col_buffer_data = no_im2col ? Xdata : Im2ColNHWC_(col_buffer);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " quantize col_buf: " << dt * 1e3
-                  << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " quantize col_buf: " << dt * 1e3
+                << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
-      ConvNHWCCore_(col_buffer_data, Y_int32);
+    ConvNHWCCore_(col_buffer_data, Y_int32);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
-      if (Wq_packed_ || Wq_depthwise_3x3_packed_ ||
-          Wq_depthwise_3x3x3_packed_) {
-        // In fast path with fbgemm except when
-        // rescaling quantized numbers should've been already done.
-        PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-      } else {
-        RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
-      }
-    }; // f2
-
-    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
-      runWithSharedBuffer<CPUContext>(this->ws_, f2);
+    if (Wq_packed_ || Wq_depthwise_3x3_packed_ || Wq_depthwise_3x3x3_packed_) {
+      // In fast path with fbgemm except when
+      // rescaling quantized numbers should've been already done.
+      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     } else {
-      f2(&col_buffer_);
+      RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
     }
   }; // f
 
-  if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    this->RunWithSharedInt32Buffer_(f);
-  } else {
-    f(&Y_int32_);
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &Y_int32_, f);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
   /*if (VLOG_IS_ON(3)) */ {
