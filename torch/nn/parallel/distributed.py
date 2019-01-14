@@ -59,7 +59,7 @@ class DistributedDataParallel(Module):
     parallel training.
 
     Here is how to use it: on each host with N GPUs, you should spawn up N
-    processes, while ensuring that each process invidually works on a single GPU
+    processes, while ensuring that each process individually works on a single GPU
     from 0 to N-1. Therefore, it is your job to ensure that your training script
     operates on a single given GPU by calling:
 
