@@ -16,17 +16,21 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
-                          skipIfRocm, load_tests)
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
+                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                          load_tests)
 
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-    warnings.warn(
-        "psutil not found. Some crucial data loader tests relying on it (e.g., "
-        "TestDataLoader.test_proper_exit) will not run.")
+    err_msg = ("psutil not found. Some critical data loader tests relying on it "
+               "(e.g., TestDataLoader.test_proper_exit) will not run.")
+    if IS_PYTORCH_CI:
+        raise ImportError(err_msg)
+    else:
+        warnings.warn(err_msg)
 
 
 # load_tests from common_utils is used to automatically filter tests for
