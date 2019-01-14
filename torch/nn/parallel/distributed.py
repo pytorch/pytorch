@@ -26,9 +26,7 @@ class DistributedDataParallel(Module):
     each such replica handles a portion of the input. During the backwards
     pass, gradients from each node are averaged.
 
-    The batch size should be larger than the number of GPUs used locally. It
-    should also be an integer multiple of the number of GPUs so that each chunk
-    is the same size (so that each GPU processes the same number of samples).
+    The batch size should be larger than the number of GPUs used locally.
 
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
