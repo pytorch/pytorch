@@ -84,6 +84,7 @@ void quantize_and_compress__base(
   }
 }
 
+decltype(quantize_and_compress__base) quantize_and_compress__avx2;
 void quantize_and_compress(
     const float* input_data,
     uint8_t* output_data,
@@ -142,6 +143,7 @@ void decompress_and_dequantize__base(
   }
 }
 
+decltype(decompress_and_dequantize__base) decompress_and_dequantize__avx2;
 void decompress_and_dequantize(
     const uint8_t* input_data,
     float* output_data,
