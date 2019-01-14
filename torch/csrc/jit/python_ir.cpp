@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/pybind.h>
@@ -148,6 +149,12 @@ void initPythonIRBindings(PyObject* module_) {
             std::stringstream ss;
             ss << g;
             return ss.str();
+          })
+      .def(
+          "dump_alias_db",
+          [](std::shared_ptr<Graph> g) {
+            AliasDb db(g);
+            db.dump();
           })
       .def(
           "propagate_shapes",
@@ -542,8 +549,7 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
-      .def(
-          py::init([](TypePtr a) { return ListType::create(a); }))
+      .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);

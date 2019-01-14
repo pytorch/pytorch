@@ -56,6 +56,7 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
+#include "torch/csrc/utils/memory.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
@@ -1783,7 +1784,7 @@ void testDynamicDAG() {
 struct TopoMoveTestFixture {
   TopoMoveTestFixture() {
     createGraph();
-    aliasDb = AliasAnalysis(graph);
+    aliasDb = torch::make_unique<AliasDb>(graph);
   }
 
   // Nodes are named after their output.
@@ -1912,7 +1913,7 @@ struct TopoMoveTestFixture {
   }
 
   std::shared_ptr<Graph> graph;
-  c10::optional<AliasDb> aliasDb;
+  std::unique_ptr<AliasDb> aliasDb;
   std::unordered_map<std::string, Node*> nodes;
 };
 
@@ -2037,7 +2038,7 @@ void testAliasAnalysis() {
 
     graph->lint();
 
-    auto aliasDb = AliasAnalysis(graph);
+    AliasDb aliasDb(graph);
     // Can't move past a mutation of a used value
     JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
     JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
@@ -2062,7 +2063,7 @@ void testAliasAnalysis() {
     auto c = graph->insert(aten::add, {fresh, aliasesB});
     graph->lint();
 
-    auto aliasDb = AliasAnalysis(graph);
+    AliasDb aliasDb(graph);
     JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         aliasesB->node(), mutatesAliasOfB->node()));
     JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(

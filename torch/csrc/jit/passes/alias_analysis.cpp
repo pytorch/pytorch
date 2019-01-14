@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -21,39 +22,323 @@ bool shouldAnnotate(const Value* v) {
 }
 } // namespace
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
-  analyze(graph_);
+// A union find-ish way to track values and the alias sets they belong to.
+//
+// Being a member of an alias set means that the value *may* alias any value in
+// the set.
+//
+// Values can belong in more than one alias set. This can happen if, e.g. it
+// takes on two different aliases depending on branching control flow.
+class AliasSetTracker {
+ public:
+  // Returns true iff `v` is present in the alias set tracker.
+  bool contains(const Value* v) const {
+    return map_.count(v);
+  }
 
-  // Build helper indices
-  // NOTE: that these assume that AliasDb is immutable once constructed.
-  // - Alias set -> value mapping
-  for (const auto& pr : valueToAlias_) {
-    const auto value = pr.first;
-    const auto& aliasInfo = pr.second;
-    // We don't support composite types yet
-    JIT_ASSERT(aliasInfo.containedTypes().size() == 0);
-    for (const auto aliasSet : aliasInfo.sets()) {
-      aliasToValue_[aliasSet].insert(value);
+  // Whether `a` *may be* an alias of `b`
+  bool isAlias(const Value* a, const Value* b) const {
+    if (isWildcard(a) || isWildcard(b)) {
+      return true;
+    }
+    const auto& aSets = map_.at(a);
+    const auto& bSets = map_.at(b);
+    for (auto aElement : aSets) {
+      for (auto bElement : bSets) {
+        if (isSameSet(aElement, bElement)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Register `v` as a member of the wildcard set.
+  void setWildcard(const Value* v) {
+    if (isWildcard(v)) {
+      return;
+    }
+
+    if (wildcardSet_) {
+      registerMembership(v, wildcardSet_);
+    } else {
+      wildcardSet_ = makeSet(v);
+      map_.insert({v, {wildcardSet_}});
     }
   }
-}
 
-bool AliasDb::hasWildcard(const Node* n) const {
-  return wildcardNodes_.count(n) != 0;
+  // Returns whether `v` is a wildcard.
+  bool isWildcard(const Value* v) const {
+    if (!contains(v)) {
+      // This value is not tracked
+      return false;
+    }
+
+    if (!wildcardSet_) {
+      // Wildcard set is empty
+      return false;
+    }
+
+    const auto& sets = map_.at(v);
+    return std::any_of(sets.begin(), sets.end(), [&](Element* set) {
+      return isSameSet(set, wildcardSet_);
+    });
+  }
+
+  // Give `v` a "fresh" alias set (i.e. it does not alias any other value).
+  void makeFreshAlias(const Value* v) {
+    auto set = makeSet(v);
+    map_.insert({v, {set}});
+  }
+
+  // Make `a` and alias of `b`, by making `a` a member of all of `b`'s alias
+  // sets.
+  //
+  // Returns true if a change occured to a's alias set
+  bool makeAlias(const Value* a, const Value* b) {
+    if (!map_.count(b)) {
+      makeFreshAlias(b);
+    }
+
+    bool changed = false;
+    for (const auto& set : map_.at(b)) {
+      const bool aHasSet = map_.count(a) && map_.at(a).count(set);
+      if (!aHasSet) {
+        changed = true;
+        registerMembership(a, set);
+      }
+    }
+    return changed;
+  }
+
+  // Get all values that may alias to `v`.
+  // NOTE: This does not include wildcards.
+  std::unordered_set<const Value*> getAliases(const Value* v) const {
+    std::unordered_set<const Value*> aliases;
+    // Collect all aliases in all sets that `v` may have membership in.
+    for (auto set : map_.at(v)) {
+      auto cur = set;
+      auto end = cur;
+
+      // Traverse the next-list and find all the values.
+      // Insert the first element
+      aliases.insert(cur->value);
+      cur = cur->next;
+
+      while (cur != end) {
+        aliases.insert(cur->value);
+        cur = cur->next;
+      }
+    }
+
+    return aliases;
+  }
+
+  void registerWrite(const Value* v, Node* writer) {
+    for (auto set : map_.at(v)) {
+      const auto root = find(set);
+      writes_[root].insert(writer);
+    }
+  }
+
+  const std::unordered_set<Node*>& getWildcardWriters() const {
+    // Static so we can always return without a copy.
+    static std::unordered_set<Node*> empty;
+    if (!wildcardSet_) {
+      return empty;
+    }
+
+    if (!writes_.count(find(wildcardSet_))) {
+      return empty;
+    }
+
+    return writes_.at(find(wildcardSet_));
+  }
+
+  // NOTE: this does not include writes to the wildcard.
+  std::unordered_set<Node*> getWrites(const Value* v) const {
+    std::unordered_set<Node*> ret;
+    if (!map_.count(v)) {
+      return ret;
+    }
+
+    for (auto set : map_.at(v)) {
+      const auto root = find(set);
+      if (!writes_.count(root)) {
+        continue;
+      }
+
+      for (auto write : writes_.at(root)) {
+        ret.insert(write);
+      }
+    }
+    return ret;
+  }
+
+  // Returns whether `n` writes to the value `v`
+  bool writesTo(Node* n, const Value* v) const {
+    return getWrites(v).count(n);
+  }
+
+  // Returns whether there are no writes in the whole graph
+  bool hasNoWrites() const {
+    return !writes_.empty();
+  }
+
+  // Dump the contents of the alias db to stdout in human-readable form
+  void dump() const {
+    std::unordered_set<Element*> roots;
+    for (auto& el : sets_) {
+      roots.insert(find(el.get()));
+    }
+
+    size_t setId = 0;
+    for (auto set : roots) {
+      if (wildcardSet_ && set == find(wildcardSet_)) {
+        std::cout << "WILDCARDS: ";
+        dump(set);
+        continue;
+      }
+
+      std::cout << "Set " << setId << ": ";
+      dump(set);
+
+      if (writes_.count(set)) {
+        std::cout << "  Writes:\n";
+        for (auto writer : writes_.at(set)) {
+          std::cout << "    " << *writer;
+        }
+      }
+
+      setId++;
+    }
+
+    std::cout << "\n";
+  }
+
+ private:
+  // Represents a value's membership in an alias set. This is the "element" of
+  // a union find, so the root element represents the set itself.
+  struct Element {
+    const Value* value;
+    // Root entries are their own parent.
+    Element* parent;
+    // Circular linked list contains all elements of the tree rooted at `this`
+    Element* next;
+    // Size of tree rooted at `this`
+    size_t size;
+  };
+
+  // Create a new membership element for `v`.
+  Element* makeSet(const Value* v) {
+    auto el = torch::make_unique<Element>();
+    el->value = v;
+    el->parent = el.get();
+    el->next = el.get();
+    el->size = 1;
+
+    auto rawPtr = el.get();
+    sets_.push_back(std::move(el));
+    return rawPtr;
+  }
+
+  Element* find(Element* el) const {
+    JIT_ASSERT(el);
+    while (el->parent != el) {
+      // Path halving to speed up future queries.
+      el->parent = el->parent->parent;
+      el = el->parent;
+    }
+
+    return el;
+  }
+
+  void union_(Element* a, Element* b) {
+    JIT_ASSERT(a);
+    JIT_ASSERT(b);
+    auto aRoot = find(a);
+    auto bRoot = find(b);
+    if (aRoot == bRoot) {
+      // Already in the same set.
+      return;
+    }
+
+    if (aRoot->size < bRoot->size) {
+      // Ensure we're always merging the smaller tree into the bigger one.
+      std::swap(aRoot, bRoot);
+    }
+
+    JIT_ASSERT(bRoot->size <= aRoot->size);
+
+    // Merge the sets and update the size
+    bRoot->parent = aRoot;
+    aRoot->size = aRoot->size + bRoot->size;
+
+    // Merge the next lists
+    std::swap(aRoot->next, bRoot->next);
+
+    // Merge the write lists
+    for (auto writer : writes_[bRoot]) {
+      writes_[aRoot].insert(writer);
+    }
+    writes_.erase(bRoot);
+  }
+
+  void dump(Element* el) const {
+    auto cur = el;
+    const auto end = el;
+
+    // Traverse the next-list and find all the values.
+    std::cout << cur->value->uniqueName();
+    cur = cur->next;
+    while (cur != end) {
+      std::cout << ", " << cur->value->uniqueName();
+      cur = cur->next;
+    }
+
+    std::cout << "\n";
+  }
+
+  // Register membership of value `a` in the given alias set.
+  void registerMembership(const Value* a, Element* set) {
+    const auto aSet = makeSet(a);
+    union_(aSet, set);
+    map_[a].insert(set);
+  }
+
+  // Test whether elements a and b are in the same set.
+  bool isSameSet(Element* a, Element* b) const {
+    return find(a) == find(b);
+  }
+
+  // Owning stoarge for elements
+  std::vector<std::unique_ptr<Element>> sets_;
+  // Mapping values to the alias sets they are in.
+  std::unordered_map<const Value*, std::unordered_set<Element*>> map_;
+  // Mapping of alias sets to the nodes that write to that alias set.
+  std::unordered_map<const Element*, std::unordered_set<Node*>> writes_;
+  // Special set representing wildcard values.
+  // Nullptr means empty (i.e. there are no wildcards in the graph)
+  Element* wildcardSet_ = nullptr;
+};
+
+AliasDb::~AliasDb() = default;
+
+AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+  setTracker_ = torch::make_unique<AliasSetTracker>();
+  analyze(graph_);
 }
 
 // Does `n` use or write to any wildcard aliases?
-bool AliasDb::hasWildcardImpl(const Node* n) const {
+bool AliasDb::hasWildcard(const Node* n) const {
   for (const auto input : n->inputs()) {
-    if (valueToAlias_.count(input) != 0 &&
-        valueToAlias_.at(input).isWildcard()) {
+    if (setTracker_->isWildcard(input)) {
       return true;
     }
   }
 
   for (const auto output : n->outputs()) {
-    if (valueToAlias_.count(output) != 0 &&
-        valueToAlias_.at(output).isWildcard()) {
+    if (setTracker_->isWildcard(output)) {
       return true;
     }
   }
@@ -61,24 +346,11 @@ bool AliasDb::hasWildcardImpl(const Node* n) const {
 }
 
 bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (valueToAlias_.count(v) == 0) {
+  if (!shouldAnnotate(v)) {
     // This is a primitive type
     return false;
   }
-
-  const auto& aliasInfo = valueToAlias_.at(v);
-  JIT_ASSERT(aliasInfo.sets().size() > 0);
-  // We only need to check one alias set, since if this value belongs to
-  // multiple alias sets they are all written to
-  const auto& aliasSet = *aliasInfo.sets().begin();
-
-  if (aliasToWrites_.count(aliasSet) == 0) {
-    // no writes to this alias set
-    return false;
-  }
-
-  const auto& writers = aliasToWrites_.at(aliasSet);
-  return writers.count(n) != 0;
+  return setTracker_->writesTo(n, v);
 }
 
 bool AliasDb::hasWriters(const Node* n) const {
@@ -86,7 +358,8 @@ bool AliasDb::hasWriters(const Node* n) const {
     // If `n` has a wildcard, any write in the graph may write to it.
     // So the only way we know there are no writers is if there are no writes
     // at all.
-    return !aliasToWrites_.empty();
+    // TODO this needs to get replaced
+    return setTracker_->hasNoWrites();
   }
   return getWriters(n).size() != 0;
 }
@@ -130,54 +403,35 @@ bool AliasDb::writesToInputAlias(Node* n) const {
 
   // For all writes, check if the written value may alias a graph input
   return std::any_of(writes.cbegin(), writes.cend(), [&](const Value* v) {
-    const auto& aliasInfo = valueToAlias_.at(v);
-    const auto& aliasSets = aliasInfo.sets();
-
-    // Check every distinct alias set this value belongs to
     return std::any_of(
-        aliasSets.cbegin(), aliasSets.cend(), [&](const Symbol aliasSet) {
-          return graphInputAliases_.count(aliasSet) != 0;
+        graph_->inputs().cbegin(),
+        graph_->inputs().cend(),
+        [&](const Value* graphInput) {
+          return shouldAnnotate(graphInput) &&
+              setTracker_->isAlias(graphInput, v);
         });
   });
 }
 
 std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
-  // Get all alias sets of this node
-  // ... check the inputs
-  std::unordered_set<Symbol> aliasSets;
-  for (const auto& input : n->inputs()) {
-    if (valueToAlias_.count(input) != 0) {
-      for (const auto& aliasSet : valueToAlias_.at(input).sets()) {
-        aliasSets.insert(aliasSet);
-      }
-    }
-  }
-
-  // ... and the outputs
-  for (const auto& output : n->outputs()) {
-    if (valueToAlias_.count(output) != 0) {
-      for (const auto& aliasSet : valueToAlias_.at(output).sets()) {
-        aliasSets.insert(aliasSet);
-      }
-    }
-  }
-
-  // Then get the union of all writers to all those alias sets
   std::unordered_set<Node*> writers;
-  for (const auto& alias : aliasSets) {
-    if (aliasToWrites_.count(alias) != 0) {
-      for (const auto writer : aliasToWrites_.at(alias)) {
-        writers.insert(writer);
-      }
+
+  for (const auto input : n->inputs()) {
+    for (auto writer : setTracker_->getWrites(input)) {
+      writers.insert(writer);
+    }
+  }
+
+  for (const auto output : n->outputs()) {
+    for (auto writer : setTracker_->getWrites(output)) {
+      writers.insert(writer);
     }
   }
 
   // A write to the wildcard set should be considered a write to `n`
-  if (aliasToWrites_.count(AliasInfo::wildcardSet())) {
-    const auto& wildcardWriters = aliasToWrites_.at(AliasInfo::wildcardSet());
-    for (auto writer : wildcardWriters) {
-      writers.insert(writer);
-    }
+  const auto& wildcardWriters = setTracker_->getWildcardWriters();
+  for (auto writer : wildcardWriters) {
+    writers.insert(writer);
   }
 
   return writers;
@@ -185,18 +439,11 @@ std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
 
 std::unordered_set<const Value*> AliasDb::getAliases(const Value* v) const {
   std::unordered_set<const Value*> ret;
-  if (!valueToAlias_.count(v)) {
+  if (!setTracker_->contains(v)) {
     return ret;
   }
 
-  const auto& aliasSets = valueToAlias_.at(v).sets();
-  for (const auto& aliasSet : aliasSets) {
-    const auto& aliases = aliasToValue_.at(aliasSet);
-    for (auto alias : aliases) {
-      ret.insert(alias);
-    }
-  }
-  return ret;
+  return setTracker_->getAliases(v);
 }
 
 std::unordered_set<const Value*> AliasDb::getWrites(Node* n) const {
@@ -217,47 +464,19 @@ std::unordered_set<const Value*> AliasDb::getWrites(Node* n) const {
 void AliasDb::dump() const {
   std::cout << "\n===1. GRAPH===\n";
   graph_->dump();
-  std::cout << "===2. ALIAS SETS===\n";
-  for (const auto& pr : valueToAlias_) {
-    std::cout << "%" << pr.first->uniqueName() << " : "
-              << "(";
 
-    bool first = true;
-    for (const auto& alias : pr.second.sets()) {
-      if (first) {
-        first = false;
-      } else {
-        std::cout << ", ";
-      }
-      std::cout << alias.toUnqualString();
-    }
-    std::cout << ")\n";
-  }
-
-  std::cout << "\n===3. WRITES===\n";
-  for (const auto& pr : aliasToWrites_) {
-    std::cout << "Alias set " << pr.first.toUnqualString() << ":\n";
-    for (const auto node : pr.second) {
-      std::cout << "  " << *node;
-    }
-    std::cout << "\n";
-  }
-
-  std::cout << "\n===3. WILDCARD INDEX===\n";
-  for (const auto node : wildcardNodes_) {
-    node->dump();
-  }
+  std::cout << "\n===2. ALIAS DB===\n";
+  setTracker_->dump();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
-  const auto tensorAlias = getFreshAlias(/*isGraphInput=*/true);
-  // Create a separate alias set for each list type
-  std::map<TypeKind, Symbol> listTypeAliases;
-  // Create a separate alias set for each tuple type
-  std::map<TupleTypePtr, Symbol> tupleTypeAliases;
-  std::map<TypeKind, Symbol> optionalTypeAliases;
+
+  // 1. Partition inputs by their type
+  std::map<TypeKind, std::vector<Value*>> listTypes;
+  std::unordered_map<TupleTypePtr, std::vector<Value*>> tupleTypes;
+  std::vector<Value*> tensors;
 
   for (auto input : graph->inputs()) {
     auto inputType = input->type();
@@ -267,7 +486,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     }
 
     if (inputType->isSubtypeOf(DynamicType::get())) {
-      addAlias(input, tensorAlias);
+      tensors.push_back(input);
     } else if (inputType->kind() == TypeKind::ListType) {
       auto containedType = inputType->containedTypes().at(0);
       // All tensor subtypes may alias to each other, so we should consider all
@@ -275,23 +494,31 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       if (containedType->isSubtypeOf(DynamicType::get())) {
         containedType = DynamicType::get();
       }
-      if (listTypeAliases.count(containedType->kind()) == 0) {
-        listTypeAliases[containedType->kind()] =
-            getFreshAlias(/*isGraphInput=*/true);
-      }
-
-      addAlias(input, listTypeAliases.at(containedType->kind()));
+      listTypes[containedType->kind()].push_back(input);
     } else if (inputType->kind() == TypeKind::TupleType) {
       auto tupleType = inputType->cast<TupleType>();
-      if (tupleTypeAliases.count(tupleType) == 0) {
-        tupleTypeAliases[tupleType] = getFreshAlias(/*isGraphInput=*/true);
-      }
-      addAlias(input, tupleTypeAliases.at(tupleType));
+      tupleTypes[tupleType].push_back(input);
     } else {
       JIT_ASSERT(!shouldAnnotate(input));
     }
   }
 
+  // 2. Make all partitions alias each other
+  for (const auto& pr : listTypes) {
+    auto& values = pr.second;
+    for (const auto value : values) {
+      setTracker_->makeAlias(value, values[0]);
+    }
+  }
+  for (const auto& pr : tupleTypes) {
+    auto& values = pr.second;
+    for (const auto value : values) {
+      setTracker_->makeAlias(value, values[0]);
+    }
+  }
+  for (const auto value : tensors) {
+    setTracker_->makeAlias(value, tensors[0]);
+  }
   analyze(graph->block());
 }
 
@@ -301,12 +528,21 @@ void AliasDb::analyze(Block* block) {
   }
 }
 
+void AliasDb::analyze(Node* node) {
+  analyzeImpl(node);
+
+  // After analyzing, update the wildcard index
+  if (hasWildcard(node)) {
+    wildcardNodes_.insert(node);
+  }
+}
+
 // The basic strategy is:
 //   1. Retrieve alias information for every input.
 //   2. Use the node's schema's alias annotations to propgagate alias/write
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
-void AliasDb::analyze(Node* node) {
+void AliasDb::analyzeImpl(Node* node) {
   // These nodes are not schematized, so we need to handle them specially
   // TODO do the thing that python_printer does to force operator writers to
   // register aliasing information
@@ -372,8 +608,7 @@ void AliasDb::analyze(Node* node) {
   }
 
   // Bind formal alias annotation to actual alias sets
-  std::unordered_map<Symbol, AliasInfo> formalToActual;
-  formalToActual[AliasInfo::wildcardSet()] = AliasInfo::createWildcard();
+  std::unordered_map<Symbol, Value*> formalToActual;
   for (size_t i = 0; i < schema.arguments().size(); i++) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
@@ -399,16 +634,12 @@ void AliasDb::analyze(Node* node) {
       continue;
     }
 
-    const auto& actualAlias = valueToAlias_.at(actualValue);
-
     // Bind the formal to the actual
-    formalToActual[formalAlias] = actualAlias;
+    formalToActual[formalAlias] = actualValue;
 
-    // Record all writes
-    for (const auto& alias : actualAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
-      }
+    // Record writes
+    if (formal->isWrite()) {
+      setTracker_->registerWrite(actualValue, node);
     }
   }
 
@@ -431,20 +662,16 @@ void AliasDb::analyze(Node* node) {
     JIT_ASSERT(formal->containedTypes().size() == 0);
 
     const auto& formalAlias = formal->set();
-    auto outputAlias = formalToActual.at(formalAlias);
-
-    // Record writes
-    for (const auto& alias : outputAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
-      }
+    if (formal->isWildcard()) {
+      setTracker_->setWildcard(actual);
+    } else {
+      auto toAlias = formalToActual.at(formalAlias);
+      addAlias(actual, toAlias);
     }
 
-    addAlias(actual, outputAlias);
-  }
-  // Keep the wildcard index up to date.
-  if (hasWildcardImpl(node)) {
-    wildcardNodes_.insert(node);
+    if (formal->isWrite()) {
+      setTracker_->registerWrite(actual, node);
+    }
   }
 }
 
@@ -495,13 +722,7 @@ void AliasDb::analyzeLoop(Node* node) {
       const auto output = blockOutputs[i];
 
       // Check whether or not this would change anything
-      if (valueToAlias_.count(input) != 0) {
-        JIT_ASSERT(valueToAlias_.count(output) != 0)
-        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[input])) {
-          notConverged = true;
-        }
-      }
-      addAlias(input, output);
+      notConverged = addAlias(input, output);
     }
   }
 }
@@ -536,15 +757,14 @@ void AliasDb::analyzeCreator(Node* node) {
 // gives up and creates wildcards for everything.
 void AliasDb::analyzeExtractor(Node* node) {
   for (const auto output : node->outputs()) {
-    addAlias(output, AliasInfo::createWildcard());
+    setTracker_->setWildcard(output);
   }
 }
 
 // For torch.chunk(), all returned tensors may alias the input tensor
 void AliasDb::analyzeChunk(Node* node) {
-  auto alias = valueToAlias_.at(node->input());
   for (auto output : node->outputs()) {
-    addAlias(output, alias);
+    addAlias(output, node->input());
   }
 }
 
@@ -557,58 +777,21 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   for (size_t index = 0; index < inputs.size(); ++index) {
     // Each inputs[i] is aliased by exactly `nchunks` distinct output tensors:
     // inputs[i] produces chunks outputs[i * nchunks + k] for k in [0..nchunks)
-    auto alias = valueToAlias_.at(inputs.at(index));
     auto output_begin = outputs.begin() + index * nchunks;
     for (auto it = output_begin; it != output_begin + nchunks; ++it) {
-      addAlias(*it, alias);
+      addAlias(*it, inputs.at(index));
     }
   }
 }
 
-Symbol AliasDb::getFreshAlias(bool isGraphInput) {
-  auto num = std::stoll(latestSymbol_.toUnqualString());
-  latestSymbol_ = Symbol::fromQualString("alias::" + std::to_string(++num));
-  if (isGraphInput) {
-    graphInputAliases_.insert(latestSymbol_);
-  }
-  return latestSymbol_;
-}
-
-// Give this alias to the value. If the value already has alias info, union
-// with this alias
-void AliasDb::addAlias(const Value* value, AliasInfo alias) {
-  if (!shouldAnnotate(value)) {
-    return;
-  }
-  if (valueToAlias_.count(value) != 0) {
-    valueToAlias_[value].unionWith(alias);
-  } else {
-    valueToAlias_.insert({value, std::move(alias)});
-  }
-}
-
-// Give this alias to the value. If the value already has alias info, union
-// with this alias
-void AliasDb::addAlias(const Value* value, Symbol alias) {
-  if (!shouldAnnotate(value)) {
-    return;
-  }
-  if (valueToAlias_.count(value) != 0) {
-    valueToAlias_[value].addSet(alias);
-  } else {
-    AliasInfo aliasInfo;
-    aliasInfo.addSet(alias);
-    valueToAlias_.insert({value, std::move(aliasInfo)});
-  }
-}
-
 // Union the alias info of `value` with `from`
-void AliasDb::addAlias(const Value* value, const Value* from) {
+// Returns true if a change occured to `value`s alias set.
+bool AliasDb::addAlias(const Value* value, const Value* from) {
   if (!shouldAnnotate(value)) {
     JIT_ASSERT(!shouldAnnotate(from));
-    return;
+    return false;
   }
-  addAlias(value, valueToAlias_.at(from));
+  return setTracker_->makeAlias(value, from);
 }
 
 void AliasDb::mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from) {
@@ -619,12 +802,17 @@ void AliasDb::mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from) {
 }
 
 void AliasDb::giveFreshAlias(const Value* value) {
-  if (valueToAlias_.count(value) != 0) {
+  if (!shouldAnnotate(value)) {
+    return;
+  }
+
+  if (setTracker_->contains(value)) {
     // Inside a loop, we may have given a fresh alias to this value already, so
     // skip
     return;
   }
-  addAlias(value, getFreshAlias());
+
+  setTracker_->makeFreshAlias(value);
 }
 
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
@@ -931,18 +1119,6 @@ void AliasDb::move(Node* toMove, Node* movePoint, MoveSide moveSide) {
   }
 }
 
-c10::optional<const Node*> AliasDb::getLastWildcard() const {
-  auto it = std::max_element(
-      wildcardNodes_.cbegin(),
-      wildcardNodes_.cend(),
-      [this](const Node* a, const Node* b) { return isBeforeSameGraph(a, b); });
-  if (it != wildcardNodes_.end()) {
-    return *it;
-  } else {
-    return c10::nullopt;
-  }
-}
-
 bool AliasDb::hasUntrackedEffects(Node* node) const {
   bool touchesWildcard = false;
   if (const auto lastWildcard = getLastWildcard()) {
@@ -978,6 +1154,18 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
     lhs = subgraphToOwner_.at(lhs->owningGraph());
   }
   JIT_ASSERT(false);
+}
+
+c10::optional<const Node*> AliasDb::getLastWildcard() const {
+  auto it = std::max_element(
+      wildcardNodes_.cbegin(),
+      wildcardNodes_.cend(),
+      [this](const Node* a, const Node* b) { return isBeforeSameGraph(a, b); });
+  if (it != wildcardNodes_.end()) {
+    return *it;
+  } else {
+    return c10::nullopt;
+  }
 }
 } // namespace jit
 } // namespace torch

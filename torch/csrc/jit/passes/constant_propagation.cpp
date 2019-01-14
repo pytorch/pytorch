@@ -171,7 +171,7 @@ void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse) {
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   ConstantPropagation(graph->block(), aliasDb, true);
   EliminateDeadCode(graph);
 }
