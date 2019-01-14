@@ -506,6 +506,7 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('is_jit_ir', bool),
     ('raw_string', str),
     ('method_prefix_derived', str),
     ('arguments', List[AtFormal]),
@@ -891,6 +892,7 @@ def create_generic(top_env, declarations):
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            is_jit_ir=option["is_jit_ir"],
             raw_string=option["raw_string"],
             method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
@@ -1133,6 +1135,7 @@ def create_generic(top_env, declarations):
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            is_jit_ir=option["is_jit_ir"],
             raw_string=option["raw_string"],
             method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
@@ -1156,6 +1159,7 @@ def create_generic(top_env, declarations):
         raw_string = declaration["raw_string"]
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
+            option["is_jit_ir"] = declaration["is_jit_ir"]
             option["raw_string"] = raw_string
             try:
                 if option['mode'] != 'native':

@@ -458,8 +458,14 @@ def signature(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     ret_val = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
     match = False
+    if "is_jit_ir" in decl and decl["is_jit_ir"]:
+        if ret_val.strip() != decl["raw_string"].strip():
+            print("ret_val.strip()")
+            print(ret_val.strip())
+            print(decl["raw_string"].strip())
     if "raw_string" in decl and ret_val.strip() == decl["raw_string"].strip():
         match = True
+        assert(decl["is_jit_ir"])
 #        print("match")
 #        print(decl)
     return ret_val, match
