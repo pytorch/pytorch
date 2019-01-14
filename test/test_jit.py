@@ -32,6 +32,7 @@ import warnings
 import math
 import types
 import pickle
+import copy
 
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -4857,99 +4858,102 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
-        def test_rnn_cell_quantized(self):
-            d_in, d_hid = 2, 2
+    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
+                     ' well with UBSAN at the moment, so we skip the test if'
+                     ' we are in a UBSAN environment.')
+    def test_rnn_cell_quantized(self):
+        d_in, d_hid = 2, 2
 
-            for cell in [
-                torch.nn.LSTMCell(d_in, d_hid).float(),
-                torch.nn.GRUCell(d_in, d_hid).float(),
-                torch.nn.RNNCell(d_in, d_hid).float(),
-            ]:
-                if isinstance(cell, torch.nn.LSTMCell):
-                    num_chunks = 4
-                elif isinstance(cell, torch.nn.GRUCell):
-                    num_chunks = 3
-                elif isinstance(cell, torch.nn.RNNCell):
-                    num_chunks = 1
+        for cell in [
+            torch.nn.LSTMCell(d_in, d_hid).float(),
+            torch.nn.GRUCell(d_in, d_hid).float(),
+            torch.nn.RNNCell(d_in, d_hid).float(),
+        ]:
+            if isinstance(cell, torch.nn.LSTMCell):
+                num_chunks = 4
+            elif isinstance(cell, torch.nn.GRUCell):
+                num_chunks = 3
+            elif isinstance(cell, torch.nn.RNNCell):
+                num_chunks = 1
 
-                # Replace parameter values s.t. the range of values is exactly
-                # 255, thus we will have 0 quantization error in the quantized
-                # GEMM call. This i s for testing purposes.
-                #
-                # Note that the current implementation does not support
-                # accumulation values outside of the range representable by a
-                # 16 bit integer, instead resulting in a saturated value. We
-                # must take care that in our test we do not end up with a dot
-                # product that overflows the int16 range, e.g.
-                # (255*127+255*127) = 64770. So, we hardcode the test values
-                # here and ensure a mix of signedness.
-                vals = [[100, -155],
-                        [100, -155],
-                        [-155, 100],
-                        [-155, 100],
-                        [100, -155],
-                        [-155, 100],
-                        [-155, 100],
-                        [100, -155]]
-                vals = vals[:d_hid * num_chunks]
-                cell.weight_ih = torch.nn.Parameter(
-                    torch.tensor(vals, dtype=torch.float),
-                    requires_grad=False)
-                cell.weight_hh = torch.nn.Parameter(
-                    torch.tensor(vals, dtype=torch.float),
-                    requires_grad=False)
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
 
-                import copy
-                ref = copy.deepcopy(cell)
-                cell = torch.jit.quantized.quantize_rnn_cell_modules(cell)
-                x = torch.tensor([[100, -155],
-                                  [-155, 100],
-                                  [100, -155]], dtype=torch.float)
-                h0_vals = [[-155, 100],
-                           [-155, 155],
-                           [100, -155]]
-                hx = torch.tensor(h0_vals, dtype=torch.float)
-                if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
-                    cx = torch.tensor(h0_vals, dtype=torch.float)
-                    hiddens = (hx, cx)
-                else:
-                    hiddens = hx
+            ref = copy.deepcopy(cell)
 
-                if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
-                    from typing import Tuple
+            cell = torch.jit.quantized.quantize_rnn_cell_modules(cell)
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
+            hx = torch.tensor(h0_vals, dtype=torch.float)
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                cx = torch.tensor(h0_vals, dtype=torch.float)
+                hiddens = (hx, cx)
+            else:
+                hiddens = hx
 
-                    class ScriptWrapper(torch.jit.ScriptModule):
-                        def __init__(self, cell):
-                            super(ScriptWrapper, self).__init__()
-                            self.cell = cell
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                from typing import Tuple
 
-                        @torch.jit.script_method
-                        def forward(self, x, hiddens):
-                            # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-                            return self.cell(x, hiddens)
-                else:
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-                    class ScriptWrapper(torch.jit.ScriptModule):
-                        def __init__(self, cell):
-                            super(ScriptWrapper, self).__init__()
-                            self.cell = cell
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                        return self.cell(x, hiddens)
+            else:
 
-                        @torch.jit.script_method
-                        def forward(self, x, hiddens):
-                            # type: (torch.Tensor, torch.Tensor)
-                            return self.cell(x, hiddens)
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
 
-                cell = ScriptWrapper(cell)
-                outs = cell(x, hiddens)
-                cell = self.getExportImportCopyWithPacking(cell)
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, torch.Tensor)
+                        return self.cell(x, hiddens)
 
-                outs = cell(x, hiddens)
-                ref_outs = ref(x, hiddens)
+            cell = ScriptWrapper(cell)
+            outs = cell(x, hiddens)
+            cell = self.getExportImportCopyWithPacking(cell)
 
-                self.assertEqual(len(outs), len(ref_outs))
-                for out, ref_out in zip(outs, ref_outs):
-                    torch.testing.assert_allclose(out, ref_out)
+            outs = cell(x, hiddens)
+            ref_outs = ref(x, hiddens)
+
+            self.assertEqual(len(outs), len(ref_outs))
+            for out, ref_out in zip(outs, ref_outs):
+                torch.testing.assert_allclose(out, ref_out)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):

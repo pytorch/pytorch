@@ -644,9 +644,9 @@ std::tuple<Tensor, Tensor> NAME(                                               \
 }
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-typedef SimpleCell<tanh_f, CellParams> tanf_cell_type;
+using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
-typedef SimpleCell<relu_f, CellParams> relu_cell_type;
+using relu_cell_type = SimpleCell<relu_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
 DEFINE_DISPATCH(lstm_cudnn_stub);
@@ -749,132 +749,63 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   return results;
 }
 
-std::tuple<Tensor, Tensor> quantized_lstm_cell(
-    const Tensor& input,
-    TensorList hx,
-    const Tensor& w_ih,
-    const Tensor& w_hh,
-    const Tensor& b_ih,
-    const Tensor& b_hh,
-    const Tensor& packed_ih,
-    const Tensor& packed_hh,
-    const Tensor& col_offsets_ih,
-    const Tensor& col_offsets_hh,
-    const Scalar scale_ih,
-    const Scalar scale_hh,
-    const Scalar zero_point_ih,
-    const Scalar zero_point_hh) {
-  QuantizedCellParams params(
-      w_ih,
-      w_hh,
-      b_ih,
-      b_hh,
-      packed_ih,
-      packed_hh,
-      col_offsets_ih,
-      col_offsets_hh,
-      scale_ih,
-      scale_hh,
-      zero_point_ih,
-      zero_point_hh);
-  return LSTMCell<QuantizedCellParams>{}(
-      input, std::make_tuple(hx[0], hx[1]), params);
+#define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
+return_type name( \
+    const Tensor& input, \
+    hx_type hx, \
+    const Tensor& w_ih, \
+    const Tensor& w_hh, \
+    const Tensor& b_ih, \
+    const Tensor& b_hh, \
+    const Tensor& packed_ih, \
+    const Tensor& packed_hh, \
+    const Tensor& col_offsets_ih, \
+    const Tensor& col_offsets_hh, \
+    const Scalar scale_ih, \
+    const Scalar scale_hh, \
+    const Scalar zero_point_ih, \
+    const Scalar zero_point_hh) { \
+  QuantizedCellParams params( \
+      w_ih, \
+      w_hh, \
+      b_ih, \
+      b_hh, \
+      packed_ih, \
+      packed_hh, \
+      col_offsets_ih, \
+      col_offsets_hh, \
+      scale_ih, \
+      scale_hh, \
+      zero_point_ih, \
+      zero_point_hh); \
+  return cell_type{}( \
+      input, prepare_hx_fn(hx), params); \
 }
 
-Tensor quantized_gru_cell(
-    const Tensor& input,
-    const Tensor& hx,
-    const Tensor& w_ih,
-    const Tensor& w_hh,
-    const Tensor& b_ih,
-    const Tensor& b_hh,
-    const Tensor& packed_ih,
-    const Tensor& packed_hh,
-    const Tensor& col_offsets_ih,
-    const Tensor& col_offsets_hh,
-    const Scalar scale_ih,
-    const Scalar scale_hh,
-    const Scalar zero_point_ih,
-    const Scalar zero_point_hh) {
-  QuantizedCellParams params(
-      w_ih,
-      w_hh,
-      b_ih,
-      b_hh,
-      packed_ih,
-      packed_hh,
-      col_offsets_ih,
-      col_offsets_hh,
-      scale_ih,
-      scale_hh,
-      zero_point_ih,
-      zero_point_hh);
-  return GRUCell<QuantizedCellParams>{}(
-      input, hx, params);
+// Quantized LSTM cell
+using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
+using quantized_lstm_return_type = std::tuple<Tensor, Tensor>;
+std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
+  return std::make_tuple(hx[0], hx[1]);
+}
+DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+
+// Helpers for simpler cells
+using simple_hx_type = const Tensor&;
+simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
+  return hx;
 }
 
-Tensor quantized_rnn_relu_cell(
-    const Tensor& input,
-    const Tensor& hx,
-    const Tensor& w_ih,
-    const Tensor& w_hh,
-    const Tensor& b_ih,
-    const Tensor& b_hh,
-    const Tensor& packed_ih,
-    const Tensor& packed_hh,
-    const Tensor& col_offsets_ih,
-    const Tensor& col_offsets_hh,
-    const Scalar scale_ih,
-    const Scalar scale_hh,
-    const Scalar zero_point_ih,
-    const Scalar zero_point_hh) {
-  QuantizedCellParams params(
-      w_ih,
-      w_hh,
-      b_ih,
-      b_hh,
-      packed_ih,
-      packed_hh,
-      col_offsets_ih,
-      col_offsets_hh,
-      scale_ih,
-      scale_hh,
-      zero_point_ih,
-      zero_point_hh);
-  return SimpleCell<relu_f, QuantizedCellParams>{}(
-      input, hx, params);
-}
+// Quantized GRU cell
+using quantized_gru_cell_type = GRUCell<QuantizedCellParams>;
+DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx);
 
-Tensor quantized_rnn_tanh_cell(
-    const Tensor& input,
-    const Tensor& hx,
-    const Tensor& w_ih,
-    const Tensor& w_hh,
-    const Tensor& b_ih,
-    const Tensor& b_hh,
-    const Tensor& packed_ih,
-    const Tensor& packed_hh,
-    const Tensor& col_offsets_ih,
-    const Tensor& col_offsets_hh,
-    const Scalar scale_ih,
-    const Scalar scale_hh,
-    const Scalar zero_point_ih,
-    const Scalar zero_point_hh) {
-  QuantizedCellParams params(
-      w_ih,
-      w_hh,
-      b_ih,
-      b_hh,
-      packed_ih,
-      packed_hh,
-      col_offsets_ih,
-      col_offsets_hh,
-      scale_ih,
-      scale_hh,
-      zero_point_ih,
-      zero_point_hh);
-  return SimpleCell<tanh_f, QuantizedCellParams>{}(
-      input, hx, params);
-}
+// Quantized RNN w/ ReLU cell
+using quantized_rnn_relu_cell_type = SimpleCell<relu_f, QuantizedCellParams>;
+DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx);
+
+// Quantized RNN w/ tanh cell
+using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
+DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
 
 }}  // namespace at::native

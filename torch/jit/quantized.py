@@ -219,7 +219,7 @@ def quantize_rnn_cell_modules(module):
         if mod is module:
             continue
         new_mod = quantize_rnn_cell_modules(mod)
-        if new_mod != mod:
+        if new_mod is not mod:
             reassign[name] = new_mod
     for name, mod in reassign.items():
         setattr(module, name, mod)
@@ -239,7 +239,7 @@ def quantize_linear_modules(module):
         if mod is module:
             continue
         new_mod = quantize_linear_modules(mod)
-        if new_mod != mod:
+        if new_mod is not mod:
             reassign[name] = new_mod
 
     for name, mod in reassign.items():
