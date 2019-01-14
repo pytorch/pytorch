@@ -132,6 +132,7 @@ class TensorRTOpTest(TestCase):
         with core.DeviceScope(device_option):
             ws.FeedBlob(op_inputs[data_input_index], data)
             if opset_version >= 5:
+                # Some newer models from ONNX Zoo come with pre-set "data_0" input
                 ws.FeedBlob("data_0", data)
             ws.RunOperatorsOnce([op])
             output_values = [ws.FetchBlob(name) for name in op_outputs]
