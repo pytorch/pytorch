@@ -32,7 +32,7 @@ namespace native{
 
 Tensor cartesian_prod(TensorList tensors) {
   for(const Tensor &t : tensors) {
-    AT_CHECK(t.dim() == 1, "Expect a 1D vector, but got shape ", t);
+    AT_CHECK(t.dim() == 1, "Expect a 1D vector, but got shape ", t.sizes());
   }
   if (tensors.size() == 1) {
     return tensors[0];
@@ -45,7 +45,7 @@ Tensor cartesian_prod(TensorList tensors) {
 }
 
 Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
-  AT_CHECK(self.dim() == 1, "Expect a 1D vector, but got shape ", self);
+  AT_CHECK(self.dim() == 1, "Expect a 1D vector, but got shape ", self.sizes());
   AT_CHECK(r > 0, "Expect a positive number, but got ", r);
   int64_t num_elements = self.numel();
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self));
