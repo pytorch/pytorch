@@ -13,11 +13,11 @@ else
     num_gpus=0
 fi
 
-cmd="$PYTHON $CAFFE2_PYPATH/python/examples/resnet50_trainer.py --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2"
 if (( $num_gpus == 0 )); then
-    cmd="$cmd --use_cpu"
+    "$PYTHON" "$CAFFE2_PYPATH/python/examples/resnet50_trainer.py" --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2 --use_cpu
 else
-    cmd="$cmd --num_gpus 1"
+    "$PYTHON" "$CAFFE2_PYPATH/python/examples/resnet50_trainer.py" --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2 --num_gpus 1
+    if (( $num_gpus >= 2 )); then
+        "$PYTHON" "$CAFFE2_PYPATH/python/examples/resnet50_trainer.py" --train_data null --batch_size 128 --epoch_size 12800 --num_epochs 2 --num_gpus 2
+    fi
 fi
-
-eval "$cmd"
