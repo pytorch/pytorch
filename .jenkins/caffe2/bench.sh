@@ -20,4 +20,7 @@ else
     if (( $num_gpus >= 2 )); then
         "$PYTHON" "$CAFFE2_PYPATH/python/examples/resnet50_trainer.py" --train_data null --batch_size 128 --epoch_size 12800 --num_epochs 2 --num_gpus 2
     fi
+    if (( $num_gpus >= 4 )); then
+        "$PYTHON" "$CAFFE2_PYPATH/python/examples/resnet50_trainer.py" --train_data null --batch_size 256 --epoch_size 25600 --num_epochs 2 --num_gpus 4
+    fi
 fi
