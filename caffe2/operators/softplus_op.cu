@@ -23,9 +23,9 @@ SoftplusGradientKernel(const int N, const T* Y, const T* dY, T* dX) {
 template <>
 bool SoftplusOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   DCHECK_GT(X.size(), 0);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   SoftplusKernel<float>
       <<<CAFFE_GET_BLOCKS(X.size()),
          CAFFE_CUDA_NUM_THREADS,
@@ -39,10 +39,10 @@ template <>
 bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   DCHECK_GT(Y.size(), 0);
   DCHECK_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   SoftplusGradientKernel<float>
       <<<CAFFE_GET_BLOCKS(Y.size()),
          CAFFE_CUDA_NUM_THREADS,

@@ -4,7 +4,6 @@
 #include <ATen/ExpandUtils.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/config.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>

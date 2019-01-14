@@ -77,6 +77,25 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
+if WINDOWS:
+    @contextmanager
+    def TemporaryFileName():
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            yield f.name
+        finally:
+            os.unlink(f.name)
+else:
+    @contextmanager
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
+
+
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -282,18 +301,9 @@ class JitTestCase(TestCase):
         if not also_test_file:
             return imported
 
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            result = torch.jit.load(f.name, map_location=map_location)
-        finally:
-            os.unlink(f.name)
-
-        return result
+        with TemporaryFileName() as fname:
+            imported.save(fname)
+            return torch.jit.load(fname, map_location=map_location)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -554,8 +564,9 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.b0.is_cuda)
 
     def test_model_save_error(self):
-        with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-            torch.save(FooToPickle(), "will_fail")
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
+                torch.save(FooToPickle(), fname)
 
     def test_single_tuple_trace(self):
         x = torch.tensor(2.)
@@ -1766,6 +1777,31 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
 
+    def test_onnx_transpose_incomplete_tensor_type(self):
+        # Smoke test to get us into the state where we are attempting to export
+        # a transpose op, where the input is a TensorType rather than a
+        # CompleteTensorType. This would previously not work, since we would
+        # take the size of the input and use the length of its sizes as the
+        # number of dimensions in the permutation.
+        class Foo(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.contiguous().transpose(0, 1).sum()
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        tm = TraceMe()
+        tm = torch.jit.trace(tm, torch.rand(3, 4))
+        example_outputs = (tm(torch.rand(3, 4)),)
+        f = io.BytesIO()
+        torch.onnx._export(tm, (torch.rand(3, 4),), f, example_outputs=example_outputs)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_cuda_export_restore(self):
         class Sub(torch.jit.ScriptModule):
@@ -2641,6 +2677,13 @@ class TestBatched(TestCase):
         self.assertEqual(ys, ybs.examples())
 
 
+def execWrapper(code, glob, loc):
+    if PY2:
+        exec(code) in glob, loc
+    else:
+        exec(code, glob, loc)
+
+
 class TestScript(JitTestCase):
     @contextmanager
     def capture_stdout(self):
@@ -2895,6 +2938,25 @@ class TestScript(JitTestCase):
             return x.to(device="cuda").to(device=torch.device("cpu"))
 
         self.checkScript(to_device, (torch.ones(3, 4),))
+
+    def test_tensor_to_cpu(self):
+        def to_cpu(x):
+            return x.cpu()
+
+        x = torch.ones(3, 4)
+        script_fn = torch.jit.script(to_cpu)
+        self.assertEqual(to_cpu(x).device, script_fn(x).device)
+        self.checkScript(to_cpu, (x,))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_cuda(self):
+        def to_cuda(x):
+            return x.cuda()
+
+        x = torch.ones(3, 4)
+        script_fn = torch.jit.script(to_cuda)
+        self.assertEqual(to_cuda(x).device, script_fn(x).device)
+        self.checkScript(to_cuda, (x,))
 
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
@@ -4400,7 +4462,7 @@ a")
 
         def run_test(code):
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
 
             self.assertEqual(cu.func(), scope['func']())
@@ -4425,6 +4487,19 @@ a")
         else:
             self.checkScript(div_int_nofuture, (), optimize=True)
             self.checkScript(div_float_nofuture, (), optimize=True)
+
+    def test_floor_div(self):
+        @torch.jit.script
+        def foo(a, b):
+            # type: (int, int) -> int
+            return a // b
+        for i in range(-8, 8):
+            for j in range(-8, 8):
+                if j != 0:
+                    self.assertEqual(foo(i, j), i // j)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
+                        foo(i, j)
 
     def test_number_augassign(self):
         def func():
@@ -4459,7 +4534,7 @@ a")
 
             code = template.format(lhs=args[0], rhs=args[1], op=op)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
@@ -4593,7 +4668,7 @@ a")
         def test(op, args):
             code = template.format(lhs=args[0], rhs=args[1], op=op)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(
                 cu.func(),
@@ -4620,7 +4695,7 @@ a")
         def test(inp, typ, type_hint):
             code = template.format(typ=typ, type_hint=type_hint)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(
                 cu.func(inp),
@@ -9137,6 +9212,17 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_list_python_op(self):
+        def python_list_op(lst):
+            # type: (List[Tensor]) -> Tensor
+            return lst[0]
+
+        def fn(lst):
+            # type: (List[Tensor]) -> Tensor
+            return python_list_op(lst)
+
+        self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9331,7 +9417,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
@@ -9483,7 +9569,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             d_embed = 100
             d_proj = 300
             dp_ratio = 0.0  # For deterministic testing TODO: change by fixing seed in checkTrace?
-            d_hidden = 300
+            d_hidden = 30
             birnn = True
             d_out = 300
             fix_emb = True
@@ -9491,8 +9577,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             n_layers = 2
             n_cells = 4  # 2 * n_layers because birnn = True
 
-        premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
-        hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
+        premise = torch.LongTensor(48, 64).random_(0, 100).to(device)
+        hypothesis = torch.LongTensor(24, 64).random_(0, 100).to(device)
 
         if quantized:
             snli = SNLIClassifier(Config()).cpu()
@@ -9544,7 +9630,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return x
 
         net = Net(upscale_factor=4).to(device)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+        self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
     @skipIfRocm
@@ -10374,6 +10460,60 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_fuse_batch_norm(self):
+
+        class ResLike(torch.jit.ScriptModule):
+            def __init__(self, optimize=True):
+                super(ResLike, self).__init__(optimize)
+                self.bn = nn.BatchNorm2d(16)
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return y + torch.relu(self.bn(x))
+
+        model = ResLike().cuda()
+        model_noopt = ResLike(optimize=False).cuda()
+        model_noopt.load_state_dict(model.state_dict())
+        x = torch.randn(2, 16, 8, 8, device='cuda')
+        y = torch.randn(2, 16, 8, 8, device='cuda')
+        # FIXME: We need differentiation for CNNs for this optimization to trigger
+        with torch.no_grad():
+            out = model(x, y)
+            graph = model.graph_for(x, y)
+            rep = str(graph)
+
+            out_noopt = model_noopt(x, y)
+            rep_noopt = str(model_noopt.graph_for(x, y))
+            self.assertEqual(out, out_noopt, prec=3e-5)
+
+        # Check that batch_norm has really been decomposed
+        self.assertIn('aten::batch_norm_update_stats', rep)
+        self.assertNotIn('aten::batch_norm(', rep)
+        self.assertIn('aten::batch_norm(', rep_noopt)
+
+        # Make sure the fusion group is big, and contains aten::sqrt, which could
+        # originate only from decomposing batch_norm in this case
+        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+        self.assertEqual(len(fusion_groups), 1)
+        fused_graph = fusion_groups[0].g('Subgraph')
+        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_threshold(self):
+        def f(x):
+            return torch.threshold(x, 0, -10) + x + x + x
+
+        x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
+        scripted = torch.jit.script(f)
+
+        self.assertEqual(f(x), scripted(x))
+        self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
     @enable_cpu_fuser
@@ -10596,6 +10736,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_small_constant_cuda(self):
         def fn_test_small_constant(x, y):
             return (1e-8 * x + 5e-9 * y) * 1e8

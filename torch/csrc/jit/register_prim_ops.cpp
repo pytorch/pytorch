@@ -72,6 +72,20 @@ Operation listConstruct(int64_t num_inputs) {
   };
 }
 
+static int64_t floordiv(int64_t a, int64_t b) {
+  if (b == 0) {
+    throw std::runtime_error("division by 0");
+  }
+  if ((a > 0) == (b > 0)) {
+    // simple case, both have same sign
+    return a / b;
+  } else {
+    // in python division rounds down, it doesnt not truncate like in c++
+    auto r = lldiv(a,  b);
+    return (r.rem) ? r.quot - 1 : r.quot;
+  }
+}
+
 RegisterOperators reg({
     Operator(
         prim::FusionGroup,
@@ -297,6 +311,26 @@ RegisterOperators reg({
             at::Tensor a;
             pop(stack, a);
             push(stack, a.is_cuda());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::cpu(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cpu());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::cuda(Tensor(a) self) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.cuda());
             return 0;
           };
         }),
@@ -683,7 +717,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        "aten::_unwrap_optional(t? optional) -> t",
+        "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);
@@ -1182,12 +1216,9 @@ RegisterOperators reg2({
         float),
     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
 
-    // in c++ int division rounds to the integer closer to 0, in python floordiv
-    // rounds to lower integer
     DEFINE_GENERIC_OP(
         aten::floordiv,
-        static_cast<int64_t>(
-            std::floor(static_cast<double>(a) / static_cast<double>(b))),
+        floordiv(a, b),
         std::floor(a / b),
         int,
         float),

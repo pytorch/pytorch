@@ -24,7 +24,7 @@ void EliminateCommonSubexpression(
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto node = *it;
     if (node->hasSideEffects() || node->isNondeterministic() ||
-        aliasDb.hasWriters(node) || aliasDb.hasWildcard(node)) {
+        aliasDb.hasWriters(node)) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;
     }
