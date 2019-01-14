@@ -23,7 +23,6 @@ namespace native {
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(std_stub);
 DEFINE_DISPATCH(prod_stub);
-DEFINE_DISPATCH(norm_kernel);
 DEFINE_DISPATCH(mean_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
@@ -389,16 +388,7 @@ Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
     return result;
-  if (self.is_contiguous() && result.is_contiguous()) {
-    _dimreduce_setup(result, self, dim);
-    norm_kernel(kCPU, result, self, p, dim);
-    if (!keepdim) {
-      result.squeeze_(dim);
-    }
-    return result;
-  } else {
-    return at::legacy::th::_th_norm_out(result, self, p, dim, keepdim);
-  }
+  return at::legacy::th::_th_norm_out(result, self, p, dim, keepdim);
 }
 
 Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> pOpt, int64_t dim, bool keepdim) {
@@ -425,17 +415,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
     AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
              "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
     AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
-    if (self.is_cuda()) {
-      return at::legacy::th::_th_norm(self, p);
-    } else {
-      if (self.is_contiguous()) {
-        Tensor result = at::scalar_tensor(0, CPU(kFloat).options()).toType(self.type());
-        norm_kernel(kCPU, result, self, p, c10::nullopt);
-        return result;
-      } else {
-        return at::legacy::th::_th_norm(self, p);
-      }
-    }
+    return at::legacy::th::_th_norm(self, p);
   }
 }
 

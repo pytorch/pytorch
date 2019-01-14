@@ -68,8 +68,10 @@ class SpatialBNOp : public Operator<Context> {
     const T* scale_data = scale.template data<T>();
     const T* bias_data = bias.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    alpha_.Resize(C);
-    beta_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     if (is_test_) {
@@ -257,8 +259,8 @@ class SpatialBNOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
 
   INPUT_TAGS(
       INPUT,
@@ -347,9 +349,12 @@ class SpatialBNGradientOp : public Operator<Context> {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
       return true;
     }
-    alpha_.Resize(C);
-    beta_.Resize(C);
-    gamma_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &gamma_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     T* gamma_data = gamma_.template mutable_data<T>();
@@ -441,9 +446,9 @@ class SpatialBNGradientOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
-  Tensor gamma_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
+  Tensor gamma_;
 
   INPUT_TAGS(
       INPUT,

@@ -204,12 +204,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    const auto writers = aliasDb_.getWriters(node);
-    const auto hasWritersBefore =
-        std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
-          return writer->isBefore(node);
-        });
-    if (hasWritersBefore || aliasDb_.hasWildcard(node)) {
+    if (aliasDb_.hasWritersBefore(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
