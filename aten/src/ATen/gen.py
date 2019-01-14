@@ -459,6 +459,7 @@ def generate_outputs():
             fm = cuda_file_manager
         fm.write(fname, GENERATOR_DERIVED, env)
 
+
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
     # be used by function_wrapper.create_derived
@@ -523,6 +524,7 @@ def generate_outputs():
         update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
         raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
                            "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
+
 
 declare_outputs()
 if options.output_dependencies is not None:

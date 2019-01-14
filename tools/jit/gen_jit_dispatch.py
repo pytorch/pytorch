@@ -357,12 +357,23 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
+    ff = open('/tmp/asdf.w', 'w')
+    sss = 0
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl),
+            print("jit_decl")
+            print(decl)
+            sig, is_match = signature(decl)
+            if is_match:
+                ff.write(sig + "\n")
+            shards[x].append(OPERATOR.substitute(signature=sig,
                                                  op=emit_decl_variant(decl)))
+            sss += 1
+    print("sss")
+    print(sss)
+    ff.close()
 
     for i, shard in enumerate(shards):
         env = {
@@ -407,6 +418,8 @@ def is_kwarg_only(a):
 
 
 def signature(decl):
+   # if "raw_string" in decl and len(decl["raw_string"]) > 1:
+   #     return decl["raw_string"]
     def format_arg(arg):
         name = arg['name'] if not arg.get('output') else 'out'
         typ = jit_type_of(arg)
@@ -443,7 +456,13 @@ def signature(decl):
     else:
         ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    return 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    ret_val = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    match = False
+    if "raw_string" in decl and ret_val.strip() == decl["raw_string"].strip():
+        match = True
+#        print("match")
+#        print(decl)
+    return ret_val, match
 
 
 def main():
