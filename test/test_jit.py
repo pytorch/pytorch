@@ -4648,15 +4648,17 @@ a")
     def test_tensor_to(self):
         template = dedent('''
         def func(t):
+            cuda = "{cuda}"
             device = "{device}"
             non_blocking = {non_blocking}
             return {to_str}
         ''')
 
-        def s(t, to_str, non_blocking=None, device=None):
+        def s(t, to_str, non_blocking=None, device=None, cuda=None):
             device = device if device is not None else str(t.device)
             non_blocking = non_blocking if non_blocking is not None else False
-            code = template.format(to_str=to_str, device=device, non_blocking=non_blocking)
+            cuda = "cuda" if cuda is None else cuda
+            code = template.format(to_str=to_str, device=device, non_blocking=non_blocking, cuda=cuda)
             scope = {}
             cu = torch.jit.CompilationUnit(code)
             return cu.func(t)
@@ -4701,9 +4703,9 @@ a")
                 for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                     b = torch.tensor(5., device=cuda)
                     test_copy_behavior(b, non_blocking)
-                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device"))
+                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device", cuda=cuda))
                     self.assertEqual(a.device, s(b, "t.to('cpu', non_blocking=non_blocking).device"))
-                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device"))
+                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device", cuda=cuda))
                     self.assertIs(torch.int32, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking).dtype"))
                     self.assertEqual(a.device, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking).device"))
                     self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32).dtype"))
