@@ -31,7 +31,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto, mapping
+from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
