@@ -844,7 +844,7 @@
 - name: var(Tensor self, bool unbiased)
   self: var_backward(grad, self, unbiased)
 
-- name: var(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: var(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad, self, dim, unbiased, keepdim)
 
 - name: view(Tensor self, IntList size)

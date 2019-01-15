@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch._six import inf
+from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
 from itertools import product
@@ -26,6 +27,7 @@ __all__ = [
     'stft',
     'tensordot',
     'unique',
+    'cartesian_prod',
 ]
 
 
@@ -100,10 +102,8 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     sz = LU_data.size(-1)
 
     if unpack_data:
-        I_U = torch.ones(sz, sz, device=LU_data.device, dtype=torch.uint8).triu_().expand_as(LU_data)
-        zero = torch.tensor(0.).type_as(LU_data)
-        U = torch.where(I_U, LU_data, zero)
-        L = torch.where(I_U, zero, LU_data)
+        U = LU_data.triu()
+        L = LU_data.tril()
         L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
@@ -245,8 +245,8 @@ def isinf(tensor):
 
 def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
-expanding the :math:`i`th input over dimensions defined by other inputs.
+vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 
     Args:
@@ -373,23 +373,20 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-def isnan(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+isnan = _add_docstr(torch.isnan, r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
-    Arguments:
-        tensor (Tensor): A tensor to check
+Arguments:
+    tensor (Tensor): A tensor to check
 
-    Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
 
-    Example::
+Example::
 
-        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-        tensor([ 0,  1,  0], dtype=torch.uint8)
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
-    return tensor != tensor
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
+""")
 
 
 def unique(input, sorted=True, return_inverse=False, dim=None):
@@ -603,6 +600,37 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def cartesian_prod(*tensors):
+    """Do cartesian product of the given sequence of tensors. The behavior is similar to
+    python's `itertools.product`.
+
+    Arguments:
+        *tensors: any number of 1 dimensional tensors.
+
+    Returns:
+        Tensor: A tensor equivalent to converting all the input tensors into lists,
+            do `itertools.product` on these lists, and finally convert the resulting list
+            into tensor.
+
+    Example::
+
+        >>> a = [1, 2, 3]
+        >>> b = [4, 5]
+        >>> list(itertools.product(a, b))
+        [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
+        >>> tensor_a = torch.tensor(a)
+        >>> tensor_b = torch.tensor(b)
+        >>> torch.cartesian_prod(tensor_a, tensor_b)
+        tensor([[1, 4],
+                [1, 5],
+                [2, 4],
+                [2, 5],
+                [3, 4],
+                [3, 5]])
+    """
+    return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None):

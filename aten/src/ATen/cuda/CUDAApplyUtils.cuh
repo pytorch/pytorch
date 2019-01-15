@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <math.h>
 
@@ -198,8 +199,8 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
@@ -272,7 +273,7 @@ template <typename Op,
           int ADims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
                                       IndexType totalElements, const Op op) {
@@ -356,7 +357,7 @@ template <typename Op,
           int ADims, int BDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
@@ -465,7 +466,7 @@ template <typename Op,
           int ADims, int BDims, int CDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply3(detail::TensorInfo<scalar1, IndexType> a,
@@ -588,7 +589,7 @@ template <typename Op,
           int ADims, int BDims, int CDims, int DDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,

@@ -681,6 +681,9 @@
   device_guard: False
 
 - func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
+  dispatch:
+    CPU: empty_strided_cpu
+    CUDA: empty_strided_cuda
 
 - func: erf(Tensor self) -> Tensor
   variants: function, method
@@ -916,6 +919,10 @@
 
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
   variants: function, method
+
+- func: isnan(Tensor self) -> Tensor
+  variants: function
+  device_guard: false
 
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
@@ -1242,6 +1249,11 @@
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
+
+- func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, double momentum) -> (Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_update_stats_cpu
+    CUDA: batch_norm_update_stats_cuda
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
@@ -1796,10 +1808,10 @@
 - func: var(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
 
-- func: var(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: var(Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
   variants: function, method
 
-- func: var_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: var_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -2328,6 +2340,12 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
 
+- func: cartesian_prod(TensorList tensors) -> Tensor
+  variants: function
+
+- func: combinations(Tensor self, int64_t r=2, bool with_replacement=false) -> Tensor
+  variants: function
+
 - func: item(Tensor self) -> Scalar
   variants: method
 
@@ -2382,6 +2400,19 @@
 - func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
 
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+
+# Quantized RNN layers
+- func: quantized_lstm(Tensor input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+
+# Quantized RNN cells
+- func: quantized_lstm_cell(Tensor input, TensorList hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
+
+- func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+
+- func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+
+- func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
@@ -2554,9 +2585,15 @@
 
 - func: tril_(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: tril_cpu_
+    CUDA: tril_cuda_
 
 - func: triu_(Tensor self,  int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: triu_cpu_
+    CUDA: triu_cuda_
 
 - func: digamma_(Tensor self) -> Tensor
   variants: method
@@ -2657,11 +2694,17 @@
   variants: method, function
 
 - func: triu_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: triu_cpu_out
+    CUDA: triu_cuda_out
 
 - func: triu(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
 
 - func: tril_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: tril_cpu_out
+    CUDA: tril_cuda_out
 
 - func: tril(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
@@ -3436,15 +3479,27 @@
 
 - func: reflection_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_out_cpu
+    CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_cpu
+    CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_out_cpu
+    CUDA: reflection_pad2d_backward_out_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_cpu
+    CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn

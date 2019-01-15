@@ -339,12 +339,11 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dY = Input(2);
-    auto* dX = Output(0);
 
     // cuDNN pooling support only 2 and 3 spatial dimensions.
     CAFFE_ENFORCE(X.ndim() >= 4 && X.ndim() <= 5);
 
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<float>());
     int N = 0, C = 0, H = 0, W = 0, D = 0;
     int H_out = 0, W_out = 0, D_out = 0;
     switch (order_) {

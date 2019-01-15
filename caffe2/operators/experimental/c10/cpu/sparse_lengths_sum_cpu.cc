@@ -2,6 +2,7 @@
 #include "caffe2/operators/experimental/c10/schemas/sparse_lengths_sum.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::Tensor;
 
@@ -10,10 +11,15 @@ namespace {
 
 template <typename InputType, typename IndexType>
 void sparse_lengths_sum_op_cpu_impl(
-    const Tensor& dataInput,
-    const Tensor& indicesInput,
-    const Tensor& lengthsInput,
-    Tensor* output) {
+    const C10Tensor& dataInput_,
+    const C10Tensor& indicesInput_,
+    const C10Tensor& lengthsInput_,
+    const C10Tensor& output_) {
+  Tensor dataInput(dataInput_);
+  Tensor indicesInput(indicesInput_);
+  Tensor lengthsInput(lengthsInput_);
+  Tensor output(output_);
+
   using T = float;
   constexpr bool USE_MEAN = false;
   constexpr bool USE_POSITIONAL_WEIGHT = false;
@@ -27,8 +33,8 @@ void sparse_lengths_sum_op_cpu_impl(
 
   auto shape = dataInput.sizes().vec();
   shape[0] = M;
-  output->Resize(shape);
-  T* out_data = output->template mutable_data<T>();
+  output.Resize(shape);
+  T* out_data = output.template mutable_data<T>();
 
   const InputType* in_data = dataInput.template data<InputType>();
   const IndexType* indices = indicesInput.template data<IndexType>();

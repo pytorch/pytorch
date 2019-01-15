@@ -149,7 +149,7 @@ class CuDNNWrapper {
 
   using PerGPUCuDNNStates = std::array<
       std::array<SyncedCuDNNState, CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES>,
-      CAFFE2_COMPILE_TIME_MAX_GPUS>;
+      C10_COMPILE_TIME_MAX_GPUS>;
   static PerGPUCuDNNStates& cudnn_states();
 
   C10_DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
