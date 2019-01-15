@@ -823,6 +823,7 @@ if(USE_GLOO)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
     endif()
+    add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
 endif()
 
