@@ -1,4 +1,4 @@
-#include <c10/core/opschema/layer_norm.h>
+#include <ATen/core/opschema/layer_norm.h>
 #include "caffe2/core/operator_c10wrapper.h"
 
 namespace {

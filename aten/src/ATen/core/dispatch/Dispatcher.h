@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/DispatchTable.h>
+#include <ATen/core/dispatch/DispatchTable.h>
 
 namespace c10 {
 

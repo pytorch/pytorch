@@ -1,5 +1,5 @@
 #include "caffe2/core/context.h"
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"

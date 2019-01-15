@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/OpSchema.h>
+#include <ATen/core/dispatch/OpSchema.h>
 #include <c10/util/Array.h>
 
 using namespace c10;

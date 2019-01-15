@@ -1,7 +1,7 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <c10/core/opschema/layer_norm.h>
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/opschema/layer_norm.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 
 namespace caffe2 {
 
