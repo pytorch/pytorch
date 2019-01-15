@@ -32,12 +32,11 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   StorageOrder order_;
   int axis_;
 
-  Tensor losses_{Context::GetDeviceType()}; // Per example loss
-  Tensor rowmax_{Context::GetDeviceType()}; // per example row max
+  Tensor losses_; // Per example loss
+  Tensor rowmax_; // per example row max
   Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor sum_multiplier_{
-      Context::GetDeviceType()}; // Vector of ones for summing via dot prod
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor total_weight_ptr_;
   Tensor scratch_{Context::GetDeviceType()};
 };
 
@@ -65,7 +64,7 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
   int label_prob_mode_;
   Tensor sum_multiplier_{Context::GetDeviceType()};
   Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
   int axis_;

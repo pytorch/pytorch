@@ -9,7 +9,10 @@ namespace caffe2 {
 
 template <typename T>
 void StoreMatrixInMatrixMarketFormat(
-    int m, int n, const T *a, const std::string& matrix_name) {
+    int m,
+    int n,
+    const T* a,
+    const std::string& matrix_name) {
   using namespace std;
   static_assert(
       is_integral<T>::value,
@@ -25,7 +28,7 @@ void StoreMatrixInMatrixMarketFormat(
   if (dumped_matrix_names.find(name) == dumped_matrix_names.end()) {
     dumped_matrix_names.insert(name);
 
-    FILE *fp = fopen((name + ".mtx").c_str(), "w");
+    FILE* fp = fopen((name + ".mtx").c_str(), "w");
     if (!fp) {
       return;
     }

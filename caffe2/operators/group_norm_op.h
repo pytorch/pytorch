@@ -47,8 +47,8 @@ class GroupNormOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* Y = Output(OUTPUT);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     T* mu_data = nullptr;
     T* rsig_data = nullptr;
     if (OutputSize() == 3) {
@@ -218,12 +218,10 @@ class GroupNormGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* dX = Output(INPUT_GRAD);
-    auto* dgamma = Output(GAMMA_GRAD);
-    auto* dbeta = Output(BETA_GRAD);
-    dX->ResizeLike(X);
-    dgamma->ResizeLike(gamma);
-    dbeta->ResizeLike(beta);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    auto* dgamma = Output(GAMMA_GRAD, gamma.sizes(), at::dtype<T>());
+    auto* dbeta = Output(BETA_GRAD, beta.sizes(), at::dtype<T>());
     return RunOnDeviceImpl(
         N,
         G,

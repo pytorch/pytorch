@@ -18,7 +18,7 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct AdamOptions {
+struct TORCH_API AdamOptions {
   /* implicit */ AdamOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, beta1) = 0.9;
@@ -28,7 +28,7 @@ struct AdamOptions {
   TORCH_ARG(bool, amsgrad) = false;
 };
 
-class Adam : public Optimizer {
+class TORCH_API Adam : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
@@ -52,10 +52,10 @@ class Adam : public Optimizer {
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    TORCH_OPTIM_SERIALIZE(step_buffers);
-    TORCH_OPTIM_SERIALIZE(exp_average_buffers);
-    TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
-    TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
+    _TORCH_OPTIM_SERIALIZE(step_buffers);
+    _TORCH_OPTIM_SERIALIZE(exp_average_buffers);
+    _TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
+    _TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
   }
 };
 } // namespace optim

@@ -105,8 +105,8 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
         OutputSize() == size + 1,
-        "Expected " + caffe2::to_string(size + 1) + ", " +
-            " got: " + caffe2::to_string(size));
+        "Expected " + c10::to_string(size + 1) + ", " +
+            " got: " + c10::to_string(size));
     bool status = queue->blockingWrite(this->Outputs());
     Output(size)->Resize();
     math::Set<bool, Context>(
@@ -160,7 +160,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
               size,
               " total columns");
 
-          out->Extend(in.sizes()[0], kTensorGrowthPct, &context_);
+          out->Extend(in.sizes()[0], kTensorGrowthPct);
           auto* dst =
               (char*)out->raw_mutable_data() + oldSize * in.dtype().itemsize();
           context_.template CopyItems<Context, Context>(
@@ -244,8 +244,8 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
     bool status = queue->blockingRead(this->Outputs());
     if (table_idx_blob_ >= 0) {
-      auto* table_idx_blob_out = Output(table_idx_blob_);
-      table_idx_blob_out->Resize(1);
+      auto* table_idx_blob_out =
+          Output(table_idx_blob_, {1}, at::dtype<int32_t>());
       int32_t* data = table_idx_blob_out->template mutable_data<int32_t>();
       data[0] = idx;
     }

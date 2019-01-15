@@ -1,7 +1,7 @@
 #ifndef CAFFE2_OPERATORS_ACTIVATION_OPS_MIOPEN_H_
 #define CAFFE2_OPERATORS_ACTIVATION_OPS_MIOPEN_H_
 
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
@@ -45,7 +45,7 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -100,7 +100,7 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

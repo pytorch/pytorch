@@ -115,4 +115,55 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   });
 }
 
+void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
+  AT_ASSERT(ntensors() == 2 && num_outputs_ == 1);
+
+  auto shape = this->shape();
+  if (tensor(0).numel() == 0) {
+    return;
+  }
+  if (tensor(0).numel() == 1) {
+    loop(*this);
+  }
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region() || !parallelize) {
+    auto reduce_dims = num_reduce_dims();
+
+    auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
+
+    int64_t non_reduced_numel = 1;
+    for (int i = 0; i < non_reduced_shape.size(); ++i) {
+      non_reduced_numel *= non_reduced_shape[i];
+    }
+    DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
+    while (!dims.is_done()) {
+      TensorIterator reduced = *this;
+      reduced.select_all_keeping_dim(reduce_dims, dims.values);
+      loop(reduced);
+      dims.increment({1, 1});
+    }
+  }
+  else {
+    int dim = find_split_dim(*this);
+    int64_t cols = shape[dim];
+    at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
+      if (begin == end) {
+        return;
+      }
+
+      auto sub_iter = *this;
+
+      sub_iter.narrow(dim, begin, end - begin);
+      // On some broken setups, `#ifdef _OPENMP` is true,
+      // and `get_max_threads` returns > 1, but
+      // `#pragma omp parallel` is ignored.
+      // There is no API to check for this, so we need to explicitly
+      // stop trying to parallelize if we've already gotten here.
+      //
+      // (If we are on one of those broken setups, we will
+      //  only have one thread here, and end - begin == cols.)
+      sub_iter.foreach_reduced_elt(loop, false);
+    });
+  }
+}
+
 }  // namespace at

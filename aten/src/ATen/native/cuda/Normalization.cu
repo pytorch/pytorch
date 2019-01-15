@@ -1,4 +1,4 @@
-#include "ATen/native/cuda/Normalization.cuh"
+#include <ATen/native/cuda/Normalization.cuh>
 
 namespace at { namespace native {
 
@@ -20,6 +20,17 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
         return batch_norm_backward_cuda_template<scalar_t, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
       } else {
         return batch_norm_backward_cuda_template<scalar_t, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
+      }
+    });
+}
+
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
+        const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm_backward", [&] {
+      if (cuda::detail::canUse32BitIndexMath(self)) {
+        return batch_norm_update_stats_cuda_template<scalar_t, int32_t>(self, running_mean, running_var, momentum);
+      } else {
+        return batch_norm_update_stats_cuda_template<scalar_t, int64_t>(self, running_mean, running_var, momentum);
       }
     });
 }

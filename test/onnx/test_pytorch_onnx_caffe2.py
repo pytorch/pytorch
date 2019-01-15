@@ -150,7 +150,7 @@ class TestCaffe2Backend(unittest.TestCase):
             torch_out = (torch_out,)
 
         caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        for i, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
@@ -189,8 +189,22 @@ class TestCaffe2Backend(unittest.TestCase):
                                 use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
-        model = nn.Linear(1, 1)
-        input = torch.randn(1, 1, requires_grad=True)
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.many_fc = nn.Sequential(
+                    nn.Linear(4, 5, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(5, 6, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(6, 7, bias=True),
+                )
+
+            def forward(self, input):
+                return self.many_fc(input)
+
+        model = MyModel()
+        input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_lstm_cell(self):
@@ -982,6 +996,19 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_group_norm(self):
+        c = torch.randn(BATCH_SIZE, 6, 224)
+        model = nn.GroupNorm(3, 6)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    def test_rsub(self):
+        class RsubModel(torch.nn.Module):
+            def forward(self, x):
+                return 1 - x
+
+        x = torch.randn(1, 2)
+        self.run_model_test(RsubModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

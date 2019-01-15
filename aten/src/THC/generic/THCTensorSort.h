@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorSort.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorSort.h"
 #else
 
 /* Performs an in-place sort of (keys, values). Only works for slice sizes

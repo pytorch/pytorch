@@ -1,20 +1,22 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <c10/macros/Macros.h>
 
 // Kernel for fast unfold+copy
 // Borrowed from Theano
 // Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
 template <typename Dtype>
-__global__ void im3d2col_kernel(const int64_t n, const Dtype* data_im,
-                                const int64_t height, const int64_t width, const int64_t depth,
-                                const int64_t kernel_h, const int64_t kernel_w, const int64_t kernel_d,
-                                const int64_t pad_h, const int64_t pad_w, const int64_t pad_d,
-                                const int64_t stride_h, const int64_t stride_w, const int64_t stride_d,
-                                const int64_t height_col, const int64_t width_col, const int64_t depth_col,
-                                Dtype* data_col)
+__global__ void C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
+im3d2col_kernel(const int64_t n, const Dtype* data_im,
+                const int64_t height, const int64_t width, const int64_t depth,
+                const int64_t kernel_h, const int64_t kernel_w, const int64_t kernel_d,
+                const int64_t pad_h, const int64_t pad_w, const int64_t pad_d,
+                const int64_t stride_h, const int64_t stride_w, const int64_t stride_d,
+                const int64_t height_col, const int64_t width_col, const int64_t depth_col,
+                Dtype* data_col)
 {
   CUDA_KERNEL_LOOP(index, n)
   {
@@ -86,14 +88,15 @@ void im3d2col(cudaStream_t stream, const Dtype* data_im, const int64_t channels,
 }
 
 template <typename Dtype, typename Acctype>
-__global__ void col2im3d_kernel(const int64_t n, const Dtype* data_col,
-                                const int64_t height, const int64_t width, const int64_t depth,
-                                const int64_t channels,
-                                const int64_t patch_h, const int64_t patch_w, const int64_t patch_d,
-                                const int64_t pad_h, const int64_t pad_w, const int64_t pad_d,
-                                const int64_t stride_h, const int64_t stride_w, const int64_t stride_d,
-                                const int64_t height_col, const int64_t width_col, const int64_t depth_col,
-                                Dtype* data_im)
+__global__ void C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
+col2im3d_kernel(const int64_t n, const Dtype* data_col,
+                const int64_t height, const int64_t width, const int64_t depth,
+                const int64_t channels,
+                const int64_t patch_h, const int64_t patch_w, const int64_t patch_d,
+                const int64_t pad_h, const int64_t pad_w, const int64_t pad_d,
+                const int64_t stride_h, const int64_t stride_w, const int64_t stride_d,
+                const int64_t height_col, const int64_t width_col, const int64_t depth_col,
+                Dtype* data_im)
 {
   CUDA_KERNEL_LOOP(index, n)
   {
@@ -155,5 +158,5 @@ void col2im3d(cudaStream_t stream, const Dtype* data_col, const int64_t channels
   THCudaCheck(cudaGetLastError());
 }
 
-#include "generic/VolumetricConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

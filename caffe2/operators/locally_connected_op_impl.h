@@ -372,7 +372,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int image_ndim = X.dim() - 2;
   CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
 
@@ -419,7 +419,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -427,15 +427,16 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
     std::vector<int64_t> dbias_dims;
-    for (auto dim : output_image_dims) {
-      dbias_dims.push_back(dim);
-    }
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
@@ -462,7 +463,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
@@ -507,7 +508,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -515,13 +516,16 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
     std::vector<int64_t> dbias_dims;
-    std::copy(output_image_dims.cbegin(), output_image_dims.cend(), std::back_inserter(dbias_dims));
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(

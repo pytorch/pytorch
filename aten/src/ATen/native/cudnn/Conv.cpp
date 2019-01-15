@@ -75,13 +75,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 
 #else  // AT_CUDNN_ENABLED
 
-#include "THC/THC.h"
+#include <THC/THC.h>
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include "ATen/native/utils/ParamsHash.h"
+#include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
 

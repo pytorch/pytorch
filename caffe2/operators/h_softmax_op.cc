@@ -194,14 +194,12 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(3);
   auto& intermediate_output = Input(4);
   auto& dY = Input(5);
-  auto* dX = Output(0);
-  auto* dW = Output(1);
-  auto* db = Output(2);
-  auto* dX_intermediate_output = Output(3);
-  dX->ResizeLike(X);
-  dW->ResizeLike(W);
-  db->ResizeLike(b);
-  dX_intermediate_output->ResizeLike(intermediate_output);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  auto* dW = Output(1, W.sizes(), at::dtype<float>());
+  auto* db = Output(2, b.sizes(), at::dtype<float>());
+  auto* dX_intermediate_output =
+      Output(3, intermediate_output.sizes(), at::dtype<float>());
 
   float* dX_data = dX->template mutable_data<float>();
   float* dW_data = dW->template mutable_data<float>();
@@ -324,7 +322,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::extractNodes(
     info.emplace_back(std::make_pair(n.name(), node.scores(i++)));
   }
   for (const int n : node.word_ids()) {
-    info.emplace_back(std::make_pair(caffe2::to_string(n), node.scores(i++)));
+    info.emplace_back(std::make_pair(c10::to_string(n), node.scores(i++)));
   }
 
   for (const auto& n : node.children()) {

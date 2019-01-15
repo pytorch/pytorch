@@ -1,23 +1,25 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep
-from hypothesis import given
-import hypothesis.strategies as st
 import collections
 
+import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core, dyndep, workspace
+from hypothesis import given
+
+
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
-    @given(N=st.integers(4, 64),
-           D=st.integers(4, 64),
-           forget_bias=st.integers(0, 4),
-           **hu.gcs_cpu_only)
+    @given(
+        N=st.integers(4, 64),
+        D=st.integers(4, 64),
+        forget_bias=st.integers(0, 4),
+        **hu.gcs_cpu_only
+    )
     def test_dnnlowp_lstm_unit(self, N, D, forget_bias, gc, dc):
 
         # X has scale 1, so exactly represented after quantization
@@ -31,43 +33,35 @@ class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
         Output = collections.namedtuple("Output", ["H_out", "C_out", "engine"])
         outputs = []
 
-        engine_list = ['', 'DNNLOWP']
+        engine_list = ["", "DNNLOWP"]
         for engine in engine_list:
             net = core.Net("test_net")
 
             if engine == "DNNLOWP":
                 quantize_H_in = core.CreateOperator(
-                    "Quantize",
-                    ["H_in"],
-                    ["H_in_q"],
-                    engine=engine,
-                    device_option=gc,
+                    "Quantize", ["H_in"], ["H_in_q"], engine=engine, device_option=gc
                 )
                 quantize_C_in = core.CreateOperator(
-                    "Quantize",
-                    ["C_in"],
-                    ["C_in_q"],
-                    engine=engine,
-                    device_option=gc,
+                    "Quantize", ["C_in"], ["C_in_q"], engine=engine, device_option=gc
                 )
                 quantize_G = core.CreateOperator(
-                    "Quantize",
-                    ["G"],
-                    ["G_q"],
-                    engine=engine,
-                    device_option=gc,
+                    "Quantize", ["G"], ["G_q"], engine=engine, device_option=gc
                 )
-                net.Proto().op.extend(
-                    [quantize_H_in, quantize_C_in, quantize_G])
+                net.Proto().op.extend([quantize_H_in, quantize_C_in, quantize_G])
 
             lstm = core.CreateOperator(
                 "LSTMUnit",
-                ["H_in_q" if engine == "DNNLOWP" else "H_in",
+                [
+                    "H_in_q" if engine == "DNNLOWP" else "H_in",
                     "C_in_q" if engine == "DNNLOWP" else "C_in",
                     "G_q" if engine == "DNNLOWP" else "G",
-                    "seq_lengths", "t"],
-                ["H_out_q" if engine == "DNNLOWP" else "H_out",
-                    "C_out_q" if engine == "DNNLOWP" else "C_out"],
+                    "seq_lengths",
+                    "t",
+                ],
+                [
+                    "H_out_q" if engine == "DNNLOWP" else "H_out",
+                    "C_out_q" if engine == "DNNLOWP" else "C_out",
+                ],
                 engine=engine,
                 device_option=gc,
                 axis=0,
@@ -94,14 +88,16 @@ class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
             self.ws.create_blob("H_in").feed(H_in, device_option=gc)
             self.ws.create_blob("C_in").feed(C_in, device_option=gc)
             self.ws.create_blob("G").feed(G, device_option=gc)
-            self.ws.create_blob("seq_lengths").feed(
-                seq_lengths, device_option=gc)
+            self.ws.create_blob("seq_lengths").feed(seq_lengths, device_option=gc)
             self.ws.create_blob("t").feed(t, device_option=gc)
             self.ws.run(net)
-            outputs.append(Output(
-                H_out=self.ws.blobs["H_out"].fetch(),
-                C_out=self.ws.blobs["C_out"].fetch(),
-                engine=engine))
+            outputs.append(
+                Output(
+                    H_out=self.ws.blobs["H_out"].fetch(),
+                    C_out=self.ws.blobs["C_out"].fetch(),
+                    engine=engine,
+                )
+            )
 
         for o in outputs:
             np.testing.assert_allclose(o.C_out, outputs[0].C_out, atol=0.1, rtol=0.2)

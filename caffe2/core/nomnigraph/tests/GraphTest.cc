@@ -176,3 +176,44 @@ TEST(Basic, MoveSubgraph) {
   EXPECT_EQ(g.getMutableEdges().size(), 0);
   EXPECT_EQ(g2.getMutableEdges().size(), 1);
 }
+
+TEST(Basic, DotGenerator) {
+  TestGraph g;
+  auto n1 = createTestNode(g);
+  auto n2 = createTestNode(g);
+  auto n3 = createTestNode(g);
+  auto e12 = g.createEdge(n1, n2);
+  g.createEdge(n1, n3);
+
+  std::string dot = nom::converters::convertToDotString(&g, TestNodePrinter);
+
+  // sanity check
+  std::string prefix = "digraph G";
+  // Full string comparison of the output is not stable because the dot
+  // string includes node pointer address as node id. We should switch to
+  // comparing full output once dot generator no longer uses addresses.
+  EXPECT_TRUE(dot.compare(0, prefix.length(), prefix) == 0);
+
+  TestGraph::SubgraphType sg;
+  sg.addNode(n1);
+  sg.addNode(n2);
+  sg.addEdge(e12);
+
+  // Convert to dot with subgraph clusters.
+  dot = nom::converters::convertToDotString<TestGraph>(
+      &g, {&sg}, TestNodePrinter);
+
+  // sanity check
+  EXPECT_TRUE(dot.compare(0, prefix.length(), prefix) == 0);
+
+  // Convert a single subgraph to dot.
+  dot = nom::converters::convertToDotString<TestGraph>(sg, TestNodePrinter);
+
+  // sanity check
+  EXPECT_TRUE(dot.compare(0, prefix.length(), prefix) == 0);
+
+  dot =
+      nom::converters::convertToDotRecordString<TestGraph>(&g, TestNodePrinter);
+  // sanity check
+  EXPECT_TRUE(dot.compare(0, prefix.length(), prefix) == 0);
+}

@@ -117,9 +117,13 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   gain_.Resize(N);
   auto* gain_data = gain_.template mutable_data<float>();
   EigenVectorArrayMap<float> gain_vec(gain_data, gain_.numel());
-  // Gain vector = 2^rel = exp{rel * log(2)}
-  gain_vec = (r_vec * log2f_).exp();
 
+  if (use_ndcg_as_loss_ && !use_exp_gain_) {
+    gain_vec = r_vec;
+  } else {
+    // Gain vector = 2^rel = exp{rel * log(2)}
+    gain_vec = (r_vec * log2f_).exp();
+  }
   ResizeInvLogITensor(N);
   ComputeDiscounts(ideal_idx_data, N);
   auto* ideal_discount_data = discount_.template mutable_data<float>();

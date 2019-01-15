@@ -1,9 +1,9 @@
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/cuda/comm.h"
-#include "torch/csrc/cuda/Stream.h"
-#include "torch/csrc/cuda/THCP.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/cuda/comm.h>
+#include <torch/csrc/cuda/Stream.h>
+#include <torch/csrc/cuda/THCP.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
 

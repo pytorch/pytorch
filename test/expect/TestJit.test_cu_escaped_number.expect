@@ -1,0 +1,4 @@
+def graph(self,
+    a: Tensor) -> None:
+  print("hi\016")
+  return None

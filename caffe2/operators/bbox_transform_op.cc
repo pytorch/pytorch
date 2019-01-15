@@ -91,7 +91,6 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   const auto& roi_in = Input(0);
   const auto& delta_in = Input(1);
   const auto& iminfo_in = Input(2);
-  auto* box_out = Output(0);
 
   const int box_dim = rotated_ ? 5 : 4;
   const int N = roi_in.dim32(0);
@@ -132,7 +131,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   Eigen::Map<const ERArrXXf> iminfo(
       iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
-  box_out->ResizeLike(delta_in);
+  auto* box_out = Output(0, delta_in.sizes(), at::dtype<float>());
   Eigen::Map<ERArrXXf> new_boxes(
       box_out->template mutable_data<float>(),
       box_out->dim32(0),

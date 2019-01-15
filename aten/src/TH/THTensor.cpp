@@ -1,12 +1,12 @@
-#include "THTensor.hpp"
+#include <TH/THTensor.hpp>
 
-#include "generic/THTensor.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THTensor.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateHalfType.h>
 
-#include "ATen/native/Resize.h"
+#include <ATen/native/Resize.h>
 
 #include <numeric>
 
@@ -157,5 +157,5 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
+  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

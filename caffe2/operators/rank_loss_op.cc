@@ -88,13 +88,13 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
   auto& dY = Input(DYVALUE);
-  auto* dX = Output(DXVALUE);
+
   int N = X.dim() > 0 ? X.dim32(0) : 0;
   CAFFE_ENFORCE_EQ(N, X.numel());
   CAFFE_ENFORCE(
       (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  dX->ResizeLike(X);
+  auto* dX = Output(DXVALUE, X.sizes(), at::dtype<T>());
   math::Set<T, CPUContext>(
       dX->numel(), 0.f, dX->template mutable_data<T>(), &context_);
 

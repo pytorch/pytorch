@@ -25,7 +25,7 @@ using ElementwiseLinearFp32Op = ElementwiseLinearOp<float, CPUContext>;
 
 template <typename T>
 class ElementwiseLinearDNNLowPOp final
-  : public DNNLowPOp<T, ElementwiseLinearFp32Op> {
+    : public DNNLowPOp<T, ElementwiseLinearFp32Op> {
  public:
   ElementwiseLinearDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;

@@ -1,7 +1,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 
-#if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && C10_MOBILE
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
@@ -2302,8 +2302,8 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
       int csz = im_i_boxes.rows();
       int cur_start_idx = out_rois->dim(0);
 
-      out_rois->Extend(csz, 50, &context_);
-      out_rois_probs->Extend(csz, 50, &context_);
+      out_rois->Extend(csz, 50);
+      out_rois_probs->Extend(csz, 50);
 
       // write rois
       Eigen::Map<ERArrXXf> cur_rois(

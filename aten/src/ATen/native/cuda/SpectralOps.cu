@@ -1,12 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/cuda/CuFFTPlanCache.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -225,7 +225,7 @@ static inline Tensor _run_cufft(
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 #else

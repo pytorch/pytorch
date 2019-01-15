@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/AccumulateType.h"
+#include <ATen/AccumulateType.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>

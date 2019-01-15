@@ -41,7 +41,7 @@ class TransposeOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -50,11 +50,11 @@ class TransposeOp final : public Operator<Context> {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int> Y_dims(ndim);
+    std::vector<int64_t> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes_[i]];
     }
-    Y->Resize(Y_dims);
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
     math::Transpose<T, Context>(
         X_dims.size(),
         X_dims.data(),

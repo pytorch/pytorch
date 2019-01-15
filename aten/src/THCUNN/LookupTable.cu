@@ -1,11 +1,11 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCThrustAllocator.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/unique.h>
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
-#include "../THC/THCTensorMathReduce.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 #ifdef __HIP_PLATFORM_HCC__
 const int WARP_SIZE = 64;
@@ -235,5 +235,5 @@ void calculate_norms_and_renorm(DType *weights,
 
 }
 
-#include "generic/LookupTable.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTable.cu>
+#include <THC/THCGenerateFloatTypes.h>

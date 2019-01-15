@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/ExpandUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/ExpandUtils.h>
 #include <limits>
 
 namespace at { namespace native {
@@ -41,6 +41,28 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+/* Checks a necessary property for the triu and tril implementations, hence the name.
+ * Here batch contiguity is checked for tensors with greater than 4 dimensions.
+ * Contiguous tensors and tensors with less than 3 dimensions pass this check
+ */ 
+static inline bool checkTrilTriuBatchContiguous(const Tensor& tensor) {
+  // Complete contiguity is the most desired property, which is why
+  // we return true if the tensor is contiguous
+  if (tensor.is_contiguous()) return true;
+
+  int64_t dims = tensor.dim();
+
+  // Tensors with dimension less than 4 are handled by default
+  if (dims <= 3) return true;
+
+  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
+  for (int64_t i = dims - 3; i >= 0; i--) {
+    if (expected_stride != tensor.stride(i)) return false;
+    expected_stride *= tensor.size(i);
+  }
+  return true;
+}
+
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
   switch (sc_type) {
@@ -53,7 +75,7 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (gesv, potrs)
+// Validates input shapes for linear solve methods (gesv, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
@@ -65,8 +87,8 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
            " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for inverse
-static inline void inverseCheckInputs(const Tensor& self) {
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky)
+static inline void squareCheckInputs(const Tensor& self) {
   AT_CHECK(self.size(-1) == self.size(-2),
            "A must be batches of square matrices, "
            "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
@@ -85,6 +107,18 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
     }
+  }
+}
+
+/*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name) {
+  if (info < 0) {
+    AT_ERROR(name, ": Argument ", -info, " has illegal value");
+  } else if (info > 0) {
+    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
   }
 }
 
