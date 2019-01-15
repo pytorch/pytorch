@@ -21,7 +21,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
-DEFINE_DISPATCH(std_stub);
+DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
 DEFINE_DISPATCH(mean_stub);
 
@@ -462,6 +462,20 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
+static Tensor &std_var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim, bool take_sqrt) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(NAN);
+  } else {
+    std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
+  }
+  return result;
+}
+
 Tensor var(const Tensor& self, bool unbiased) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
@@ -470,21 +484,13 @@ Tensor var(const Tensor& self, bool unbiased) {
   return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_var(self, unbiased);
 }
 
-Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor var(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &var_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {
-    return result;
-  } else {
-    return at::legacy::th::_th_var_out(result, self, dim, unbiased, keepdim);
-  }
+Tensor &var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
+  return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
@@ -501,17 +507,7 @@ Tensor std(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
 }
 
 Tensor &std_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
-  ScalarType dtype = get_dtype(result, self, {}, true);
-  auto iter = make_reduction("std", result, self, dim, keepdim, dtype);
-  if (iter->numel() == 0) {
-    result.fill_(NAN);
-  } else {
-    std_stub(iter->device_type(), *iter, unbiased);
-  }
-  return result;
+  return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 
 }} // namespace at::native

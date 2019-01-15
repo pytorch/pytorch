@@ -67,7 +67,7 @@ void TCPStoreDaemon::run() {
       fds[i].revents = 0;
     }
 
-    SYSCHECK(::poll(fds.data(), fds.size(), -1));
+    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
 
     // TCPStore's listening socket has an event and it should now be able to
     // accept new connections.
@@ -351,7 +351,7 @@ void TCPStore::wait(
   if (timeout != kNoTimeout) {
     struct timeval timeoutTV = {.tv_sec = timeout.count() / 1000,
                                 .tv_usec = (timeout.count() % 1000) * 1000};
-    SYSCHECK(::setsockopt(
+    SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
         storeSocket_,
         SOL_SOCKET,
         SO_RCVTIMEO,
