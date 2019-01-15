@@ -1,13 +1,13 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/KernelUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -236,8 +236,6 @@ void fractional_max_pool2d_backward_out_cuda_template(
 
   int outputH = output_size[0];
   int outputW = output_size[1];
-  int poolSizeH = pool_size[0];
-  int poolSizeW = pool_size[1];
 
   AT_CHECK(outputH == gradOutput.size(dimh),
            "fractional_max_pool2d(): gradOutput height unexpected");

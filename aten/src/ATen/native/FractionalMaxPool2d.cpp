@@ -145,7 +145,7 @@ void fractional_max_pool2d_out_cpu_template(
 
   int ndims = input.ndimension();
   AT_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
-		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
+    "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
     ndims);
 
   if (ndims == 4) {
@@ -267,8 +267,6 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 
   int outputH = output_size[0];
   int outputW = output_size[1];
-  int poolSizeH = pool_size[0];
-  int poolSizeW = pool_size[1];
 
   int ndims = input.ndimension();
   if (ndims == 4) {
