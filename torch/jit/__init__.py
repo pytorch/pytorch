@@ -673,7 +673,15 @@ def _try_get_overloaded_fn(fn):
     if not hasattr(fn, '__func__') or not hasattr(fn, '__self__'):
         # Only allow overloads for bound methods
         return None
-    overloads = _overloaded_fns.get(fn.__func__)
+
+    if isinstance(fn.__func__, types.BuiltinFunctionType):
+        # Special handling for weak modules (stored as self -> fn_name -> overloads)
+        weak_overloads = _overloaded_fns.get(fn.__self__)
+        if weak_overloads is None:
+            return None
+        overloads = weak_overloads.get(fn.__name__)
+    else:
+        overloads = _overloaded_fns.get(fn.__func__)
     if overloads is None:
         return None
     return [getattr(fn.__self__, overload) for overload in overloads]
@@ -1211,7 +1219,12 @@ if _enabled:
                     continue
                 entry = _overloaded_fns.get(item.__func__)
                 if entry is not None:
-                    _overloaded_fns[getattr(self, item.__name__).__func__] = entry
+                    if self in _overloaded_fns:
+                        _overloaded_fns[self][item.__name__] = entry
+                    else:
+                        _overloaded_fns[self] = {
+                            item.__name__: entry
+                        }
                     del _overloaded_fns[item.__func__]
 
         def __getattr__(self, attr):
