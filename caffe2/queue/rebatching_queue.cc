@@ -21,7 +21,7 @@ void concat(
 
   for (int i = 0; i < numTensors; ++i) {
     SmartTensorPrinter::PrintTensor(inputZero.at(i));
-    outputDims[i] = inputZero.at(i).dims().vec();
+    outputDims[i] = inputZero.at(i).sizes().vec();
     outputDims[i].insert(outputDims[i].begin(), numRows);
   }
 
@@ -42,7 +42,7 @@ void concat(
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
       CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.dim());
       for (int k = 0; k < input.dim(); ++k) {
-        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
+        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].size(k));
       }
 
       // Skip empty tensors
