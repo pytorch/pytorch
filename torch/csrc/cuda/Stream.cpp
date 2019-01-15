@@ -163,13 +163,11 @@ void THCPStream_init(PyObject *module)
 {
   THCPStreamClass = (PyObject*)&THCPStreamType;
   if (PyType_Ready(&THCPStreamType) < 0) {
-    std::cout << "=== stream ready error\n";
     throw python_error();
   }
   Py_INCREF(&THCPStreamType);
   if (PyModule_AddObject(
       module, "_CudaStreamBase", (PyObject *)&THCPStreamType) < 0) {
-    std::cout << "=== stream add object error\n";
     throw python_error();
   }
 }

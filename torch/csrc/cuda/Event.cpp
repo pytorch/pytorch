@@ -156,7 +156,7 @@ PyTypeObject THCPEventType = {
   0,                                     /* tp_iternext */
   THCPEvent_methods,                     /* tp_methods */
   0,                                     /* tp_members */
-  THCPEvent_properties,                /* tp_getset */
+  THCPEvent_properties,                  /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -170,13 +170,11 @@ PyTypeObject THCPEventType = {
 void THCPEvent_init(PyObject *module) {
   THCPEventClass = (PyObject*)&THCPEventType;
   if (PyType_Ready(&THCPEventType) < 0) {
-    std::cout << "=== event ready error\n";
     throw python_error();
   }
   Py_INCREF(&THCPEventType);
   if (PyModule_AddObject(
       module, "_CudaEventBase", (PyObject *)&THCPEventType) < 0) {
-    std::cout << "=== stream add object error\n";
     throw python_error();
   }
 }
