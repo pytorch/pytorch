@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMath.cu"
 #else
 
+#include "ATen/cuda/CUDAContext.h"
+
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
@@ -334,7 +336,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     THCTensor_(resize1d)(state, self_, size);
     if (size > 0) {
       int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
       int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyFromDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
@@ -349,7 +351,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     if (size > 0) {
       int64_t stride0 = THCTensor_(stride)(state, self_, 0);
       int64_t stride1 = THCTensor_(stride)(state, self_, 1);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
       ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyToDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>

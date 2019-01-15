@@ -3,10 +3,6 @@
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 
-namespace at {
-class BaseContext;
-}
-
 namespace c10 {
 namespace core {
 namespace opschema {
@@ -29,15 +25,14 @@ struct LayerNorm final {
       const C10Tensor& output_stddev,
       int axis,
       float epsilon,
-      Cache* cache,
-      at::BaseContext* context);
+      Cache* cache);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 
   static constexpr size_t num_outputs() {return 3;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
-      {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache", "context"}};
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+      {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache"}};
 };
 
 } // namespace opschema

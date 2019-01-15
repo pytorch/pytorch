@@ -79,8 +79,8 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-  auto* dX = Output(0);
-  auto* dY = Output(1);
+  
+  
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = N > 0 ? X.size() / N : 0;
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
@@ -95,8 +95,8 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   }
   CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
   CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  auto* dY = Output(1, Y.sizes(), at::dtype<float>());
   math::Sub<float, CUDAContext>(
       X.size(),
       X.data<float>(),
@@ -211,8 +211,8 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-  auto* dX = Output(0);
-  auto* dY = Output(1);
+  
+  
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = N > 0 ? X.size() / N : 0;
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
@@ -227,8 +227,8 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   }
   CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
   CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  auto* dY = Output(1, Y.sizes(), at::dtype<float>());
 
   L1DistanceGradientKernel<<<
       CAFFE_GET_BLOCKS(N * D),
@@ -351,8 +351,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dCos = Input(DER_COS_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
+  
+  
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
@@ -361,8 +361,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   }
   CAFFE_ENFORCE(dCos.ndim() == 1);
   CAFFE_ENFORCE(dCos.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
 
   const auto* X_data = X.data<float>();
   const auto* Y_data = Y.data<float>();
@@ -498,8 +498,8 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
+  
+  
   int N, D;
   if (X.size() > 0) {
     N = X.ndim() > 0 ? X.dim32(0) : 1;
@@ -514,8 +514,8 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
   }
   CAFFE_ENFORCE(dDot.ndim() == 1);
   CAFFE_ENFORCE(dDot.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
   DotProductGradientKernel<<<
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,

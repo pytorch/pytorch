@@ -7,9 +7,11 @@ namespace caffe2 {
 
 class StringJoinOpTest : public testing::Test {
  public:
-  bool runOp(const Tensor& input) {
+  bool runOp(const TensorCPU& input) {
     auto* blob = ws_.CreateBlob("X");
-    BlobSetTensor(blob, input.Alias());
+    auto* tensor = BlobGetMutableTensor(blob, CPU);
+    tensor->ResizeLike(input);
+    tensor->ShareData(input);
 
     OperatorDef def;
     def.set_name("test");

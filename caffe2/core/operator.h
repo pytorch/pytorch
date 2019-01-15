@@ -223,12 +223,6 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return t;
   }
 
-  Tensor* OutputTensorAlias(int idx, const Tensor& src) {
-    return BlobSetTensor(OutputBlob(idx),
-                  src.Alias());
-  }
-
-
   template <typename T>
   inline T* Output(int idx, T* allocated) {
     outputs_.at(idx)->Reset(allocated);
@@ -794,8 +788,7 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize;              \
-  /* using override */ using OperatorBase::IsInputOutputAlias;      \
-  /* using override */ using OperatorBase::OutputTensorAlias
+  /* using override */ using OperatorBase::IsInputOutputAlias
 
 #define USE_OPERATOR_FUNCTIONS(context)                     \
   USE_OPERATOR_BASE_FUNCTIONS;                              \

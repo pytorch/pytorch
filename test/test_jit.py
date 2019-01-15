@@ -1777,6 +1777,31 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
 
+    def test_onnx_transpose_incomplete_tensor_type(self):
+        # Smoke test to get us into the state where we are attempting to export
+        # a transpose op, where the input is a TensorType rather than a
+        # CompleteTensorType. This would previously not work, since we would
+        # take the size of the input and use the length of its sizes as the
+        # number of dimensions in the permutation.
+        class Foo(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.contiguous().transpose(0, 1).sum()
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        tm = TraceMe()
+        tm = torch.jit.trace(tm, torch.rand(3, 4))
+        example_outputs = (tm(torch.rand(3, 4)),)
+        f = io.BytesIO()
+        torch.onnx._export(tm, (torch.rand(3, 4),), f, example_outputs=example_outputs)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_cuda_export_restore(self):
         class Sub(torch.jit.ScriptModule):
@@ -2651,11 +2676,13 @@ class TestBatched(TestCase):
                          w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch, idx_batch)
         self.assertEqual(ys, ybs.examples())
 
+
 def execWrapper(code, glob, loc):
     if PY2:
         exec(code) in glob, loc
     else:
         exec(code, glob, loc)
+
 
 class TestScript(JitTestCase):
     @contextmanager
@@ -2911,6 +2938,25 @@ class TestScript(JitTestCase):
             return x.to(device="cuda").to(device=torch.device("cpu"))
 
         self.checkScript(to_device, (torch.ones(3, 4),))
+
+    def test_tensor_to_cpu(self):
+        def to_cpu(x):
+            return x.cpu()
+
+        x = torch.ones(3, 4)
+        script_fn = torch.jit.script(to_cpu)
+        self.assertEqual(to_cpu(x).device, script_fn(x).device)
+        self.checkScript(to_cpu, (x,))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_cuda(self):
+        def to_cuda(x):
+            return x.cuda()
+
+        x = torch.ones(3, 4)
+        script_fn = torch.jit.script(to_cuda)
+        self.assertEqual(to_cuda(x).device, script_fn(x).device)
+        self.checkScript(to_cuda, (x,))
 
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
@@ -4597,6 +4643,73 @@ a")
                     self.assertEqual(t1, t2)
                 self.assertEqual(t1.dtype, t2.dtype)
                 self.assertEqual(t1.device, t2.device)
+
+    # adapted from test in test_torch
+    def test_tensor_to(self):
+        template = dedent('''
+        def func(t):
+            cuda = "{cuda}"
+            device = "{device}"
+            non_blocking = {non_blocking}
+            return {to_str}
+        ''')
+
+        def s(t, to_str, non_blocking=None, device=None, cuda=None):
+            device = device if device is not None else str(t.device)
+            non_blocking = non_blocking if non_blocking is not None else False
+            cuda = "cuda" if cuda is None else cuda
+            code = template.format(to_str=to_str, device=device, non_blocking=non_blocking, cuda=cuda)
+            scope = {}
+            cu = torch.jit.CompilationUnit(code)
+            return cu.func(t)
+
+        def test_copy_behavior(t, non_blocking=False):
+            self.assertIs(t, s(t, 't.to(t, non_blocking=non_blocking)', non_blocking))
+            self.assertIs(t, s(t, 't.to(t.dtype, non_blocking=non_blocking)', non_blocking))
+            self.assertIs(t, s(t, 't.to(torch.empty_like(t), non_blocking=non_blocking)', non_blocking))
+            self.assertIsNot(t, s(t, 't.to(t, non_blocking=non_blocking, copy=True)', non_blocking))
+            self.assertIsNot(t, s(t, 't.to(t.dtype, non_blocking=non_blocking, copy=True)', non_blocking))
+            self.assertIsNot(t, s(t, 't.to(torch.empty_like(t), non_blocking=non_blocking, copy=True)', non_blocking))
+
+            devices = [t.device]
+            if t.device.type == 'cuda':
+                if t.device.index == -1:
+                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                elif t.device.index == torch.cuda.current_device():
+                    devices.append('cuda')
+            for device in devices:
+                self.assertIs(t, s(t, 't.to(device, non_blocking=non_blocking)', non_blocking, device))
+                self.assertIs(t, s(t, 't.to(device, t.dtype, non_blocking=non_blocking)', non_blocking, device))
+                self.assertIsNot(t, s(t, 't.to(device, non_blocking=non_blocking, copy=True)', non_blocking, device))
+                self.assertIsNot(t, s(t, 't.to(device, t.dtype, non_blocking=non_blocking, copy=True)',
+                                      non_blocking, device))
+
+        t = torch.tensor(5)
+        test_copy_behavior(t)
+
+        self.assertEqual(t.device, s(t, "t.to('cpu')").device)
+        self.assertEqual(t.device, s(t, "t.to('cpu', dtype=torch.float32)").device)
+        self.assertIs(torch.float32, s(t, "t.to('cpu', dtype=torch.float32)").dtype)
+        self.assertEqual(t.device, s(t, "t.to(torch.float32)").device)
+        self.assertIs(torch.float32, s(t, "t.to(dtype=torch.float32)").dtype)
+        self.assertEqual(t.data_ptr(), s(t, "t.to('cpu')").data_ptr())
+        self.assertEqual(t.data_ptr(), s(t, "t.to(dtype=t.dtype, device=t.device, copy=False)").data_ptr())
+        self.assertEqual(t.data_ptr(), s(t, "t.to('cpu', copy=False)").data_ptr())
+        self.assertNotEqual(t.data_ptr(), s(t, "t.to('cpu', copy=True)").data_ptr())
+
+        a = torch.tensor(5)
+        if torch.cuda.is_available():
+            for non_blocking in [True, False]:
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = torch.tensor(5., device=cuda)
+                    test_copy_behavior(b, non_blocking)
+                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device", cuda=cuda))
+                    self.assertEqual(a.device, s(b, "t.to('cpu', non_blocking=non_blocking).device"))
+                    self.assertEqual(b.device, s(b, "t.to(cuda, non_blocking=non_blocking).device", cuda=cuda))
+                    self.assertIs(torch.int32, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking)").dtype)
+                    self.assertEqual(a.device, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking)").device)
+                    self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32)").dtype)
+                    self.assertEqual(b.device, s(b, "t.to(dtype=torch.int32)").device)
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
@@ -9371,7 +9484,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
@@ -9523,7 +9636,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             d_embed = 100
             d_proj = 300
             dp_ratio = 0.0  # For deterministic testing TODO: change by fixing seed in checkTrace?
-            d_hidden = 300
+            d_hidden = 30
             birnn = True
             d_out = 300
             fix_emb = True
@@ -9531,8 +9644,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             n_layers = 2
             n_cells = 4  # 2 * n_layers because birnn = True
 
-        premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
-        hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
+        premise = torch.LongTensor(48, 64).random_(0, 100).to(device)
+        hypothesis = torch.LongTensor(24, 64).random_(0, 100).to(device)
 
         if quantized:
             snli = SNLIClassifier(Config()).cpu()
@@ -9584,7 +9697,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return x
 
         net = Net(upscale_factor=4).to(device)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+        self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
     @skipIfRocm
@@ -10414,6 +10527,60 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_fuse_batch_norm(self):
+
+        class ResLike(torch.jit.ScriptModule):
+            def __init__(self, optimize=True):
+                super(ResLike, self).__init__(optimize)
+                self.bn = nn.BatchNorm2d(16)
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return y + torch.relu(self.bn(x))
+
+        model = ResLike().cuda()
+        model_noopt = ResLike(optimize=False).cuda()
+        model_noopt.load_state_dict(model.state_dict())
+        x = torch.randn(2, 16, 8, 8, device='cuda')
+        y = torch.randn(2, 16, 8, 8, device='cuda')
+        # FIXME: We need differentiation for CNNs for this optimization to trigger
+        with torch.no_grad():
+            out = model(x, y)
+            graph = model.graph_for(x, y)
+            rep = str(graph)
+
+            out_noopt = model_noopt(x, y)
+            rep_noopt = str(model_noopt.graph_for(x, y))
+            self.assertEqual(out, out_noopt, prec=3e-5)
+
+        # Check that batch_norm has really been decomposed
+        self.assertIn('aten::batch_norm_update_stats', rep)
+        self.assertNotIn('aten::batch_norm(', rep)
+        self.assertIn('aten::batch_norm(', rep_noopt)
+
+        # Make sure the fusion group is big, and contains aten::sqrt, which could
+        # originate only from decomposing batch_norm in this case
+        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+        self.assertEqual(len(fusion_groups), 1)
+        fused_graph = fusion_groups[0].g('Subgraph')
+        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_threshold(self):
+        def f(x):
+            return torch.threshold(x, 0, -10) + x + x + x
+
+        x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
+        scripted = torch.jit.script(f)
+
+        self.assertEqual(f(x), scripted(x))
+        self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
     @enable_cpu_fuser
@@ -10636,6 +10803,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_small_constant_cuda(self):
         def fn_test_small_constant(x, y):
             return (1e-8 * x + 5e-9 * y) * 1e8

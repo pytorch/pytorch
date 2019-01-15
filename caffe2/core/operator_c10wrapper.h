@@ -55,10 +55,6 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  static constexpr bool op_has_context_argument = std::is_same<
-      BaseContext*,
-      c10::guts::typelist::last_t<
-          typename Schema::signature::parameter_types>>::value;
   static constexpr bool op_has_state_argument =
       !std::is_same<void, State>::value;
 
@@ -71,7 +67,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   static constexpr size_t num_inputs() {
     return Schema::signature::num_args - num_outputs() - num_parameters() -
-        (op_has_context_argument ? 1 : 0) - (op_has_state_argument ? 1 : 0);
+        (op_has_state_argument ? 1 : 0);
   }
 
   static constexpr size_t num_parameters() {
@@ -112,46 +108,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... OutputIndex,
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && op_has_context_argument &&
-          op_has_state_argument && !use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        C10Tensor(Input(InputIndex))...,
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        state_.get(),
-        static_cast<BaseContext*>(&context_));
-  }
-
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && op_has_context_argument &&
-          !op_has_state_argument && !use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        C10Tensor(Input(InputIndex))...,
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        static_cast<BaseContext*>(&context_));
-  }
-
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && !op_has_context_argument &&
+      details::true_t<InputIndex...>::value &&
           op_has_state_argument && !use_array_input,
       void>
   RunOnDevice_(
@@ -170,7 +127,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... OutputIndex,
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && !op_has_context_argument &&
+      details::true_t<InputIndex...>::value &&
           !op_has_state_argument && !use_array_input,
       void>
   RunOnDevice_(
@@ -188,46 +145,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... OutputIndex,
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && op_has_context_argument &&
-          op_has_state_argument && use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<C10Tensor>(array_inputs_()),
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        state_.get(),
-        static_cast<BaseContext*>(&context_));
-  }
-
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && op_has_context_argument &&
-          !op_has_state_argument && use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<C10Tensor>(array_inputs_()),
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        static_cast<BaseContext*>(&context_));
-  }
-
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && !op_has_context_argument &&
+      details::true_t<InputIndex...>::value &&
           op_has_state_argument && use_array_input,
       void>
   RunOnDevice_(
@@ -246,7 +164,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... OutputIndex,
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value && !op_has_context_argument &&
+      details::true_t<InputIndex...>::value &&
           !op_has_state_argument && use_array_input,
       void>
   RunOnDevice_(

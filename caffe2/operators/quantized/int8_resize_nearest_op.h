@@ -33,7 +33,7 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const int OW = IW * width_scale_;
     const int OH = IH * height_scale_;
 
-    Y->t.Resize(N, OH, OW, C);
+    ReinitializeTensor(&Y->t, {N, OH, OW, C}, at::dtype<uint8_t>().device(CPU));
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
 
