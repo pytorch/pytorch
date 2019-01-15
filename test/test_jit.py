@@ -4152,6 +4152,14 @@ a")
                 print(x + y)
 
         @torch.jit.script
+        def test_not(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if not (x is not None and y is not None):
+                pass
+            else:
+                print(x + y)
+
+        @torch.jit.script
         def test_bool_expression(x):
             # type: (Optional[int]) -> None
             if x is not None and x < 2:
