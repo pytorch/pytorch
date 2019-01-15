@@ -664,7 +664,7 @@ inline Tensor & Tensor::unsqueeze_(int64_t dim) {
 inline Tensor Tensor::var(bool unbiased) const {
     return type().var(*this, unbiased);
 }
-inline Tensor Tensor::var(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::var(IntList dim, bool unbiased, bool keepdim) const {
     return type().var(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
