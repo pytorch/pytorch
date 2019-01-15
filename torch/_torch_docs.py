@@ -6267,3 +6267,17 @@ Example::
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
 """)
+
+add_docstr(torch.clone,
+           r"""
+clone(tensor) -> Tensor
+
+See :meth:`~Tensor.clone`
+""")
+
+add_docstr(torch.detach,
+           r"""
+detach(tensor) -> Tensor
+
+See :meth:`~Tensor.detach`
+""")

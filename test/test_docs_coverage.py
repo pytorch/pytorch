@@ -14,7 +14,9 @@ class TestTorchDocCoverage(unittest.TestCase):
     def test_torch(self):
         whitelist = [
             'all', 'any', 'as_strided', 'autograd', 'backends', 'clamp_max',
-            'clamp_min', 'complex128', 'complex32', 'complex64', 'cpp',
+            'clamp_min', 'complex128', 'complex32', 'complex64', 'cpp', 'cuda',
+            'default_generator', 'device', 'distributed', 'distributions',
+            'float', 'double',
         ]
         everything = set(whitelist)
         filename = os.path.join(path, 'torch.rst')
@@ -24,10 +26,7 @@ class TestTorchDocCoverage(unittest.TestCase):
                 l = l.strip()
                 name = r1.findall(l)
                 if name:
-                    name = name[0]
-                else:
-                    continue
-                everything.add(name)
+                    everything.add(name[0])
         for p in everything:
             self.assertIn(p, dir(torch))
         for p in dir(torch):

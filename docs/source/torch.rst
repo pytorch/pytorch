@@ -13,6 +13,8 @@ Tensors
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 .. autofunction:: set_flush_denormal
+.. autofunction:: clone
+.. autofunction:: detach
 
 .. _tensor-creation-ops:
 
