@@ -408,8 +408,7 @@ class TestMultiprocessing(TestCase):
     def test_event_handle_multi_gpu(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
-        with torch.cuda.device(d0):
-            e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+        e0 = torch.cuda.Event(device=d0, enable_timing=False, interprocess=True)
 
         with torch.cuda.device(d1):
             # create handle on different device from un-recorded event

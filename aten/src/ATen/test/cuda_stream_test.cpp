@@ -217,7 +217,7 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event;
 
-  ASSERT_FALSE(event.query());
+  ASSERT_TRUE(event.query());
 
   event.recordOnce(stream);
 
@@ -249,7 +249,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   event0 = std::move(event1);
 
-  ASSERT_EQ_CUDA(event0.device(), 1);
+  ASSERT_EQ_CUDA(event0.device(), at::Device(at::kCUDA, 1));
 
   event0.block(stream0);
 

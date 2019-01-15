@@ -103,48 +103,60 @@ class Stream(torch._C._CudaStreamBase):
 
 
 class Event(torch._C._CudaEventBase):
-    r"""Wrapper around CUDA event. Every event is associated with a device index, which
-    is the device where the event is lazily created when first recorded. However, if
-    constructed from a handle or ipc_handle() is called before it is ever recorded, the
-    device index will be the sames as the device of ``torch.cuda.current_stream()``.
+    r"""Wrapper around a CUDA event.
+
+    CUDA events are synchronization markers that can be used to monitor the
+    device's progress, to accurately measure timing, and to synchronize CUDA
+    streams.
+
+    The underlying CUDA events are lazily initialized when the event is first
+    recorded or exported to another process. After creation, only streams on the
+    same device may record the event. However, streams on any device can wait on
+    the event.
 
     Arguments:
+        device(torch.device or int, optional): a device on which to allocate
+            the event. If :attr:`device` is ``None`` (default) or a negative
+            integer, this will use the current device.
         enable_timing (bool, optional): indicates if the event should measure time
             (default: ``False``)
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
-        _handle (bytes-like object, optional): acquired by calling Event.ipc_handle()
-            from another Event object. If given and not ``None``, all flags will be
-            ignored, and a new event will be reconstructed from the given handle.
-            Both the original and the reconstructed events must not be deconstructed
-            when calling methods (e.g., query(), synchronize()) on either event.
+
+       .. _CUDA documentation:
+       https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
     """
 
-    def __new__(cls, enable_timing=False, blocking=False, interprocess=False,
+    def __new__(cls, device=None,
+                enable_timing=False, blocking=False, interprocess=False,
                 **kwargs):
-        return super(Event, cls).__new__(
-            cls, enable_timing=enable_timing, blocking=blocking,
-            interprocess=interprocess, **kwargs)
+        with torch.cuda.device(device):
+            return super(Event, cls).__new__(
+                cls, device=torch.cuda.current_device(),
+                enable_timing=enable_timing, blocking=blocking,
+                interprocess=interprocess, **kwargs)
 
     def record(self, stream=None):
-        r"""Records the event in a given stream. Use
-        ``torch.cuda.current_stream()`` if not given. The stream's device must agree
-        with event's device."""
+        r"""Records the event in a given stream.
+
+        Uses ``torch.cuda.current_stream()`` if no stream is specified. The
+        stream's device must match the event's device."""
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).record(stream)
 
     def wait(self, stream=None):
-        r"""Makes a given stream wait for the event. Use
-        ``torch.cuda.current_stream()`` is not given."""
+        r"""Makes all future work submitted to the given stream wait for this
+        event.
+
+        Use ``torch.cuda.current_stream()`` if no stream is specified."""
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).wait(stream)
 
     def query(self):
-        r"""Checks if all work currently captured by event has completed. This
-        can be called on any device.
+        r"""Checks if all work currently captured by event has completed.
 
         Returns:
             A boolean indicating if all work currently captured by event has
@@ -154,16 +166,25 @@ class Event(torch._C._CudaEventBase):
 
     def elapsed_time(self, end_event):
         r"""Returns the time elapsed in milliseconds after the event was
-        recorded and before the end_event was recorded. The two events must be
-        on the same device.
+        recorded and before the end_event was recorded.
         """
         return super(Event, self).elapsed_time(end_event)
 
     def synchronize(self):
-        r"""Synchronizes with the event on the event's device."""
+        r"""Waits for the event to complete.
+
+        Waits until the completion of all work currently captured in this event.
+        This prevents the CPU thread from proceeding until the event completes.
+
+         .. note:: This is a wrapper around ``cudaEventSynchronize()``: see `CUDA
+           documentation`_ for more info.
+
+        .. _CUDA documentation:
+           https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
+        """
         super(Event, self).synchronize()
 
-    def ipc_handle(self):
+    def _ipc_handle(self):
         r"""Returns an IPC handle of this event. If not recorded yet, the event will
         use the device of ``torch.cuda.current_stream()`` as its own device."""
         return super(Event, self).ipc_handle()

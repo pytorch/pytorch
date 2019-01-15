@@ -21,27 +21,21 @@ namespace at { namespace cuda {
 * reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
 * device is acquired from the first recording stream. However, if constructed
 * from a handle or ipc_handle() is called before it is ever recorded, the device
-* will be acquired from current stream. Later streams that record to the event
-* must share this device, but streams on any device can query and wait on the
-* event.
+* should be explicitly specified. Later streams that record the event must share
+* this device。
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
   // Constructors
-  explicit CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
+  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
   : flags_{flags} { }
 
-  // Note: the original event and the reconstructed event now share recorded
-  // activities. Users need to make sure the last recording event (either
-  // original or reconstructed) must not be destructed when synchronize(),
-  // query(), wait(), or block() is called. Otherwise, the behavior will be
-  // undefined.
-  explicit CUDAEvent(const cudaIpcEventHandle_t* handle) {
+  CUDAEvent(DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
     #ifndef __HIP_PLATFORM_HCC__
-      device_index_ = getCurrentCUDAStream().device_index();
-      CUDAGuard guard(static_cast<int16_t>(device_index_));
+      device_index_ = device_index;
+      CUDAGuard guard(device_index_);
 
       AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
       is_created_ = true;
@@ -55,7 +49,7 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
-        CUDAGuard device_guard(static_cast<int16_t>(device_index_));
+        CUDAGuard guard(device_index_);
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -77,8 +71,16 @@ struct AT_CUDA_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
+  optional<at::Device> device() const {
+    if (is_created_) {
+      return at::Device(at::kCUDA, device_index_);
+    } else {
+      return {};
+    }
+  }
+
   bool isCreated() const { return is_created_; }
-  int64_t device() const { return device_index_; }
+  DeviceIndex device_index() const {return device_index_;}
   cudaEvent_t event() const { return event_; }
 
   // Note: cudaEventQuery can be safely called from any device
@@ -103,12 +105,12 @@ struct AT_CUDA_API CUDAEvent {
     if (!was_recorded_) record(stream);
   }
 
-  // Note: cudaEventRecord must be called on the same device as the stream.
+  // Note: cudaEventRecord must be called on the same device as the event.
   void record(const CUDAStream& stream) {
-    CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+    CUDAGuard guard(stream.device_index());
 
     if (is_created_) {
-      AT_ASSERT(device_index_ == stream.device_index());
+      AT_CHECK(device_index_ == stream.device_index());
     } else {
       createEvent(stream.device_index());
     }
@@ -117,11 +119,11 @@ struct AT_CUDA_API CUDAEvent {
     was_recorded_ = true;
   }
 
-  // Note: cudaStreamWaitEvent must be called on the same device as the stream.
+  // Note: cudaStreamWaitEvent must be called on the same device as the event.
   // The event has no actual GPU resources associated with it.
   void block(const CUDAStream& stream) const {
     if (is_created_) {
-      CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+      CUDAGuard guard(stream.device_index());
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
@@ -130,8 +132,6 @@ struct AT_CUDA_API CUDAEvent {
   float elapsed_time(const CUDAEvent& other) const {
     AT_CHECK(is_created_ && other.isCreated(),
       "Both events must be recorded before calculating elapsed time.");
-    AT_CHECK(device_index_ == other.device_index_, "When calculating elapsed "
-      "time, start and end events must share the same device index.")
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
@@ -145,7 +145,7 @@ struct AT_CUDA_API CUDAEvent {
     }
   }
 
-  // Note: cudaIpcGetEventHandle must be called on the same device as the stream
+  // Note: cudaIpcGetEventHandle must be called on the same device as the event
   void ipc_handle(cudaIpcEventHandle_t * handle) {
     #ifndef __HIP_PLATFORM_HCC__
       if (!is_created_) {
@@ -153,7 +153,7 @@ struct AT_CUDA_API CUDAEvent {
         // is not created yet.
         createEvent(getCurrentCUDAStream().device_index());
       }
-      CUDAGuard guard(static_cast<int16_t>(device_index_));
+      CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
     #else
       AT_ERROR("cuIpcGetEventHandle with HIP is not supported");
@@ -164,11 +164,11 @@ private:
   unsigned int flags_ = DEFAULT_FLAGS;
   bool is_created_ = false;
   bool was_recorded_ = false;
-  int64_t device_index_ = -1;
+  DeviceIndex device_index_ = -1;
   cudaEvent_t event_;
 
   void createEvent(const at::DeviceIndex deviceIndex) {
-    CUDAGuard guard(static_cast<int16_t>(deviceIndex));
+    CUDAGuard guard(deviceIndex);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
     is_created_ = true;
     device_index_ = deviceIndex;

@@ -1599,12 +1599,13 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e0 = torch.cuda.Event(enable_timing=True)
+            torch.cuda._sleep(10)  # spin for about 50 ms on device1
             s0.record_event(e0)
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
             e1 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            torch.cuda._sleep(30000000)  # spin for about 50 ms on device1
             s1.record_event(e1)
 
         e0.synchronize()
@@ -1620,7 +1621,7 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e2 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            torch.cuda._sleep(30000000)  # spin for about 50 ms on device1
             s0.record_event(e2)
             s0.synchronize()
 
