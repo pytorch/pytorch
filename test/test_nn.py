@@ -6766,18 +6766,8 @@ class TestNN(NNTestCase):
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
+    @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
     def test_nnpack_conv(self):
-        try:
-            torch._nnpack_spatial_convolution(torch.randn(1, 1, 5, 5, dtype=torch.float32),
-                                              torch.randn(1, 1, 3, 3, dtype=torch.float32),
-                                              padding=0,
-                                              bias=torch.randn(1, dtype=torch.float32))
-        except RuntimeError as e:
-            if 'ATen not compiled with NNPACK support' in str(e) or \
-               '(unsupported hardware)' in str(e):
-                raise unittest.SkipTest('NNPack not available')
-            else:
-                raise
         for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
             for batch, padding, chan_in, chan_out in \
                     product([1, 2], [0, 1, 2], [2], [3]):

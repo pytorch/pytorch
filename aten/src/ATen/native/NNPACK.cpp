@@ -44,6 +44,10 @@ _nnpack_spatial_convolution_backward(
       "_nnpack_spatial_convolution_backward: ATen not compiled with NNPACK support");
 }
 
+bool _nnpack_available() {
+  return false;
+}
+
 } // namespace native
 } // namespace at
 
@@ -93,7 +97,7 @@ pthreadpool_t nnpack_threadpool() {
   return nnpack_threadpool_;
 }
 
-bool nnpack_available() {
+bool _nnpack_available() {
   if (! called_nnpack_threadpool_) {
     try {
       return nnpack_threadpool() != nullptr;

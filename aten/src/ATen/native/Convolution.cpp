@@ -11,10 +11,6 @@ static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
 
-#if AT_NNPACK_ENABLED()
-bool nnpack_available(); // from NNPACK.cpp
-#endif
-
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
@@ -155,7 +151,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 }
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
-  return nnpack_available() &&
+  return at::_nnpack_available() &&
          input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_strided() && // doesn't support strides

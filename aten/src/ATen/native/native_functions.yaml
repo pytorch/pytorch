@@ -1252,8 +1252,8 @@
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
 
-# TODO: Why does kW come before kH?  Hella confusing, because it
-# doesn't match the input layout.
+- func: _nnpack_available() -> bool
+
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, IntList[2] padding) -> Tensor
   variants: function
 
