@@ -13,6 +13,7 @@ from operator import mul
 from collections import OrderedDict
 import hashlib
 import os
+import threading
 
 import torch
 from torch._six import inf, nan
@@ -3837,6 +3838,55 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
+    def test_cudnn_multiple_threads_same_device(self):
+        # This function is intended to test the lazy creation and reuse of per-thread
+        # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
+        # Failure here likely indicates something wrong with that logic.
+        weight = torch.ones((1, 1, 2, 2), device='cuda')
+
+        results = {}
+
+        num_threads = 2
+        trials = 2
+        test_iters = 100
+
+        with torch.backends.cudnn.flags(enabled=True):
+            def _worker(t, input):
+                my_stream = torch.cuda.Stream()
+                results[t] = input
+                with torch.cuda.stream(my_stream):
+                    for i in range(test_iters):
+                        # If all threads are sharing the same cudnn handle,
+                        # the following sequence may occur:
+                        # thread 0 calls setCuDNNStreamToCurrent()
+                        # thread 1 calls setCuDNNStreamToCurrent()
+                        # thread 0 launches its raw convolution, which it thinks is in
+                        #          its own stream, but is actually in thread 1's stream.
+                        # thread 0 enqueues its div_, which IS is its own stream,
+                        #          but now races with its convolution.
+                        results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
+                        results[t].div_(4.0)
+                torch.cuda.current_stream().wait_stream(my_stream)
+
+            for trial in range(trials):
+                for t in range(num_threads):
+                    results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
+
+                threads = [threading.Thread(target=_worker,
+                                            args=(t, results[t])) for t in range(num_threads)]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                for t in range(num_threads):
+                    self.assertEqual(results[t].sum().item(),
+                                     (2048 - test_iters) * (2048 - test_iters))
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
     @skipIfRocm
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
@@ -4530,6 +4580,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(len(w), 1)
                     self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
                     first_warn = False
+                    warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
                 grads_noncontig = [v.grad.data.clone() for v in all_vars]
                 for v in all_vars:
@@ -4927,6 +4978,28 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_RNN_cudnn_weight_norm(self):
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+        seq_length = 7
+        batch = 6
+        m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
+        input = torch.randn(seq_length, batch, input_size).cuda()
+        expected_output = m(input)
+        # add weight normalization
+        name = 'weight_hh_l0'
+        m = torch.nn.utils.weight_norm(m, name=name)
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
+        self.assertEqual(m(input), expected_output)
+
+        # remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m, name=name)
+        self.assertEqual(m(input), expected_output)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
@@ -6518,6 +6591,12 @@ class TestNN(NNTestCase):
         dummy_out = func(*inputs)
         grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
 
+        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
+        # to imprecision issues
+        if dtype == torch.float:
+            g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
+            return g.requires_grad
+
         return gradgradcheck(func, inputs, (grad_y,))
 
     def test_conv_double_backward(self):
@@ -6526,20 +6605,22 @@ class TestNN(NNTestCase):
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
                 for no_weight in (True, False):
-                    result = self.run_conv_double_back_test(kern, stride,
-                                                            padding, chan_in, chan_out,
-                                                            batch_size, inp_size, dilation,
-                                                            no_weight)
-                    self.assertTrue(result,
-                                    "Conv double backward test failed with parameters:" +
-                                    "\nkern: " + str(kern) +
-                                    "\nstride: " + str(stride) +
-                                    "\npadding: " + str(padding) +
-                                    "\nchan_in: " + str(chan_in) +
-                                    "\nchan_out: " + str(chan_out) +
-                                    "\nbatch_size: " + str(batch_size) +
-                                    "\ninp_size: " + str(inp_size) +
-                                    "\ndilation: " + str(dilation))
+                    for dtype in (torch.float, torch.double):
+                        result = self.run_conv_double_back_test(kern, stride,
+                                                                padding, chan_in, chan_out,
+                                                                batch_size, inp_size, dilation,
+                                                                no_weight, dtype=dtype)
+                        self.assertTrue(result,
+                                        "Conv double backward test failed with parameters:" +
+                                        "\nkern: " + str(kern) +
+                                        "\nstride: " + str(stride) +
+                                        "\npadding: " + str(padding) +
+                                        "\nchan_in: " + str(chan_in) +
+                                        "\nchan_out: " + str(chan_out) +
+                                        "\nbatch_size: " + str(batch_size) +
+                                        "\ninp_size: " + str(inp_size) +
+                                        "\ndilation: " + str(dilation) +
+                                        "\ndtype: " + str(dtype))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3

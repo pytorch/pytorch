@@ -239,16 +239,24 @@ void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  jit::Node* node = nullptr;
+  jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    // if you have no views of self, then an in place copy is equivalent to
-    // making sure we expand src to the same size as self
-    node = graph->create(jit::aten::expand_as, /*num_outputs=*/0);
-    jit::tracer::addInputs(node, "src", src);
-    jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
-    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
+    const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
+    auto& graph = state.graph;
+    if (state.force_outplace) {
+      // if you have no views of self, then an in place copy is equivalent to
+      // making sure we expand src to the same size as self
+      jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
+      jit::tracer::addInputs(node, "src", src);
+      jit::tracer::addInputs(node, "self", self);
+      graph->appendNode(node);
+      jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
+      output = node->output();
+    } else {
+      output = graph->insert(
+          jit::aten::copy_,
+          {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
+    }
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -270,7 +278,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
+    jit::tracer::setOutput(output, self);
   }
   return self;
 }

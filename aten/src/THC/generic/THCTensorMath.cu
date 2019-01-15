@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMath.cu"
 #else
 
+#include "ATen/cuda/CUDAContext.h"
+
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
@@ -280,12 +282,12 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   strided_range<Iter> strided_tensor(tensor_data,
                                      tensor_data+N*num_dim, num_dim);
 
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   cudaStream_t stream = THCState_getCurrentStream(state);
 #endif
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(stream),
 #endif
     idxfirst,
@@ -302,7 +304,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
     strided_range<Iter> stride_dim(tensor_data+dim,
                                    tensor_data+N*num_dim, num_dim);
     thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(stream),
 #endif
       strided_tensor.begin(),
@@ -334,7 +336,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     THCTensor_(resize1d)(state, self_, size);
     if (size > 0) {
       int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
       int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyFromDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
@@ -349,7 +351,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     if (size > 0) {
       int64_t stride0 = THCTensor_(stride)(state, self_, 0);
       int64_t stride1 = THCTensor_(stride)(state, self_, 1);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
       ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyToDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
@@ -389,28 +391,6 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   accreal trace = THCTensor_(sumall)(state, diag);
   THCTensor_(free)(state, diag);
   return trace;
-}
-
-void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-  double size_d = ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-              , 1, "invalid size, possible overflow?");
-  ptrdiff_t size = static_cast<ptrdiff_t>(size_d);
-
-  if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
-  THCTensor *r = THCTensor_(newContiguous)(state, r_);
-  LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
-  thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-  thrust::tabulate(data_, data_ + size, linspace_method);
-  THCTensor_(freeCopyTo)(state, r, r_);
-  THCudaCheck(cudaGetLastError());
 }
 
 #endif

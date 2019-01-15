@@ -13,18 +13,19 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   const int D = X.size_from_dim(canonical_axis);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
+  // ReinitializeTensor itself has the effect of caching, so there is no need to check for numel of Tensor
   // First, get scales
-  if (scale_.numel() != N) {
-    scale_.Resize(N);
-  }
-  if (rowmax_.numel() != N) {
-    rowmax_.Resize(N);
-  }
-  if (sum_multiplier_.numel() != D) {
-    sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
-  }
+  ReinitializeTensor(
+      &scale_, {N}, at::dtype<float>().device(CPU));
+
+  ReinitializeTensor(
+      &rowmax_, {N}, at::dtype<float>().device(CPU));
+
+  ReinitializeTensor(
+      &sum_multiplier_,
+      {D},
+      at::dtype<float>().device(CPU));
+  math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
 
   SoftmaxCPU(
       context_,
@@ -46,14 +47,18 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(1);
 
   const auto canonical_axis = Y.canonical_axis_index(axis_);
-  const int N = Y.size_to_dim(canonical_axis);
-  const int D = Y.size_from_dim(canonical_axis);
+  const int64_t N = Y.size_to_dim(canonical_axis);
+  const int64_t D = Y.size_from_dim(canonical_axis);
   // First, get scales
   if (scale_.numel() != N) {
-    scale_.Resize(N);
+    ReinitializeTensor(
+        &scale_, {N}, at::dtype<float>().device(CPU));
   }
   if (sum_multiplier_.numel() != D) {
-    sum_multiplier_.Resize(D);
+    ReinitializeTensor(
+        &sum_multiplier_,
+        {D},
+        at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }

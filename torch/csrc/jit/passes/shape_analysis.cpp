@@ -204,12 +204,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    const auto writers = aliasDb_.getWriters(node);
-    const auto hasWritersBefore =
-        std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
-          return writer->isBefore(node);
-        });
-    if (hasWritersBefore || aliasDb_.hasWildcard(node)) {
+    if (aliasDb_.hasWritersBefore(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
@@ -908,7 +903,6 @@ class ShapePropagator {
             "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::norm(Tensor self, Scalar? p, int dim, bool keepdim) -> Tensor",
-            "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
@@ -962,6 +956,7 @@ class ShapePropagator {
         {
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
+            "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {

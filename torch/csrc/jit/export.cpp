@@ -497,7 +497,7 @@ class ScriptModuleSerializer final {
       torch::ParameterDef* param_def);
 
   std::ofstream ofs_;
-  PyTorchStreamWriter writer_;
+  caffe2::serialize::PyTorchStreamWriter writer_;
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;

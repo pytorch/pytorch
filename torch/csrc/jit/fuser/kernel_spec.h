@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
@@ -55,6 +53,9 @@ struct TORCH_API PartitionInfo {
 // TODO: allow abstract kernels to use multiple generated kernels
 // TODO: allow abstract kernels to reuse generated kernels from common pool
 struct TORCH_API KernelSpec {
+  // Note: assumes the spec is a single block
+  // Note: This is the appropriate place to generalize if you want to add other
+  //  passes to upfront compilation that walk the graph.
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},
@@ -62,7 +63,15 @@ struct TORCH_API KernelSpec {
         nInputs_{_graph->inputs().size()},
         inputBroadcastGroups_{},
         inputChunks_{},
-        kernels_{} {}
+        has_random_{false},
+        kernels_{} {
+    for (const auto& n : graph_->nodes()) {
+      if (n->kind() == aten::rand_like) {
+        has_random_ = true;
+        break;
+      }
+    }
+  }
 
   // Getters
   int64_t key() const {
@@ -92,6 +101,10 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
+  bool hasRandom() const {
+    return has_random_;
+  }
+
   // Cache functions
   c10::optional<std::shared_ptr<FusedKernel>> findKernel(
       const ArgSpec& arg_spec) const {
@@ -114,6 +127,7 @@ struct TORCH_API KernelSpec {
   uint64_t nInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
+  bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
       unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, torch::hash<ArgSpec>>
@@ -123,5 +137,3 @@ struct TORCH_API KernelSpec {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER
