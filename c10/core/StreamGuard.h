@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/impl/InlineStreamGuard.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 namespace c10 {
 

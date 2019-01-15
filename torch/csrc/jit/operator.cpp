@@ -72,7 +72,8 @@ struct SchemaParser {
   TreeRef parseIdent() {
     return String::create(L.expect(TK_IDENT).text());
   }
-  TypePtr parseBaseType() {
+  using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
+  TypeAndAlias parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
         {"Generator", GeneratorType::get()},
         {"ScalarType", IntType::get()},
@@ -91,11 +92,11 @@ struct SchemaParser {
       if (text.size() > 0 && islower(text[0])) {
         // lower case identifiers that are not otherwise valid types
         // are treated as type variables
-        return VarType::create(text);
+        return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
       }
       throw ErrorReport(tok.range) << "unknown type specifier";
     }
-    return it->second;
+    return TypeAndAlias(it->second, c10::nullopt);
   }
   // Examples:
   // Tensor(a) // Tensor is in set a
@@ -160,7 +161,9 @@ struct SchemaParser {
       value = DynamicType::get();
       alias_info = parseAliasAnnotation();
     } else {
-      value = parseBaseType();
+      auto value_alias = parseBaseType();
+      value = value_alias.first;
+      alias_info = value_alias.second;
     }
     while (true) {
       if (L.cur().kind == '[' && L.lookahead().kind == ']') {

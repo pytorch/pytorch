@@ -1,4 +1,4 @@
-c10/impl provides headers for functionality that is only needed in very
+c10/core/impl provides headers for functionality that is only needed in very
 *specific* use-cases (e.g., you are defining a new device type), which are
 generally only needed by C10 or PyTorch code.  If you are an ordinary end-user,
 you **should not** use headers in this folder.  We permanently give NO

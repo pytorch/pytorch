@@ -1,3 +1,3 @@
-#include <c10/StreamGuard.h>
+#include <c10/core/StreamGuard.h>
 
 // At the moment, just make sure it compiles

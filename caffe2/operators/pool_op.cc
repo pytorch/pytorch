@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <string>
+#include <type_traits>
 
 #include "caffe2/operators/pool_op_util.h"
 #include "caffe2/utils/eigen_utils.h"
@@ -560,314 +561,206 @@ void RunMaxPool3D(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(T, kOrder) \
-  template <>                                                         \
-  template <>                                                         \
-  bool AveragePoolFunctor<CPUContext>::Forward<T, kOrder, 1>(         \
-      const int N,                                                    \
-      const int C,                                                    \
-      const std::array<int, 1>& X_dims,                               \
-      const std::array<int, 1>& Y_dims,                               \
-      const std::array<int, 1>& kernel,                               \
-      const std::array<int, 1>& /* dilation */,                       \
-      const std::array<int, 1>& stride,                               \
-      const std::array<int, 2>& pads,                                 \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* /* context */) const {                              \
-    RunAveragePool1D<T, kOrder>(                                      \
-        N,                                                            \
-        C,                                                            \
-        X_dims[0],                                                    \
-        Y_dims[0],                                                    \
-        kernel[0],                                                    \
-        stride[0],                                                    \
-        pads[0],                                                      \
-        count_include_pad,                                            \
-        X,                                                            \
-        Y);                                                           \
-    return true;                                                      \
+#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(T, kOrder)           \
+  template <>                                                                \
+  template <>                                                                \
+  bool AveragePoolFunctor<CPUContext>::Forward<T, kOrder>(                   \
+      const int N,                                                           \
+      const int C,                                                           \
+      const std::vector<int>& X_dims,                                        \
+      const std::vector<int>& Y_dims,                                        \
+      const std::vector<int>& kernel,                                        \
+      const std::vector<int>& dilation,                                      \
+      const std::vector<int>& stride,                                        \
+      const std::vector<int>& pads,                                          \
+      const T* X,                                                            \
+      T* Y,                                                                  \
+      CPUContext* /* context */) const {                                     \
+    const int ndim = X_dims.size();                                          \
+    switch (ndim) {                                                          \
+      case 1: {                                                              \
+        RunAveragePool1D<T, kOrder>(                                         \
+            N,                                                               \
+            C,                                                               \
+            X_dims[0],                                                       \
+            Y_dims[0],                                                       \
+            kernel[0],                                                       \
+            stride[0],                                                       \
+            pads[0],                                                         \
+            count_include_pad,                                               \
+            X,                                                               \
+            Y);                                                              \
+        return true;                                                         \
+      }                                                                      \
+      case 2: {                                                              \
+        if (std::is_same<T, float>::value && kOrder == StorageOrder::NCHW && \
+            pool_op_util::IsNeon4x4p0s0Eligible(                             \
+                X_dims[0],                                                   \
+                X_dims[1],                                                   \
+                Y_dims[0],                                                   \
+                Y_dims[1],                                                   \
+                kernel[0],                                                   \
+                kernel[1],                                                   \
+                stride[0],                                                   \
+                stride[1],                                                   \
+                pads[0],                                                     \
+                pads[1],                                                     \
+                pads[2],                                                     \
+                pads[3],                                                     \
+                dilation[0],                                                 \
+                dilation[1],                                                 \
+                X,                                                           \
+                Y)) {                                                        \
+          pool_op_util::RunNeonAveragePool4x4p0s0NCHW(                       \
+              N, C, X_dims[0], X_dims[1], X, Y);                             \
+        } else {                                                             \
+          RunAveragePool2D<T, kOrder>(                                       \
+              N,                                                             \
+              C,                                                             \
+              X_dims[0],                                                     \
+              X_dims[1],                                                     \
+              Y_dims[0],                                                     \
+              Y_dims[1],                                                     \
+              kernel[0],                                                     \
+              kernel[1],                                                     \
+              stride[0],                                                     \
+              stride[1],                                                     \
+              pads[0],                                                       \
+              pads[1],                                                       \
+              count_include_pad,                                             \
+              X,                                                             \
+              Y);                                                            \
+        }                                                                    \
+        return true;                                                         \
+      }                                                                      \
+      case 3: {                                                              \
+        RunAveragePool3D<T, kOrder>(                                         \
+            N,                                                               \
+            C,                                                               \
+            X_dims[0],                                                       \
+            X_dims[1],                                                       \
+            X_dims[2],                                                       \
+            Y_dims[0],                                                       \
+            Y_dims[1],                                                       \
+            Y_dims[2],                                                       \
+            kernel[0],                                                       \
+            kernel[1],                                                       \
+            kernel[2],                                                       \
+            stride[0],                                                       \
+            stride[1],                                                       \
+            stride[2],                                                       \
+            pads[0],                                                         \
+            pads[1],                                                         \
+            pads[2],                                                         \
+            count_include_pad,                                               \
+            X,                                                               \
+            Y);                                                              \
+        return true;                                                         \
+      }                                                                      \
+      default: {                                                             \
+        CAFFE_THROW("Unsupported pooling dim: ", ndim);                      \
+        return false;                                                        \
+      }                                                                      \
+    }                                                                        \
   }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D
+CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(float, StorageOrder::NCHW)
+CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD(float, StorageOrder::NHWC)
+#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD
 
-template <>
-template <>
-bool AveragePoolFunctor<CPUContext>::Forward<float, StorageOrder::NCHW, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& dilation,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  if (pool_op_util::IsNeon4x4p0s0Eligible(
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          pads[2],
-          pads[3],
-          dilation[0],
-          dilation[1],
-          X,
-          Y)) {
-    pool_op_util::RunNeonAveragePool4x4p0s0NCHW(
-        N, C, X_dims[0], X_dims[1], X, Y);
-  } else {
-    RunAveragePool2D<float, StorageOrder::NCHW>(
-        N,
-        C,
-        X_dims[0],
-        X_dims[1],
-        Y_dims[0],
-        Y_dims[1],
-        kernel[0],
-        kernel[1],
-        stride[0],
-        stride[1],
-        pads[0],
-        pads[1],
-        count_include_pad,
-        X,
-        Y);
+#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(T, kOrder)                \
+  template <>                                                                 \
+  template <>                                                                 \
+  bool MaxPoolFunctor<CPUContext>::Forward<T, kOrder>(                        \
+      const int N,                                                            \
+      const int C,                                                            \
+      const std::vector<int>& X_dims,                                         \
+      const std::vector<int>& Y_dims,                                         \
+      const std::vector<int>& kernel,                                         \
+      const std::vector<int>& dilation,                                       \
+      const std::vector<int>& stride,                                         \
+      const std::vector<int>& pads,                                           \
+      const T* X,                                                             \
+      T* Y,                                                                   \
+      CPUContext* /* context */) const {                                      \
+    const int ndim = X_dims.size();                                           \
+    switch (ndim) {                                                           \
+      case 1: {                                                               \
+        RunMaxPool1D<T, kOrder>(                                              \
+            N, C, X_dims[0], Y_dims[0], kernel[0], stride[0], pads[0], X, Y); \
+        return true;                                                          \
+      }                                                                       \
+      case 2: {                                                               \
+        if (std::is_same<T, float>::value && kOrder == StorageOrder::NCHW &&  \
+            pool_op_util::IsNeon2x2p0s0Eligible(                              \
+                X_dims[0],                                                    \
+                X_dims[1],                                                    \
+                Y_dims[0],                                                    \
+                Y_dims[1],                                                    \
+                kernel[0],                                                    \
+                kernel[1],                                                    \
+                stride[0],                                                    \
+                stride[1],                                                    \
+                pads[0],                                                      \
+                pads[1],                                                      \
+                pads[2],                                                      \
+                pads[3],                                                      \
+                dilation[0],                                                  \
+                dilation[1],                                                  \
+                X,                                                            \
+                Y)) {                                                         \
+          pool_op_util::RunNeonMaxPool2x2p0s0NCHW(                            \
+              N, C, X_dims[0], X_dims[1], X, Y);                              \
+        } else {                                                              \
+          RunMaxPool2D<T, kOrder>(                                            \
+              N,                                                              \
+              C,                                                              \
+              X_dims[0],                                                      \
+              X_dims[1],                                                      \
+              Y_dims[0],                                                      \
+              Y_dims[1],                                                      \
+              kernel[0],                                                      \
+              kernel[1],                                                      \
+              stride[0],                                                      \
+              stride[1],                                                      \
+              pads[0],                                                        \
+              pads[1],                                                        \
+              X,                                                              \
+              Y);                                                             \
+        }                                                                     \
+        return true;                                                          \
+      }                                                                       \
+      case 3: {                                                               \
+        RunMaxPool3D<T, kOrder>(                                              \
+            N,                                                                \
+            C,                                                                \
+            X_dims[0],                                                        \
+            X_dims[1],                                                        \
+            X_dims[2],                                                        \
+            Y_dims[0],                                                        \
+            Y_dims[1],                                                        \
+            Y_dims[2],                                                        \
+            kernel[0],                                                        \
+            kernel[1],                                                        \
+            kernel[2],                                                        \
+            stride[0],                                                        \
+            stride[1],                                                        \
+            stride[2],                                                        \
+            pads[0],                                                          \
+            pads[1],                                                          \
+            pads[2],                                                          \
+            X,                                                                \
+            Y);                                                               \
+        return true;                                                          \
+      }                                                                       \
+      default: {                                                              \
+        CAFFE_THROW("Unsupported pooling dim: ", ndim);                       \
+        return false;                                                         \
+      }                                                                       \
+    }                                                                         \
   }
-  return true;
-}
-
-template <>
-template <>
-bool AveragePoolFunctor<CPUContext>::Forward<float, StorageOrder::NHWC, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  RunAveragePool2D<float, StorageOrder::NHWC>(
-      N,
-      C,
-      X_dims[0],
-      X_dims[1],
-      Y_dims[0],
-      Y_dims[1],
-      kernel[0],
-      kernel[1],
-      stride[0],
-      stride[1],
-      pads[0],
-      pads[1],
-      count_include_pad,
-      X,
-      Y);
-  return true;
-}
-
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(T, kOrder) \
-  template <>                                                         \
-  template <>                                                         \
-  bool AveragePoolFunctor<CPUContext>::Forward<T, kOrder, 3>(         \
-      const int N,                                                    \
-      const int C,                                                    \
-      const std::array<int, 3>& X_dims,                               \
-      const std::array<int, 3>& Y_dims,                               \
-      const std::array<int, 3>& kernel,                               \
-      const std::array<int, 3>& /* dilation */,                       \
-      const std::array<int, 3>& stride,                               \
-      const std::array<int, 6>& pads,                                 \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* /* context */) const {                              \
-    RunAveragePool3D<T, kOrder>(                                      \
-        N,                                                            \
-        C,                                                            \
-        X_dims[0],                                                    \
-        X_dims[1],                                                    \
-        X_dims[2],                                                    \
-        Y_dims[0],                                                    \
-        Y_dims[1],                                                    \
-        Y_dims[2],                                                    \
-        kernel[0],                                                    \
-        kernel[1],                                                    \
-        kernel[2],                                                    \
-        stride[0],                                                    \
-        stride[1],                                                    \
-        stride[2],                                                    \
-        pads[0],                                                      \
-        pads[1],                                                      \
-        pads[2],                                                      \
-        count_include_pad,                                            \
-        X,                                                            \
-        Y);                                                           \
-    return true;                                                      \
-  }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(T, kOrder)         \
-  template <>                                                             \
-  template <>                                                             \
-  bool MaxPoolFunctor<CPUContext>::Forward<T, kOrder, 1>(                 \
-      const int N,                                                        \
-      const int C,                                                        \
-      const std::array<int, 1>& X_dims,                                   \
-      const std::array<int, 1>& Y_dims,                                   \
-      const std::array<int, 1>& kernel,                                   \
-      const std::array<int, 1>& /* dilation */,                           \
-      const std::array<int, 1>& stride,                                   \
-      const std::array<int, 2>& pads,                                     \
-      const T* X,                                                         \
-      T* Y,                                                               \
-      CPUContext* /* context */) const {                                  \
-    RunMaxPool1D<T, kOrder>(                                              \
-        N, C, X_dims[0], Y_dims[0], kernel[0], stride[0], pads[0], X, Y); \
-    return true;                                                          \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D
-
-template <>
-template <>
-bool MaxPoolFunctor<CPUContext>::Forward<float, StorageOrder::NCHW, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& dilation,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  if (pool_op_util::IsNeon2x2p0s0Eligible(
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          pads[2],
-          pads[3],
-          dilation[0],
-          dilation[1],
-          X,
-          Y)) {
-    pool_op_util::RunNeonMaxPool2x2p0s0NCHW(N, C, X_dims[0], X_dims[1], X, Y);
-  } else {
-    RunMaxPool2D<float, StorageOrder::NCHW>(
-        N,
-        C,
-        X_dims[0],
-        X_dims[1],
-        Y_dims[0],
-        Y_dims[1],
-        kernel[0],
-        kernel[1],
-        stride[0],
-        stride[1],
-        pads[0],
-        pads[1],
-        X,
-        Y);
-  }
-  return true;
-}
-
-template <>
-template <>
-bool MaxPoolFunctor<CPUContext>::Forward<float, StorageOrder::NHWC, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  RunMaxPool2D<float, StorageOrder::NHWC>(
-      N,
-      C,
-      X_dims[0],
-      X_dims[1],
-      Y_dims[0],
-      Y_dims[1],
-      kernel[0],
-      kernel[1],
-      stride[0],
-      stride[1],
-      pads[0],
-      pads[1],
-      X,
-      Y);
-  return true;
-}
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(T, kOrder) \
-  template <>                                                     \
-  template <>                                                     \
-  bool MaxPoolFunctor<CPUContext>::Forward<T, kOrder, 3>(         \
-      const int N,                                                \
-      const int C,                                                \
-      const std::array<int, 3>& X_dims,                           \
-      const std::array<int, 3>& Y_dims,                           \
-      const std::array<int, 3>& kernel,                           \
-      const std::array<int, 3>& /* dilation */,                   \
-      const std::array<int, 3>& stride,                           \
-      const std::array<int, 6>& pads,                             \
-      const T* X,                                                 \
-      T* Y,                                                       \
-      CPUContext* /* context */) const {                          \
-    RunMaxPool3D<T, kOrder>(                                      \
-        N,                                                        \
-        C,                                                        \
-        X_dims[0],                                                \
-        X_dims[1],                                                \
-        X_dims[2],                                                \
-        Y_dims[0],                                                \
-        Y_dims[1],                                                \
-        Y_dims[2],                                                \
-        kernel[0],                                                \
-        kernel[1],                                                \
-        kernel[2],                                                \
-        stride[0],                                                \
-        stride[1],                                                \
-        stride[2],                                                \
-        pads[0],                                                  \
-        pads[1],                                                  \
-        pads[2],                                                  \
-        X,                                                        \
-        Y);                                                       \
-    return true;                                                  \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D
+CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(float, StorageOrder::NCHW)
+CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD(float, StorageOrder::NHWC)
+#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD
 
 constexpr char kAveragePoolDoc[] = R"DOC(
 consumes an input blob and applies average pooling across the the blob according
