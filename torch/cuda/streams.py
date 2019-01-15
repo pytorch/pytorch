@@ -104,9 +104,9 @@ class Stream(torch._C._CudaStreamBase):
 
 class Event(torch._C._CudaEventBase):
     r"""Wrapper around CUDA event. Every event is associated with a device index, which
-    is the device where the event is first recorded. However, if constructed from an
-    handle or ipc_handle() is called before it is ever recorded, the device index will
-    be the sames as the device of ``torch.cuda.current_stream()``.
+    is the device where the event is lazily created when first recorded. However, if
+    constructed from a handle or ipc_handle() is called before it is ever recorded, the
+    device index will be the sames as the device of ``torch.cuda.current_stream()``.
 
     Arguments:
         enable_timing (bool, optional): indicates if the event should measure time
@@ -164,7 +164,8 @@ class Event(torch._C._CudaEventBase):
         super(Event, self).synchronize()
 
     def ipc_handle(self):
-        r"""Returns an IPC handle of this event."""
+        r"""Returns an IPC handle of this event. If not recorded yet, the event will
+        use the device of ``torch.cuda.current_stream()`` as its own device."""
         return super(Event, self).ipc_handle()
 
     @property

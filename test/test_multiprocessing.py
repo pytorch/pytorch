@@ -402,6 +402,29 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_event_handle_multi_gpu(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+        with torch.cuda.device(d0):
+            e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+
+        with torch.cuda.device(d1):
+            # create handle on different device from un-recorded event
+            e0.ipc_handle()
+
+        with torch.cuda.device(d0):
+            e1 = torch.cuda.Event(enable_timing=False, interprocess=True)
+            stream = torch.cuda.Stream()
+            torch.cuda._sleep(50000000)  # spin for about 50 ms
+            e1.record(stream)
+
+        with torch.cuda.device(d1):
+            # create handle on different device from recorded event
+            e1.ipc_handle()
+
     def _test_empty_tensor_sharing(self, dtype, device):
         q = mp.Queue()
         empty = torch.tensor([], dtype=dtype, device=device)
