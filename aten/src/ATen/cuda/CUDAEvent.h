@@ -17,11 +17,13 @@ namespace at { namespace cuda {
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
 *
-* CUDAEvents are constructed lazily when recorded unless it is reconstructed
-* from a cudaIpcEventHandle_t. The events have a device, and this device is
-* acquired from the first recording stream or passed in when reconstructed from
-* a handle. Later streams that record to the event must share this device, but
-* streams on any device can wait on the event.
+* CUDAEvents are constructed lazily when first recorded unless it is
+* reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
+* device is acquired from the first recording stream. However, if constructed
+* from a handle or ipc_handle() is called before it is ever recorded, the device
+* will be acquired from current stream. Later streams that record to the event
+* must share this device, but streams on any device can query and wait on the
+* event.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
@@ -33,8 +35,9 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: the original event and the reconstructed event now share recorded
   // activities. Users need to make sure the last recording event (either
-  // original or reconstructed) must not be destructed when synchronize() is
-  // called. Otherwise, the behavior is undefined.
+  // original or reconstructed) must not be destructed when synchronize(),
+  // query(), wait(), or block() is called. Otherwise, the behavior will be
+  // undefined.
   explicit CUDAEvent(const cudaIpcEventHandle_t* handle) {
     #ifndef __HIP_PLATFORM_HCC__
       device_index_ = getCurrentCUDAStream().device_index();
