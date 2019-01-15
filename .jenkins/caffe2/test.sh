@@ -54,7 +54,7 @@ done
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
-caffe2_pypath="$(dirname $(python -c 'import caffe2; print(caffe2.__file__  if type(caffe2.__file) == str else caffe2.__file__[0])'))"
+caffe2_pypath="$(python -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
 
 if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
