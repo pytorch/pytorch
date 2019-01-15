@@ -124,6 +124,7 @@ set CC=sccache cl
 set CXX=sccache cl
 
 set DISTUTILS_USE_SDK=1
+set REL_WITH_DEB_INFO=1
 
 set CMAKE_GENERATOR=Ninja
 
