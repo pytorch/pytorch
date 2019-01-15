@@ -53,16 +53,15 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   AT_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
   size_t tg_target_stride;
-  int64_t max_target_length;
+  int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    max_target_length = 0;
     for (int64_t i = 0; i < batch_size; i++) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
-	max_target_length = target_lengths[i];
+	    max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
     checkSize(c, targets_arg, 0, pos);
@@ -74,7 +73,6 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
       tg_batch_offsets[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);
-    max_target_length = targets.size(1);
     checkSize(c, targets_arg, 0, batch_size);
     AT_CHECK(targets.size(1) >= max_target_length,
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,
@@ -163,6 +161,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
+  AT_CHECK(isIntegralType(input_lengths.type().scalarType()), "input_lenghts must be integral");
+  AT_CHECK(isIntegralType(target_lengths.type().scalarType()), "target_lenghts must be integral");
+
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
   int64_t max_input_length = log_probs.size(0);
