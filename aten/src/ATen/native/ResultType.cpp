@@ -56,4 +56,8 @@ Type& resultType(TensorList tensors) {
   return at::globalContext().getNonVariableType(backend, result_type);
 }
 
+ScalarType resultType(ArrayRef<ScalarTypeSource> inputs) {
+  return ScalarType::Short;
+}
+
 }  // namespace at

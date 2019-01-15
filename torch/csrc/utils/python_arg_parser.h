@@ -70,7 +70,8 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, DEVICE, STRING
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, SCALARTYPESOURCE,
+  SCALARTYPESOURCE_LIST, LAYOUT, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -126,6 +127,7 @@ struct PythonArgs {
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
+  inline std::vector<at::ScalarTypeSource> scalartypesourcelist(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
@@ -324,6 +326,35 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
   if (!args[i]) return default_scalartype;
   return scalartype(i);
+}
+
+std::vector<at::ScalarTypeSource> PythonArgs::scalartypesourcelist(int i) {
+  if (!args[i]) return std::vector<at::ScalarTypeSource>();
+  PyObject* arg = args[i];
+  AT_CHECK(PyTuple_Check(arg));
+  auto size = PyTuple_GET_SIZE(arg);
+  std::vector<at::ScalarTypeSource> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = PyTuple_GET_ITEM(arg, idx);
+    if (THPVariable_Check(obj)) {
+      res.emplace_back(reinterpret_cast<THPVariable*>(obj)->cdata);
+    } else if (PyComplex_Check(obj)) {
+      res.emplace_back(at::Scalar(THPUtils_unpackComplexDouble(obj)));
+    } else if (THPUtils_checkDouble(obj)) {
+      res.emplace_back(at::Scalar(THPUtils_unpackDouble(obj)));
+    } else if (THPUtils_checkLong(obj)) {
+      res.emplace_back(
+          at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    } else if (THPDtype_Check(obj)) {
+      res.emplace_back(reinterpret_cast<THPDtype*>(args[i])->scalar_type);
+    } else {
+      throw TypeError(
+          "expected one of tensor, dtype or number as argument %d, but got %s",
+          i,
+          Py_TYPE(obj)->tp_name);
+    }
+  }
+  return res;
 }
 
 inline at::ScalarType PythonArgs::scalartype(int i) {

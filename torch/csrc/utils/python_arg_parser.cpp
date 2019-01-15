@@ -28,6 +28,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"optional<ScalarType>", ParameterType::SCALARTYPE},
+  {"ScalarTypeSourceList", ParameterType::SCALARTYPESOURCE_LIST},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
@@ -141,6 +142,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
     case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPESOURCE_LIST: return PyTuple_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
@@ -162,6 +164,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::SCALARTYPE: return "torch.dtype";
+    case ParameterType::SCALARTYPESOURCE_LIST: return "tuple of dtypes, numbers or tensors";
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
@@ -427,15 +430,18 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
-  bool allow_varargs_intlist = false;
+  bool allow_varargs_list = false;
 
-  // if there is a single positional IntList argument, i.e. expand(..), view(...),
-  // allow a var-args style IntList, so expand(5,3) behaves as expand((5,3))
-  if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
-    allow_varargs_intlist = true;
+  // if there is a single positional IntList or ScalarTypeSourceList argument,
+  // i.e. expand(..), resultType(...), allow a var-args style list,
+  // so expand(5,3) behaves as expand((5,3))
+  if (max_pos_args == 1 &&
+      (params[0].type_ == ParameterType::INT_LIST ||
+       params[0].type_ == ParameterType::SCALARTYPESOURCE_LIST)) {
+    allow_varargs_list = true;
   }
 
-  if (nargs > max_pos_args && !allow_varargs_intlist) {
+  if (nargs > max_pos_args && !allow_varargs_list) {
     if (raise_exception) {
       // foo() takes takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
@@ -474,8 +480,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
-    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkIndex(obj)) {
+    } else if (allow_varargs_list && arg_pos == 0 && !is_kwd &&
+               (THPUtils_checkIndex(obj) || params[0].type_ == ParameterType::SCALARTYPESOURCE_LIST)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

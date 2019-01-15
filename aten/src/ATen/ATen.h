@@ -18,6 +18,7 @@
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
 #include <ATen/core/Scalar.h>
+#include <ATen/core/ScalarTypeSource.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorMethods.h>
 #include <c10/core/TensorOptions.h>

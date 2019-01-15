@@ -23,6 +23,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/native/ResultType.h>
 
 #include <functional>
 #include <initializer_list>
@@ -340,13 +341,29 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_promote_types(ScalarType type1, ScalarType type2)",
+"_promote_types(ScalarType type1, ScalarType type2)",
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     ScalarType promoted = at::promoteTypes(r.scalartype(0), r.scalartype(1));
     return torch::autograd::utils::wrap(torch::getDtype(promoted));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__result_type(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "_result_type(ScalarTypeSourceList args)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    ScalarType resultType = at::resultType(r.scalartypesourcelist(0));
+    return torch::autograd::utils::wrap(torch::getDtype(resultType));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -397,6 +414,7 @@ static PyMethodDef torch_functions[] = {
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", (PyCFunction)THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", (PyCFunction)THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_result_type", (PyCFunction)THPVariable__result_type, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

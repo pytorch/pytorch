@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/Dispatch.h>
-#include <ATen/ScalarOps.h>
+#include <ATen/ATen.h>
 
 #include <tuple>
 
@@ -74,6 +73,8 @@ Scalar castToType(Type& type, Scalar arg) {
  * in order to be regarded as non-tensor numbers per the order rules above.
  */
 CAFFE2_API Type& resultType(TensorList tensors);
+
+CAFFE2_API ScalarType resultType(ArrayRef<ScalarTypeSource> inputs);
 
 // Tries to cast mixed-type operands to output type.
 //
