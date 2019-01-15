@@ -13,7 +13,8 @@ else
     num_gpus=0
 fi
 
-cmd="$PYTHON $CAFFE2_PYPATH/python/examples/resnet50_trainer.py --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2"
+caffe2_pypath="$(python -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
+cmd="$PYTHON $caffe2_pypath/python/examples/resnet50_trainer.py --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2"
 if (( $num_gpus == 0 )); then
     cmd="$cmd --use_cpu"
 else
