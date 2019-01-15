@@ -10,8 +10,8 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
-    int64_t owidth,
-    int64_t oheight) {
+    int64_t oheight,
+    int64_t owidth) {
   int64_t numBatch = 1;
   int64_t dimc = 0;
   int64_t dimh = 1;
@@ -80,6 +80,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
     IntList output_size) {
   auto oheight = output_size[0];
   auto owidth = output_size[1];
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
   AT_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -112,7 +113,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
         max_unpooling2d_forward_out_cpu_frame<scalar_t>(
-            output, self, indices, owidth, oheight);
+            output, self, indices, oheight, owidth);
       }));
   return output;
 };
@@ -132,14 +133,14 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
     const Tensor& input,
     const Tensor& indices,
     int64_t oT,
-    int64_t oW,
     int64_t oH,
+    int64_t oW,
     int64_t dT,
-    int64_t dW,
     int64_t dH,
+    int64_t dW,
     int64_t pT,
-    int64_t pW,
-    int64_t pH) {
+    int64_t pH,
+    int64_t pW) {
   int64_t nBatch = 1;
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -228,13 +229,13 @@ void max_unpooling3d_shape_check(
       input.sizes());
   AT_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, width, height) in output_size");
+      "There should be exactly three elements (depth, height, width) in output_size");
   AT_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, width, height) in stride");
+      "There should be exactly three elements (depth, height, width) in stride");
   AT_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, width, height) in padding");
+      "There should be exactly three elements (depth, height, width) in padding");
   AT_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
@@ -291,6 +292,7 @@ Tensor& max_unpooling3d_forward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
@@ -315,8 +317,8 @@ Tensor& max_unpooling3d_forward_out_cpu(
             self,
             indices,
             oT,
-            oW,
             oH,
+            oW,
             stride[0],
             stride[1],
             stride[2],
@@ -345,10 +347,10 @@ static void max_unpooling2d_backward_out_cpu_frame(
     scalar_t* gradOutput_p,
     int64_t* ind_p,
     int64_t nslices,
-    int64_t iwidth,
     int64_t iheight,
-    int64_t owidth,
-    int64_t oheight) {
+    int64_t iwidth,
+    int64_t oheight,
+    int64_t owidth) {
   bool has_error = false;
   int64_t error_index = 0;
   int k;
@@ -393,6 +395,7 @@ Tensor& max_unpooling2d_backward_out_cpu(
     const Tensor& self,
     const Tensor& indices_,
     IntList output_size) {
+  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
   int dimw = 2;
@@ -439,24 +442,23 @@ Tensor& max_unpooling2d_backward_out_cpu(
         "x",
         grad_output.size(dimw));
   }
-
-  int p;
-  for (p = 0; p < nbatch; p++) {
-    auto inputOffset = p * nslices * iheight * iwidth;
-    auto outputOffset = p * nslices * oheight * owidth;
-    AT_DISPATCH_FLOATING_TYPES(
-        self.type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(
+      self.type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
+        int p;
+        for (p = 0; p < nbatch; p++) {
+          auto inputOffset = p * nslices * iheight * iwidth;
+          auto outputOffset = p * nslices * oheight * owidth;
           max_unpooling2d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
               grad_output.data<scalar_t>() + outputOffset,
               indices.data<int64_t>() + inputOffset,
               nslices,
-              iwidth,
               iheight,
-              owidth,
-              oheight);
-        }));
-  }
+              iwidth,
+              oheight,
+              owidth);
+        }
+      }));
   return grad_input;
 }
 
@@ -478,11 +480,11 @@ static void max_unpooling3d_backward_out_cpu_frame(
     int64_t* ind_p,
     int64_t nslices,
     int64_t iT,
-    int64_t iW,
     int64_t iH,
+    int64_t iW,
     int64_t oT,
-    int64_t oW,
-    int64_t oH) {
+    int64_t oH,
+    int64_t oW) {
   int k;
   bool has_error = false;
   int error_index = 0;
@@ -532,6 +534,7 @@ Tensor& max_unpooling3d_backward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   auto oT = output_size[0];
   auto oH = output_size[1];
   auto oW = output_size[2];
@@ -569,25 +572,25 @@ Tensor& max_unpooling3d_backward_out_cpu(
   iW = self.size(dimw);
 
   /* backprop */
-  int p;
-  for (p = 0; p < nbatch; p++) {
-    int inputOffset = p * nslices * iT * iH * iW;
-    int outputOffset = p * nslices * oT * oH * oW;
-    AT_DISPATCH_FLOATING_TYPES(
-        self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(
+      self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
+        int p;
+        for (p = 0; p < nbatch; p++) {
+          int inputOffset = p * nslices * iT * iH * iW;
+          int outputOffset = p * nslices * oT * oH * oW;
           max_unpooling3d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
               grad_output.data<scalar_t>() + outputOffset,
               indices.data<int64_t>() + inputOffset,
               nslices,
               iT,
-              iW,
               iH,
+              iW,
               oT,
-              oW,
-              oH);
-        }));
-  }
+              oH,
+              oW);
+        }
+      }));
   return grad_input;
 }
 

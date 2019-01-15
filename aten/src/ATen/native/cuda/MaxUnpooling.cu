@@ -103,6 +103,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
     const Tensor& self_,
     const Tensor& indices_,
     IntList output_size) {
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
   AT_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -151,8 +152,6 @@ Tensor& max_unpooling2d_forward_out_cuda(
 
   output.zero_();
 
-  // dim3 block(512);
-  // dim3 grid((output.numel() + 512 - 1) / 512);
   auto count = self.numel();
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "max_unpooling2d_forward_kernel", ([&] {
@@ -209,13 +208,13 @@ void max_unpooling3d_shape_check(
       input.sizes());
   AT_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, width, height) in output_size");
+      "There should be exactly three elements (depth, height, width) in output_size");
   AT_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, width, height) in stride");
+      "There should be exactly three elements (depth, height, width) in stride");
   AT_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, width, height) in padding");
+      "There should be exactly three elements (depth, height, width) in padding");
   AT_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
@@ -266,12 +265,13 @@ void max_unpooling3d_shape_check(
 }
 
 Tensor& max_unpooling3d_forward_out_cuda(
-    Tensor& output_,
+    Tensor& output,
     const Tensor& self_,
     const Tensor& indices_,
     IntList output_size,
     IntList stride,
     IntList padding) {
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
   max_unpooling3d_shape_check(
       self_, Tensor(), indices_, output_size, stride, padding);
 
@@ -279,7 +279,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
 
-  TensorArg output_arg{output_, "output_", 1}, self_arg{self_, "self_", 2},
+  TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
       indices_arg{indices_, "indices_", 3};
   checkAllSameGPU(
       "max_unpooling3d_forward_out_cuda", {output_arg, self_arg, indices_arg});
@@ -299,18 +299,17 @@ Tensor& max_unpooling3d_forward_out_cuda(
     inputTime = self.size(1);
     inputHeight = self.size(2);
     inputWidth = self.size(3);
-    output_.resize_({inputSlices, oT, oH, oW});
+    output.resize_({inputSlices, oT, oH, oW});
   } else {
     batchSize = self.size(0);
     inputSlices = self.size(1);
     inputTime = self.size(2);
     inputHeight = self.size(3);
     inputWidth = self.size(4);
-    output_.resize_({batchSize, inputSlices, oT, oH, oW});
+    output.resize_({batchSize, inputSlices, oT, oH, oW});
   }
 
-  output_ = output_.contiguous();
-  output_.zero_();
+  output.zero_();
 
   // Collapse batch and feature dimensions if needed
   if (self.ndimension() == 5) {
@@ -342,7 +341,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               at::cuda::getCurrentCUDAStream()>>>(
               self.packed_accessor<scalar_t, 4>(),
               indices.packed_accessor<int64_t, 4>(),
-              output_.data<scalar_t>(),
+              output.data<scalar_t>(),
               oT,
               oH,
               oW,
@@ -355,7 +354,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
           offsetZ += 65535;
         }
       }));
-  return output_;
+  return output;
 }
 
 Tensor max_unpooling3d_forward_cuda(
@@ -378,6 +377,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
     IntList output_size) {
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
+  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   AT_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -438,13 +438,11 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   int count = self.numel();
 
-  dim3 block(512);
-  dim3 grid((count + 512 - 1) / 512);
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "max_unpooling2d_backward_kernel", ([&] {
         max_unpooling2d_backward_kernel<<<
-            grid,
-            block,
+            GET_BLOCKS(count),
+            CUDA_NUM_THREADS,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             count,
@@ -482,6 +480,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  AT_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
   int64_t oW = output_size[2];
