@@ -349,6 +349,27 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   return ret;
 }
 
+bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
+      this->kernel_.size() != 2) {
+    return false;
+  }
+
+  auto& filter = InputTensorCPU_(FILTER);
+  const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
+  fbgemm::conv_param_t<> conv_p(
+      1,
+      C,
+      M,
+      {1, 1},
+      group_,
+      {this->kernel_[0], this->kernel_[1]},
+      {this->stride_[0], this->stride_[1]},
+      {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+  return fbgemm::fbgemmOptimizedGConv(conv_p);
+}
+
 bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   const auto& filter = InputTensorCPU_(FILTER);
 
@@ -426,6 +447,19 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   } else if (TakeDepthWise3x3x3FastPath_()) {
     Y->W_depthwise_3x3x3.reset(
         new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+  } else if (TakeGConvFastPath_()) {
+    fbgemm::conv_param_t<> conv_p(
+        1,
+        group_ * C_per_group,
+        M,
+        {1, 1},
+        group_,
+        {this->kernel_[0], this->kernel_[1]},
+        {this->stride_[0], this->stride_[1]},
+        {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+    Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+        fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
   } else {
     Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
         fbgemm::matrix_op_t::Transpose,

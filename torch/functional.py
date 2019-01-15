@@ -27,6 +27,7 @@ __all__ = [
     'stft',
     'tensordot',
     'unique',
+    'cartesian_prod',
 ]
 
 
@@ -599,6 +600,37 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def cartesian_prod(*tensors):
+    """Do cartesian product of the given sequence of tensors. The behavior is similar to
+    python's `itertools.product`.
+
+    Arguments:
+        *tensors: any number of 1 dimensional tensors.
+
+    Returns:
+        Tensor: A tensor equivalent to converting all the input tensors into lists,
+            do `itertools.product` on these lists, and finally convert the resulting list
+            into tensor.
+
+    Example::
+
+        >>> a = [1, 2, 3]
+        >>> b = [4, 5]
+        >>> list(itertools.product(a, b))
+        [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
+        >>> tensor_a = torch.tensor(a)
+        >>> tensor_b = torch.tensor(b)
+        >>> torch.cartesian_prod(tensor_a, tensor_b)
+        tensor([[1, 4],
+                [1, 5],
+                [2, 4],
+                [2, 5],
+                [3, 4],
+                [3, 5]])
+    """
+    return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None):

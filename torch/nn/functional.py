@@ -1855,9 +1855,9 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction is 'none':
+    if reduction == 'none':
         ret = loss
-    if reduction is 'mean':
+    if reduction == 'mean':
         ret = torch.mean(loss)
     else:
         ret = torch.sum(loss)
