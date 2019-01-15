@@ -193,12 +193,12 @@ void layer_norm_c10(
     const c10::C10Tensor& sig_,
     int axis,
     float epsilon,
-    c10::core::opschema::LayerNorm::Cache* cache,
-    caffe2::BaseContext* context) {
+    c10::core::opschema::LayerNorm::Cache* cache) {
   caffe2::Tensor X(X_);
   caffe2::Tensor Y(Y_);
   caffe2::Tensor mean(mean_);
   caffe2::Tensor sig(sig_);
+  caffe2::CPUContext context;
   if (!cache->scale.has_value()) {
     cache->scale = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
   }
@@ -215,7 +215,7 @@ void layer_norm_c10(
   mean.Resize(moments_dims);
   sig.Resize(moments_dims);
   caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
-    X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(context)
+    X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
   );
 }
 }

@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/upsampling.h>
+#include <ATen/cuda/CUDAContext.h>
 
 static inline void THNN_(SpatialUpSamplingBicubic_shapeCheck)
                         (THCState *state,
@@ -62,7 +63,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
 
   const int num_output_elements = outputHeight * outputWidth;
   const int max_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
 
   // Launch kernel
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -103,7 +104,7 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   bicubic_interp2d_backward_kernel<scalar_t ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rheight, rwidth, align_corners, in_data, out_data);

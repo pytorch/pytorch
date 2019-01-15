@@ -19,7 +19,7 @@ from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes
-from itertools import product, combinations
+from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -844,7 +844,7 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_norm(self, device):
         # full reduction
-        x = torch.randn(5, device=device)
+        x = torch.randn(25, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
@@ -852,7 +852,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
 
         # one dimension
-        x = torch.randn(5, 5, device=device)
+        x = torch.randn(25, 25, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
@@ -866,6 +866,9 @@ class _TestTorchMixin(object):
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+
+        # larger tensor sanity check
+        self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @skipIfNoLapack
@@ -2055,6 +2058,14 @@ class _TestTorchMixin(object):
                 lambda n, d: n.std(d, ddof=1 if unbiased else 0),
                 use_integral=False)
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_var_dim(self):
+        for unbiased in [False, True]:
+            self._test_dim_ops(
+                lambda t, d: t.var(d, unbiased=unbiased),
+                lambda n, d: n.var(d, ddof=1 if unbiased else 0),
+                use_integral=False)
+
     def test_sum_out(self):
         x = torch.rand(100, 100)
         res1 = torch.sum(x, 1)
@@ -2587,6 +2598,7 @@ class _TestTorchMixin(object):
                 self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device)).shape)
                 self.assertEqual(shape, torch.empty(shape, device=device).shape)
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device)).shape)
+                self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device).shape)
                 self.assertEqual(shape, torch.full(shape, 3, device=device).shape)
                 self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device), 3).shape)
                 self.assertEqual(shape, torch.ones(shape, device=device).shape)
@@ -3557,10 +3569,14 @@ class _TestTorchMixin(object):
         SIZE = 4
         if order == 'descending':
             def check_order(a, b):
-                return a >= b
+                # `a != a` because we put NaNs
+                # at the end of ascending sorted lists,
+                # and the beginning of descending ones.
+                return a != a or a >= b
         elif order == 'ascending':
             def check_order(a, b):
-                return a <= b
+                # see above
+                return b != b or a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -3634,6 +3650,17 @@ class _TestTorchMixin(object):
 
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+
+        # Test sorting with NaNs
+        x = torch.rand(SIZE, SIZE)
+        x[1][2] = float('NaN')
+        x[3][0] = float('NaN')
+        torch.sort(x, out=(res2val, res2ind))
+        self.assertIsOrdered('ascending', x, res2val, res2ind,
+                             'random with NaNs')
+        torch.sort(x, out=(res2val, res2ind), descending=True)
+        self.assertIsOrdered('descending', x, res2val, res2ind,
+                             'random with NaNs')
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensordot(self):
@@ -8817,6 +8844,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.empty_like(a).shape, a.shape)
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
+    def test_empty_strided(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for shape in [(2, 3, 4), (0, 2, 0)]:
+                # some of these cases are pretty strange, just verifying that if as_strided
+                # allows them then empty_strided can as well.
+                for strides in [(12, 4, 1), (2, 4, 6), (0, 0, 0)]:
+                    empty_strided = torch.empty_strided(shape, strides, device=device)
+                    # as_strided checks the storage size is big enough to support such a strided tensor;
+                    # instead of repeating this calculation, we just use empty_strided which does the same
+                    # calculation when setting the storage size.
+                    as_strided = torch.empty(empty_strided.storage().size(),
+                                             device=device).as_strided(shape, strides)
+                    self.assertEqual(empty_strided.shape, as_strided.shape)
+                    self.assertEqual(empty_strided.stride(), as_strided.stride())
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     @skipIfRocm
     def test_pin_memory(self):
@@ -9651,6 +9694,63 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(a.data.type(), a_copy.data.type())
         self.assertEqual(b.type(), b_copy.type())
         self.assertEqual(b.data.type(), b_copy.type())
+
+    def test_cartesian_prod(self):
+        a = torch.tensor([1])
+        b = torch.tensor([1, 2, 3])
+        c = torch.tensor([1, 2])
+        prod = torch.cartesian_prod(a, b, c)
+        expected = torch.tensor(list(product([a], b, c)))
+        self.assertEqual(expected, prod)
+
+        # test 0 size input
+        d = torch.empty(0, dtype=b.dtype)
+        prod = torch.cartesian_prod(a, b, c, d)
+        expected = torch.empty(0, 4, dtype=b.dtype)
+        self.assertEqual(expected, prod)
+
+        # test single input
+        prod = torch.cartesian_prod(b)
+        self.assertEqual(b, prod)
+
+    def test_combinations(self):
+        a = torch.tensor([1, 2, 3])
+
+        c = torch.combinations(a, r=1)
+        expected = torch.tensor(list(combinations(a, r=1)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=1, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=1)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a)
+        expected = torch.tensor(list(combinations(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=3)
+        expected = torch.tensor(list(combinations(a, r=3)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=4)
+        expected = torch.empty(0, 4, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=5)
+        expected = torch.empty(0, 5, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        # test empty imput
+        a = torch.empty(0)
+        c1 = torch.combinations(a)
+        c2 = torch.combinations(a, with_replacement=True)
+        expected = torch.empty(0, 2, dtype=a.dtype)
+        self.assertEqual(c1, expected)
+        self.assertEqual(c2, expected)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):

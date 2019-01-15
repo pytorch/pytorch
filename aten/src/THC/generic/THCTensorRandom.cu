@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorRandom.cu"
 #else
 
+#include "ATen/cuda/CUDAContext.h"
+
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
@@ -113,7 +115,7 @@ void THCTensor_(renormRows)(struct THCState* state,
   int64_t rows = THCTensor_(size)(state, t, 0);
   int64_t cols = THCTensor_(size)(state, t, 1);
 
-  cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
+  cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
   THAssert(props != NULL);
 
   int numSM = props->multiProcessorCount;
@@ -175,7 +177,7 @@ void THCTensor_(multinomial)(struct THCState *state,
   THCudaLongTensor_resize2d(state, self, numDist, n_sample);
 
   // get current device properties
-  cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
+  cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
   THAssert(props != NULL);
   int numSM = props->multiProcessorCount;
   int maxThreads = props->maxThreadsPerBlock;

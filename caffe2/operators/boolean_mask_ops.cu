@@ -39,7 +39,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     const auto* maskData = mask.data<bool>();
     const auto outerSize = mask.size(0);
-    indices_.Resize(outerSize);
+    ReinitializeTensor(
+        &indices_, {outerSize}, at::dtype<int64_t>().device(CUDA));
     auto* indicesData = indices_.mutable_data<int64_t>();
 
     size_t numBytes = 0;
@@ -57,7 +58,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto numint64_t =
         static_cast<int64_t>((numBytes + sizeof(int64_t) - 1) / sizeof(int64_t));
     // allocate one more int64_t at the end of scratch for storing numOfOutput
-    scratch_.Resize(numint64_t + 1);
+    ReinitializeTensor(
+        &scratch_, {numint64_t + 1}, at::dtype<int64_t>().device(CUDA));
     auto* scratchData = scratch_.mutable_data<int64_t>();
     auto* numOfOutputData = scratchData + numint64_t;
 
@@ -82,7 +84,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-      
+
       auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
       indicesOut->template mutable_data<int64_t>();
     }
@@ -108,8 +110,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor indices_{CUDA};
-  Tensor scratch_{CUDA};
+  Tensor indices_;
+  Tensor scratch_;
 };
 
 REGISTER_CUDA_OPERATOR(BooleanMask, BooleanMaskOp<CUDAContext>);
@@ -306,8 +308,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 

@@ -8,9 +8,9 @@ from .env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
 
 hotpatch_build_env_vars()
 
-from .build import (BUILD_BINARY, BUILD_CAFFE2_OPS, BUILD_TEST, USE_FBGEMM,
-                    USE_FFMPEG, USE_LEVELDB, USE_LMDB, USE_OPENCV,
-                    USE_TENSORRT)
+from .build import (BLAS, BUILD_BINARY, BUILD_CAFFE2_OPS, BUILD_TEST,
+                    USE_FBGEMM, USE_FFMPEG, USE_LEVELDB, USE_LMDB, USE_OPENCV,
+                    USE_REDIS, USE_TENSORRT, USE_ZSTD, CUDA_NVCC_EXECUTABLE)
 from .cuda import CUDA_HOME, CUDA_VERSION, USE_CUDA
 from .cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIB_DIR, CUDNN_LIBRARY, USE_CUDNN
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
@@ -66,6 +66,8 @@ def get_common_env_with_flags():
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
+    if BLAS:
+        my_env["BLAS"] = BLAS
     if USE_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
         my_env["NCCL_INCLUDE_DIR"] = NCCL_INCLUDE_DIR
@@ -75,6 +77,8 @@ def get_common_env_with_flags():
         extra_flags += ['--use-cuda']
         if IS_WINDOWS:
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
+        if CUDA_NVCC_EXECUTABLE:
+            my_env["CUDA_NVCC_EXECUTABLE"] = CUDA_NVCC_EXECUTABLE
     if USE_CUDA_STATIC_LINK:
         extra_flags += ['--cuda-static-link']
     if USE_FBGEMM:
