@@ -1129,8 +1129,8 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     def test_pdist_norm(self):
-        def test_pdist_single(shape, device, p, trans):
-            x = torch.randn(shape, device=device)
+        def test_pdist_single(shape, device, p, dtype, trans):
+            x = torch.randn(shape, dtype=dtype, device=device)
             if trans:
                 x.transpose_(-2, -1)
             actual = torch.pdist(x, p=p)
@@ -1143,11 +1143,13 @@ class _TestTorchMixin(object):
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
-                        test_pdist_single(shape, device, p, trans)
+                        for dtype in [torch.float32, torch.float64]:
+                            test_pdist_single(shape, device, p, dtype, trans)
 
             # do a simplified comparison with big inputs, see:
             # https://github.com/pytorch/pytorch/issues/15511
-            test_pdist_single((1000, 2), device, 2, False)
+            for dtype in [torch.float32, torch.float64]:
+                test_pdist_single((1000, 2), device, 2, dtype, False)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
