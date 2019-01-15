@@ -1699,6 +1699,26 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
+    def test_constant_prop_none(self):
+        @torch.jit.script
+        def typed_none():
+            # type: () -> Optional[int]
+            return None
+
+        @torch.jit.script
+        def constant_prop():
+            a = typed_none()
+            b = typed_none()
+            if (a is None and b is None):
+                a = 2
+            else:
+                a = 1
+            return a
+
+        self.run_pass('constant_propagation', constant_prop.graph)
+        graph_str = str(constant_prop.graph)
+        self.assertTrue(graph_str.count("prim::None") == 0)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
