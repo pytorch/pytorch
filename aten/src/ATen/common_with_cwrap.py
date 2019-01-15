@@ -23,12 +23,10 @@ def parse_arguments(args):
 
 
 def set_declaration_defaults(declaration):
-    raw_string = ""
-    is_jit_ir = False
-    if "raw_string" in declaration:
-        raw_string = declaration["raw_string"]
-    if "is_jit_ir" in declaration:
-        is_jit_ir = declaration["is_jit_ir"]
+    if 'raw_string' not in declaration:
+        declaration['raw_string'] = ''
+    if 'is_jit_ir' not in declaration:
+        declaration["is_jit_ir"] = False
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
@@ -51,8 +49,6 @@ def set_declaration_defaults(declaration):
             # propagaged for ATen
             if k != 'options':
                 option.setdefault(k, v)
-    declaration["raw_string"] = raw_string
-    declaration["is_jit_ir"] = is_jit_ir
 
 # TODO(zach): added option to remove keyword handling for C++ which cannot
 # support it.
