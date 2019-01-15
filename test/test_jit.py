@@ -12310,6 +12310,18 @@ class TestAsync(JitTestCase):
         self.assertEqual(inside_fork, False)
         self.assertEqual(after_wait, False)
 
+    def test_trace_fork_wait(self):
+        def fork_body(x):
+            return x.neg(), x.neg() + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            return torch.jit._wait(fut)
+
+        traced = torch.jit.trace(fn, (torch.rand(3, 4),))
+        x = torch.rand(3, 4)
+        self.assertEqual(fn(x), traced(x))
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 

@@ -61,11 +61,6 @@ using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 
-// TODO: make a fake future for python
-namespace detail {
-class Future {};
-} // namespace detail
-
 namespace {
 
 using autograd::variable_list;
@@ -379,16 +374,45 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<detail::Future>(m, "Future");
 
-  m.def("fork", [](script::Module& sm, py::args args) {
-    // TODO: this is a fake stub
-    return detail::Future();
+  struct PythonFutureWrapper {
+    PythonFutureWrapper(py::object value) : value(value) {}
+
+    py::object value;
+  };
+
+  py::class_<PythonFutureWrapper>(m, "Future");
+
+  m.def("fork", [](py::function f, py::args args) {
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto body_block = fork_node->addBlock();
+
+      Value *node_output;
+      py::object py_func_output;
+      {
+        WithInsertPoint guard(body_block);
+        py_func_output = f(*args);
+        Value *out_val = jit::tracer::getNestedValueTrace(toIValue(py_func_output));
+        body_block->registerOutput(out_val);
+        node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
+
+        // TODO lambda lift
+      }
+
+      std::cout << *graph << std::endl;
+      return PythonFutureWrapper(py_func_output);
+    } else {
+      return PythonFutureWrapper(f(*args));
+    }
   });
 
-  m.def("wait", [](detail::Future& fut) {
-    // TODO: this is a fake stub
+  m.def("wait", [](PythonFutureWrapper& fut) {
+    if (jit::tracer::isTracing()) {
+
+    }
+    return fut.value;
   });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
