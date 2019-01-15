@@ -357,11 +357,12 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
+    fob = open('/tmp/aa', 'w')
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl),
+            shards[x].append(OPERATOR.substitute(signature=signature(decl, fob),
                                                  op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
@@ -369,6 +370,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             'constructors': shard,
         }
         write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
+    fob.close()
 
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
@@ -406,7 +408,7 @@ def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
 
 
-def signature(decl):
+def signature(decl, fob):
     def format_arg(arg):
         name = arg['name'] if not arg.get('output') else 'out'
         typ = jit_type_of(arg)
