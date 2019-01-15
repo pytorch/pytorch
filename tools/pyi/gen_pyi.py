@@ -10,12 +10,13 @@ import re
 
 needed_modules = set()
 
-FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[device, str, None]=None, requires_grad: bool=False"
+FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: bool=False"
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, builtins.int, slice, Tensor, List, Tuple]"
 
-blacklist = ['__init_subclass__', '__new__', '__subclasshook__', 'clamp', 'clamp_']
+blacklist = ['__init_subclass__', '__new__', '__subclasshook__', 'clamp', 'clamp_', 'device', 'grad', 'requires_grad',
+             'range']
 
 
 def type_to_python(typename, size=None):
@@ -28,7 +29,7 @@ as used for type hints.
     if typename in {'IntList', 'TensorList'} and size is not None:
         typename += '[]'
     typename = {
-        'Device': 'Union[device, str, None]',
+        'Device': 'Union[_device, str, None]',
         'Generator*': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Union[builtins.float, builtins.int]',
@@ -36,6 +37,7 @@ as used for type hints.
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
+        'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
         'IntList': 'Union[Tuple[builtins.int, ...], List[builtins.int], Size]',
         'IntList[]': 'Union[builtins.int, Tuple[builtins.int, ...], List[builtins.int], Size]',
@@ -160,7 +162,6 @@ the translation C++ -> Python.
                 python_args.remove('self: Tensor')
                 python_args = ['self'] + python_args
             else:
-                print(decl)
                 raise Exception("method without self is unexpected")
         if has_out:
             if render_kw_only_separator:
@@ -173,7 +174,7 @@ the translation C++ -> Python.
                 render_kw_only_separator = False
             python_args += ["dtype: _dtype=None",
                             "layout: layout=strided",
-                            "device: Optional[device]=None",
+                            "device: Union[_device, str, None]=None",
                             "requires_grad:bool=False"]
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
@@ -329,9 +330,16 @@ As such it is inteded to be used from a subprocess.
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'clamp': ["def clamp(self, min: builtins.float=-math.inf, max: builtins.float=math.inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
-        'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[device]=None) -> Tensor: ..."],
+        'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> builtins.int: ...'],
         'set_num_threads': ['def set_num_threads(num: builtins.int) -> None: ...'],
+        'range': ['def range(start: Union[builtins.float, builtins.int], end: Union[builtins.float, builtins.int],'
+                  ' step: Union[builtins.float, builtins.int]=1, *, out: Optional[Tensor]=None, dtype: _dtype=None,'
+                  ' layout: layout=strided, device: Optional[_device]=None, requires_grad:bool=False) -> Tensor: ...'],
+        'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: List,'
+                              ' size: Union[Tuple[builtins.int, ...],'
+                              ' List[builtins.int], Size], *, dtype: _dtype=None, layout: layout=strided,'
+                              ' device: Union[_device, str, None]=None, requires_grad:bool=False) -> Tensor: ...'],
     })
 
     for fname in dir(torch):
@@ -385,14 +393,13 @@ As such it is inteded to be used from a subprocess.
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, builtins.float, builtins.int])"
                         " -> None: ...".format(INDICES)],
-        'item': ['def item(self) -> Union[builtins.float, builtins.int]: ...'],
         'tolist': ['def tolist(self) -> List: ...'],
         'requires_grad_': ['def requires_grad_(self, mode: bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> builtins.int: ...'],
         'dim': ['def dim(self) -> builtins.int: ...'],
         'ndimension': ['def ndimension(self) -> builtins.int: ...'],
         'nelement': ['def nelement(self) -> builtins.int: ...'],
-        'cuda': ['def cuda(self, device: Optional[device]=None, non_blocking: bool=False) -> Tensor: ...'],
+        'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
@@ -400,6 +407,14 @@ As such it is inteded to be used from a subprocess.
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
+        'get_device': ['def get_device(self) -> builtins.int: ...'],
+        'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
+        'is_cuda': ['def is_cuda(self) -> bool: ...'],
+        'is_leaf': ['def is_leaf(self) -> bool: ...'],
+        'storage_offset': ['def storage_offset(self) -> builtins.int: ...'],
+        'coalesce': ['def coalesce(self) -> Tensor: ...'],
+        'to': ['def to(self, device: Union[_device, str, None], non_blocking: bool=False,'
+               ' copy: bool=False) -> Tensor: ...']
     })
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float', 'half', 'int', 'long', 'short']
     for fname in simple_conversions:
@@ -431,6 +446,7 @@ As such it is inteded to be used from a subprocess.
     tensor_type_hints_s = """class Tensor:
     dtype: _dtype = ...
     shape: Size = ...
+    device: _device = ...
     requires_grad: bool = ...
     grad: Optional['Tensor'] = ...
 
@@ -453,7 +469,9 @@ class layout: ...
 strided : layout = ...
 
 class device:
-   def __init__(self, device: Union[device, str, None]=None) -> None: ...
+   def __init__(self, device: Union['_device', str, None]=None) -> None: ...
+
+_device = device
 
 class Generator: ...
 
