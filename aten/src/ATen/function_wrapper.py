@@ -470,6 +470,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'inferred_type': str,
     'inplace': bool,
+    'is_jit_ir': bool,
     # This controls whether or not we generate the interface in Type or
     # TypeExtendedInterface
     'extended_method': bool,
@@ -484,6 +485,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
+    'raw_string': str,
     'requires_tensor': bool,
     'return_call': str,
     'return_type': str,

@@ -449,10 +449,9 @@ def signature(decl):
     # case of native_functions.yaml, func should match the generated signature,
     # if is_jit_ir is true. This is used to track and verify the alignment
     # of native_function.yaml's function schema with that used in this parse.
-    if "is_jit_ir" in decl and decl["is_jit_ir"]:
-        assert(ret_val.strip() == decl["raw_string"].strip())
-    if "raw_string" in decl and ret_val.strip() == decl["raw_string"].strip():
-        assert(decl["is_jit_ir"])
+    if 'is_jit_ir' in decl and decl['is_jit_ir']:
+        assert(ret_val.strip() == decl['raw_string'].strip()),\
+            decl['raw_string'] + ' is flagged as JIT IR, but not compliant'
     return ret_val
 
 
