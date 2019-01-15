@@ -111,6 +111,8 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
       }
     }
 
+    // Some CPU ops inherited from OperatorBase directly might need this default
+    // input argument '0' like 'PrefetchOperator'.
     if (!base_op_->Run(0)) {
       LOG(ERROR) << "Base op run failed in IDEEPFallbackOp. Def: "
                  << ProtoDebugString(this->debug_def());
