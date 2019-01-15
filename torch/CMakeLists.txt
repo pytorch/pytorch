@@ -129,7 +129,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
@@ -144,7 +143,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
-  ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
@@ -226,6 +224,14 @@ else ()
     )
   endif()
 endif ()
+
+if (USE_CUDA)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
+    ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+  )
+endif()
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
