@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cu"
 #else
 
 void THCStorage_(rawCopy)(THCState *state, THCStorage *self, scalar_t *src)

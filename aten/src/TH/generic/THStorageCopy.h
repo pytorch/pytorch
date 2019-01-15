@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorageCopy.h"
+#define TH_GENERIC_FILE "TH/generic/THStorageCopy.h"
 #else
 
 /* Support for copy between different Storage types */

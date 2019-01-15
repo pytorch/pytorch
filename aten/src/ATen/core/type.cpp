@@ -91,6 +91,10 @@ StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
+DeviceObjTypePtr DeviceObjType::get() {
+  static auto value = DeviceObjType::create();
+  return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(DynamicType::get());
   return value;
@@ -112,7 +116,13 @@ ListTypePtr ListType::ofBools() {
   return value;
 }
 
-TypePtr inferTypeFrom(const IValue& value) {
+// why incomplete? You cannot completely recover a type from
+// an IValue, List[List[int]] and List[List[Tensor]] will both
+// become ivalue.isGenericList() and cannot be recovered.
+// The only appropriate place to use this is where you know that
+// you are only dealing with a subset of objects where you can recover
+// the type, like in the tracer.
+TypePtr incompleteInferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
     return CompleteTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
@@ -132,9 +142,11 @@ TypePtr inferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
+    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
+  } else if (value.isDevice()) {
+    return DeviceObjType::get();
   }
-  AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
+  AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
@@ -307,6 +319,23 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     });
     return type->withContained(std::move(new_contained));
   }
+}
+
+
+const char * typeKindToString(TypeKind kind) {
+#define CASE_TYPE(T) case TypeKind::T: return #T;
+  switch(kind) {
+    C10_FORALL_TYPES(CASE_TYPE)
+  }
+#undef CASE_TYPE
+  return "";
+}
+
+bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if(auto rhs_ = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOf(rhs_->getElementType());
+  }
+  return *this == *rhs;
 }
 
 } // namespace c10

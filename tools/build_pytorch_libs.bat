@@ -27,7 +27,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
-set /a USE_FBGEMM=0
+set /a USE_FBGEMM=1
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -247,13 +247,22 @@ goto:eof
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DUSE_ROCM=%USE_ROCM%
+                  -DUSE_ROCM=%USE_ROCM% %EXTRA_CAFFE2_CMAKE_FLAGS%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
 
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
+
+  :: Install Python proto files
+  IF "%BUILD_PYTHON%" == "ON" (
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        copy /Y %%i ..\caffe2\proto\
+      )
+    )
+  )
 
   popd
   @endlocal

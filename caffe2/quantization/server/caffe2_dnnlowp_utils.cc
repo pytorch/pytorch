@@ -8,15 +8,15 @@
 #include <omp.h>
 #endif
 
-C10_DECLARE_int32(dnnlowp_activation_quantization_precision);
-C10_DECLARE_int32(dnnlowp_weight_quantization_precision);
-C10_DECLARE_int32(dnnlowp_requantization_multiplier_precision);
-C10_DECLARE_int32(dnnlowp_eltwise_quantization_precision);
-C10_DECLARE_bool(dnnlowp_force_scale_power_of_two);
-C10_DECLARE_bool(dnnlowp_preserve_activation_sparsity);
-C10_DECLARE_bool(dnnlowp_preserve_weight_sparsity);
-C10_DECLARE_string(dnnlowp_activation_quantization_kind);
-C10_DECLARE_string(dnnlowp_weight_quantization_kind);
+C10_DECLARE_int32(caffe2_dnnlowp_activation_quantization_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_weight_quantization_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_requantization_multiplier_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_eltwise_quantization_precision);
+C10_DECLARE_bool(caffe2_dnnlowp_force_scale_power_of_two);
+C10_DECLARE_bool(caffe2_dnnlowp_preserve_activation_sparsity);
+C10_DECLARE_bool(caffe2_dnnlowp_preserve_weight_sparsity);
+C10_DECLARE_string(caffe2_dnnlowp_activation_quantization_kind);
+C10_DECLARE_string(caffe2_dnnlowp_weight_quantization_kind);
 
 namespace dnnlowp {
 
@@ -264,44 +264,46 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
           op_def,
           "activation_precision",
-          FLAGS_dnnlowp_activation_quantization_precision);
+          FLAGS_caffe2_dnnlowp_activation_quantization_precision);
   int weight_precision = ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-      op_def, "weight_precision", FLAGS_dnnlowp_weight_quantization_precision);
+      op_def,
+      "weight_precision",
+      FLAGS_caffe2_dnnlowp_weight_quantization_precision);
   int requantization_multiplier_precision =
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
           op_def,
           "requantization_multiplier_precision",
-          FLAGS_dnnlowp_requantization_multiplier_precision);
+          FLAGS_caffe2_dnnlowp_requantization_multiplier_precision);
   int eltwise_quantization_precision =
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
           op_def,
           "eltwise_quantization_precision",
-          FLAGS_dnnlowp_eltwise_quantization_precision);
+          FLAGS_caffe2_dnnlowp_eltwise_quantization_precision);
   bool preserve_activation_sparsity =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
           op_def,
           "preserve_activation_sparsity",
-          FLAGS_dnnlowp_preserve_activation_sparsity);
+          FLAGS_caffe2_dnnlowp_preserve_activation_sparsity);
   bool preserve_weight_sparsity =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
           op_def,
           "preserve_weight_sparsity",
-          FLAGS_dnnlowp_preserve_weight_sparsity);
+          FLAGS_caffe2_dnnlowp_preserve_weight_sparsity);
   bool force_scale_power_of_two =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
           op_def,
           "force_scale_power_of_two",
-          FLAGS_dnnlowp_force_scale_power_of_two);
+          FLAGS_caffe2_dnnlowp_force_scale_power_of_two);
   string activation_quantization_kind =
       ArgumentHelper::GetSingleArgument<OperatorDef, string>(
           op_def,
           "activation_quantization_kind",
-          FLAGS_dnnlowp_activation_quantization_kind);
+          FLAGS_caffe2_dnnlowp_activation_quantization_kind);
   string weight_quantization_kind =
       ArgumentHelper::GetSingleArgument<OperatorDef, string>(
           op_def,
           "weight_quantization_kind",
-          FLAGS_dnnlowp_weight_quantization_kind);
+          FLAGS_caffe2_dnnlowp_weight_quantization_kind);
 
   VLOG(2) << "Quantization method for op with output " << op_def.output(0)
           << " activation_precision " << activation_precision

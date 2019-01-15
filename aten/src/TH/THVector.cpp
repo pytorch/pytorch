@@ -1,25 +1,25 @@
-#include "THVector.h"
+#include <TH/THVector.h>
 
-#include "vector/simd.h"
+#include <TH/vector/simd.h>
 
 #ifdef __NEON__
-#include "vector/NEON.cpp"
+#include <TH/vector/NEON.cpp>
 #endif
 
 #ifdef __PPC64__
-#include "vector/VSX.cpp"
+#include <TH/vector/VSX.cpp>
 #endif
 
 #if defined(USE_AVX)
-#include "vector/AVX.h"
+#include <TH/vector/AVX.h>
 #endif
 
 #if defined(USE_AVX2)
-#include "vector/AVX2.h"
+#include <TH/vector/AVX2.h>
 #endif
 
-#include "generic/THVectorDefault.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THVectorDefault.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THVectorDispatch.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THVectorDispatch.cpp>
+#include <TH/THGenerateAllTypes.h>

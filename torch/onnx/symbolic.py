@@ -37,9 +37,10 @@ _sum = sum
 
 
 def _parse_arg(value, desc):
+    if desc == 'none':
+        return value
     if desc == 'v' or not _is_value(value):
         return value
-
     if value.node().kind() != 'onnx::Constant':
         raise RuntimeError("ONNX symbolic expected a constant value in the trace")
     tval = value.node()['value']
@@ -228,6 +229,8 @@ def sub(g, self, other, alpha=None):
 
 
 def rsub(g, self, other, alpha=None):
+    other = _maybe_get_scalar(other)
+    other = _if_scalar_type_as(g, other, self)
     return sub(g, other, self, alpha=alpha)
 
 
@@ -345,9 +348,11 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    size = _maybe_get_const(size, 'is')
+    if not _is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Expand", self, size)
 
 
 def expand_as(g, self, other):
@@ -430,6 +435,21 @@ def prim_ConstantSplit(g, self, split_size, dim):
 def prim_ConstantChunk(g, self, chunks, dim):
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     return prim_ConstantSplit(g, self, split_size, dim)
+
+
+@parse_args('v', 'i', 'i')
+def split(g, self, split_size, dim):
+    size = self.type().sizes()[dim]
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+
+
+@parse_args('v', 'is', 'i')
+def split_with_sizes(g, self, split_sizes, dim):
+    return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
 @parse_args('v', 'i', 'v')
@@ -661,24 +681,61 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
                 mode_s="linear")
 
 
+def wrap_logical_op_with_cast_to_uint8(func):
+    def wrap_with_cast(g, input, other):
+        return g.op("Cast", func(g, input, other), to_i=cast_pytorch_to_onnx['Byte'])
+    return wrap_with_cast
+
+
+def wrap_logical_op_with_negation(func):
+    def wrap_with_not(g, input, other):
+        return g.op("Not", func(g, input, other))
+    return wrap_with_not
+
+
+@wrap_logical_op_with_cast_to_uint8
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
+def ne(g, self, other):
+    return g.op("Equal", self, other)
+
+
+@wrap_logical_op_with_cast_to_uint8
 def gt(g, input, other):
+    return gt_impl(g, input, other)
+
+
+def gt_impl(g, input, other):
     other = _maybe_get_scalar(other)
     return g.op("Greater", input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
 def lt(g, input, other):
+    return lt_impl(g, input, other)
+
+
+def lt_impl(g, input, other):
     other = _maybe_get_scalar(other)
     return g.op("Less", input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
+    return lt_impl(g, input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
+    return gt_impl(g, input, _if_scalar_type_as(g, other, input))
 
 
 def where(g, condition, self, other):
@@ -878,7 +935,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -893,7 +952,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
@@ -906,10 +967,6 @@ def min(g, self, dim_or_y, keepdim=None):
                     dim_i=dim,
                     keepdim_i=keepdim,
                     outputs=2)
-
-
-def eq(g, self, other):
-    return g.op("Equal", self, other)
 
 
 def exp(g, self):
@@ -1022,13 +1079,19 @@ def zeros(g, sizes, dtype, layout, device):
     return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
 
 
-def zeros_like(g, input):
-    return g.op("Sub", input, input).setType(input.type().contiguous())
+@parse_args('v', 'i', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=0.0)
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def ones_like(g, input, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=1.0)
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1042,9 +1105,9 @@ def full(g, sizes, value, dtype, layout, device):
                     input_as_shape_i=1, value_f=const_value)
 
 
-def full_like(g, input, fill_value):
-    # TODO: a more efficient implementation (ConstantFill?)
-    return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
+@parse_args('v', 'f', 'i', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=fill_value)
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1136,6 +1199,12 @@ def pixel_shuffle(g, self, upscale_factor):
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
                  upscale_factor])
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -1348,3 +1417,15 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+@parse_args('v', 'f', 'f', 'i', 'none')
+def rrelu(g, input, lower, upper, training, generator):
+    p = g.op('RandomUniformLike', input, high_f=upper, low_f=lower)
+    return g.op('PRelu', input, p)
+
+
+@parse_args('v')
+def log_sigmoid(g, input):
+    p = g.op('Sigmoid', input)
+    return g.op('Log', p)

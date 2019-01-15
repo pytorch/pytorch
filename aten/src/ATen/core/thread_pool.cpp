@@ -65,20 +65,6 @@ void ThreadPool::waitWorkComplete() {
   }
 }
 
-void ThreadPool::workOnTasksUntilCompleted(
-    c10::intrusive_ptr<ivalue::Future> future) {
-  if (future->completed()) {
-    return;
-  }
-  std::condition_variable finished;
-  future->addCallback([&] { finished.notify_all(); });
-
-  std::unique_lock<std::mutex> future_lock(future->get_mutex());
-  while (!future->completed()) {
-    finished.wait(future_lock);
-  }
-}
-
 void ThreadPool::main_loop(std::size_t index) {
   init_thread();
 

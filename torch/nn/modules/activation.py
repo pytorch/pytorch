@@ -76,6 +76,13 @@ class ReLU(Threshold):
         >>> m = nn.ReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
+
+
+      An implementation of CReLU - https://arxiv.org/abs/1603.05201
+
+        >>> m = nn.ReLU()
+        >>> input = torch.randn(2).unsqueeze(0)
+        >>> output = torch.cat((m(input),m(-input)))
     """
 
     def __init__(self, inplace=False):
@@ -126,7 +133,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
-    __constants__ = ['lower', 'upper', 'inplace', 'training']
+    __constants__ = ['lower', 'upper', 'inplace']
 
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()

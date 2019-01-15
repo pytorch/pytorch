@@ -118,14 +118,14 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
   // Number of positive examples: scalar
   auto& wp = Input(2);
   // output avg Sigmoid focal loss as mentioned in RetinaNet paper
-  auto* avg_loss = Output(0);
+
 
   int N = X.dim32(0);
   int D = X.dim32(1);
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   losses_.ResizeLike(X);
   float* avg_loss_data = avg_loss->mutable_data<float>();
 

@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <TH/THBlasUtils.h>
 
@@ -55,7 +55,7 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-static Tensor scalar_tensor(Scalar s) {
+static Tensor wrapped_scalar_tensor(Scalar s) {
   auto tensor = scalar_to_tensor(s);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
@@ -82,7 +82,7 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
 }
 
 SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  return mul_out_sparse_zerodim(r, t, scalar_tensor(value));
+  return mul_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
 }
 
 // --------------------------------------------------------------------
@@ -167,7 +167,7 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
 }
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  return div_out_sparse_zerodim(r, t, scalar_tensor(value));
+  return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
 }
 
 // --------------------------------------------------------------------
@@ -546,7 +546,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   int64_t nnz        = sparse._nnz();
 
   if (nnz == 0) {
-    at::mul_out(r, t, r.type().scalarTensor(beta));
+    at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
     return r;
   }
 
@@ -593,10 +593,16 @@ Tensor _sparse_addmm(
   Scalar beta,
   Scalar alpha
 ) {
-  AT_CHECK(sparse.is_coalesced(), "_sparse_addmm doesn't support uncoalesced SparseTensor");
   return at::s_native_addmm(t, sparse, dense, beta, alpha);
 }
 
+Tensor _sparse_mm(
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  Tensor t = at::empty({sparse.size(0), dense.size(1)}, dense.options());
+  return at::_sparse_addmm(t, sparse, dense, 0, 1);
+}
 
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)

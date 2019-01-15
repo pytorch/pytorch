@@ -85,7 +85,7 @@ TEST(CUDAContextTest, TestSameThreadTempObject) {
   if (!HasCudaGPU())
     return;
   CUDAContext context_outer(0); // gpu id
-  context_outer.SwitchToDevice(0); // logical stream id
+  context_outer.SwitchToDevice();
 
   if (NumCudaDevices() >= 2) {
     auto before_stream = context_outer.cuda_stream();
@@ -95,7 +95,7 @@ TEST(CUDAContextTest, TestSameThreadTempObject) {
     context_different_device.SwitchToDevice(10);
 
     // go back
-    context_outer.SwitchToDevice(0); // logical stream id
+    context_outer.SwitchToDevice();
     EXPECT_EQ(context_outer.cuda_stream(), before_stream);
 
     // do nothing - infers the current device and stream
@@ -132,6 +132,7 @@ namespace {
 // after thread exit.
 void TEST_GetStreamAddress(cudaStream_t* ptr) {
   CUDAContext context(0);
+  context.SwitchToDevice();
   *ptr = context.cuda_stream();
   // Sleep for a while so we have concurrent thread executions
   std::this_thread::sleep_for(std::chrono::seconds(1));

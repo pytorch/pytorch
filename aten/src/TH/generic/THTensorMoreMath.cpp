@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMoreMath.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorMoreMath.cpp"
 #else
 
 #include <TH/generic/THTensorApply.hpp>
@@ -619,48 +619,6 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
 }
 
-
-void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
-{
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
-void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  double size_d = ceil(static_cast<double>(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-             , 1, "invalid size, possible overflow?");
-  size = static_cast<ptrdiff_t>(size_d);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
@@ -1242,37 +1200,6 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
 
   c10::raw::intrusive_ptr::decref(tmpResults);
   THLongTensor_free(tmpIndices);
-}
-
-void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
-{
-  int64_t t_size_0, t_size_1;
-  int64_t t_stride_0, t_stride_1;
-  int64_t r__stride_0, r__stride_1;
-  scalar_t *t_data, *r__data;
-  int64_t r, c;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  THTensor_(resizeAs)(r_, t);
-
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = r_->data<scalar_t>();
-  t_data = t->data<scalar_t>();
-
-  for(r = 0; r < t_size_0; r++)
-  {
-    int64_t sz = THMin(r+k+1, t_size_1);
-    for(c = THMax(0, r+k+1); c < t_size_1; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = 0;
-    for(c = 0; c < sz; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = t_data[r*t_stride_0+c*t_stride_1];
-  }
 }
 
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
@@ -2129,50 +2056,6 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
 accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
   return sqrt(THTensor_(varall)(tensor, biased));
-}
-
-void THTensor_(linspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, a);
-  } else {
-     TH_TENSOR_APPLY(scalar_t, r_,
-             *r__data = a + (b-a)/((scalar_t)(n-1))*i;
-             i++;
-           );
-  }
-}
-
-void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
-  } else {
-    TH_TENSOR_APPLY(scalar_t, r_,
-        *r__data = TH_MATH_NAME(pow)(10.0, a + i*(b-a)/((scalar_t)(n-1)));
-        i++;
-        );
-  }
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)

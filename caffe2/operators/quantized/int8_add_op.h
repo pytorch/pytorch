@@ -32,6 +32,11 @@ class Int8AddOp final : public Operator<CPUContext> {
     const auto& B = Inputs()[1]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
 
+    CAFFE_ENFORCE_EQ(
+        A.t.sizes(),
+        B.t.sizes(),
+        "inputs must have the same shape (broadcast semantics is not supported)");
+
     /*
      * Record quantization parameters for A and B inputs, because if the op is
      * in-place, we may overwrite these parameters later, when we set
@@ -63,6 +68,7 @@ class Int8AddOp final : public Operator<CPUContext> {
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         activationLimits(Y_scale, Y_zero_point, Ac).first,
         activationLimits(Y_scale, Y_zero_point, Ac).second,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

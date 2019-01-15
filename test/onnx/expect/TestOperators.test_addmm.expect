@@ -41,7 +41,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -57,7 +57,7 @@ graph {
     name: "1"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 3
@@ -73,7 +73,7 @@ graph {
     name: "2"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 4
@@ -86,7 +86,7 @@ graph {
     name: "4"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2

@@ -1,4 +1,4 @@
-#include "ATen/native/cuda/Normalization.cuh"
+#include <ATen/native/cuda/Normalization.cuh>
 
 namespace at { namespace native {
 

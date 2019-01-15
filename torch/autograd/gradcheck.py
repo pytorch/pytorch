@@ -43,12 +43,14 @@ def iter_tensors(x, only_requiring_grad=False):
                 yield result
 
 
-# `input` is input to `fn`
-# `target` is the Tensors wrt whom Jacobians are calculated (default=`input`)
-#
-# Note that `target` may not even be part of `input` to `fn`, so please be
-# **very careful** in this to not clone `target`.
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
+    """
+    input: input to `fn`
+    target: the Tensors wrt whom Jacobians are calculated (default=`input`)
+
+    Note that `target` may not even be part of `input` to `fn`, so please be
+    **very careful** in this to not clone `target`.
+    """
     if target is None:
         target = input
     output_size = fn(input).numel()
@@ -64,22 +66,57 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
         # need data here to get around the version check because without .data,
         # the following code updates version but doesn't change content
-        x_tensor = x_tensor.data
-        for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
-            orig = x_tensor[x_idx].item()
-            x_tensor[x_idx] = orig - eps
-            outa = fn(input).clone()
-            x_tensor[x_idx] = orig + eps
-            outb = fn(input).clone()
-            x_tensor[x_idx] = orig
+        if x_tensor.is_sparse:
+            def get_stride(size):
+                dim = len(size)
+                tmp = 1
+                stride = [0] * dim
+                for i in reversed(range(dim)):
+                    stride[i] = tmp
+                    tmp *= size[i]
+                return stride
 
-            r = (outb - outa) / (2 * eps)
-            d_tensor[d_idx] = r.detach().reshape(-1)
+            x_nnz = x_tensor._nnz()
+            x_size = list(x_tensor.size())
+            x_indices = x_tensor._indices().t()
+            x_values = x_tensor._values().data
+            x_stride = get_stride(x_size)
+
+            for i in range(x_nnz):
+                x_value = x_values[i]
+                for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
+                    indices = x_indices[i].tolist() + list(x_idx)
+                    d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
+
+                    orig = x_value[x_idx].item()
+                    x_value[x_idx] = orig - eps
+                    outa = fn(input).clone()
+                    x_value[x_idx] = orig + eps
+                    outb = fn(input).clone()
+                    x_value[x_idx] = orig
+                    r = (outb - outa) / (2 * eps)
+                    d_tensor[d_idx] = r.detach().reshape(-1)
+        else:
+            x_tensor = x_tensor.data
+            for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
+                orig = x_tensor[x_idx].item()
+                x_tensor[x_idx] = orig - eps
+                outa = fn(input).clone()
+                x_tensor[x_idx] = orig + eps
+                outb = fn(input).clone()
+                x_tensor[x_idx] = orig
+                r = (outb - outa) / (2 * eps)
+                d_tensor[d_idx] = r.detach().reshape(-1)
 
     return jacobian
 
 
 def get_analytical_jacobian(input, output):
+    # it is easier to call to_dense() on the sparse output than
+    # to modify analytical jacobian
+    if output.is_sparse:
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
     diff_input_list = list(iter_tensors(input, True))
     jacobian = make_jacobian(input, output.numel())
     jacobian_reentrant = make_jacobian(input, output.numel())
@@ -125,7 +162,7 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False):
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
@@ -154,11 +191,21 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
+        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparseTensor input,
+            and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
 
     Returns:
         True if all differences satisfy allclose condition
     """
+    def fail_test(msg):
+        if raise_exception:
+            raise RuntimeError(msg)
+        return False
+
     tupled_inputs = _as_tuple(inputs)
+    if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
+        fail_test('gradcheck expects all tensor inputs '
+                  'are dense when check_sparse_nnz is set to False.')
 
     # Make sure that gradients are saved for all inputs
     any_input_requiring_grad = False
@@ -179,11 +226,6 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             'but none of the them have requires_grad=True.')
 
     output = _differentiable_outputs(func(*tupled_inputs))
-
-    def fail_test(msg):
-        if raise_exception:
-            raise RuntimeError(msg)
-        return False
 
     for i, o in enumerate(output):
         if not o.requires_grad:
@@ -220,6 +262,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for gi, i in zip(grads_input, diff_input_list):
             if gi is None:
                 continue
+            if isinstance(gi, torch.Tensor) and gi.is_sparse:
+                if gi.layout != i.layout:
+                    return fail_test('grad is sparse tensor, but has incorrect layout')
+                if gi.sparse_dim() != i.sparse_dim():
+                    return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
+                if gi.dense_dim() != i.dense_dim():
+                    return fail_test('grad is sparse tensor, but has incorrect dense_dim')
+                gi = gi.to_dense()
+                i = i.to_dense()
             if not gi.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
             if gi.type() != i.type():

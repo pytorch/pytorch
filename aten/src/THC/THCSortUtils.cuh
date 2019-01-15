@@ -1,9 +1,9 @@
 #ifndef THC_SORT_UTILS_INC
 #define THC_SORT_UTILS_INC
 
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorTypeUtils.cuh"
-#include "THCNumerics.cuh"
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCNumerics.cuh>
 
 // Collection of kernel sort routines
 template <typename T>
