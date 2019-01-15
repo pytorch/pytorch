@@ -32,6 +32,7 @@ import warnings
 import math
 import types
 import pickle
+import copy
 
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -304,6 +305,32 @@ class JitTestCase(TestCase):
         with TemporaryFileName() as fname:
             imported.save(fname)
             return torch.jit.load(fname, map_location=map_location)
+
+    def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
+        buffer = io.BytesIO()
+        m.apply(lambda s: s._pack() if s._has_method('_pack') else None)
+        torch.jit.save(m, buffer)
+        m.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        buffer.seek(0)
+        imported = torch.jit.load(buffer, map_location=map_location)
+        imported.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+        if not also_test_file:
+            return imported
+
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            imported.save(f.name)
+            result = torch.jit.load(f.name, map_location=map_location)
+        finally:
+            os.unlink(f.name)
+
+        result.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        return result
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -4898,6 +4925,103 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
+    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
+                     ' well with UBSAN at the moment, so we skip the test if'
+                     ' we are in a UBSAN environment.')
+    def test_rnn_cell_quantized(self):
+        d_in, d_hid = 2, 2
+
+        for cell in [
+            torch.nn.LSTMCell(d_in, d_hid).float(),
+            torch.nn.GRUCell(d_in, d_hid).float(),
+            torch.nn.RNNCell(d_in, d_hid).float(),
+        ]:
+            if isinstance(cell, torch.nn.LSTMCell):
+                num_chunks = 4
+            elif isinstance(cell, torch.nn.GRUCell):
+                num_chunks = 3
+            elif isinstance(cell, torch.nn.RNNCell):
+                num_chunks = 1
+
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+
+            ref = copy.deepcopy(cell)
+
+            cell = torch.jit.quantized.quantize_rnn_cell_modules(cell)
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
+            hx = torch.tensor(h0_vals, dtype=torch.float)
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                cx = torch.tensor(h0_vals, dtype=torch.float)
+                hiddens = (hx, cx)
+            else:
+                hiddens = hx
+
+            if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                from typing import Tuple
+
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
+
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                        return self.cell(x, hiddens)
+            else:
+
+                class ScriptWrapper(torch.jit.ScriptModule):
+                    def __init__(self, cell):
+                        super(ScriptWrapper, self).__init__()
+                        self.cell = cell
+
+                    @torch.jit.script_method
+                    def forward(self, x, hiddens):
+                        # type: (torch.Tensor, torch.Tensor)
+                        return self.cell(x, hiddens)
+
+            cell = ScriptWrapper(cell)
+            outs = cell(x, hiddens)
+            cell = self.getExportImportCopyWithPacking(cell)
+
+            outs = cell(x, hiddens)
+            ref_outs = ref(x, hiddens)
+
+            self.assertEqual(len(outs), len(ref_outs))
+            for out, ref_out in zip(outs, ref_outs):
+                torch.testing.assert_allclose(out, ref_out)
+
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
@@ -5205,10 +5329,7 @@ a")
         # Test save path
         self.assertFalse(sm.pack_called.item())
         self.assertFalse(sm.unpack_called.item())
-        sm.apply(lambda s: s._pack())
-        imported = self.getExportImportCopy(sm)
-        sm.apply(lambda s: s._unpack())
-        imported.apply(lambda s: s._unpack())
+        imported = self.getExportImportCopyWithPacking(sm)
         # ensure pack was called before serialization
         self.assertTrue(sm.pack_called.item())
         # ensure unpack was called after serialization so as to leave the module in an initialized state
@@ -8328,15 +8449,11 @@ a")
             fb_ref = FooBar()
             fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
             fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
-            torch.jit.quantized.quantize_linear_modules(fb)
+            fb = torch.jit.quantized.quantize_linear_modules(fb)
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
             traced = torch.jit.trace(fb, (x,))
-            traced.apply(lambda s: s._pack() if s._has_method('_pack') else None)
-            fb = self.getExportImportCopy(traced)
-            traced.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
-
-            fb.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+            fb = self.getExportImportCopyWithPacking(traced)
 
             x = torch.tensor([[100, -150]], dtype=torch.float)
             y = fb(x)
