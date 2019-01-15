@@ -52,6 +52,17 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+# Override /Zi with /Z7 with MSVC
+if (MSVC)
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if(${flag_var} MATCHES "/Z[iI]")
+      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+    endif(${flag_var} MATCHES "/Z[iI]")
+  endforeach(flag_var)
+endif(MSVC)
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.

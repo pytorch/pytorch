@@ -590,16 +590,16 @@ if (BUILD_PYTHON)
 
   set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-  set(TORCH_PYTHON_LINK_FLAGS)
+  set(TORCH_PYTHON_LINK_FLAGS "")
 
   if (MSVC)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
     if (NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
-      list(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
   elseif (APPLE)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
   else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -623,7 +623,6 @@ if (BUILD_PYTHON)
     if(MSVC)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
       list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES "${NVTOOLEXT_HOME}/include")
-      list(APPEND TORCH_PYTHON_LINK_FLAGS " /FORCE:UNRESOLVED")
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
@@ -706,8 +705,8 @@ if (BUILD_PYTHON)
 
   target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
-  if (TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if (NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
 
   install(TARGETS torch_python
