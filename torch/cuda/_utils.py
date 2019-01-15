@@ -30,6 +30,6 @@ def _get_device_index(device, optional=False):
             # default cuda device index
             return torch.cuda.current_device()
         else:
-            raise ValueError('Expected a cuda device with sepecified index or '
-                             'an integer, but got: '.format(device))
+            raise ValueError('Expected a cuda device with specified index '
+                             'or an integer, but got: '.format(device))
     return device_idx
