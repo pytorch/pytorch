@@ -21,8 +21,10 @@ THC_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream st
 #endif
 THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device);
 THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device);
+THC_API void     THCCachingAllocator_resetMaxMemoryAllocated(int device);
 THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device);
 THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device);
+THC_API void     THCCachingAllocator_resetMaxMemoryCached(int device);
 
 #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && defined(__cplusplus))
 THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex();

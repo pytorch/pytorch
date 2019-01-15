@@ -27,16 +27,6 @@
 #include <queue>
 #include <TH/TH.h>
 
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <c10/cuda/CUDAGuard.h>
-#endif  // USE_CUDA
-
-#ifdef USE_ROCM
-#include <hip/hip_runtime.h>
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
-#endif  // USE_ROCM
-
 namespace torch { namespace autograd {
 
 // NB: -1 indicates the CPU worker!
@@ -217,22 +207,20 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#if defined(USE_CUDA)
   // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with USE_CUDA, but
+  // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  at::cuda::OptionalCUDAGuard guard;
+  at::OptionalDeviceGuard guard;
   if (device != -1) {
-    guard.set_index(device);
+    if (at::hasCUDA()) {
+      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+    }
+    if (at::hasHIP()) {
+      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    }
   }
-#elif defined(USE_ROCM)
-  at::cuda::OptionalHIPGuardMasqueradingAsCUDA guard;
-  if (device != -1) {
-    guard.set_index(device);
-  }
-#endif
   worker_device = device;
   thread_main(nullptr);
 }
@@ -644,29 +632,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = 0;
-#ifdef USE_CUDA
-  {
-    int num_cuda_devices = 0;
-    // check for case of compiled with CUDA but no available devices
-    if (cudaGetDeviceCount(&num_cuda_devices) != cudaSuccess) {
-      cudaGetLastError();
-    } else {
-      num_devices += num_cuda_devices;
-    }
-  }
-#endif
-#ifdef USE_ROCM
-  {
-    int num_hip_devices = 0;
-    // check for case of compiled with CUDA but no available devices
-    if (hipGetDeviceCount(&num_hip_devices) != hipSuccess) {
-      hipGetLastError();
-    } else {
-      num_devices += num_hip_devices;
-    }
-  }
-#endif
+  int num_devices = at::getNumGPUs();
   // One for CPU, plus one for every GPU device
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);

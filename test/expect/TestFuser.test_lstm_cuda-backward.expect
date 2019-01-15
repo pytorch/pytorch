@@ -66,14 +66,13 @@ graph(%0 : Float(*, *)
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Tensor
       %2 : Float(*, *)) {
-  %3 : Float(*, *) = aten::mul(%2, %2)
-  %4 : Float(*, *) = aten::neg(%3)
-  %5 : int = prim::Constant[value=1]()
-  %6 : Float(*, *) = aten::add(%4, %5, %5)
+  %3 : int = prim::Constant[value=1]()
+  %4 : Float(*, *) = aten::mul(%2, %2)
+  %5 : Float(*, *) = aten::neg(%4)
+  %6 : Float(*, *) = aten::add(%5, %3, %3)
   %7 : Tensor = aten::mul(%1, %6)
-  %8 : int = prim::Constant[value=1]()
-  %9 : Tensor = aten::add(%0, %7, %8)
-  return (%9);
+  %8 : Tensor = aten::add(%0, %7, %3)
+  return (%8);
 }
 with prim::FusionGroup_1 = graph(%0 : Tensor
       %1 : Float(*, *)
@@ -83,26 +82,23 @@ with prim::FusionGroup_1 = graph(%0 : Tensor
       %5 : Float(*, *)
       %6 : Tensor
       %7 : Float(*, *)) {
-  %8 : Float(*, *) = aten::neg(%7)
-  %9 : int = prim::Constant[value=1]()
-  %10 : Float(*, *) = aten::add(%8, %9, %9)
+  %8 : int = prim::Constant[value=1]()
+  %9 : Float(*, *) = aten::neg(%7)
+  %10 : Float(*, *) = aten::add(%9, %8, %8)
   %11 : Float(*, *) = aten::mul(%10, %7)
   %12 : Tensor = aten::mul(%11, %6)
   %13 : Float(*, *) = aten::mul(%5, %5)
   %14 : Float(*, *) = aten::neg(%13)
-  %15 : int = prim::Constant[value=1]()
-  %16 : Float(*, *) = aten::add(%14, %15, %15)
-  %17 : Tensor = aten::mul(%4, %16)
-  %18 : Float(*, *) = aten::neg(%3)
-  %19 : int = prim::Constant[value=1]()
-  %20 : Float(*, *) = aten::add(%18, %19, %19)
-  %21 : Float(*, *) = aten::mul(%20, %3)
-  %22 : Tensor = aten::mul(%21, %2)
-  %23 : Float(*, *) = aten::neg(%1)
-  %24 : int = prim::Constant[value=1]()
-  %25 : Float(*, *) = aten::add(%23, %24, %24)
-  %26 : Float(*, *) = aten::mul(%25, %1)
-  %27 : Tensor = aten::mul(%26, %0)
-  %28 : Tensor = prim::FusedConcat[dim=1](%27, %22, %17, %12)
-  return (%28);
+  %15 : Float(*, *) = aten::add(%14, %8, %8)
+  %16 : Tensor = aten::mul(%4, %15)
+  %17 : Float(*, *) = aten::neg(%3)
+  %18 : Float(*, *) = aten::add(%17, %8, %8)
+  %19 : Float(*, *) = aten::mul(%18, %3)
+  %20 : Tensor = aten::mul(%19, %2)
+  %21 : Float(*, *) = aten::neg(%1)
+  %22 : Float(*, *) = aten::add(%21, %8, %8)
+  %23 : Float(*, *) = aten::mul(%22, %1)
+  %24 : Tensor = aten::mul(%23, %0)
+  %25 : Tensor = prim::FusedConcat[dim=1](%24, %20, %16, %12)
+  return (%25);
 }

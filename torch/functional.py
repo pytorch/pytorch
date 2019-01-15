@@ -101,10 +101,8 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     sz = LU_data.size(-1)
 
     if unpack_data:
-        I_U = torch.ones(sz, sz, device=LU_data.device, dtype=torch.uint8).triu_().expand_as(LU_data)
-        zero = torch.tensor(0.).type_as(LU_data)
-        U = torch.where(I_U, LU_data, zero)
-        L = torch.where(I_U, zero, LU_data)
+        U = LU_data.triu()
+        L = LU_data.tril()
         L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
@@ -246,8 +244,8 @@ def isinf(tensor):
 
 def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
-expanding the :math:`i`th input over dimensions defined by other inputs.
+vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 
     Args:
