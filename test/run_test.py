@@ -28,6 +28,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'docs_coverage',
     'expecttest',
     'indexing',
     'indexing_cuda',
