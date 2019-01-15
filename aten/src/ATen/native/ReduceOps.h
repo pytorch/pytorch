@@ -16,9 +16,9 @@ DECLARE_DISPATCH(reduce_fn, sum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
 DECLARE_DISPATCH(reduce_fn, mean_stub);
 
-using reduce_std_function =
-  void (*)(TensorIterator&, bool unbiased);
-DECLARE_DISPATCH(reduce_std_function, std_stub);
+using reduce_std_var_function =
+  void (*)(TensorIterator&, bool unbiased, bool take_sqrt);
+DECLARE_DISPATCH(reduce_std_var_function, std_var_stub);
 
 using reduce_norm_fn =
     void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);

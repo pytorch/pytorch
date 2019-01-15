@@ -1808,10 +1808,10 @@
 - func: var(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
 
-- func: var(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: var(Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
   variants: function, method
 
-- func: var_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: var_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
