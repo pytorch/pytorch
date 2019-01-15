@@ -27,12 +27,12 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
-      axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-      axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+      axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+      axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
       b_quantized_(make_shared<vector<int32_t>>()),
       column_offsets_(make_shared<vector<int32_t>>()),
       is_weight_constant_(
-          OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
+          this->template GetSingleArgument<bool>("constant_weight", true)) {
   if (!is_weight_constant_) {
     LOG(INFO) << operator_def.output(0) << " is_weight_constant "
               << is_weight_constant_;
@@ -298,12 +298,10 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation
-    StoreMatrixInMatrixMarketFormat(
-        M, K, Xdata, OperatorBase::debug_def().input(0));
+    StoreMatrixInMatrixMarketFormat(M, K, Xdata, this->debug_def().input(0));
 
     // Dump weight
-    StoreMatrixInMatrixMarketFormat(
-        N, K, Wdata, OperatorBase::debug_def().input(1));
+    StoreMatrixInMatrixMarketFormat(N, K, Wdata, this->debug_def().input(1));
   }
 
   if (VLOG_IS_ON(3)) {
@@ -374,9 +372,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
     VLOG(3) << "@PERF this=" << this
-            << " output=" << OperatorBase::debug_def().output(0) << " " << M
-            << "x" << N << "x" << K << ": " << dt * 1e3 << " ms " << gops
-            << " gops";
+            << " output=" << this->debug_def().output(0) << " " << M << "x" << N
+            << "x" << K << ": " << dt * 1e3 << " ms " << gops << " gops";
   }
 
   return true;
@@ -412,7 +409,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   int signed_min = -(1 << (qfactory_->GetWeightPrecision() - 1));
   if (is_weight_constant_) {
     bool fast_path = is_same<T, uint8_t>::value && GetCpuId().avx2() &&
-        OperatorBase::debug_def().engine() != "DNNLOWP_ACC16";
+        this->debug_def().engine() != "DNNLOWP_ACC16";
 
     if ((fast_path && !Wq_packed_) || (!fast_path && W_quantized_.empty())) {
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -449,14 +446,13 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
           reason = "fbgemm only supports 8-bit integers";
         } else if (!GetCpuId().avx2()) {
           reason = "fbgemm only supports AVX2";
-        } else if (OperatorBase::debug_def().engine() == "DNNLOWP_ACC16") {
+        } else if (this->debug_def().engine() == "DNNLOWP_ACC16") {
           reason = "";
         } else {
           assert(false);
         }
         if (!reason.empty()) {
-          LOG(WARNING) << "Conv with weight "
-                       << OperatorBase::debug_def().input(1)
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(1)
                        << " falls back to slow path because " << reason;
         }
       }

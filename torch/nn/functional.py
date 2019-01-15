@@ -2629,13 +2629,21 @@ def pad(input, pad, mode='constant', value=0):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
-    Pading size:
-        The number of dimensions to pad is :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor`
-        and the dimensions that get padded begins with the last dimension and moves forward.
-        For example, to pad the last dimension of the input tensor, then `pad` has form
-        `(padLeft, padRight)`; to pad the last 2 dimensions of the input tensor, then use
-        `(padLeft, padRight, padTop, padBottom)`; to pad the last 3 dimensions, use
-        `(padLeft, padRight, padTop, padBottom, padFront, padBack)`.
+    Padding size:
+        The padding size by which to pad some dimensions of :attr:`input`
+        are described starting from the last dimension and moving forward.
+        :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor` dimensions
+        of ``input`` will be padded.
+        For example, to pad only the last dimension of the input tensor, then
+        :attr:`pad` has the form
+        :math:`(\text{padding\_left}, \text{padding\_right})`;
+        to pad the last 2 dimensions of the input tensor, then use
+        :math:`(\text{padding\_left}, \text{padding\_right},`
+        :math:`\text{padding\_top}, \text{padding\_bottom})`;
+        to pad the last 3 dimensions, use
+        :math:`(\text{padding\_left}, \text{padding\_right},`
+        :math:`\text{padding\_top}, \text{padding\_bottom}`
+        :math:`\text{padding\_front}, \text{padding\_back})`.
 
     Padding mode:
         See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and

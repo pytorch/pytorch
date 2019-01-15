@@ -57,7 +57,7 @@ ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
   }
 
   quantize_groupwise_ =
-      OperatorBase::GetSingleArgument<bool>("quantize_groupwise", false);
+      this->template GetSingleArgument<bool>("quantize_groupwise", false);
 }
 
 template <typename T, bool ReluFused>
@@ -75,6 +75,8 @@ ConvDNNLowPOp<T, ReluFused>::RequantizationParams(int group_id) {
   return requantization_params_[quantize_groupwise_ ? group_id : 0];
 }
 
+// FIXME : code duplication with
+// ConvDNNLowPPackWeightOp::TakeDepthWise3x3FastPath_
 template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
@@ -84,9 +86,11 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
       this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
       dilation_h() == 1 && dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 &&
-      pad_l() == 1 && pad_r() == 1 && GetCpuId().avx2() && !quantize_groupwise_;
+      pad_l() == 1 && pad_r() == 1 && GetCpuId().avx2();
 }
 
+// FIXME : code duplication with
+// ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_
 template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
@@ -102,7 +106,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
       this->dilation_[2] == 1 &&
       accumulate(
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
-      GetCpuId().avx2() && !quantize_groupwise_;
+      GetCpuId().avx2();
   return ret;
 }
 
@@ -213,12 +217,12 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
       b_quantized_data_ = b_quantized_->data();
     } else {
       const auto& bias = InputTensorCPU_(BIAS);
-      if (OperatorBase::InputIsType<int8::Int8TensorCPU>(BIAS)) {
+      if (this->template InputIsType<int8::Int8TensorCPU>(BIAS)) {
         TensorQuantizationParams bias_qparams;
         bias_qparams.scale =
-            OperatorBase::Input<int8::Int8TensorCPU>(BIAS).scale;
+            this->template Input<int8::Int8TensorCPU>(BIAS).scale;
         bias_qparams.zero_point =
-            OperatorBase::Input<int8::Int8TensorCPU>(BIAS).zero_point;
+            this->template Input<int8::Int8TensorCPU>(BIAS).zero_point;
         CAFFE_ENFORCE_LE(
             std::abs(
                 bias_qparams.scale -
@@ -368,8 +372,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         static int log_occurences = 0;
         if (log_occurences < 32) {
           ++log_occurences;
-          LOG(WARNING) << "Conv with weight "
-                       << OperatorBase::debug_def().input(FILTER)
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(FILTER)
                        << " falls back to slow path because " << reason;
         }
       }
@@ -560,103 +563,91 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHW() {
   T* Y_data_T = Y->template mutable_data<T>();
   column_offsets_->resize(Y_HxW * dnnlowp_get_max_threads());
 
-  auto f = [&](Tensor* col_buffer) {
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
     col_buffer->Resize(buffer_shape);
     vector<int> buffer_shape_per_thread(
         buffer_shape.begin() + 1, buffer_shape.end());
     T* col_buffer_data = col_buffer->template mutable_data<T>();
 
-    auto f2 = [&](vector<int32_t>* Y_int32) {
-      Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
+    Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
 
-      // Im2Col, followed by gemm.
+    // Im2Col, followed by gemm.
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-      for (int image_id = 0; image_id < N; ++image_id) {
-        int tid = dnnlowp_get_thread_num();
-        for (int group_id = 0; group_id < group_; ++group_id) {
-          if (this->kernel_.size() == 2) {
-            math::Im2ColNCHW<T>(
-                C / group_,
-                input_dims[0],
-                input_dims[1],
-                kernel_h(),
-                kernel_w(),
-                dilation_h(),
-                dilation_w(),
-                pad_t(),
-                pad_l(),
-                pad_b(),
-                pad_r(),
-                stride_h(),
-                stride_w(),
-                Xdata + (group_ * image_id + group_id) * input_offset,
-                col_buffer_data + tid * col_buffer_size,
-                &context_,
-                in_qparams_[INPUT].zero_point);
-          } else {
-            math::Im2ColNdNCHW<T>(
-                this->kernel_.size(),
-                C * X_HxW,
-                col_buffer_size,
-                img_shape.data(),
-                buffer_shape_per_thread.data(),
-                this->kernel_.data(),
-                this->stride_.data(),
-                this->dilation_.data(),
-                this->pads_.data(),
-                Xdata + (group_ * image_id + group_id) * input_offset,
-                col_buffer_data + tid * col_buffer_size,
-                &context_,
-                in_qparams_[INPUT].zero_point);
-          }
+    for (int image_id = 0; image_id < N; ++image_id) {
+      int tid = dnnlowp_get_thread_num();
+      for (int group_id = 0; group_id < group_; ++group_id) {
+        if (this->kernel_.size() == 2) {
+          math::Im2ColNCHW<T>(
+              C / group_,
+              input_dims[0],
+              input_dims[1],
+              kernel_h(),
+              kernel_w(),
+              dilation_h(),
+              dilation_w(),
+              pad_t(),
+              pad_l(),
+              pad_b(),
+              pad_r(),
+              stride_h(),
+              stride_w(),
+              Xdata + (group_ * image_id + group_id) * input_offset,
+              col_buffer_data + tid * col_buffer_size,
+              &context_,
+              in_qparams_[INPUT].zero_point);
+        } else {
+          math::Im2ColNdNCHW<T>(
+              this->kernel_.size(),
+              C * X_HxW,
+              col_buffer_size,
+              img_shape.data(),
+              buffer_shape_per_thread.data(),
+              this->kernel_.data(),
+              this->stride_.data(),
+              this->dilation_.data(),
+              this->pads_.data(),
+              Xdata + (group_ * image_id + group_id) * input_offset,
+              col_buffer_data + tid * col_buffer_size,
+              &context_,
+              in_qparams_[INPUT].zero_point);
+        }
 
-          // quantize col_buffer
-          T* col_buffer_private = col_buffer_data + tid * col_buffer_size;
+        // quantize col_buffer
+        T* col_buffer_private = col_buffer_data + tid * col_buffer_size;
 
-          int32_t* Y_int32_temp =
-              Y_int32->data() + ((M / group_) * group_id + M * tid) * Y_HxW;
-          T_signed* W_quantized_group =
-              W_quantized_.data() + (M / group_) * group_id * kernel_dim;
+        int32_t* Y_int32_temp =
+            Y_int32->data() + ((M / group_) * group_id + M * tid) * Y_HxW;
+        T_signed* W_quantized_group =
+            W_quantized_.data() + (M / group_) * group_id * kernel_dim;
 
-          for (int i = 0; i < M / group_; ++i) {
-            for (int j = 0; j < Y_HxW; ++j) {
-              int32_t sum = 0;
-              for (int k = 0; k < kernel_dim; ++k) {
-                int w = W_quantized_group[i * kernel_dim + k];
-                int x = col_buffer_private[k * Y_HxW + j];
-                sum += w * x;
-              }
-              Y_int32_temp[i * Y_HxW + j] = sum;
-            } // j
-          } // i
+        for (int i = 0; i < M / group_; ++i) {
+          for (int j = 0; j < Y_HxW; ++j) {
+            int32_t sum = 0;
+            for (int k = 0; k < kernel_dim; ++k) {
+              int w = W_quantized_group[i * kernel_dim + k];
+              int x = col_buffer_private[k * Y_HxW + j];
+              sum += w * x;
+            }
+            Y_int32_temp[i * Y_HxW + j] = sum;
+          } // j
+        } // i
 
-          RunOnDeviceEpilogueNCHW_(
-              col_buffer_private,
-              Y_int32_temp,
-              Y_data_T + (M * image_id + M / group_ * group_id) * Y_HxW,
-              M / group_ * group_id,
-              group_id);
-        } // for each group
-      } // for each image_id
+        RunOnDeviceEpilogueNCHW_(
+            col_buffer_private,
+            Y_int32_temp,
+            Y_data_T + (M * image_id + M / group_ * group_id) * Y_HxW,
+            M / group_ * group_id,
+            group_id);
+      } // for each group
+    } // for each image_id
 
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-      MeasureQuantizationError_();
-    }; // f2
-
-    if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-      this->RunWithSharedInt32Buffer_(f2);
-    } else {
-      f2(&Y_int32_);
-    }
+    PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+    MeasureQuantizationError_();
   }; // f
 
-  if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
-    runWithSharedBuffer<CPUContext>(this->ws_, f);
-  } else {
-    f(&col_buffer_);
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &Y_int32_, f);
 
   return true;
 } // RunOnDeviceWithOrderNCHW
@@ -685,7 +676,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
         ++log_occurences;
         LOG(WARNING) << "Cannot do group-wise quantization without "
                         "static quantization of activations for "
-                     << OperatorBase::debug_def().output(0);
+                     << this->debug_def().output(0);
       }
     }
 
@@ -999,14 +990,14 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         N * Y_HxW * group_,
         kernel_dim,
         col_buffer_data,
-        OperatorBase::debug_def().input(INPUT));
+        this->debug_def().input(INPUT));
 
     // Dump weight
     StoreMatrixInMatrixMarketFormat(
         group_ * M,
         kernel_dim,
         W_quantized_.data(),
-        OperatorBase::debug_def().input(FILTER));
+        this->debug_def().input(FILTER));
   }
 
   if (TakeDepthWise3x3x3FastPath_()) {
@@ -1017,27 +1008,53 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-    fbgemm::depthwise_3x3x3_pad_1(
-        N,
-        X.dim32(1),
-        X.dim32(2),
-        X.dim32(3),
-        C,
-        this->stride_[0],
-        this->stride_[1],
-        this->stride_[2],
-        in_qparams_[INPUT].zero_point,
-        reinterpret_cast<const uint8_t*>(Xdata),
-        FilterQuantizationParams(0).zero_point,
-        *Wq_depthwise_3x3x3_packed_,
-        requantization_params_[0].real_multiplier,
-        out_qparams_.zero_point,
-        Y_uint8_data,
-        column_offsets_->data(),
-        b_quantized_data_,
-        ReluFused,
-        dnnlowp_get_thread_num(),
-        dnnlowp_get_num_threads());
+    {
+      if (quantize_groupwise_) {
+        fbgemm::depthwise_3x3x3_per_channel_quantization_pad_1(
+            N,
+            X.dim32(1),
+            X.dim32(2),
+            X.dim32(3),
+            C,
+            this->stride_[0],
+            this->stride_[1],
+            this->stride_[2],
+            in_qparams_[INPUT].zero_point,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            filter_zero_points_.data(),
+            *Wq_depthwise_3x3x3_packed_,
+            requantization_multipliers_.data(),
+            out_qparams_.zero_point,
+            Y_uint8_data,
+            column_offsets_->data(),
+            b_quantized_data_,
+            ReluFused,
+            dnnlowp_get_thread_num(),
+            dnnlowp_get_num_threads());
+      } else {
+        fbgemm::depthwise_3x3x3_pad_1(
+            N,
+            X.dim32(1),
+            X.dim32(2),
+            X.dim32(3),
+            C,
+            this->stride_[0],
+            this->stride_[1],
+            this->stride_[2],
+            in_qparams_[INPUT].zero_point,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            FilterQuantizationParams(0).zero_point,
+            *Wq_depthwise_3x3x3_packed_,
+            requantization_params_[0].real_multiplier,
+            out_qparams_.zero_point,
+            Y_uint8_data,
+            column_offsets_->data(),
+            b_quantized_data_,
+            ReluFused,
+            dnnlowp_get_thread_num(),
+            dnnlowp_get_num_threads());
+      }
+    } // omp parallel
 
     return;
   } else if (TakeDepthWise3x3FastPath_()) {
@@ -1049,29 +1066,54 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-    fbgemm::depthwise_3x3_pad_1(
-        N,
-        H,
-        W,
-        C,
-        stride_h(),
-        stride_w(),
-        in_qparams_[INPUT].zero_point,
-        reinterpret_cast<const uint8_t*>(Xdata),
-        FilterQuantizationParams(0).zero_point,
-        *Wq_depthwise_3x3_packed_,
-        requantization_params_[0].real_multiplier,
-        out_qparams_.zero_point,
-        Y_uint8_data,
-        column_offsets_->data(),
-        b_quantized_data_,
-        dnnlowp_get_thread_num(),
-        dnnlowp_get_num_threads(),
-        ReluFused);
+    {
+      if (quantize_groupwise_) {
+        fbgemm::depthwise_3x3_per_channel_quantization_pad_1(
+            N,
+            H,
+            W,
+            C,
+            stride_h(),
+            stride_w(),
+            in_qparams_[INPUT].zero_point,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            filter_zero_points_.data(),
+            *Wq_depthwise_3x3_packed_,
+            requantization_multipliers_.data(),
+            out_qparams_.zero_point,
+            Y_uint8_data,
+            column_offsets_->data(),
+            b_quantized_data_,
+            ReluFused,
+            dnnlowp_get_thread_num(),
+            dnnlowp_get_num_threads());
+      } else {
+        fbgemm::depthwise_3x3_pad_1(
+            N,
+            H,
+            W,
+            C,
+            stride_h(),
+            stride_w(),
+            in_qparams_[INPUT].zero_point,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            FilterQuantizationParams(0).zero_point,
+            *Wq_depthwise_3x3_packed_,
+            requantization_params_[0].real_multiplier,
+            out_qparams_.zero_point,
+            Y_uint8_data,
+            column_offsets_->data(),
+            b_quantized_data_,
+            ReluFused,
+            dnnlowp_get_thread_num(),
+            dnnlowp_get_num_threads());
+      }
+    } // omp parallel
 
     return;
   }
 
+  // Normal path for non-special (e.g., no depth-wise) convolutions.
   using namespace fbgemm;
   int row_offset_size_per_thread = -1;
   int x_pack_buf_size_per_thread = -1;
@@ -1270,68 +1312,55 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
 #endif
 
   bool no_im2col = NoIm2ColNHWC_();
-  auto f = [&](vector<int32_t>* Y_int32) {
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
     if (!TakeDepthWise3x3FastPath_() && !TakeDepthWise3x3x3FastPath_()) {
       Y_int32->resize(Y->numel());
     }
 
     // Im2col, followed by gemm.
-    auto f2 = [&](Tensor* col_buffer_) {
-      const T* Xdata = X.template data<T>();
-      const T* col_buffer_data = no_im2col ? Xdata : Im2ColNHWC_(col_buffer_);
+    const T* Xdata = X.template data<T>();
+    const T* col_buffer_data = no_im2col ? Xdata : Im2ColNHWC_(col_buffer);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " quantize col_buf: " << dt * 1e3
-                  << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " quantize col_buf: " << dt * 1e3
+                << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
-      ConvNHWCCore_(col_buffer_data, Y_int32);
+    ConvNHWCCore_(col_buffer_data, Y_int32);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      /*if (VLOG_IS_ON(3)) */ {
-        t_end = chrono::system_clock::now();
-        double dt = chrono::duration<double>(t_end - t_begin).count();
-        LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms";
-        t_begin = chrono::system_clock::now();
-      }
+    /*if (VLOG_IS_ON(3)) */ {
+      t_end = chrono::system_clock::now();
+      double dt = chrono::duration<double>(t_end - t_begin).count();
+      LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms";
+      t_begin = chrono::system_clock::now();
+    }
 #endif
 
-      if (Wq_packed_ || Wq_depthwise_3x3_packed_ ||
-          Wq_depthwise_3x3x3_packed_) {
-        // In fast path with fbgemm except when
-        // rescaling quantized numbers should've been already done.
-        PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-      } else {
-        RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
-      }
-    }; // f2
-
-    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
-      runWithSharedBuffer<CPUContext>(this->ws_, f2);
+    if (Wq_packed_ || Wq_depthwise_3x3_packed_ || Wq_depthwise_3x3x3_packed_) {
+      // In fast path with fbgemm except when
+      // rescaling quantized numbers should've been already done.
+      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     } else {
-      f2(&col_buffer_);
+      RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
     }
   }; // f
 
-  if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    this->RunWithSharedInt32Buffer_(f);
-  } else {
-    f(&Y_int32_);
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &Y_int32_, f);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
   /*if (VLOG_IS_ON(3)) */ {
@@ -1351,9 +1380,9 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
     double ops = 2. * N * Y_HxW * M * kernel_dim;
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
-    LOG(INFO) << "this=" << this << " " << OperatorBase::debug_def().type()
-              << " output=" << OperatorBase::debug_def().output(0) << " "
-              << N * Y_HxW << "x" << M << "x" << kernel_dim << " G=" << group_
+    LOG(INFO) << "this=" << this << " " << this->debug_def().type()
+              << " output=" << this->debug_def().output(0) << " " << N * Y_HxW
+              << "x" << M << "x" << kernel_dim << " G=" << group_
               << " C/G=" << C / group_ << " K/G=" << M / group_
               << " R=" << kernel_h() << " S=" << kernel_w() << " : " << dt * 1e3
               << " ms " << gops << " gops";

@@ -156,7 +156,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& T = Input(1); // Labels / targets
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
-  int N, D;
+  int64_t N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
   auto* P =
@@ -179,13 +179,18 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (sum_multiplier_.numel() != D) {
-    sum_multiplier_.Resize(D);
+    ReinitializeTensor(
+        &sum_multiplier_,
+        {D},
+        at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  rowmax_.Resize(N);
-  losses_.Resize(N);
+  ReinitializeTensor(
+      &rowmax_, {N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(
+      &losses_, {N}, at::dtype<float>().device(CPU));
 
   SoftmaxCPU(
       context_,
