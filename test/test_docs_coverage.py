@@ -16,8 +16,16 @@ class TestTorchDocCoverage(unittest.TestCase):
             'all', 'any', 'as_strided', 'autograd', 'backends', 'clamp_max',
             'clamp_min', 'complex128', 'complex32', 'complex64', 'cpp', 'cuda',
             'default_generator', 'device', 'distributed', 'distributions',
-            'float', 'double',
+            'float', 'double', 'dtype', 'empty_strided', 'enable_grad',
+            'finfo', 'float16', 'float32', 'float64', 'fork', 'frobenius_norm',
+            'functional', 'get_device', 'get_file_path', 'half', 'has_cudnn',
+            'has_lapack', 'has_mkl', 'iinfo', 'import_ir_module', 'int',
+            'import_ir_module_from_buffer', 'instance_norm', 'int16', 'int32',
+            'int64', 'int8', 'is_anomaly_enabled', 'is_complex', 'is_nonzero',
+            'is_distributed', 'is_grad_enabled', 'is_signed'
         ]
+        tmplist = ['dsmm', 'hsmm', 'hspmm']
+        whitelist += tmplist
         everything = set(whitelist)
         filename = os.path.join(path, 'torch.rst')
         with open(filename, 'r') as f:
@@ -30,7 +38,7 @@ class TestTorchDocCoverage(unittest.TestCase):
         for p in everything:
             self.assertIn(p, dir(torch))
         for p in dir(torch):
-            if p.startswith('_') or p[0].isupper() or p.endswith('_'):
+            if p.startswith('_') or p[0].isupper() or p.endswith('_') or p.startswith('fbgemm_'):
                 continue
             self.assertIn(p, everything)
 

@@ -6281,3 +6281,25 @@ detach(tensor) -> Tensor
 
 See :meth:`~Tensor.detach`
 """)
+
+add_docstr(torch.index_put,
+           r"""
+index_put_(self, indices, value, accumulate=False) -> Tensor
+
+Outplace version of :meth:`~Tensor.index_put_`
+""")
+
+add_docstr(torch.is_same_size,
+           r"""
+is_same_size(self, other) -> bool
+
+Returns true if the two tensors has the same shape, otherwise
+returns false.
+""")
+
+add_docstr(torch.isclose,
+           r"""
+isclose(self, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> bool
+
+TODO
+""")

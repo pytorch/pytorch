@@ -8,14 +8,13 @@ from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 from .. import init
-from .. import _VF
 from ..._jit_internal import weak_module, weak_script_method
 
 _rnn_impls = {
-    'LSTM': _VF.lstm,
-    'GRU': _VF.gru,
-    'RNN_TANH': _VF.rnn_tanh,
-    'RNN_RELU': _VF.rnn_relu,
+    'LSTM': torch._C._nn.lstm,
+    'GRU': torch._C._nn.gru,
+    'RNN_TANH': torch._C._nn.rnn_tanh,
+    'RNN_RELU': torch._C._nn.rnn_relu,
 }
 
 
@@ -670,13 +669,13 @@ class RNNCell(RNNCellBase):
             _hx = torch.jit._unwrap_optional(hx)
         self.check_forward_hidden(input, _hx, '')
         if self.nonlinearity == "tanh":
-            ret = _VF.rnn_tanh_cell(
+            ret = torch._C._nn.rnn_tanh_cell(
                 input, _hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
         elif self.nonlinearity == "relu":
-            ret = _VF.rnn_relu_cell(
+            ret = torch._C._nn.rnn_relu_cell(
                 input, _hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
@@ -764,7 +763,7 @@ class LSTMCell(RNNCellBase):
             _hx = torch.jit._unwrap_optional(hx)
         self.check_forward_hidden(input, _hx[0], '[0]')
         self.check_forward_hidden(input, _hx[1], '[1]')
-        return _VF.lstm_cell(
+        return torch._C._nn.lstm_cell(
             input, _hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
@@ -837,7 +836,7 @@ class GRUCell(RNNCellBase):
         else:
             _hx = torch.jit._unwrap_optional(hx)
         self.check_forward_hidden(input, _hx, '')
-        return _VF.gru_cell(
+        return torch._C._nn.gru_cell(
             input, _hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,

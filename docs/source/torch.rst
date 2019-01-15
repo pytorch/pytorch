@@ -58,6 +58,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: cat
 .. autofunction:: chunk
 .. autofunction:: gather
+.. autofunction:: index_put
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: narrow
@@ -225,6 +226,7 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: isclose
 .. autofunction:: allclose
 .. autofunction:: argsort
 .. autofunction:: eq
@@ -234,6 +236,7 @@ Comparison Ops
 .. autofunction:: isfinite
 .. autofunction:: isinf
 .. autofunction:: isnan
+.. autofunction:: is_same_size
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt
