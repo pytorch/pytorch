@@ -2,14 +2,13 @@ import torch
 import unittest
 import os
 import re
-import torch._torch_docs as d
-import inspect
 import ast
 import _ast
 
 
 path = os.path.dirname(os.path.realpath(__file__))
-path = os.path.join(path, '../docs/source/')
+rstpath = os.path.join(path, '../docs/source/')
+pypath = os.path.join(path, '../torch/_torch_docs.py')
 r1 = re.compile(r'\.\. autofunction:: (\w*)')
 
 
@@ -24,7 +23,7 @@ class TestDocCoverage(unittest.TestCase):
             'manual_seed'
         ]
         everything = set()
-        filename = os.path.join(path, 'torch.rst')
+        filename = os.path.join(rstpath, 'torch.rst')
         with open(filename, 'r') as f:
             lines = f.readlines()
             for l in lines:
@@ -36,24 +35,25 @@ class TestDocCoverage(unittest.TestCase):
         # get symbols in functional.py and _torch_docs.py
         whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch']
         everything2 = set()
-        body = ast.parse(inspect.getsource(d)).body
-        for i in body:
-            if not isinstance(i, _ast.Expr):
-                continue
-            i = i.value
-            if not isinstance(i, _ast.Call):
-                continue
-            if i.func.id != 'add_docstr':
-                continue
-            i = i.args[0]
-            if i.value.id != 'torch':
-                continue
-            i = i.attr
-            everything2.add(i)
-        for p in dir(torch.functional):
-            if not p.startswith('_') and p[0].islower():
-                everything2.add(p)
-        everything2 -= set(whitelist2)
+        with open(pypath, 'r') as f:
+            body = ast.parse(f.read()).body
+            for i in body:
+                if not isinstance(i, _ast.Expr):
+                    continue
+                i = i.value
+                if not isinstance(i, _ast.Call):
+                    continue
+                if i.func.id != 'add_docstr':
+                    continue
+                i = i.args[0]
+                if i.value.id != 'torch':
+                    continue
+                i = i.attr
+                everything2.add(i)
+            for p in dir(torch.functional):
+                if not p.startswith('_') and p[0].islower():
+                    everything2.add(p)
+            everything2 -= set(whitelist2)
         # assert they are equal
         for p in everything:
             self.assertIn(p, everything2, 'in torch.rst but not in python')
