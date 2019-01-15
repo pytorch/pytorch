@@ -1,6 +1,6 @@
 #pragma once
-#include <functional>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <functional>
 #include <memory>
 
 namespace torch {
@@ -9,6 +9,7 @@ namespace script {
 struct Module;
 }
 TORCH_API void didFinishEmitModule(std::shared_ptr<script::Module> module);
-TORCH_API void setEmitModuleHook(std::function<void(std::shared_ptr<script::Module> module)> cb);
+TORCH_API void setEmitModuleHook(
+    std::function<void(std::shared_ptr<script::Module> module)> cb);
 } // namespace jit
 } // namespace torch

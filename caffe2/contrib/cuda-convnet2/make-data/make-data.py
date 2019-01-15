@@ -52,10 +52,8 @@ def pickle(filename, data):
         cPickle.dump(data, fo, protocol=cPickle.HIGHEST_PROTOCOL)
 
 def unpickle(filename):
-    fo = open(filename, 'r')
-    contents = cPickle.load(fo)
-    fo.close()
-    return contents
+    with open(filename) as fo:
+        return cPickle.load(fo)
 
 def partition_list(l, partition_size):
     divup = lambda a,b: (a + b - 1) / b

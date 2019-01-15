@@ -6,10 +6,10 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ivalue.h>
-#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
@@ -25,7 +25,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -36,11 +37,11 @@ namespace torch { namespace jit {
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
-//    A drop node is just a node with no outputs that just pops its inputs off the stack,
-//    to ensure the interpreter release references to nodes that are never used.
-//    Drop nodes are also inserted when the last use of a node is in some conditionally
-//    run control flow (e.g. one side of an If) and the interpreter must free
-//    the node only after the control flow has reconverged
+//    A drop node is just a node with no outputs that just pops its inputs off
+//    the stack, to ensure the interpreter release references to nodes that are
+//    never used. Drop nodes are also inserted when the last use of a node is in
+//    some conditionally run control flow (e.g. one side of an If) and the
+//    interpreter must free the node only after the control flow has reconverged
 // Outputs are:
 // * graph - the post processed copy of g
 // * move_flags[n] - a list of booleans, one for each input,
@@ -58,24 +59,25 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output()->setType(BoolType::get());
+          ->output()
+          ->setType(BoolType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output()->setType(BoolType::get());
+          ->output()
+          ->setType(BoolType::get());
   return new_cond;
 }
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
 // provide a loop counter
-void desugarTripCounts(Block * b) {
-  for(auto n : b->nodes()) {
-
-    if(n->kind() == prim::Loop) {
+void desugarTripCounts(Block* b) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == prim::Loop) {
       auto g = n->owningGraph();
       auto body_block = n->blocks()[0];
 
@@ -109,9 +111,10 @@ void desugarTripCounts(Block * b) {
         Value* const_one = g->insertConstant(1);
 
         Value* inc_trip_count =
-            g->insertNode(g->create(
-                    aten::add, {block_trip_count_input, const_one}, 1))
-             ->output()->setType(IntType::get());
+            g->insertNode(
+                 g->create(aten::add, {block_trip_count_input, const_one}, 1))
+                ->output()
+                ->setType(IntType::get());
         body_block->insertOutput(1, inc_trip_count);
 
         Value* body_cond = createTripCountConjunctiveCondition(
@@ -120,16 +123,17 @@ void desugarTripCounts(Block * b) {
         body_block->insertOutput(0, body_cond);
       }
     }
-    for(auto sb : n->blocks()) {
+    for (auto sb : n->blocks()) {
       desugarTripCounts(sb);
     }
   }
 }
 
-// removes all inputs and outputs to a graph, replacing them with Load Store nodes
-static void flattenIO(Graph & graph) {
+// removes all inputs and outputs to a graph, replacing them with Load Store
+// nodes
+static void flattenIO(Graph& graph) {
   auto load = graph.prependNode(graph.create(prim::Load, 0));
-  for(auto old_input : graph.inputs()) {
+  for (auto old_input : graph.inputs()) {
     auto nv = load->addOutput();
     nv->setType(old_input->type());
     old_input->replaceAllUsesWith(nv);
@@ -142,42 +146,40 @@ static void flattenIO(Graph & graph) {
     graph.eraseOutput(graph.outputs().size() - 1);
 }
 
-
 // insert Drop nodes to kill references for anything unused:
 // this can happen in a few places, e.g. when a node returns
 // many values but only one is used
 // a, b = foo()
 // return a
-void dropUnused(Block *b) {
+void dropUnused(Block* b) {
   auto createDropIfUnused = [&](ArrayRef<Value*> values) -> Node* {
     std::vector<Value*> to_drop;
-    for(auto v : values) {
-      if(v->uses().size() == 0)
+    for (auto v : values) {
+      if (v->uses().size() == 0)
         to_drop.push_back(v);
     }
-    if(to_drop.size() == 0)
+    if (to_drop.size() == 0)
       return nullptr;
     return b->owningGraph()->create(prim::Drop, to_drop, 0);
   };
 
-  if(auto d = createDropIfUnused(b->inputs())) {
+  if (auto d = createDropIfUnused(b->inputs())) {
     b->prependNode(d);
   }
-  for(auto n : b->nodes()) {
-    if(auto d = createDropIfUnused(n->outputs())) {
+  for (auto n : b->nodes()) {
+    if (auto d = createDropIfUnused(n->outputs())) {
       d->insertAfter(n);
     }
-    for(auto b : n->blocks())
+    for (auto b : n->blocks())
       dropUnused(b);
   }
 }
 
-
 // for each input, should we move rather than copy the inputs
-std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
+std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
   // struct to share common data structures
   struct FindLastUses {
-    Graph & graph;
+    Graph& graph;
     // have we seen this value, yet, if not, it is the last use of the value
     std::unordered_set<Value*> seen;
 
@@ -187,40 +189,39 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
     // when the If/Loop exits. These are created and inserted on demand.
     std::unordered_map<Node*, Node*> drop_for_node;
 
-    FindLastUses(Graph & g)
-    : graph(g) {
+    FindLastUses(Graph& g) : graph(g) {
       scanBlock(graph.block());
     }
-    void scanBlock(Block * b) {
+    void scanBlock(Block* b) {
       scanNode(b->return_node());
-      for(auto n : b->nodes().reverse()) {
+      for (auto n : b->nodes().reverse()) {
         scanNode(n);
       }
     }
-    void scanNode(Node * n) {
-      for(auto b : n->blocks()) {
+    void scanNode(Node* n) {
+      for (auto b : n->blocks()) {
         scanBlock(b);
       }
       move_flags[n].resize(n->inputs().size());
-      // scan backwards so if a value is used twice in the list then it is a move
-      for(size_t i = n->inputs().size(); i > 0; --i) {
-        scanUse(n, i-1);
+      // scan backwards so if a value is used twice in the list then it is a
+      // move
+      for (size_t i = n->inputs().size(); i > 0; --i) {
+        scanUse(n, i - 1);
       }
     }
-    void scanUse(Node * n, size_t i) {
-      auto & move_flags_n = move_flags[n];
+    void scanUse(Node* n, size_t i) {
+      auto& move_flags_n = move_flags[n];
       auto v = n->inputs()[i];
       auto inserted = seen.insert(v).second;
-      if(!inserted) {
+      if (!inserted) {
         move_flags_n[i] = false;
         return;
       }
 
       // the last use of v may be in a nested block of an If or Loop statement
-      // find the node 'same_depth_node' at the same depth as the definition of v,
-      // and consider that node to be the last use of v.
-      // This ensures we do not delete nodes in nested scopes
-      // that may be executed multiple times
+      // find the node 'same_depth_node' at the same depth as the definition of
+      // v, and consider that node to be the last use of v. This ensures we do
+      // not delete nodes in nested scopes that may be executed multiple times
       // and that nodes used on one side of an if
       // but not the other get deleted regardless of the branch
       // e.g.
@@ -230,12 +231,13 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
       // drop(a)
       // In other words, we find the first program point for v that
       // _reverse_ dominates the definition of v, and add a drop point there.
-      Node * same_depth_node = findOwnerInBlock(n, v->node()->owningBlock());
-      JIT_ASSERT(same_depth_node); // failure means v is not in scope for n, use lint!
+      Node* same_depth_node = findOwnerInBlock(n, v->node()->owningBlock());
+      JIT_ASSERT(
+          same_depth_node); // failure means v is not in scope for n, use lint!
 
       // In the case where v and n are in the same block, just mark
       // its move_flags to be true
-      if(same_depth_node == n) {
+      if (same_depth_node == n) {
         move_flags_n[i] = true;
         return;
       }
@@ -243,7 +245,8 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
       // in the case where the use is nested in a block
       // add a Drop node after that block which will drop 'v'.
       move_flags_n[i] = false;
-      addToDropIfNotExists(findOrCreateDropInstructionForNode(same_depth_node), v);
+      addToDropIfNotExists(
+          findOrCreateDropInstructionForNode(same_depth_node), v);
     }
 
     // finds the node in block 'block' that contains in 'n'
@@ -252,16 +255,16 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
     // n1: if <cond>:
     // n2:    b = a + a
     // findOwnerInBlock(n2, n0.block()) == n1
-    Node * findOwnerInBlock(Node * n, Block * block) {
-      while(n != nullptr && block != n->owningBlock()) {
+    Node* findOwnerInBlock(Node* n, Block* block) {
+      while (n != nullptr && block != n->owningBlock()) {
         n = n->owningBlock()->owningNode();
       }
       return n;
     }
 
-    Node * findOrCreateDropInstructionForNode(Node * n) {
+    Node* findOrCreateDropInstructionForNode(Node* n) {
       auto it = drop_for_node.find(n);
-      if(it == drop_for_node.end()) {
+      if (it == drop_for_node.end()) {
         auto drop_node = graph.create(prim::Drop, 0);
         drop_node->insertAfter(n);
         it = drop_for_node.emplace(n, drop_node).first;
@@ -269,10 +272,10 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
       return it->second;
     }
 
-    void addToDropIfNotExists(Node * drop, Value * v) {
-      for(auto i : drop->inputs()) {
+    void addToDropIfNotExists(Node* drop, Value* v) {
+      for (auto i : drop->inputs()) {
         // we already accounted for this use
-        if(i == v)
+        if (i == v)
           return;
       }
       drop->addInput(v);
@@ -282,19 +285,18 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 
   return FindLastUses(g).move_flags;
 }
-} //namespace
+} // namespace
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
-  PreprocessGraph(Graph & g)
-  : graph(g.copy()) {
+  PreprocessGraph(Graph& g) : graph(g.copy()) {
     n_outputs = graph->outputs().size();
     desugarTripCounts(graph->block());
     flattenIO(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
-    //TODO: desugar Loop trip counts, for now we drop trip counts
+    // TODO: desugar Loop trip counts, for now we drop trip counts
   }
   // Outputs of the preprocessing:
   std::shared_ptr<Graph> graph;
@@ -311,9 +313,13 @@ struct PreprocessGraph {
 // Note: this is currently unused but will probably be useful in the future,
 // so we keep it around
 struct ContainerTensor : public at::TensorImpl {
-public:
+ public:
   ContainerTensor()
-  : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
+      : TensorImpl(
+            at::UndefinedTensorId(),
+            caffe2::TypeMeta(),
+            nullptr,
+            /* is_variable */ false) {}
 
   ~ContainerTensor() override = default;
   at::IntList sizes() const override {
@@ -335,7 +341,7 @@ public:
 // which are stored in the ListHandle struct
 // start is an offset into int_data of Code for ListHandle<int>
 // and bool_data of Code for ListHandle<bool>
-template<typename T>
+template <typename T>
 struct ListHandle {
   int start;
   int size;
@@ -358,24 +364,22 @@ struct Instruction {
   std::shared_ptr<SourceLocation> debug_location; // for error reporting
 };
 
-
 int relativeJump(int from_inst, int to_inst) {
   return to_inst - (from_inst + 1);
 }
 
 struct CodeImpl {
-  CodeImpl(const std::shared_ptr<Graph>& graph_)
-      : preprocess(*graph_) {
+  CodeImpl(const std::shared_ptr<Graph>& graph_) : preprocess(*graph_) {
     graph = preprocess.graph;
     insertNodesFromBlock(graph->block());
   }
 
   // jump when input is false
   void createJumpFalse(int from_inst, int to_inst) {
-    auto & inst = instructions[from_inst];
+    auto& inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [offset](Stack & stack) {
+    inst.callback = [offset](Stack& stack) {
       auto t = pop(stack).toBool();
       return t ? 0 : offset;
     };
@@ -384,10 +388,10 @@ struct CodeImpl {
 
   // jump when input is true
   void createJumpTrue(int from_inst, int to_inst) {
-    auto & inst = instructions[from_inst];
+    auto& inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [offset](Stack & stack) {
+    inst.callback = [offset](Stack& stack) {
       auto t = pop(stack).toBool();
       return t ? offset : 0;
     };
@@ -395,19 +399,17 @@ struct CodeImpl {
   }
 
   void createJump(int from_inst, int to_inst) {
-    auto & inst = instructions[from_inst];
+    auto& inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [=](Stack & stack) {
-      return offset;
-    };
+    inst.callback = [=](Stack& stack) { return offset; };
     inst.debug_name = prim::Jump;
   }
 
   void insertNodesFromBlock(Block* block) {
-    for(auto node : block->nodes()) {
-      const auto & source_location = node->getSourceLocation();
-      switch(node->kind()) {
+    for (auto node : block->nodes()) {
+      const auto& source_location = node->getSourceLocation();
+      switch (node->kind()) {
         case prim::If: {
           // x = if c:
           //   <then_block>
@@ -426,17 +428,31 @@ struct CodeImpl {
           //   x = vt
           // end:
 
-          // prim::Placeholder instructions are replaced with branch instructions
-          // when the branch target locations are known
-          auto cond_branch = insertInstruction(prim::Placeholder, source_location, node->inputs(), moveFlags(node), {});
+          // prim::Placeholder instructions are replaced with branch
+          // instructions when the branch target locations are known
+          auto cond_branch = insertInstruction(
+              prim::Placeholder,
+              source_location,
+              node->inputs(),
+              moveFlags(node),
+              {});
           auto then_block = node->blocks()[0];
           auto else_block = node->blocks()[1];
           insertNodesFromBlock(else_block);
-          insertAssign(source_location,else_block->outputs(), moveFlags(else_block), node->outputs());
-          auto jump = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
+          insertAssign(
+              source_location,
+              else_block->outputs(),
+              moveFlags(else_block),
+              node->outputs());
+          auto jump =
+              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           auto then_block_start = instructions.size();
           insertNodesFromBlock(then_block);
-          insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
+          insertAssign(
+              source_location,
+              then_block->outputs(),
+              moveFlags(then_block),
+              node->outputs());
           createJump(jump, instructions.size());
           createJumpTrue(cond_branch, then_block_start);
         } break;
@@ -458,114 +474,140 @@ struct CodeImpl {
           auto body_block = node->blocks()[0];
 
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(source_location, node->inputs(), moveFlags(node), body_block->inputs());
+          insertAssign(
+              source_location,
+              node->inputs(),
+              moveFlags(node),
+              body_block->inputs());
           // after assign op: stack: ... <cond>
           // cond_branch consumes <cond> from top of the stack
-          auto cond_branch = insertInstruction(prim::Placeholder, source_location,{}, {}, {});
+          auto cond_branch =
+              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           // after branch: stack: ...
 
           auto entry = instructions.size();
           insertNodesFromBlock(body_block);
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(source_location, body_block->outputs(), moveFlags(body_block), body_block->inputs());
+          insertAssign(
+              source_location,
+              body_block->outputs(),
+              moveFlags(body_block),
+              body_block->inputs());
           // after assign op: stack: ... <cond>
-          auto cond_branch_end = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
+          auto cond_branch_end =
+              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
           createJumpFalse(cond_branch, instructions.size());
           createJumpTrue(cond_branch_end, entry);
         } break;
-        default: {
-          insertInstruction(node);
-        } break;
+        default: { insertInstruction(node); } break;
       }
     }
   }
 
-  size_t insertInstruction(Node * n) {
-    auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
+  size_t insertInstruction(Node* n) {
+    auto inst = insertInstruction(
+        n->kind(),
+        n->getSourceLocation(),
+        n->inputs(),
+        moveFlags(n),
+        n->outputs());
     instructions[inst].callback = getOperation(n);
     return inst;
   }
-  size_t insertInstruction(Symbol sym,
-                           std::shared_ptr<SourceLocation> debug_location,
-                                 ArrayRef<Value*> inputs,
-                                 ArrayRef<uint8_t> move_flags,
-                                 ArrayRef<Value*> outputs) {
+  size_t insertInstruction(
+      Symbol sym,
+      std::shared_ptr<SourceLocation> debug_location,
+      ArrayRef<Value*> inputs,
+      ArrayRef<uint8_t> move_flags,
+      ArrayRef<Value*> outputs) {
     instructions.emplace_back();
-    auto & inst = instructions.back();
+    auto& inst = instructions.back();
     inst.debug_name = sym;
     inst.debug_location = std::move(debug_location);
     listBegin(inst.inputs.values);
-    for(auto input : inputs) {
+    for (auto input : inputs) {
       listInsert(inst.inputs.values, getOrAllocateRegister(input, true));
     }
     listBegin(inst.inputs.free_flags);
-    for(auto flag : move_flags) {
+    for (auto flag : move_flags) {
       listInsert(inst.inputs.free_flags, flag);
     }
     listBegin(inst.outputs);
-    for(auto output : outputs) {
+    for (auto output : outputs) {
       listInsert(inst.outputs, getOrAllocateRegister(output));
     }
     return instructions.size() - 1;
   }
-  ArrayRef<uint8_t> moveFlags(Node * n) {
+  ArrayRef<uint8_t> moveFlags(Node* n) {
     return preprocess.move_flags.at(n);
   }
-  ArrayRef<uint8_t> moveFlags(Block *b) {
+  ArrayRef<uint8_t> moveFlags(Block* b) {
     return moveFlags(b->return_node());
   }
 
-  size_t insertAssign(std::shared_ptr<SourceLocation> debug_location, ArrayRef<Value*> inputs, ArrayRef<uint8_t> move_flags, ArrayRef<Value*> outputs) {
-    auto inst = insertInstruction(prim::Assign, std::move(debug_location),inputs, move_flags, outputs);
-    // This node effectively forwards its inputs into different places in a register list.
-    // We don't need to manipulate the stack in any way, because all inputs are also outputs,
-    // and the interpreter will take care of putting them in correct places.
+  size_t insertAssign(
+      std::shared_ptr<SourceLocation> debug_location,
+      ArrayRef<Value*> inputs,
+      ArrayRef<uint8_t> move_flags,
+      ArrayRef<Value*> outputs) {
+    auto inst = insertInstruction(
+        prim::Assign, std::move(debug_location), inputs, move_flags, outputs);
+    // This node effectively forwards its inputs into different places in a
+    // register list. We don't need to manipulate the stack in any way, because
+    // all inputs are also outputs, and the interpreter will take care of
+    // putting them in correct places.
     instructions[inst].callback = [](Stack& stack) { return 0; };
     return inst;
   }
 
   // helpers to build/access RegList objects
-  int get(const ListHandle<int> & list, int i)  const {
+  int get(const ListHandle<int>& list, int i) const {
     return int_data[list.start + i];
   }
-  bool get(const ListHandle<bool> & list, int i) const {
+  bool get(const ListHandle<bool>& list, int i) const {
     return bool_data[list.start + i];
   }
-  void listBegin(ListHandle<int> & list) {
+  void listBegin(ListHandle<int>& list) {
     list.start = int_data.size();
     list.size = 0;
   }
-  void listInsert(ListHandle<int> & list, int value) {
-    JIT_ASSERTM(list.start + list.size == (int)int_data.size(), "another list already started");
+  void listInsert(ListHandle<int>& list, int value) {
+    JIT_ASSERTM(
+        list.start + list.size == (int)int_data.size(),
+        "another list already started");
     int_data.push_back(value);
     list.size++;
   }
-  void listBegin(ListHandle<bool> & list) {
+  void listBegin(ListHandle<bool>& list) {
     list.start = bool_data.size();
     list.size = 0;
   }
-  void listInsert(ListHandle<bool> & list, int value) {
-    JIT_ASSERTM(list.start + list.size == (int)bool_data.size(), "another list already started");
+  void listInsert(ListHandle<bool>& list, int value) {
+    JIT_ASSERTM(
+        list.start + list.size == (int)bool_data.size(),
+        "another list already started");
     bool_data.push_back(value);
     list.size++;
   }
   // must be called before any new_allocations are used, otherwise they will
   // already have registers assigned
-  void aliasRegistersTo(ArrayRef<Value*> new_allocations, ArrayRef<Value*> existing_allocations) {
+  void aliasRegistersTo(
+      ArrayRef<Value*> new_allocations,
+      ArrayRef<Value*> existing_allocations) {
     JIT_ASSERT(new_allocations.size() == existing_allocations.size());
-    for(size_t i = 0; i < new_allocations.size(); ++i) {
+    for (size_t i = 0; i < new_allocations.size(); ++i) {
       auto n = new_allocations[i]->unique();
       auto e = existing_allocations[i]->unique();
       JIT_ASSERT(unique_to_reg.count(e) > 0 && unique_to_reg.count(n) == 0);
       unique_to_reg[n] = unique_to_reg[e];
     }
   }
-  int getOrAllocateRegister(Value * n, bool required = false) {
+  int getOrAllocateRegister(Value* n, bool required = false) {
     size_t u = n->unique();
-    if(unique_to_reg.count(u) > 0)
+    if (unique_to_reg.count(u) > 0)
       return unique_to_reg[u];
     JIT_ASSERT(!required);
     int r = register_size++;
@@ -576,7 +618,7 @@ struct CodeImpl {
   const std::vector<GraphExecutor*>& grad_executors() {
     if (!grad_executors_) {
       grad_executors_.emplace();
-      for (Instruction & instr : instructions) {
+      for (Instruction& instr : instructions) {
         if (auto executor = detail::getGradExecutor(instr.callback)) {
           grad_executors_->push_back(executor);
         }
@@ -585,33 +627,33 @@ struct CodeImpl {
     return *grad_executors_;
   }
 
-  void dumpInstruction(std::ostream & out, size_t pc) const {
-    auto writeList = [&](const ListHandle<int> & list) {
-      for(int i = 0; i < list.size; i++) {
-        if(i > 0)
+  void dumpInstruction(std::ostream& out, size_t pc) const {
+    auto writeList = [&](const ListHandle<int>& list) {
+      for (int i = 0; i < list.size; i++) {
+        if (i > 0)
           out << ", ";
         out << get(list, i);
       }
     };
-    auto writeUseList = [&](const UseList & list) {
-      for(int i = 0; i < list.values.size; i++) {
-        if(i > 0)
+    auto writeUseList = [&](const UseList& list) {
+      for (int i = 0; i < list.values.size; i++) {
+        if (i > 0)
           out << ", ";
-        if(get(list.free_flags, i))
+        if (get(list.free_flags, i))
           out << "move(" << get(list.values, i) << ")";
         else
           out << get(list.values, i);
       }
     };
-    auto & inst = instructions.at(pc);
+    auto& inst = instructions.at(pc);
     writeList(inst.outputs);
     // NB: debug names are the kind of operator used to select
     // dispatch
     out << " = " << inst.debug_name.toUnqualString() << " ";
     writeUseList(inst.inputs);
   }
-  void dump(std::ostream & out) const {
-    for(size_t i = 0; i < instructions.size(); ++i) {
+  void dump(std::ostream& out) const {
+    for (size_t i = 0; i < instructions.size(); ++i) {
       dumpInstruction(out, i);
       out << "\n";
     }
@@ -626,7 +668,8 @@ struct CodeImpl {
   c10::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
-  std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
+  std::unordered_map<size_t, int>
+      unique_to_reg; // map from unique of nodes to register in register table
 
   friend struct InterpreterState;
   std::vector<Instruction> instructions;
@@ -640,12 +683,11 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code & code)
-  : function(code.pImpl),
-    int_data(function->int_data.data()),
-    bool_data(function->bool_data),
-    registers(function->register_size) {
-  }
+  InterpreterStateImpl(const Code& code)
+      : function(code.pImpl),
+        int_data(function->int_data.data()),
+        bool_data(function->bool_data),
+        registers(function->register_size) {}
 
  private:
   c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
@@ -654,60 +696,61 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool runImpl(Stack& stack) {
-    auto & instructions = function->instructions;
+    auto& instructions = function->instructions;
     size_t last = instructions.size();
 
     while (pc < last) {
-        // std::cout << "executing " << pc << ": ";
-        // function->dumpInstruction(std::cout, pc);
-        // std::cout << "\n";
-        auto & inst = instructions[pc];
-        try {
-          loadTensorsFromRegisters(inst.inputs, stack);
-          size_t new_pc = pc + 1 + inst.callback(stack);
-          for (int i = inst.outputs.size - 1; i >= 0; --i) {
-            int reg = get(inst.outputs, i);
-            registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
-          }
-          pc = new_pc;
-        } catch (Suspend& e) {
-          // wait() expects a single input
-          JIT_ASSERT(inst.inputs.values.size == 1);
-
-          getOrCreateFuture();
-
-          if (get(inst.inputs.free_flags, 0)) {
-            // make sure the register is not freed once we are waked up
-            registers[get(inst.inputs.values, 0)] = e.future;
-          }
-
-          // Make sure adding callback is the last step.
-          // Otherwise if e.future has completed,
-          // the current thread will continue running before it suspends.
-          InterpreterState state(intrusive_from_this());
-          e.future->addCallback([state]() {
-            c10::global_work_queue().run(
-                InterpreterContinuation(state, Stack()));
-          });
-
-          return true;
-        } catch (Future::FutureError& e) {
-          // Error from the forked thread.
-          auto msg = e.error_msg; // copy the error for each callback
-          handleError(std::move(msg), false);
-          return false;
-        } catch (std::exception& e) {
-          // Error from the current thread
-          bool is_jit_exception = dynamic_cast<JITException*>(&e);
-          if (instructions[pc].debug_location) {
-            handleError(instructions[pc].debug_location->wrapException(
-                e, "operation failed in interpreter"), is_jit_exception);
-          } else {
-            handleError(e.what(), is_jit_exception);
-          }
-          return false;
+      // std::cout << "executing " << pc << ": ";
+      // function->dumpInstruction(std::cout, pc);
+      // std::cout << "\n";
+      auto& inst = instructions[pc];
+      try {
+        loadTensorsFromRegisters(inst.inputs, stack);
+        size_t new_pc = pc + 1 + inst.callback(stack);
+        for (int i = inst.outputs.size - 1; i >= 0; --i) {
+          int reg = get(inst.outputs, i);
+          registers[reg] = pop(stack);
+          // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
         }
+        pc = new_pc;
+      } catch (Suspend& e) {
+        // wait() expects a single input
+        JIT_ASSERT(inst.inputs.values.size == 1);
+
+        getOrCreateFuture();
+
+        if (get(inst.inputs.free_flags, 0)) {
+          // make sure the register is not freed once we are waked up
+          registers[get(inst.inputs.values, 0)] = e.future;
+        }
+
+        // Make sure adding callback is the last step.
+        // Otherwise if e.future has completed,
+        // the current thread will continue running before it suspends.
+        InterpreterState state(intrusive_from_this());
+        e.future->addCallback([state]() {
+          c10::global_work_queue().run(InterpreterContinuation(state, Stack()));
+        });
+
+        return true;
+      } catch (Future::FutureError& e) {
+        // Error from the forked thread.
+        auto msg = e.error_msg; // copy the error for each callback
+        handleError(std::move(msg), false);
+        return false;
+      } catch (std::exception& e) {
+        // Error from the current thread
+        bool is_jit_exception = dynamic_cast<JITException*>(&e);
+        if (instructions[pc].debug_location) {
+          handleError(
+              instructions[pc].debug_location->wrapException(
+                  e, "operation failed in interpreter"),
+              is_jit_exception);
+        } else {
+          handleError(e.what(), is_jit_exception);
+        }
+        return false;
+      }
     }
     if (future) {
       auto num_outputs = function->preprocess.n_outputs;
@@ -762,22 +805,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
-  int get(const ListHandle<int> & list, int i) {
+  int get(const ListHandle<int>& list, int i) {
     return int_data[list.start + i];
   };
-  bool get(const ListHandle<bool> & list, int i) {
+  bool get(const ListHandle<bool>& list, int i) {
     return bool_data[list.start + i];
   }
-  void loadTensorsFromRegisters(const UseList & uses, Stack & stack) {
-    for(int i = 0; i < uses.values.size; i++) {
-      int reg = get(uses.values,i);
+  void loadTensorsFromRegisters(const UseList& uses, Stack& stack) {
+    for (int i = 0; i < uses.values.size; i++) {
+      int reg = get(uses.values, i);
       // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
-      if(get(uses.free_flags,i)) {
+      if (get(uses.free_flags, i)) {
         stack.push_back(std::move(registers[reg]));
       } else {
         stack.push_back(registers[reg]);
       }
-
     }
   }
 
@@ -786,9 +828,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
-  int * int_data;
-  const std::vector<bool> & bool_data;
-
+  int* int_data;
+  const std::vector<bool>& bool_data;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -797,31 +838,31 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // to make sure memory management happens efficiently.
 
   // We optimize for the case where derivatives are run with retain_graph=False
-  // in the case where it is true, then the interpreter and this array get copied
-  // if this every becomes a bottleneck then we _should_ consider minimizing the
-  // total number or register
+  // in the case where it is true, then the interpreter and this array get
+  // copied if this every becomes a bottleneck then we _should_ consider
+  // minimizing the total number or register
   std::vector<IValue> registers;
 
-  // single buffer for input/output calls to ATen functions, so that we do not reallocate
+  // single buffer for input/output calls to ATen functions, so that we do not
+  // reallocate
   Stack stack;
 };
 
-std::ostream & operator<<(std::ostream & out, const Code & code) {
+std::ostream& operator<<(std::ostream& out, const Code& code) {
   out << *code.pImpl->graph << "\n";
   code.pImpl->dump(out);
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph)
-    : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
 }
 
-InterpreterState::InterpreterState(const Code & code)
-  : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
+InterpreterState::InterpreterState(const Code& code)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {
@@ -836,6 +877,8 @@ c10::intrusive_ptr<Future> InterpreterState::getFuture() {
   return static_cast<InterpreterStateImpl*>(pImpl.get())->getOrCreateFuture();
 }
 
-InterpreterState::InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
+InterpreterState::InterpreterState(
+    c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
     : pImpl(std::move(pImpl_)) {}
-}}
+} // namespace jit
+} // namespace torch

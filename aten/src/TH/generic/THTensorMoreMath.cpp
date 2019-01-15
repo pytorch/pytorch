@@ -619,48 +619,6 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
 }
 
-
-void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
-{
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
-void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  double size_d = ceil(static_cast<double>(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-             , 1, "invalid size, possible overflow?");
-  size = static_cast<ptrdiff_t>(size_d);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
@@ -716,6 +674,11 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
   REAL_SWAP(ARR(III), ARR(JJJ)); \
   LONG_SWAP(IDX(III), IDX(JJJ))
 
+/* Emulate NumPy behavior of putting NaNs
+ * at the end of an ascending list. */
+#define GT_OR_NAN(x, y) \
+  ((x != x && y == y) || (x > y))
+
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
   int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid, stack = 0, sz_right, sz_left;
@@ -731,15 +694,15 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(L+1), ARR(R))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(L), ARR(R))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L+1), ARR(L))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) < piv);
-      do { j = j-1; } while(ARR(j) > piv);
+      do { i = i+1; } while(GT_OR_NAN(piv, ARR(i)));
+      do { j = j-1; } while(GT_OR_NAN(ARR(j), piv));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -790,7 +753,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) > ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i),ARR(i+1))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -798,7 +761,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) < piv);
+      } while(j < elements && GT_OR_NAN(piv, ARR(j)));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
@@ -820,15 +783,15 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) < ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) < ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) < ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(R), ARR(L+1))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(R), ARR(L))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L), ARR(L+1))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) > piv);
-      do { j = j-1; } while(ARR(j) < piv);
+      do { i = i+1; } while(GT_OR_NAN(ARR(i), piv));
+      do { j = j-1; } while(GT_OR_NAN(piv, ARR(j)));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -879,7 +842,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) < ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i+1), ARR(i))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -887,7 +850,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) > piv);
+      } while(j < elements && GT_OR_NAN(ARR(j), piv));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
@@ -1242,37 +1205,6 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
 
   c10::raw::intrusive_ptr::decref(tmpResults);
   THLongTensor_free(tmpIndices);
-}
-
-void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
-{
-  int64_t t_size_0, t_size_1;
-  int64_t t_stride_0, t_stride_1;
-  int64_t r__stride_0, r__stride_1;
-  scalar_t *t_data, *r__data;
-  int64_t r, c;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  THTensor_(resizeAs)(r_, t);
-
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = r_->data<scalar_t>();
-  t_data = t->data<scalar_t>();
-
-  for(r = 0; r < t_size_0; r++)
-  {
-    int64_t sz = THMin(r+k+1, t_size_1);
-    for(c = THMax(0, r+k+1); c < t_size_1; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = 0;
-    for(c = 0; c < sz; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = t_data[r*t_stride_0+c*t_stride_1];
-  }
 }
 
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
@@ -2129,27 +2061,6 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
 accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
   return sqrt(THTensor_(varall)(tensor, biased));
-}
-
-void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  THArgCheck((n >= 0), 3, "number of points must be non-negative");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
-  } else {
-    TH_TENSOR_APPLY(scalar_t, r_,
-        *r__data = TH_MATH_NAME(pow)(10.0, a + i*(b-a)/((scalar_t)(n-1)));
-        i++;
-        );
-  }
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)

@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/enforce_finite.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
@@ -8,7 +9,8 @@ using caffe2::Tensor;
 namespace caffe2 {
 namespace {
 template <class DataType>
-void enforce_finite_op_impl_cpu(const Tensor& input) {
+void enforce_finite_op_impl_cpu(const C10Tensor& input_) {
+  Tensor input(input_);
   const DataType* input_data = input.template data<DataType>();
   auto size = input.numel();
 

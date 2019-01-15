@@ -4,14 +4,12 @@ import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
-    nchw2nhwc,
-    nhwc2nchw,
 )
 from hypothesis import assume, given
 
@@ -33,8 +31,6 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group=st.integers(2, 16),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        in_quantized=st.booleans(),
-        out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
         prepack_weight=st.booleans(),
         share_col_buffer=st.booleans(),
@@ -54,8 +50,6 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
-        in_quantized,
-        out_quantized,
         weight_quantized,
         prepack_weight,
         share_col_buffer,
@@ -96,8 +90,8 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine
+            do_dequantize = "DNNLOWP" in engine
             # If output scale/zp aren't set, it gets computed from ref fp32 op
             # in DNNLOWP, which isn't possible when we quantize input weights.
             # Make sure atleast one output is collected to compute output
@@ -161,7 +155,6 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 dilation=dilation,
                 pad=pad,
                 order=order,
-                dequantize_output=not do_dequantize,
                 shared_buffer=(1 if share_col_buffer else 0),
                 preserve_activation_sparsity=preserve_activation_sparsity,
                 preserve_weight_sparsity=preserve_weight_sparsity,
@@ -356,8 +349,8 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             fall_back_to_NCHW = "DNNLOWP" not in engine and order == "NHWC"
 
             if fall_back_to_NCHW:
-                X_nchw = nhwc2nchw(X)
-                W_nchw = nhwc2nchw(W)
+                X_nchw = utils.NHWC2NCHW(X)
+                W_nchw = utils.NHWC2NCHW(W)
 
             do_quantize = "DNNLOWP" in engine
             do_dequantize = "DNNLOWP" in engine
@@ -446,7 +439,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             if fall_back_to_NCHW:
-                Y = nchw2nhwc(Y)
+                Y = utils.NCHW2NHWC(Y)
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
 
         check_quantized_results_close(outputs)

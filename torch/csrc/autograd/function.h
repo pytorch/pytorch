@@ -86,10 +86,9 @@ void deleteFunction(Function* function);
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
-  /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
-  /// in the backward() pass, with higher sequence numbers prioritized
-  /// before lower sequence numbers.
+  /// Construct a new `Function` with the given `next_edges`. `sequence_nr` is
+  /// a (currently THE) hint to prioritization in the backward() pass, with
+  /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Function(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())

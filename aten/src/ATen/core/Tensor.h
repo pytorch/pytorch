@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
@@ -11,6 +11,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 namespace c10{
@@ -56,6 +57,17 @@ public:
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
 
   int64_t dim() const {
     return impl_->dim();
@@ -481,7 +493,7 @@ public:
   Tensor unsqueeze(int64_t dim) const;
   Tensor & unsqueeze_(int64_t dim);
   Tensor var(bool unbiased=true) const;
-  Tensor var(int64_t dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor var(IntList dim, bool unbiased=true, bool keepdim=false) const;
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
   Tensor norm(c10::optional<Scalar> p, ScalarType dtype) const;

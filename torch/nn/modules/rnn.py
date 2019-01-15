@@ -19,6 +19,10 @@ _rnn_impls = {
 }
 
 
+def apply_permutation(tensor, permutation, dim=1):
+    return tensor.index_select(dim, permutation)
+
+
 class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
@@ -156,14 +160,24 @@ class RNNBase(Module):
         else:
             check_hidden_size(hidden, expected_hidden_size)
 
+    def permute_hidden(self, hx, permutation):
+        if permutation is None:
+            return hx
+        if self.mode == 'LSTM':
+            return tuple(apply_permutation(state, permutation) for state in hx)
+        else:
+            return apply_permutation(hx, permutation)
+
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
-            input, batch_sizes = input
+            input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
@@ -172,6 +186,10 @@ class RNNBase(Module):
                                  requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
@@ -185,8 +203,8 @@ class RNNBase(Module):
         hidden = result[1:] if self.mode == 'LSTM' else result[1]
 
         if is_packed:
-            output = PackedSequence(output, batch_sizes)
-        return output, hidden
+            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
@@ -223,7 +241,7 @@ class RNNBase(Module):
 
     @property
     def _flat_weights(self):
-        return list(self._parameters.values())
+        return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
@@ -345,8 +363,8 @@ class LSTM(RNNBase):
             f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hg} h_{(t-1)} + b_{hg}) \\
             o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
-            c_t = f_t c_{(t-1)} + i_t g_t \\
-            h_t = o_t \tanh(c_t) \\
+            c_t = f_t * c_{(t-1)} + i_t * g_t \\
+            h_t = o_t * \tanh(c_t) \\
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
@@ -451,7 +469,7 @@ class GRU(RNNBase):
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) n_t + z_t h_{(t-1)}
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
@@ -682,7 +700,7 @@ class LSTMCell(RNNCellBase):
         g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\
         o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
-        h' = o \tanh(c') \\
+        h' = o * \tanh(c') \\
         \end{array}
 
     where :math:`\sigma` is the sigmoid function.
