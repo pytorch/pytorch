@@ -13,7 +13,7 @@ else
     num_gpus=0
 fi
 
-caffe2_pypath="$(dirname $(python -c 'import caffe2; print(if type(caffe2.__file) == str then caffe2.__file__ else caffe2.__file__[0])'))"
+caffe2_pypath="$(dirname $(python -c 'import caffe2; print(caffe2.__file__  if type(caffe2.__file) == str else caffe2.__file__[0])'))"
 cmd="$PYTHON $caffe2_pypath/python/examples/resnet50_trainer.py --train_data null --batch_size 64 --epoch_size 6400 --num_epochs 2"
 if (( $num_gpus == 0 )); then
     cmd="$cmd --use_cpu"
