@@ -670,16 +670,13 @@ def _try_get_dispatched_fn(fn):
 
 
 def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__self__'):
+    if not hasattr(fn, '__func__') or not hasattr(fn, '__self__'):
         # Only allow overloads for bound methods
         return None
-    overloads_by_name = _overloaded_fns.get(type(fn.__self__))
-    if overloads_by_name is None:
-        # Have to grab methods off a particualr instance for weak modules
-        overloads_by_name = _overloaded_fns.get(fn.__self__)
-    if overloads_by_name is None:
+    overloads = _overloaded_fns.get(fn.__func__)
+    if overloads is None:
         return None
-    return overloads_by_name.get(fn.__name__)
+    return [getattr(fn.__self__, overload) for overload in overloads]
 
 
 def _try_compile_weak_script(fn):
@@ -1204,12 +1201,18 @@ if _enabled:
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
 
-            entry = _overloaded_fns.get(type(original))
-            if entry is not None:
-                _overloaded_fns[self] = {}
-                for fn_name in entry:
-                    script_methods = [getattr(self, x.__name__) for x in entry[fn_name]]
-                    _overloaded_fns[self][fn_name] = script_methods
+            # Copy overloads since the original may be killed, but the weak module
+            # still needs to know how to resolve overloads
+            for name in dir(original):
+                item = getattr(original, name)
+                if not callable(item):
+                    continue
+                if not hasattr(item, '__func__'):
+                    continue
+                entry = _overloaded_fns.get(item.__func__)
+                if entry is not None:
+                    _overloaded_fns[getattr(self, item.__name__).__func__] = entry
+                    del _overloaded_fns[item.__func__]
 
         def __getattr__(self, attr):
             # Try to get the attribute directly, if that fails, fall back to the

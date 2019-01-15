@@ -154,27 +154,19 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     return fn
 
 
-def overload(self_type, fn_name, fns):
+def overload(*args):
     """
-    When calling 'fn_name' from script from an object of type 'self_type',
-    overload it with 'fns'. The first match in 'fns' will be chosen as the
-    overload.
+    Overload the decorated method with the method names provided. The first
+    match in will be chosen as the overload.
 
     ```
-    torch._jit_internal.overload(type(self), 'forward', (self.overload1, self.overload2))
+    @torch._jit_internal.overload('forward_tensor', 'forward_tuple')
     ```
     """
-    entry = _overloaded_fns.get(self_type)
-    # Bound methods are created for each use, so we can't store a weak reference
-    # to them (it dies immediately)
-    weak_fns = weakref.WeakSet([fn.__func__ for fn in fns])
-
-    if entry is None:
-        _overloaded_fns[self_type] = {
-            fn_name: weak_fns,
-        }
-    else:
-        entry[fn_name] = weak_fns
+    def decorator(fn):
+        _overloaded_fns[fn] = args
+        return fn
+    return decorator
 
 
 try:

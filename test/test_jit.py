@@ -9208,13 +9208,13 @@ a")
         class W(torch.nn.Module):
             def __init__(self):
                 super(W, self).__init__()
-                torch._jit_internal.overload(type(self), 'forward', (self.forward_tensor, self.forward_tuple))
 
             @torch._jit_internal.weak_script_method
             def forward_tuple(self, x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x[0] + 5
 
+            @torch._jit_internal.overload('forward_tensor', 'forward_tuple')
             def forward(self, x):
                 # manually do argument switching
                 if isinstance(x, tuple):
