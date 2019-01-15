@@ -7,8 +7,8 @@ def _get_device_index(device, optional=False):
     object, a Python integer, or ``None``.
 
     If :attr:`device` is a torch.device object, returns the device index if it
-    is a CUDA device. Note that for CUDA device without sepecified index, i.e.,
-    ``torch.devie('cuda')``, this will return the current default CUDA device if
+    is a CUDA device. Note that for CUDA device without specified index, i.e.,
+    ``torch.device('cuda')``, this will return the current default CUDA device if
     :attr:`optional` is ``True``.
 
     If :attr:`device` is a Python interger, it is returned as is.
