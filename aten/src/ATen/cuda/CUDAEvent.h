@@ -126,22 +126,26 @@ struct AT_CUDA_API CUDAEvent {
     }
   }
 
+  // Note: cudaEventElapsedTime can be safely called from any device
   float elapsed_time(const CUDAEvent& other) const {
     AT_CHECK(is_created_ && other.isCreated(),
       "Both events must be recorded before calculating elapsed time.");
+    AT_CHECK(device_index_ == other.device_index_, "When calculating elapsed "
+      "time, start and end events must share the same device index.")
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;
   }
 
+  // Note: cudaEventSynchronize can be safely called from any device
   void synchronize() const {
     if (is_created_) {
-      CUDAGuard guard(static_cast<int16_t>(device_index_));
       AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
 
+  // Note: cudaIpcGetEventHandle must be called on the same device as the stream
   void ipc_handle(cudaIpcEventHandle_t * handle) {
     #ifndef __HIP_PLATFORM_HCC__
       if (!is_created_) {

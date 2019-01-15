@@ -1610,12 +1610,25 @@ class TestCuda(TestCase):
         e0.synchronize()
         e1.synchronize()
         with torch.cuda.device(d0):
-            with self.assertRaisesRegex(RuntimeError, 'CUDA error'):
+            with self.assertRaises(RuntimeError):
                 self.assertGreater(e0.elapsed_time(e1), 0)
 
         with torch.cuda.device(d1):
-            with self.assertRaisesRegex(RuntimeError, 'CUDA error'):
+            with self.assertRaises(RuntimeError):
                 self.assertGreater(e0.elapsed_time(e1), 0)
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            e2 = torch.cuda.Event(enable_timing=True)
+            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            s0.record_event(e2)
+            s0.synchronize()
+
+        self.assertGreater(e0.elapsed_time(e2), 0)
+
+        # deliberately calling from a different device
+        with torch.cuda.device(d1):
+            self.assertGreater(e0.elapsed_time(e2), 0)
 
     @skipIfRocm
     def test_record_stream(self):
