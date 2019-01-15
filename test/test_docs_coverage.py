@@ -4,13 +4,14 @@ import os
 import re
 import torch._torch_docs as d
 import inspect
-import ast, _ast
+import ast
+import _ast
 
 
 path = os.path.dirname(os.path.realpath(__file__))
 path = os.path.join(path, '../docs/source/')
-
 r1 = re.compile(r'\.\. autofunction:: (\w*)')
+
 
 class TestTorchDocCoverage(unittest.TestCase):
 
