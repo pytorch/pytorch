@@ -257,7 +257,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   const at::Tensor& gradOutput_,
   at::Tensor& gradInput,
   IntList output_size,
-  IntList pool_size,
+  IntList pool_size /* unused */,
   const at::Tensor& indices) {
 
   int numBatch = 1;

@@ -217,7 +217,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
   Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
-  IntList pool_size,
+  IntList pool_size /* unused */,
   IntList output_size,
   const Tensor& indices)
 {
