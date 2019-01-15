@@ -402,12 +402,13 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
-    def _test_event_handle_consumer(handle):
+    def _test_event_handle_consumer(handle, p2c, c2p):
         e1 = torch.cuda.Event(_handle=handle)
-        # synchronization here is not really necessary, as the above Event
-        # construction invocation will block until the current device wakes up.
-        # This is testing if event can be successfully created from a handle.
+        c2p.put(0)  # notify parent synchronization is done
+        p2c.get()  # wait for parent before destructing child event
         e1.synchronize()
+        c2p.put(1)  # nofity synchronization is done in child
+        p2c.get()  # wait for parent to finish before destructing child event
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -416,17 +417,58 @@ class TestMultiprocessing(TestCase):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
-        torch.cuda._sleep(50000000)  # spin for about 50 ms
-        e0.record()
-
         ctx = mp.get_context('spawn')
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
         p = ctx.Process(target=TestMultiprocessing._test_event_handle_consumer,
-                        args=(e0.ipc_handle(),))
+                        args=(e0.ipc_handle(), p2c, c2p))
         p.start()
 
+        c2p.get()  # wait for child to become ready
+        torch.cuda._sleep(50000000)  # spin for about 50 ms
+        e0.record()
+        p2c.put(0)  # notify child event is recorded
+
         self.assertFalse(e0.query())
-        p.join()
+        c2p.get()  # wait for synchronization in child
         self.assertTrue(e0.query())
+        p2c.put(1)  # notify child that parent is done
+
+    def _test_event_multi_gpu_consumer(handle, p2c, c2p):
+        d1 = torch.device('cuda:1')
+        with torch.cuda.device(d1):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                e1 = torch.cuda.Event(_handle=handle)
+                torch.cuda._sleep(50000000)  # spin for about 50 ms
+                e1.record()
+                c2p.put(0)
+                # wait for parent process finished synchronization before
+                # destructing e1
+                p2c.get()
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_event_multi_gpu(self):
+        d0 = torch.device('cuda:0')
+        with torch.cuda.device(d0):
+            e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+
+            ctx = mp.get_context('spawn')
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=TestMultiprocessing._test_event_multi_gpu_consumer,
+                args=(e0.ipc_handle(), p2c, c2p))
+            p.start()
+            # wait for event in child process is recorded
+            c2p.get()
+
+            self.assertFalse(e0.query())
+            e0.synchronize()
+            self.assertTrue(e0.query())
+            p2c.put(0)
 
     def _test_empty_tensor_sharing(self, dtype, device):
         q = mp.Queue()
