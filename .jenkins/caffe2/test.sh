@@ -8,18 +8,26 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exit 0
 fi
 
-rm -rf "$TEST_DIR" && mkdir -p "$TEST_DIR"
+# Find where cpp tests and Caffe2 itself are installed
+if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+  # For cmake only build we install everything into /usr/local
+  cpp_test_dir="$INSTALL_PREFIX/cpp_test"
+  ld_library_path="$INSTALL_PREFIX/lib"
+else
+  # For Python builds we install into python
+  # cd to /usr first so the python import doesn't get confused by any 'caffe2'
+  # directory in cwd
+  python_installation="$(dirname $(dirname $(cd /usr && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+  caffe2_pypath="$python_installation/caffe2"
+  cpp_test_dir="$python_installation/caffe2/cpp_test"
+  ld_library_path="$python_installation/torch/lib"
+fi
 
-cd "${WORKSPACE}"
-
-#############
+################################################################################
 # C++ tests #
-#############
-
+################################################################################
 echo "Running C++ tests.."
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
-mkdir -p "$gtest_reports_dir"
-for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
+for test in $(find "$cpp_test_dir" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
     */mkl_utils_test|*/aten/integer_divider_test)
@@ -29,7 +37,7 @@ for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
       if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
         continue
       else
-        "$test"
+        LD_LIBRARY_PATH="$ld_library_path" "$test"
       fi
       ;;
     *)
@@ -43,7 +51,8 @@ for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
       # output than it is to have XML output for Jenkins.
       # Note: in the future, if we want to use xml test reporter once we switch
       # to all gtest, one can simply do:
-      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+      LD_LIBRARY_PATH="$ld_library_path" \
+          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       ;;
   esac
 done
@@ -54,10 +63,6 @@ done
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
-
-# Anywhere except $ROOT_DIR should work
-cd "$INSTALL_PREFIX"
-caffe2_pypath="$(python -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
 
 if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
@@ -72,8 +77,6 @@ if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
 else
   pip install --user --no-cache-dir hypothesis==3.59.0
 fi
-
-mkdir -p "$pytest_reports_dir"
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -119,7 +122,6 @@ pip install --user pytest-sugar
 #####################
 # torchvision tests #
 #####################
-
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install --user torchvision
   "$ROOT_DIR/scripts/onnx/test.sh"
