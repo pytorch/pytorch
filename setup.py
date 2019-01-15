@@ -910,7 +910,7 @@ if __name__ == '__main__':
             ],
             'caffe2': [
                 'cpp_test/*',
-                'caffe2/python/serialized_test/data/operator_test/*.zip'
+                'python/serialized_test/data/operator_test/*.zip',
             ]
         },
     )
