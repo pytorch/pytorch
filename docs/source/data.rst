@@ -3,8 +3,10 @@ torch.utils.data
 
 .. automodule:: torch.utils.data
 .. autoclass:: Dataset
+.. autoclass:: IterableDataset
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
+.. autoclass:: ChainDataset
 .. autoclass:: Subset
 .. autoclass:: DataLoader
 .. autofunction:: torch.utils.data.get_worker_info

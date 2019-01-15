@@ -39,16 +39,82 @@ class IterableDataset(Dataset):
     When a subclass is used with :class:`~torch.data.utils.DataLoader`, each
     item in the dataset will be yielded from the :class:`~torch.data.utils.DataLoader`
     iterator. When ``num_workers > 0``, each worker process will have a
-    different copy of the dataset object. :func:`~torch.data.utils.get_worker_info`
-    and the :class:`~torch.data.utils.DataLoader` 's ``worker_init_fn`` option
-    can be used to config each copy independently.
+    different copy of the dataset object, so it is often desired to configure
+    each copy independently to avoid having duplicate data returned from the
+    workers. :func:`~torch.data.utils.get_worker_info`, when called in a worker
+    process, returns information about the worker. It can be used in either the
+    dataset's ``__iter__`` method or the :class:`~torch.data.utils.DataLoader` 's
+    ``worker_init_fn`` option to modify each copy's behavior.
+
+    Examples::
+
+        >>> # Use `get_worker_info` in `worker_init_fn`
+        >>> class MyIterableDataset(torch.utils.data.IterableDataset):
+        ...     def __init__(self, start, end):
+        ...         super(MyIterableDataset).__init__()
+        ...         self.start = start
+        ...         self.end = end
+        ...
+        ...     def __iter__(self):
+        ...         return iter(range(self.start, self.end))
+        ...
+        >>> def worker_init_fn(worker_id):
+        ...     # Splits the overall workload across workers using `get_worker_info`
+        ...     info = torch.utils.data.get_worker_info()
+        ...     dataset = info.dataset  # info.dataset is the dataset copy in this worker process
+        ...     overall_start = dataset.start
+        ...     overall_end = dataset.end
+        ...     # split workload
+        ...     per_worker = int(math.ceil((overall_end - overall_start) / float(info.num_workers)))
+        ...     worker_id = info.id
+        ...     dataset.start = overall_start + worker_id * per_worker
+        ...     dataset.end = min(dataset.start + per_worker, overall_end)
+        ...
+        >>> ds = MyIterableDataset(start=3, end=11)
+        >>>
+        >>> # The `worker_init_fn` splits workload using `worker_info.num_workers` so it works for
+        >>> # different `num_workers` values.
+        >>>
+        >>> loader = torch.utils.data.DataLoader(ds, num_workers=0, worker_init_fn=worker_init_fn)
+        >>> print(list(loader))
+        [tensor(3), tensor(4), tensor(5), tensor(6), tensor(7), tensor(8), tensor(9), tensor(10)]
+        >>>
+        >>> loader = torch.utils.data.DataLoader(ds, num_workers=2, worker_init_fn=worker_init_fn)
+        >>> print(list(loader))
+        [tensor(3), tensor(7), tensor(4), tensor(8), tensor(5), tensor(9), tensor(6), tensor(10)]
+        >>>
+        >>> loader = torch.utils.data.DataLoader(ds, num_workers=4, worker_init_fn=worker_init_fn)
+        >>> print(list(loader))
+        [tensor(3), tensor(5), tensor(7), tensor(9), tensor(4), tensor(6), tensor(8), tensor(10)]
+
+        >>> # Use `get_worker_info` in `__iter__`
+        >>> class MyIterableDataset(torch.utils.data.IterableDataset):
+        ...     def __iter__(self):
+        ...         worker_info = torch.utils.data.get_worker_info()
+        ...         assert worker_info is not None, "Not in a worker process"
+        ...         worker_id = worker_info.id
+        ...         return iter([-1, worker_id + 1, (worker_id + 1) * 10])
+        ...
+        >>> ds = MyIterableDataset()
+        >>> loader = torch.utils.data.DataLoader(ds, num_workers=2)
+        >>> print(list(loader))
+        # Worker 0 fetched [-1, 1, 10]. Worker 1 fetched [-1, 2, 20].
+        [tensor(-1), tensor(-1), tensor(1), tensor(2), tensor(10), tensor(20)]
     """
 
     def __iter__(self):
         raise NotImplementedError
 
     def __add__(self, other):
-        return itertools.chain(self, other)
+        return ChainDataset([self, other])
+
+    def __len__(self):
+        # Returning `NotImplemented` instead of raising `NotImplementedError`
+        # allows for properly triggering some fallback behavior. E.g., the
+        # built-in `list(X)` tries to call `len(X)` first, and executes a
+        # different code path if `NotImplemented` is returned, while raising
+        # `NotImplementedError` will propagate and and make the call fail.
+        return NotImplemented
 
 
 class TensorDataset(Dataset):
@@ -72,9 +138,9 @@ class TensorDataset(Dataset):
 
 
 class ConcatDataset(Dataset):
-    r"""
-    Dataset to concatenate multiple datasets.
-    Purpose: useful to assemble different existing datasets, possibly
+    r"""Dataset to concatenate multiple datasets.
+
+    This classuseful to assemble different existing datasets, possibly
     large-scale datasets as the concatenation operation is done in an
     on-the-fly manner.
 
@@ -115,6 +181,34 @@ class ConcatDataset(Dataset):
         warnings.warn("cummulative_sizes attribute is renamed to "
                       "cumulative_sizes", DeprecationWarning, stacklevel=2)
         return self.cumulative_sizes
+
+
+class ChainDataset(IterableDataset):
+    r"""Dataset to chain multiple :class:`IterableDataset` s.
+
+    This classuseful to assemble different existing dataset streamss, possibly
+    large-scale datasets as the concatenation operation is done in an
+    on-the-fly manner.
+
+    Arguments:
+        datasets (iterable of IterableDataset): datasets to be chained together
+    """
+    def __init__(self, datasets):
+        super(ChainDataset, self).__init__()
+        self.datasets = datasets
+
+    def __iter__(self):
+        for d in self.datasets:
+            assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
+            for x in d:
+                yield x
+
+    def __len__(self):
+        total = 0
+        for d in self.datasets:
+            assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
+            total += len(d)
+        return total
 
 
 class Subset(Dataset):

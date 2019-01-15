@@ -43,10 +43,6 @@ class DataLoader(object):
             at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
             the dataset. If specified, ``shuffle`` must be False.
-        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
-            if the dataset size is not divisible by the batch size. If ``False`` and
-            the size of dataset is not divisible by the batch size, then the last batch
-            will be smaller. (default: ``False``)
         batch_sampler (Sampler, optional): like sampler, but returns a batch of
             indices at a time. Mutually exclusive with :attr:`batch_size`,
             :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
@@ -56,6 +52,10 @@ class DataLoader(object):
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
+        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
+            if the dataset size is not divisible by the batch size. If ``False`` and
+            the size of dataset is not divisible by the batch size, then the last batch
+            will be smaller. (default: ``False``)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: ``0``)
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
@@ -74,6 +74,15 @@ class DataLoader(object):
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
+
+    .. note:: When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
+              ``len(dataloader)`` returns ``len(dataset)``. But this may not be
+              accurate because the actual iterator size also depends on :attr:`num_workers`
+              and :attr:`worker_init_fn`. If ``num_workers > 0``, each worker
+              gets a copy of the same iterable dataset object and can return
+              duplicate data, unless the dataset copies and/or the workers are
+              configured differently in :attr:`worker_init_fn`. See
+              :class:`~torch.utils.data.IterableDataset` for more details.
     """
 
     __initialized = False
@@ -498,7 +507,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self.mode, self.dataset, index_queue,
                       self.worker_result_queue, self.done_event,
                       self.convert_fn, self.collate_fn, self.base_seed + i,
-                      self.worker_init_fn, i))
+                      self.worker_init_fn, i, self.num_workers))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -553,10 +562,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # failed. Note that this is the only mechanism for Windows to detect
             # worker failures.
             failed_workers = []
-            for i, w in enumerate(self.workers):
-                if self.worker_activity[i] and not w.is_alive:
+            for worker_id, w in enumerate(self.workers):
+                if self.worker_activity[worker_id] and not w.is_alive:
                     failed_workers.append(w)
-                    self.worker_activity[i] = False
+                    _utils.signal_handling._remove_worker_pid(id(self), w.pid)
+                    self.index_queues[worker_id].close()
+                    self.worker_activity[worker_id] = False
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))

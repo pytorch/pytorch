@@ -55,10 +55,21 @@ else:
                 self.manager_dead = os.getppid() != self.manager_pid
             return not self.manager_dead
 
-
-WorkerInfo = namedtuple('WorkerInfo', ['id', 'seed', 'dataset'])
-
 _worker_info = None
+
+
+class WorkerInfo(object):
+    __initialized = False
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.__initialized = True
+
+    def __setattr__(self, key, val):
+        if self.__initialized:
+            raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
+        return super(WorkerInfo, self).__setattr__(key, val)
 
 
 def get_worker_info():
@@ -69,6 +80,7 @@ def get_worker_info():
     following attributes:
 
     * :attr:`id`: the current worker id.
+    * :attr:`num_workers`: the total number of workers.
     * :attr:`seed`: the random seed set for the current worker. This value is
       determined by main process RNG and the worker id. See
       :class:`torch.utils.data.DataLoader`'s documentation for more details.
@@ -82,8 +94,8 @@ def get_worker_info():
        When used in a :attr:`worker_init_fn` passed over to
        :class:`~torch.utils.data.DataLoader`, this method can be useful to
        set up each worker process differently. E.g., the :attr:`worker_init_fn`
-       can use the worker ``id`` to configure the ``dataset`` object to only
-       read a specific fraction of a sharded dataset.
+       can use the worker ``worker_id`` to configure the ``dataset`` object to
+       only read a specific fraction of a sharded dataset.
     """
     return _worker_info
 
@@ -95,7 +107,7 @@ class IterableDatasetStopIteration(object):
 
 
 def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
-                 collate_fn, seed, init_fn, worker_id):
+                 collate_fn, seed, init_fn, worker_id, num_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -116,7 +128,8 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
         data_queue.cancel_join_thread()
 
         global _worker_info
-        _worker_info = WorkerInfo(worker_id, seed, dataset)
+        _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
+                                  seed=seed, dataset=dataset)
 
         if init_fn is not None:
             init_fn(worker_id)
@@ -177,8 +190,8 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                 data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
                 data_queue.put((idx, data))
-                del data
-            del idx, index, r
+                del data  # save memory
+            del idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass

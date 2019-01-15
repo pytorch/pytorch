@@ -13,7 +13,7 @@ import subprocess
 import itertools
 import warnings
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
@@ -400,7 +400,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
         worker_error_event = None
 
     if is_iterable_dataset:
-        ds = TestProperExitIterableDataset(5, worker_error_event)
+        ds = TestProperExitIterableDataset(7, worker_error_event)
     else:
         ds = TestProperExitDataset(12, worker_error_event)
 
@@ -472,10 +472,20 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 def test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     assert worker_id == worker_info.id
+    assert worker_id < worker_info.num_workers
     assert worker_info.seed == torch.initial_seed()
     dataset = worker_info.dataset
     assert isinstance(dataset, TestWorkerInfoDataset)
     assert not hasattr(dataset, 'value')
+    # test that WorkerInfo attributes are read-only
+    try:
+        worker_info.id = 3999
+    except RuntimeError as e:
+        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
+    try:
+        worker_info.a = 3
+    except RuntimeError as e:
+        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
     dataset.value = [worker_id, os.getpid()]
 
 
@@ -637,15 +647,9 @@ class TestDataLoader(TestCase):
     def test_iterable_dataset(self):
         # single process loading
         dataset = CountingIterableDataset(20)
-        for i, d in enumerate(DataLoader(dataset)):
-            self.assertIsInstance(d, torch.Tensor)
-            self.assertEqual(d, i)
-
-        # concatenation
-        dataset1 = CountingIterableDataset(20)
-        dataset2 = CountingIterableDataset(15)
-        expected = list(range(20)) + list(range(15))
-        for i, d in zip(expected, DataLoader(dataset,)):
+        fetched = list(DataLoader(dataset))
+        self.assertEqual(len(fetched), 20)
+        for i, d in enumerate(fetched):
             self.assertIsInstance(d, torch.Tensor)
             self.assertEqual(d, i)
 
@@ -658,6 +662,25 @@ class TestDataLoader(TestCase):
         dataloader = DataLoader(dataset, num_workers=num_workers)
         retrieved = set(d.item() for d in dataloader)
         self.assertEqual(retrieved, expected)
+
+    def test_chain_iterable_dataset(self):
+        # chaining (concatenation)
+        dataset1 = CountingIterableDataset(20)
+        dataset2 = CountingIterableDataset(15)
+        expected = list(range(20)) + list(range(15))
+        for num_workers in [0, 1]:
+            for chained_dataset in [dataset1 + dataset2, ChainDataset([dataset1, dataset2])]:
+                fetched = list(DataLoader(chained_dataset, num_workers=num_workers))
+                self.assertEqual(len(fetched), len(expected))
+                for e, d in zip(expected, fetched):
+                    self.assertIsInstance(d, torch.Tensor)
+                    self.assertEqual(e, d)
+
+        with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
+            list(iter(dataset1 + self.dataset))
+
+        with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
+            list(iter(ChainDataset([dataset1, self.dataset])))
 
     def test_worker_seed(self):
         num_workers = 6
