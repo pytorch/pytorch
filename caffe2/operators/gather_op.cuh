@@ -30,14 +30,14 @@ __global__ void BatchGatherKernel(
     if (wrap_indices && (idx < 0)) {
         idx = idx + (T_INDEX) indexing_axis_dim;
     }
-    const float* src_offset = src_base + i * data_batch_size + idx * block_size;
-    float* dst_offset = out + i * gathered_batch_size + j * block_size;
+    const TData* src_offset = src_base + i * data_batch_size + idx * block_size;
+    TData* dst_offset = out + i * gathered_batch_size + j * block_size;
     dst_offset[k] = src_offset[k];
   }
 }
 
 // Actual gather implementation - resizes output and copies indexed data.
-template <typename Index>
+template <typename Index, typename TData>
 static bool gather_impl_cuda(
     Operator<CUDAContext>* op,
     int dataIdx,
@@ -48,7 +48,6 @@ static bool gather_impl_cuda(
   const Tensor& data = op->Input(dataIdx);
   const Tensor& indices = op->Input(indicesIdx);
   const TypeMeta dataType = data.dtype();
-  size_t item_bytesize = dataType.itemsize();
 
   // ONNX allows negative axis to index from the back, valid range: [-r, r].
   if (axis < 0) {
@@ -64,7 +63,7 @@ static bool gather_impl_cuda(
   vector<int64_t> shape =
       calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis);
   Tensor* output = op->Output(outputIdx, shape, at::dtype(dataType));
-  float* out = static_cast<float*>(output->raw_mutable_data(dataType));
+  TData* out = static_cast<TData*>(output->raw_mutable_data(dataType));
 
   // Succeed if size of output is zero, which can happen for empty batch which
   // would have data dimension size of 0.
@@ -75,7 +74,7 @@ static bool gather_impl_cuda(
   }
 
   const Index* idxs = indices.template data<Index>();
-  const float* src_base = static_cast<const float*>(data.raw_data());
+  const TData* src_base = static_cast<const TData*>(data.raw_data());
 
   const int outer_dims_product = data.size_to_dim(axis);
   const int block_size = data.size_from_dim(axis + 1);

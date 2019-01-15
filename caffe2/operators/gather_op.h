@@ -53,7 +53,7 @@ static void check_indexarray_range(
 }
 
 // Actual gather implementation - resizes output and copies indexed data.
-template <typename Index, typename Context>
+template <typename Index, typename TData, typename Context>
 static bool gather_impl(
     Operator<Context>* op,
     int dataIdx,
@@ -175,10 +175,26 @@ class GatherOp : public Operator<Context> {
   }
 
   template <typename Index>
-  bool DoRunWithType() {
-    return gather_helper::gather_impl<Index, Context>(
+      bool DoRunWithType() {
+          return DispatchHelper<TensorTypes2<int8_t,int16_t,int32_t,int64_t,
+                 long,float,double,GenericTensorImplementation>,
+                 Index>::call(this, Input(DATA));
+      }
+
+  template <typename Index, typename TData>
+      bool DoRunWithType2() {
+          return gather_helper::gather_impl<Index,Context>(
         this, DATA, INDICES, 0, axis_, wrap_indices_);
-  }
+      }
+
+  template <typename TIndex>
+      bool DoRunWithOtherType2() {
+          CAFFE_THROW(
+                  "Gather is not implemented on tensor of type ",
+                  Input(DATA).meta().name(),
+                  " Consider adding it a type in the list DispatchHelper or implementing "
+                  "a generic version (which won't work for duplicated indices though)");
+      }
 
   INPUT_TAGS(DATA, INDICES);
 

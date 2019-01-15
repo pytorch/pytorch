@@ -16,8 +16,16 @@ bool BatchGatherOp<CUDAContext>::RunOnDevice() {
 template <>
 template <typename TInd>
 bool BatchGatherOp<CUDAContext>::DoRunWithType() {
+    return DispatchHelper<TensorTypes2<int8_t,int16_t,int32_t,int64_t,
+           long,float,double,GenericTensorImplementation>,
+           TInd>::call(this, Input(DATA));
+}
+
+template <>
+template <typename TInd, typename TData>
+bool BatchGatherOp<CUDAContext>::DoRunWithType2() {
   // BatchGather is a special-case of Gather with Axis = 1, wrap = false.
-  return gather_helper::gather_impl_cuda<TInd>(
+  return gather_helper::gather_impl_cuda<TInd,TData>(
       this, DATA, INDICES, 0, 1, false);
 }
 

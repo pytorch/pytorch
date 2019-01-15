@@ -21,11 +21,28 @@ class BatchGatherOp final : public Operator<Context> {
   }
 
   template <typename TInd>
-  bool DoRunWithType() {
-    // BatchGather is a special-case of Gather with Axis = 1.
-    return gather_helper::gather_impl<TInd, Context>(
-        this, DATA, INDICES, 0, 1, false);
-  }
+      bool DoRunWithType() {
+          return DispatchHelper<
+              TensorTypes2<int8_t,int16_t,int32_t,int64_t,long,float,double,
+              GenericTensorImplementation>,TInd>::call(this, Input(DATA));
+      }
+
+  template <typename TInd, typename TData>
+      bool DoRunWithType2() {
+          // BatchGather is a special-case of Gather with Axis = 1.
+          return gather_helper::gather_impl<TInd, Context>(
+                  this, DATA, INDICES, 0, 1, false);
+      }
+
+  template <typename TInd>
+      bool DoRunWithOtherType2() {
+          CAFFE_THROW(
+                  "Gather is not implemented on tensor of type ",
+                  Input(DATA).meta().name(),
+                  " Consider adding it a type in the list DispatchHelper or implementing "
+                  "a generic version (which won't work for duplicated indices though)");
+      }
+
   INPUT_TAGS(DATA, INDICES);
 };
 
