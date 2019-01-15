@@ -1,7 +1,8 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
+#include <ATen/core/blob.h>
 
 namespace c10 {
 namespace core {
@@ -14,18 +15,18 @@ struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
   struct Cache final {
-      at::optional<C10Tensor> scale = at::nullopt;
-      at::optional<C10Tensor> bias = at::nullopt;
+      at::optional<at::Tensor> scale = at::nullopt;
+      at::optional<at::Tensor> bias = at::nullopt;
   };
 
   using Signature = void(
-      const C10Tensor& input,
-      const C10Tensor& output,
-      const C10Tensor& output_mean,
-      const C10Tensor& output_stddev,
+      const at::Tensor& input,
+      const at::Tensor& output,
+      const at::Tensor& output_mean,
+      const at::Tensor& output_stddev,
       int axis,
       float epsilon,
-      Cache* cache);
+      intrusive_ptr<caffe2::Blob> cache);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 

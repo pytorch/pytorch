@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 
 namespace caffe2 {
@@ -10,7 +10,7 @@ struct Relu final {
   static constexpr const char* name = "relu";
 
   using Signature =
-      void(const C10Tensor& input, const C10Tensor& output);
+      void(const at::Tensor& input, const at::Tensor& output);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 

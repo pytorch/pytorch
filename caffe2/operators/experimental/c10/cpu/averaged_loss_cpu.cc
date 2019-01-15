@@ -12,11 +12,12 @@ namespace {
 
 template <class T, class Context>
 void averaged_loss_op_cpu_impl(
-    const C10Tensor& X_,
-    const C10Tensor& sum_,
-    caffe2::ops::AveragedLoss::State* state) {
-  Tensor X(X_);
-  Tensor sum(sum_);
+    const at::Tensor& X_,
+    const at::Tensor& sum_,
+    intrusive_ptr<Blob> state_) {
+  Tensor X{C10Tensor(X_)};
+  Tensor sum{C10Tensor(sum_)};
+  caffe2::ops::AveragedLoss::State* state = state_->GetMutable<caffe2::ops::AveragedLoss::State>();
   CPUContext context;
 
   sum.Resize(vector<int64_t>());

@@ -4,20 +4,13 @@
 #include "caffe2/core/operator.h"
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Metaprogramming.h>
+#include <ATen/core/ivalue.h>
 
 namespace caffe2 {
 
 namespace details {
 template <size_t...>
 struct true_t : std::true_type {};
-template <class State>
-inline std::shared_ptr<State> init_state() {
-  return std::make_shared<State>();
-}
-template <>
-inline std::shared_ptr<void> init_state<void>() {
-  return std::shared_ptr<void>();
-}
 template <class T>
 using is_output_arg = std::is_same<Tensor*, T>;
 template <class ParameterDef>
@@ -60,7 +53,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        state_(details::init_state<State>()),
+        state_(make_intrusive<Blob>()),
         parameters_(parse_parameters_(
             operator_def,
             c10::guts::make_index_sequence<num_parameters()>())) {}
@@ -115,11 +108,14 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
+    state_->GetMutable<State>(); // initialize state if not initialized yet
     c10::Dispatcher<OpSchemaDef>::call(
-        C10Tensor(Input(InputIndex))...,
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        state_.get());
+      ArrayRef<IValue>{
+        IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
+        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+        IValue(std::get<ParameterIndex>(parameters_))...,
+        IValue(state_)
+      });
   }
 
   template <
@@ -135,9 +131,12 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        C10Tensor(Input(InputIndex))...,
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...);
+        // TODO Make outputs be returned, not passed in
+        ArrayRef<IValue>{
+          IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
+          IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+          IValue(std::get<ParameterIndex>(parameters_))...
+        });
   }
 
   template <
@@ -152,11 +151,15 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
+    state_->GetMutable<State>(); // initialize state if not initialized yet
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<C10Tensor>(array_inputs_()),
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...,
-        state_.get());
+      // TODO Make outputs be returned, not passed in
+      ArrayRef<IValue>{
+        IValue(at::ArrayRef<at::Tensor>(array_inputs_())),
+        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+        IValue(std::get<ParameterIndex>(parameters_))...,
+        IValue(state_)
+      });
   }
 
   template <
@@ -172,21 +175,23 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<C10Tensor>(array_inputs_()),
-        C10Tensor(*Output(OutputIndex))...,
-        std::get<ParameterIndex>(parameters_)...);
+      ArrayRef<IValue>{
+        IValue(ivalue::TensorList(array_inputs_())),
+        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+        IValue(std::get<ParameterIndex>(parameters_))...
+      });
   }
 
-  std::vector<C10Tensor> array_inputs_() {
-    std::vector<C10Tensor> result;
+  std::vector<at::Tensor> array_inputs_() {
+    std::vector<at::Tensor> result;
     result.reserve(InputSize());
     for (size_t i = 0; i < InputSize(); ++i) {
-      result.push_back(C10Tensor(Input(i)));
+      result.push_back(at::Tensor(c10::C10Tensor(Input(i))));
     }
     return result;
   }
 
-  std::shared_ptr<State> state_;
+  intrusive_ptr<Blob> state_;
 
   ParameterTuple parameters_;
 };
