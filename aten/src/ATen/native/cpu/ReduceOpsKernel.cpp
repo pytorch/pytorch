@@ -59,9 +59,16 @@ static void and_kernel_impl(TensorIterator& iter) {
     iter,
     [=](uint8_t a, uint8_t b) -> uint8_t { return a && b; },
     [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-      // adding the implementation here instead of in vec256_base because it is
-      // inconsistent with other vec256_base comparison operators which return
-      // -1/0 instead of 1/0.
+      // Adding the implementation here instead of in vec256_base to avoid
+      // return value inconsistency. Other comparison operators in vec256_base
+      // return -1/0 (all bit 1 / all bit 0) as true/false to follow the AVX2
+      // convention. This would be convenient when combined with other
+      // vectorized operations. For example, one can use the logical operation
+      // results as a mask for a bit operation to retrieve/reset multiple
+      // elements in a vector.
+      //
+      // In this method, users would expect, e.g., all(), to return 1/0 as
+      // true/false.
       Vec256<uint8_t> c = Vec256<uint8_t>();
       for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
         c[i] = a[i] && b[i];

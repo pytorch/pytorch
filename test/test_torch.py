@@ -400,22 +400,22 @@ class _TestTorchMixin(object):
                 x.all(2, keepdim=True))
 
             # set the last element to 0
-            x[1][2][399] = 0
+            x[-1][-1][-1] = 0
 
             self.assertEqual(
                 torch.tensor(0, dtype=torch.uint8, device=device),
                 x.all())
 
             y = torch.ones([1, 3, 400], dtype=torch.uint8, device=device)
-            y[0][2][399] = 0
+            y[-1][-1][-1] = 0
             self.assertEqual(y, x.all(0, keepdim=True))
 
             y = torch.ones([2, 1, 400], dtype=torch.uint8, device=device)
-            y[1][0][399] = 0
+            y[-1][-1][-1] = 0
             self.assertEqual(y, x.all(1, keepdim=True))
 
             y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
-            y[1][2][0] = 0
+            y[-1][-1][-1] = 0
             self.assertEqual(y, x.all(2, keepdim=True))
 
     def test_allclose(self):
