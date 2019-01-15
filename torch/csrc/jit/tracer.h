@@ -79,7 +79,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto& state = getTracingState();
   if (!var.defined()) {
     Node* n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
+    return state->graph->insertNode(n)->output();
   }
 
   auto& value_map = getTracingState()->value_map;
@@ -128,7 +128,7 @@ inline Value* getOutputTrace(
     size_t output_no) {
   if (!var.defined()) {
     Node* n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
+    return state->graph->insertNode(n)->output();
   }
 
   auto& value_map = getTracingState()->value_map;
@@ -141,6 +141,26 @@ inline Value* getOutputTrace(
     throw std::runtime_error(os.str());
   }
   return it->second;
+}
+
+inline Value* getNestedOutputTrace(
+    const std::shared_ptr<TracingState>& state,
+    const IValue& iv,
+    size_t output_no) {
+  if (iv.isTensor()) {
+    return getOutputTrace(state, iv.toTensor(), output_no);
+  } else if (iv.isTuple()) {
+    const auto& elems = iv.toTuple()->elements();
+    auto tuple_node = state->graph->createTuple(
+        fmap(elems, [&state, output_no](const IValue& iv) {
+          return getNestedOutputTrace(state, iv, output_no);
+        }));
+    state->graph->insertNode(tuple_node);
+    return tuple_node->output();
+  } else {
+    AT_ERROR(
+        "Only tensors or tuples of tensors can be output from traced functions");
+  }
 }
 
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
@@ -196,22 +216,8 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
 inline void exit(const Stack& outputs) {
   auto& state = getTracingState();
   size_t i = 0;
-  std::function<Value*(const IValue&)> reduce_ivalue =
-      [&](const IValue& iv) -> Value* {
-    if (iv.isTensor()) {
-      return getOutputTrace(state, iv.toTensor(), i);
-    } else if (iv.isTuple()) {
-      const auto& elems = iv.toTuple()->elements();
-      auto tuple_node = state->graph->createTuple(fmap(elems, reduce_ivalue));
-      state->graph->appendNode(tuple_node);
-      return tuple_node->output();
-    } else {
-      AT_ERROR(
-          "Only tensors or tuples of tensors can be output from traced functions");
-    }
-  };
   for (auto& output : outputs) {
-    state->graph->registerOutput(reduce_ivalue(output));
+    state->graph->registerOutput(getNestedOutputTrace(state, output, i));
     i++;
   }
   setTracingState(nullptr);
