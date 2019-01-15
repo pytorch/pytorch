@@ -80,9 +80,8 @@ ConvDNNLowPOp<T, ReluFused>::RequantizationParams(int group_id) {
 template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
-  return StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
-      is_same<T, uint8_t>::value && !Acc16() &&
-      group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
+  return this->order_ == StorageOrder::NHWC && is_same<T, uint8_t>::value &&
+      !Acc16() && group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
       dilation_h() == 1 && dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 &&
@@ -94,9 +93,8 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
 template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
-  bool ret = StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
-      is_same<T, uint8_t>::value && !Acc16() &&
-      group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
+  bool ret = this->order_ == StorageOrder::NHWC && is_same<T, uint8_t>::value &&
+      !Acc16() && group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 3 && this->kernel_[0] == 3 &&
       this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
       this->stride_[0] == this->stride_[1] &&
@@ -108,6 +106,30 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
       GetCpuId().avx2();
   return ret;
+}
+
+template <typename T, bool ReluFused>
+bool ConvDNNLowPOp<T, ReluFused>::TakeGConvFastPath_() {
+  const Tensor& X = InputTensorCPU_(INPUT);
+  if (this->order_ != StorageOrder::NHWC || !is_same<T, uint8_t>::value ||
+      !X.template IsType<T>() || this->kernel_.size() != 2) {
+    return false;
+  }
+
+  auto& filter = InputTensorCPU_(FILTER);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
+  const int M = filter.dim32(0);
+  fbgemm::conv_param_t<> conv_p(
+      N,
+      C,
+      M,
+      {X.dim32(1), X.dim32(2)},
+      group_,
+      {this->kernel_[0], this->kernel_[1]},
+      {this->stride_[0], this->stride_[1]},
+      {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+  return fbgemm::fbgemmOptimizedGConv(conv_p);
 }
 
 template <typename T, bool ReluFused>
@@ -156,7 +178,8 @@ bool ConvDNNLowPOp<T, ReluFused>::IsConvGEMM_() const {
 
 template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::NoIm2ColNHWC_() {
-  if (TakeDepthWise3x3FastPath_() || TakeDepthWise3x3x3FastPath_()) {
+  if (TakeDepthWise3x3FastPath_() || TakeDepthWise3x3x3FastPath_() ||
+      TakeGConvFastPath_()) {
     return true;
   }
 
@@ -267,18 +290,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       !Acc16() && is_same<T, uint8_t>::value && GetCpuId().avx2() &&
       !FLAGS_caffe2_dnnlowp_force_slow_path;
 
-  bool depthwise_3x3_fast_path = false, depthwise_3x3x3_fast_path = false;
+  bool depthwise_3x3_fast_path = false, depthwise_3x3x3_fast_path = false,
+       gconv_fast_path = false;
   if (TakeDepthWise3x3FastPath_()) {
     depthwise_3x3_fast_path = true;
     packW = false;
   } else if (TakeDepthWise3x3x3FastPath_()) {
     depthwise_3x3x3_fast_path = true;
     packW = false;
+  } else if (TakeGConvFastPath_()) {
+    gconv_fast_path = true;
+    packW = false;
   }
 
   if ((depthwise_3x3_fast_path && !Wq_depthwise_3x3_packed_) ||
       (depthwise_3x3x3_fast_path && !Wq_depthwise_3x3x3_packed_) ||
-      (packW && !Wq_packed_) || (!packW && W_quantized_.empty())) {
+      (gconv_fast_path && !Wq_gconv_packed_) || (packW && !Wq_packed_) ||
+      (!packW && W_quantized_.empty())) {
     if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
       CAFFE_ENFORCE_EQ(
           ConvPoolOpBase<CPUContext>::order_,
@@ -336,6 +364,30 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       } else {
         Wq_depthwise_3x3x3_packed_.reset(new fbgemm::Packed3x3x3ConvMatrix(
             group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
+      }
+    } else if (gconv_fast_path) {
+      if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
+        const auto& packed_filter =
+            this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
+        Wq_gconv_packed_ = packed_filter.W_gconv;
+      } else {
+        const Tensor& X = InputTensorCPU_(INPUT);
+        const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
+
+        fbgemm::conv_param_t<> conv_p(
+            N,
+            C,
+            M,
+            {X.dim32(1), X.dim32(2)},
+            group_,
+            {this->kernel_[0], this->kernel_[1]},
+            {this->stride_[0], this->stride_[1]},
+            {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+        Wq_gconv_packed_.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+            fbgemm::matrix_op_t::Transpose,
+            conv_p,
+            reinterpret_cast<const int8_t*>(W_quantized_.data())));
       }
     } else if (packW) {
       if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
@@ -1000,6 +1052,8 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         this->debug_def().input(FILTER));
   }
 
+  using namespace fbgemm;
+
   if (TakeDepthWise3x3x3FastPath_()) {
     const T* Xdata = X.template data<T>();
     uint8_t* Y_uint8_data =
@@ -1010,7 +1064,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #endif
     {
       if (quantize_groupwise_) {
-        fbgemm::depthwise_3x3x3_per_channel_quantization_pad_1(
+        depthwise_3x3x3_per_channel_quantization_pad_1(
             N,
             X.dim32(1),
             X.dim32(2),
@@ -1032,7 +1086,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
-        fbgemm::depthwise_3x3x3_pad_1(
+        depthwise_3x3x3_pad_1(
             N,
             X.dim32(1),
             X.dim32(2),
@@ -1068,7 +1122,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #endif
     {
       if (quantize_groupwise_) {
-        fbgemm::depthwise_3x3_per_channel_quantization_pad_1(
+        depthwise_3x3_per_channel_quantization_pad_1(
             N,
             H,
             W,
@@ -1088,7 +1142,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
-        fbgemm::depthwise_3x3_pad_1(
+        depthwise_3x3_pad_1(
             N,
             H,
             W,
@@ -1111,10 +1165,88 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
     } // omp parallel
 
     return;
+  } else if (TakeGConvFastPath_()) {
+    const T* Xdata = X.template data<T>();
+    uint8_t* Y_uint8_data =
+        OutputTensorCPU_(0)->template mutable_data<uint8_t>();
+
+    conv_param_t<> conv_p(
+        N,
+        C,
+        M,
+        {X.dim32(1), X.dim32(2)},
+        group_,
+        {this->kernel_[0], this->kernel_[1]},
+        {this->stride_[0], this->stride_[1]},
+        {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+    int row_offset_size_per_thread = rowOffsetBufferSizeGConv(conv_p);
+    row_offsets_.resize(dnnlowp_get_max_threads() * row_offset_size_per_thread);
+
+#ifdef _OPENMP
+// TODO: add parallelization once fbgemmGroupwiseConv supports multi-threading
+// #pragma omp parallel
+#endif
+    {
+      int tid = 0; // dnnlowp_get_thread_num();
+      int nthreads = 1; // dnnlowp_get_num_threads();
+
+      DoNothing<> doNothingObj{};
+      if (quantize_groupwise_) {
+        ReQuantizeOutput<false, QuantizationGranularity::GROUP> reqObj(
+            doNothingObj,
+            requantization_multipliers_.data(),
+            out_qparams_.zero_point,
+            in_qparams_[INPUT].zero_point,
+            filter_zero_points_.data(),
+            row_offsets_.data() + tid * row_offset_size_per_thread,
+            column_offsets_->data(),
+            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            conv_p.OC,
+            conv_p.G);
+
+        fbgemmGroupwiseConv(
+            conv_p,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            in_qparams_[INPUT].zero_point,
+            row_offsets_.data() + tid * row_offset_size_per_thread,
+            *Wq_gconv_packed_,
+            Y_uint8_data,
+            Y_int32->data(),
+            reqObj,
+            tid,
+            nthreads);
+      } else {
+        ReQuantizeOutput<false, QuantizationGranularity::TENSOR> reqObj(
+            doNothingObj,
+            requantization_multipliers_.data(),
+            out_qparams_.zero_point,
+            in_qparams_[INPUT].zero_point,
+            filter_zero_points_.data(),
+            row_offsets_.data() + tid * row_offset_size_per_thread,
+            column_offsets_->data(),
+            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            conv_p.OC,
+            conv_p.G);
+
+        fbgemmGroupwiseConv(
+            conv_p,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            in_qparams_[INPUT].zero_point,
+            row_offsets_.data() + tid * row_offset_size_per_thread,
+            *Wq_gconv_packed_,
+            Y_uint8_data,
+            Y_int32->data(),
+            reqObj,
+            tid,
+            nthreads);
+      }
+    } // omp parallel
+
+    return;
   }
 
   // Normal path for non-special (e.g., no depth-wise) convolutions.
-  using namespace fbgemm;
   int row_offset_size_per_thread = -1;
   int x_pack_buf_size_per_thread = -1;
   bool fuse_im2col =
@@ -1351,7 +1483,8 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
     }
 #endif
 
-    if (Wq_packed_ || Wq_depthwise_3x3_packed_ || Wq_depthwise_3x3x3_packed_) {
+    if (Wq_packed_ || Wq_depthwise_3x3_packed_ || Wq_depthwise_3x3x3_packed_ ||
+        Wq_gconv_packed_) {
       // In fast path with fbgemm except when
       // rescaling quantized numbers should've been already done.
       PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
