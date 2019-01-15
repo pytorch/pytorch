@@ -104,9 +104,14 @@ class DataLoader(object):
             # FIXME: check default for some args
             self.mode = _DataLoaderMode.Iterable
             self.sampler = None
-        elif sampler is not None and batch_size is None:
+        elif batch_size is None:
             # FIXME: check default for some args
             self.mode = _DataLoaderMode.Map
+            if sampler is None:
+                if shuffle:
+                    sampler = RandomSampler(dataset)
+                else:
+                    sampler = SequentialSampler(dataset)
             self.sampler = sampler
         else:
             # FIXME: check default for some args
