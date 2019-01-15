@@ -54,6 +54,10 @@ done
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
+
+# Anywhere except $ROOT_DIR should work
+cd "$INSTALL_PREFIX"
+
 caffe2_pypath="$(python -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
 
 if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
