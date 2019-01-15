@@ -782,7 +782,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);
-            JIT_ASSERTM(!val.isNone(), "Unwrapping null optional");
+            AT_CHECK(!val.isNone(), "Unwrapping null optional");
             push(stack, val);
             return 0;
           };
