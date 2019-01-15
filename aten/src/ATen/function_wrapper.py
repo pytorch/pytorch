@@ -458,7 +458,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # cimpls is really a List[FunctionOption]
     'cimpls': List[Any],
     'cname': str,
-    'raw_string': str,
     'condition': str,
     'const_mark': str,
     'device_guard': bool,
@@ -1156,11 +1155,10 @@ def create_generic(top_env, declarations):
 
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
-        raw_string = declaration["raw_string"]
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
             option["is_jit_ir"] = declaration["is_jit_ir"]
-            option["raw_string"] = raw_string
+            option["raw_string"] = declaration["raw_string"]
             try:
                 if option['mode'] != 'native':
                     process_option(option, output_options)

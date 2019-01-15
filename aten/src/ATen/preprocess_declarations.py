@@ -251,7 +251,6 @@ def run(declarations):
                 non_extended_methods.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
-#        declaration['options']['raw_string'] = declaration['raw_string']
     # We (very unfortunately) have overloaded virtual methods. Because
     # of C++'s rules, we cannot move one overload without doing some
     # extra work to make sure that overload in a superclass and an
