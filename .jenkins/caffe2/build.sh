@@ -234,7 +234,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   # This is to save test binaries for testing
   mv "$INSTALL_PREFIX/test/" "$INSTALL_PREFIX/cpp_test/"
 
-  ls $INSTALL_PREFIX
+  ls -lah $INSTALL_PREFIX
 
 else
   # Python build. Uses setup.py to install into site-packages
@@ -249,6 +249,9 @@ else
   build_args+=("USE_FBGEMM=OFF")
   build_args+=("USE_MKLDNN=OFF")
   build_args+=("USE_DISTRIBUTED=ON")
+  for build_arg in "${build_args[@]}"; do
+    export $build_arg
+  done
 
   # sccache will be stuck if  all cores are used for compiling
   # see https://github.com/pytorch/pytorch/pull/7361
@@ -256,20 +259,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  for build_arg in "${build_args[@]}"; do
-    export $build_arg
-  done
   $PYTHON setup.py install --user
-
-  # This is to save test binaries for testing. Copying caffe2/test to
-  # INSTALL_PREFIX, which is /usr/local/caffe2/, enables these setup.py builds
-  # to share cpp-tests test-code with the cmake-only build above. In test.sh
-  # the cpp tests are run in install_prefix
-  cp -r torch/lib/tmp_install $INSTALL_PREFIX
-  mkdir -p "$INSTALL_PREFIX/cpp_test/"
-  cp -r caffe2/test/* "$INSTALL_PREFIX/cpp_test/"
-
-  ls $INSTALL_PREFIX
 
   report_compile_cache_stats
 fi
