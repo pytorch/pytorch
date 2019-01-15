@@ -444,6 +444,11 @@ def signature(decl):
         ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     ret_val = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    # If is_jit_ir has been specified the signature constructed from the
+    # declared attributes should match the raw string passed through. In the
+    # case of native_functions.yaml, func should match the generated signature,
+    # if is_jit_ir is true. This is used to track and verify the alignment
+    # of native_function.yaml's function schema with that used in this parse.
     if "is_jit_ir" in decl and decl["is_jit_ir"]:
         assert(ret_val.strip() == decl["raw_string"].strip())
     if "raw_string" in decl and ret_val.strip() == decl["raw_string"].strip():
