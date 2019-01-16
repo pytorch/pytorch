@@ -105,7 +105,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 Tensor empty_cpu(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: this can be removed when Variable and Tensor are merged
 
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = prod_intlist(size);

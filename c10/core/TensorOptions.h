@@ -17,29 +17,6 @@
 
 namespace c10 {
 
-struct C10_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
-};
-
-// A RAII, thread local (!) guard that has the following effect:
-//
-// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
-// control whether we are in non-Variable-type mode.
-//
-// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
-//
-// See NOTE [ Treating Variables as non-Variables in `is_variable()` ] for details.
-struct C10_API AutoNonVariableTypeMode {
-  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
-    NonVariableTypeMode::set_enabled(enabled);
-  }
-  ~AutoNonVariableTypeMode() {
-    NonVariableTypeMode::set_enabled(prev_mode);
-  }
-  bool prev_mode;
-};
-
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -333,12 +310,8 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
-  ///
-  /// NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled
-  /// we always return false in this function.
-  /// See NOTE [ Treating Variables as non-Variables in `is_variable()` ]
   bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ && !at::NonVariableTypeMode::is_enabled() : false;
+    return has_is_variable_ ? is_variable_ : false;
   }
 
   /// Returns whether the `is_variable` is specified.

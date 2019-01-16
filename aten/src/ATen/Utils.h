@@ -73,8 +73,8 @@ static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char *
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
-  if (expr.is_variable()) {
-    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+  if (expr.requires_grad()) {
+    AT_ERROR("Expected Variable to not require gradient for argument #", pos, " '", name, "'");
   }
   return expr.unsafeGetTensorImpl();
 }
@@ -93,8 +93,8 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
                " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
     }
-    if (expr.is_variable()) {
-      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
+    if (expr.requires_grad()) {
+      AT_ERROR("Expected Variable to not require gradient for sequence element ",
                i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
