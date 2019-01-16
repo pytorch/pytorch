@@ -1,7 +1,5 @@
 #include <torch/csrc/cuda/comm.h>
 
-#ifdef USE_CUDA
-
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -244,5 +242,3 @@ at::Tensor gather(
   return result;
 }
 }} // namespace torch::cuda
-
-#endif

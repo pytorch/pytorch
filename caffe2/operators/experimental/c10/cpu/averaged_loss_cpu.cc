@@ -14,10 +14,10 @@ template <class T, class Context>
 void averaged_loss_op_cpu_impl(
     const C10Tensor& X_,
     const C10Tensor& sum_,
-    caffe2::ops::AveragedLoss::State* state,
-    BaseContext* context) {
+    caffe2::ops::AveragedLoss::State* state) {
   Tensor X(X_);
   Tensor sum(sum_);
+  CPUContext context;
 
   sum.Resize(vector<int64_t>());
 
@@ -28,7 +28,7 @@ void averaged_loss_op_cpu_impl(
       X.numel(),
       X.template data<T>(),
       data,
-      static_cast<Context*>(context),
+      static_cast<Context*>(&context),
       &scratch);
   if (X.numel() > 0) {
     caffe2::math::Scale<T, T, Context>(
@@ -36,7 +36,7 @@ void averaged_loss_op_cpu_impl(
         static_cast<T>(1.) / X.numel(),
         sum.template data<T>(),
         data,
-        static_cast<Context*>(context));
+        static_cast<Context*>(&context));
   }
 }
 } // namespace

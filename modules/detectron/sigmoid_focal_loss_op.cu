@@ -150,7 +150,7 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& T = Input(1);
   auto& wp = Input(2);
   auto& d_avg_loss = Input(InputSize() - 1);
-  auto* dX = Output(0);
+
 
   // get input shape
   int N = X.dim32(0);
@@ -158,7 +158,7 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   SigmoidFocalLossGradientKernel<<<CAFFE_GET_BLOCKS(X.size()),
           CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(

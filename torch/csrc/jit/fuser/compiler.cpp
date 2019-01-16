@@ -13,14 +13,6 @@
 #include <torch/csrc/jit/type.h>
 #include "torch/csrc/jit/fuser/interface.h"
 
-#if USE_CUDA_FUSER
-#include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
-#endif // USE_CUDA_FUSER
-
-#if USE_CPU_FUSER
-#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
-#endif // USE_CUDA_FUSER
-
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -34,6 +26,32 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+std::mutex fusion_backends_lock_;
+static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
+getFusionBackends() {
+  static std::unordered_map<at::Device::Type, FusedKernelConstructor>
+      fusion_backends;
+  return fusion_backends;
+}
+
+void registerFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  getFusionBackends()[backend_type] = std::move(ctor);
+}
+
+bool hasFusionBackend(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().count(backend_type);
+}
+
+const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().at(backend_type);
+}
+
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
@@ -232,38 +250,19 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
-  std::string code = generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
-  std::shared_ptr<FusedKernel> fused_kernel;
-  if (use_cuda) {
-#if USE_CUDA_FUSER
-    fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
-        device.index(),
-        name,
-        code,
-        input_desc,
-        output_desc,
-        chunk_desc,
-        concat_desc,
-        spec.hasRandom());
-#else
-    throw std::runtime_error("CUDA Fusion is not supported on this build.");
-#endif // USE_CUDA_FUSER
-  } else {
-#if USE_CPU_FUSER
-    fused_kernel = std::make_shared<cpu::FusedKernelCPU>(
-        name,
-        code,
-        input_desc,
-        output_desc,
-        chunk_desc,
-        concat_desc,
-        spec.hasRandom());
-#else
-    throw std::runtime_error("CPU Fusion is not supported on this build.");
-#endif // USE_CPU_FUSER
-  }
-
-  return fused_kernel;
+  std::string code =
+      generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
+  const FusedKernelConstructor& kernel_ctor =
+      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
+  return kernel_ctor(
+      device.index(),
+      name,
+      code,
+      input_desc,
+      output_desc,
+      chunk_desc,
+      concat_desc,
+      spec.hasRandom());
 }
 
 } // namespace fuser

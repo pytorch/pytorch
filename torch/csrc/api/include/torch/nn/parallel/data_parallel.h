@@ -6,7 +6,9 @@
 #include <torch/types.h>
 
 #include <torch/csrc/autograd/functions/comm.h>
+#ifdef USE_CUDA
 #include <torch/csrc/cuda/comm.h>
+#endif
 #include <torch/csrc/utils/functional.h>
 
 #include <ATen/Device.h>

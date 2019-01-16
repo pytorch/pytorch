@@ -30,9 +30,9 @@ __global__ void SeluGradientKernel(
 template <>
 bool SeluOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   CAFFE_ENFORCE_GT(X.size(), 0);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   SeluKernel<float>
       <<<CAFFE_GET_BLOCKS(X.size()),
          CAFFE_CUDA_NUM_THREADS,
@@ -50,10 +50,10 @@ template <>
 bool SeluGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   SeluGradientKernel<float>
       <<<CAFFE_GET_BLOCKS(Y.size()),
          CAFFE_CUDA_NUM_THREADS,

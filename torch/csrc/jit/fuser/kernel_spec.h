@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
@@ -58,23 +56,20 @@ struct TORCH_API KernelSpec {
   // Note: assumes the spec is a single block
   // Note: This is the appropriate place to generalize if you want to add other
   //  passes to upfront compilation that walk the graph.
-  KernelSpec(
-    const int64_t _key, 
-    const std::shared_ptr<Graph>& _graph)
-  : key_{_key},
-    graph_{_graph},
-    code_{_graph},
-    nInputs_{_graph->inputs().size()},
-    inputBroadcastGroups_{},
-    inputChunks_{},
-    has_random_{false},
-    kernels_{} {
-    
+  KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
+      : key_{_key},
+        graph_{_graph},
+        code_{_graph},
+        nInputs_{_graph->inputs().size()},
+        inputBroadcastGroups_{},
+        inputChunks_{},
+        has_random_{false},
+        kernels_{} {
     for (const auto& n : graph_->nodes()) {
       if (n->kind() == aten::rand_like) {
         has_random_ = true;
         break;
-      } 
+      }
     }
   }
 
@@ -142,5 +137,3 @@ struct TORCH_API KernelSpec {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER
