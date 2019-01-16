@@ -73,7 +73,10 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
       Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
 
   if (sum_multiplier_.numel() != D) {
-    sum_multiplier_.Resize(D);
+    ReinitializeTensor(
+        &sum_multiplier_,
+        {D},
+        at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
