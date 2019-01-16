@@ -14,24 +14,6 @@
 
 namespace at { namespace native {
 
-namespace {
-
-template <typename scalar_t>
-struct SimpleCopy {
-  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
-    return a;
-  }
-};
-
-template <typename scalar_t>
-struct AbsCopy {
-  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
-    return ::abs(a);
-  }
-};
-
-} // namespace
-
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void sum_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
