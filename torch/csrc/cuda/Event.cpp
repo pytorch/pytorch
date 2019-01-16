@@ -14,20 +14,14 @@ PyObject *THCPEventClass = nullptr;
 static PyObject * THCPEvent_pynew(
     PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
-
   unsigned char enable_timing = 0;
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
-  const char * handle_bytes = nullptr;
-  int handle_size = 0;
-  int64_t device_index = -1;
 
-  // cannot use bool 'p' and bytearray 'Y' as they are not available in Python 2
-  static char *kwlist[] = {
-    "device", "enable_timing", "blocking", "interprocess", "_handle", nullptr};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|Lbbbs#", kwlist,
-      &device_index, &enable_timing, &blocking, &interprocess, &handle_bytes,
-      &handle_size)) {
+  static char *kwlist[] =
+    {"enable_timing", "blocking", "interprocess", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|bbb", kwlist,
+      &enable_timing, &blocking, &interprocess)) {
     return nullptr;
   }
 
@@ -37,26 +31,49 @@ static PyObject * THCPEvent_pynew(
   }
 
   THCPEvent* self = (THCPEvent *)ptr.get();
-  if (handle_bytes) {
-    AT_CHECK(handle_size == sizeof(cudaIpcEventHandle_t),
-      "cudaIpcEventHandle_t expects byte-like object of size ",
-      sizeof(cudaIpcEventHandle_t), ", but got ", handle_size);
-    AT_CHECK(device_index >= 0, "Reconstructing event from handle requires "
-      "a non-negtive device index, but got ", device_index)
-    // no need to release the handle byte array as it is automatically managed
-    // by the corresponding THCPEvent python object.
-    // see https://docs.python.org/3/c-api/arg.html#strings-and-buffers
-    cudaIpcEventHandle_t handle;
-    std::memcpy(&handle, handle_bytes, sizeof(handle));
-    new (&self->cuda_event) at::cuda::CUDAEvent(device_index, &handle);
-  } else {
-    unsigned int flags =
-      (blocking ? cudaEventBlockingSync : cudaEventDefault) |
-      (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-      (interprocess ? cudaEventInterprocess : cudaEventDefault);
+  unsigned int flags =
+    (blocking ? cudaEventBlockingSync : cudaEventDefault) |
+    (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
+    (interprocess ? cudaEventInterprocess : cudaEventDefault);
 
-    new (&self->cuda_event) at::cuda::CUDAEvent(flags);
+  new (&self->cuda_event) at::cuda::CUDAEvent(flags);
+
+  return (PyObject *)ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPEvent_from_ipc_handle(
+    PyTypeObject *type, PyObject *args) {
+  HANDLE_TH_ERRORS
+  int64_t device_index = -1;
+  const char *handle_bytes = nullptr;
+  int handle_size = 0;
+
+  // cannot use bool 'p' and bytearray 'Y' as they are not available in Python 2
+  if (!PyArg_ParseTuple(
+      args, "Ls#", &device_index, &handle_bytes, &handle_size)) {
+    return nullptr;
   }
+
+  AT_CHECK(handle_size == sizeof(cudaIpcEventHandle_t),
+    "cudaIpcEventHandle_t expects byte-like object of size ",
+    sizeof(cudaIpcEventHandle_t), ", but got ", handle_size);
+  AT_CHECK(device_index >= 0, "Reconstructing event from handle requires "
+    "a non-negtive device index, but got ", device_index)
+
+  // no need to release the handle byte array as it is automatically managed
+  // by the corresponding THCPEvent python object.
+  // see https://docs.python.org/3/c-api/arg.html#strings-and-buffers
+
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    return nullptr;
+  }
+  THCPEvent* self = (THCPEvent *)ptr.get();
+
+  cudaIpcEventHandle_t handle;
+  std::memcpy(&handle, handle_bytes, handle_size);
+  new (&self->cuda_event) at::cuda::CUDAEvent(device_index, &handle);
 
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -112,11 +129,10 @@ static PyObject * THCPEvent_synchronize(THCPEvent *self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *device) {
+static PyObject * THCPEvent_ipc_handle(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  int64_t device_index = THPUtils_unpackLong(device);
   cudaIpcEventHandle_t handle;
-  self->cuda_event.ipc_handle(&handle, device_index);
+  self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
 }
@@ -128,13 +144,16 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 };
 
 static PyMethodDef THCPEvent_methods[] = {
+  {(char*)"from_ipc_handle", (PyCFunction)THCPEvent_from_ipc_handle,
+    METH_CLASS | METH_VARARGS, nullptr},
   {(char*)"record", (PyCFunction)THCPEvent_record, METH_O, nullptr},
   {(char*)"wait", (PyCFunction)THCPEvent_wait, METH_O, nullptr},
   {(char*)"query", (PyCFunction)THCPEvent_query, METH_NOARGS, nullptr},
   {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
-  {(char*)"synchronize",
-    (PyCFunction)THCPEvent_synchronize, METH_NOARGS, nullptr},
-  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_O, nullptr},
+  {(char*)"synchronize", (PyCFunction)THCPEvent_synchronize,
+    METH_NOARGS, nullptr},
+  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle,
+    METH_NOARGS, nullptr},
   {nullptr}
 };
 

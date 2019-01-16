@@ -67,12 +67,12 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
-def rebuild_event(handle):
-    return torch.cuda.Event(_handle=handle)
+def rebuild_event(device, handle):
+    return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
 def reduce_event(event):
-    return (rebuild_event, (event.ipc_handle(),))
+    return (rebuild_event, (torch.cuda.current_device(), event.ipc_handle()))
 
 
 def rebuild_tensor(cls, storage, metadata):

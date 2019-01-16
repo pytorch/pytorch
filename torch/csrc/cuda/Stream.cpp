@@ -68,11 +68,11 @@ static PyObject * THCPStream_get_priority(THCPStream *self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_priority_range(THCPStream *self) {
+static PyObject * THCPStream_priority_range() {
   HANDLE_TH_ERRORS
   int least_priority, greatest_priority;
   std::tie(least_priority, greatest_priority) =
-    self->cuda_stream.priority_range();
+    at::cuda::CUDAStream::priority_range();
   return Py_BuildValue("(ii)", least_priority, greatest_priority);
   END_HANDLE_TH_ERRORS
 }

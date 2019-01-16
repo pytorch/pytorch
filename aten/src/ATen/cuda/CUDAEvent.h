@@ -19,10 +19,10 @@ namespace at { namespace cuda {
 *
 * CUDAEvents are constructed lazily when first recorded unless it is
 * reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
-* device is acquired from the first recording stream. However, if constructed
-* from a handle or ipc_handle() is called before it is ever recorded, the device
-* should be explicitly specified. Later streams that record the event must share
-* this device.
+* device is acquired from the first recording stream. However, if reconstructed
+* from a handle the device should be explicitly specified, or if ipc_handle() is
+* called before the event is ever recorded, it will use the current device.
+* Later streams that record the event must match this device.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
@@ -108,13 +108,13 @@ struct AT_CUDA_API CUDAEvent {
       createEvent(stream.device_index());
     }
 
+    AT_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
+      " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     was_recorded_ = true;
   }
 
-  // Note: cudaStreamWaitEvent must be called on the same device as the event.
-  // The event has no actual GPU resources associated with it.
   // Note: cudaStreamWaitEvent must be called on the same device as the stream.
   // The event has no actual GPU resources associated with it.
   void block(const CUDAStream& stream) {
@@ -142,16 +142,13 @@ struct AT_CUDA_API CUDAEvent {
   }
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
-  void ipc_handle(cudaIpcEventHandle_t * handle, DeviceIndex device_index) {
+  void ipc_handle(cudaIpcEventHandle_t * handle) {
     #ifndef __HIP_PLATFORM_HCC__
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.
-        createEvent(device_index);
+        createEvent(getCurrentCUDAStream().device_index());
       }
-      AT_CHECK(device_index_ == device_index,
-        "Event device (", device_index_, ") does not match specified device "
-        "(", device_index, ") when getting IPC handle.");
       CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
     #else
