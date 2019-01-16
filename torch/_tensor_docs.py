@@ -1270,6 +1270,13 @@ is_floating_point() -> bool
 Returns True if the data type of :attr:`self` is a floating point data type.
 """)
 
+add_docstr_all('is_signed',
+               r"""
+is_signed() -> bool
+
+Returns True if the data type of :attr:`self` is a signed data type.
+""")
+
 add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
@@ -2261,7 +2268,7 @@ add_docstr_all('storage',
                r"""
 storage() -> torch.Storage
 
-Returns the underlying storage
+Returns the underlying storage.
 """)
 
 add_docstr_all('storage_offset',
@@ -2279,6 +2286,13 @@ Example::
     >>> x[3:].storage_offset()
     3
 
+""")
+
+add_docstr_all('storage_type',
+               r"""
+storage_type() -> type
+
+Returns the type of the underlying storage.
 """)
 
 add_docstr_all('stride',
@@ -2486,6 +2500,13 @@ add_docstr_all('take',
 take(indices) -> Tensor
 
 See :func:`torch.take`
+""")
+
+add_docstr_all('tan',
+               r"""
+tan() -> Tensor
+
+See :func:`torch.tan`
 """)
 
 add_docstr_all('tan_',
@@ -2941,6 +2962,13 @@ add_docstr_all('unbind',
 unbind(dim=0) -> seq
 
 See :func:`torch.unbind`
+""")
+
+add_docstr_all('pin_memory',
+               r"""
+pin_memory() -> Tensor
+
+Copies the tensor to pinned memory, if it’s not already pinned.
 """)
 
 add_docstr_all('pinverse',
