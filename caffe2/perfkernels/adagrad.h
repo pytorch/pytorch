@@ -159,6 +159,9 @@ inline void rowwise_adagrad_update_inlined(
   }
 }
 
+
+
+
 } // namespace internal
 
 // version with prefetching
