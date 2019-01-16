@@ -588,21 +588,21 @@ struct Node {
   }
   bool hasAttribute(Symbol name) const {
     JIT_ASSERT(name.is_attr());
-    return find(name, false) != values_.end();
+    return findAttr(name, false) != values_.end();
   }
   bool hasAttributeS(const std::string& name) const {
     return hasAttribute(Symbol::attr(name));
   }
   AttributeKind kindOf(Symbol name) const {
     JIT_ASSERT(name.is_attr());
-    return (*find(name, true))->kind();
+    return (*findAttr(name, true))->kind();
   }
   AttributeKind kindOfS(const std::string& name) const {
     return kindOf(Symbol::attr(name));
   }
   Node* removeAttribute(Symbol name) {
     JIT_ASSERT(name.is_attr());
-    values_.erase(find(name, true));
+    values_.erase(findAttr(name, true));
     return this;
   }
   Node* removeAttributeS(const std::string& name) {
@@ -680,7 +680,7 @@ struct Node {
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
     JIT_ASSERT(name.is_attr());
-    auto it = find(name, false);
+    auto it = findAttr(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     if (it == values_.end()) {
       values_.push_back(std::move(nv));
@@ -692,7 +692,7 @@ struct Node {
   template <typename T>
   typename T::ValueType& getAttr(Symbol name) const {
     JIT_ASSERT(name.is_attr());
-    auto it = find(name, true);
+    auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
       throw AttributeError(name, true);
@@ -704,7 +704,7 @@ struct Node {
   // mean that lookups are O(n), so you shouldn't use Attributes to store
   // a big pile of messages.
   std::vector<AVPtr> values_;
-  std::vector<AVPtr>::iterator find(Symbol name, bool required) {
+  std::vector<AVPtr>::iterator findAttr(Symbol name, bool required) {
     JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
@@ -715,7 +715,7 @@ struct Node {
     JIT_ASSERT(!required || it != values_.end());
     return it;
   }
-  std::vector<AVPtr>::const_iterator find(Symbol name, bool required) const {
+  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required) const {
     JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
