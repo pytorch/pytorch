@@ -36,11 +36,11 @@ struct Refinements {
   //using ordered map for deterministic graph output
   std::map<std::string, TypeAndRange> mappings;
 
-  void setMapping(const std::string& name, TypeAndRange mapping) {
+  void setRefinement(const std::string& name, TypeAndRange mapping) {
     mappings[name] = std::move(mapping);
   }
 
-  c10::optional<TypeAndRange> getName(const std::string& name) const {
+  c10::optional<TypeAndRange> getRefinement(const std::string& name) const {
     const auto& maybe_mapping = mappings.find(name);
     if (maybe_mapping == mappings.end()) {
       return c10::nullopt;
@@ -55,10 +55,10 @@ struct Refinements {
     for (auto& name_mapping: mappings) {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
-      if (auto other_mapping = other.getName(name_mapping.first)) {
+      if (auto other_mapping = other.getRefinement(name_mapping.first)) {
         auto maybe_unified_type = unifyTypes(mapping.first, other_mapping->first);
         if (maybe_unified_type) {
-          ret.setMapping(name, TypeAndRange(*maybe_unified_type, mapping.second));
+          ret.setRefinement(name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       }
     }
@@ -75,7 +75,7 @@ struct Refinements {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
       TypePtr t_1 = mapping.first;
-      if (auto other_mapping = other.getName(name_mapping.first)) {
+      if (auto other_mapping = other.getRefinement(name_mapping.first)) {
         TypePtr t_2 = other_mapping->first;
         c10::optional<TypePtr> maybe_unified_type = c10::nullopt;
         if (t_1->isSubtypeOf(t_2)) {
@@ -84,16 +84,16 @@ struct Refinements {
           maybe_unified_type = t_2;
         }
         if (maybe_unified_type) {
-          ret.setMapping(name, TypeAndRange(*maybe_unified_type, mapping.second));
+          ret.setRefinement(name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       } else {
-        ret.setMapping(name, mapping);
+        ret.setRefinement(name, mapping);
       }
     }
 
     for (auto& name_mapping: other.mappings) {
-      if (!a.getName(name_mapping.first)) {
-        ret.setMapping(name_mapping.first, name_mapping.second);
+      if (!a.getRefinement(name_mapping.first)) {
+        ret.setRefinement(name_mapping.first, name_mapping.second);
       }
     }
 
@@ -1985,8 +1985,8 @@ struct to_ir {
           Refinements true_info, false_info;
           auto type = environment_stack->getVar(var_name, inputs[0]->range())->type();
           if (auto opt_type = type->cast<OptionalType>()) {
-            false_info.setMapping(var_name, TypeAndRange(opt_type->getElementType(), &tree->range()));
-            true_info.setMapping(var_name, TypeAndRange(NoneType::get(), &tree->range()));
+            false_info.setRefinement(var_name, TypeAndRange(opt_type->getElementType(), &tree->range()));
+            true_info.setRefinement(var_name, TypeAndRange(NoneType::get(), &tree->range()));
           }
           if (tree->kind() == TK_IS) {
             return BoolInfo(true_info, false_info);
