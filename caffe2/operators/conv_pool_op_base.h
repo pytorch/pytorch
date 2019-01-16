@@ -215,6 +215,7 @@ class ConvPoolOpBase : public Operator<Context> {
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
+  // TODO: passing sizes directly rather than Tensor
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
     CAFFE_ENFORCE(input.numel() > 0);
     vector<int> output_dims;
