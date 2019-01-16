@@ -15,7 +15,7 @@ void uniformQuantize2b1b(const TensorCPU& X,
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims().vec();
+  auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   CAFFE_ENFORCE_EQ(XQ.size(), k2b1bXBits);
   for (auto i = 0; i < k2b1bXBits; ++i) {
@@ -137,7 +137,7 @@ void signQuantize(const TensorCPU& X, TensorCPU* XQ) {
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims().vec();
+  auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   XQ->Resize(XQs);
   const float* Xdata = X.data<float>();
