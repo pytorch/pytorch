@@ -396,7 +396,7 @@ class TestPooling(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(
-            gc, op, [X], 0, [0], threshold=5e-2, stepsize=1e-3)
+            gc, op, [X], 0, [0], threshold=0.05, stepsize=0.005)
 
 
 if __name__ == "__main__":
