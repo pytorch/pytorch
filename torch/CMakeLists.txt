@@ -419,6 +419,12 @@ if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
   set_property(TARGET torch PROPERTY CXX_STANDARD 11)
 endif()
 
+# Prevent the unused functions being optimized away
+# Otherwise torch.dll will be linked without caffe2_gpu.dll
+if (MSVC)
+  set_target_properties(torch PROPERTIES LINK_FLAGS "/OPT:NOREF")
+endif(MSVC)
+
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
