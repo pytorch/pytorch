@@ -381,6 +381,9 @@ class build_py(setuptools.command.build_py.build_py):
 
 
 class develop(setuptools.command.develop.develop):
+    sub_commands = setuptools.command.develop.develop.sub_commands + [
+        ('create_pyi', lambda self: True),
+    ]
 
     def run(self):
         report('setup.py::develop::run()')
@@ -528,14 +531,18 @@ class build_ext(build_ext_parent):
         return outputs
 
 
-# this is a subclass of build just to get access to self.build_lib
-# as there does not seem to be an utility function getting this
-class create_pyi(distutils.command.build.build):
+class create_pyi(PytorchCommand):
+    """
+    Build type hint stub files (e.g., torch/__init__.pyi), so that
+    autocomplete in IDEs like PyCharm works.
+    """
     def run(self):
-        print("-- Building .pyi --")
+        report("-- Building .pyi --")
+        # At the moment, type stubs only work on Python 3, because
+        # we want to use type hint introspection
         if sys.version_info[0] == 3:
             from tools.pyi.gen_pyi import gen_pyi
-            gen_pyi(self.build_lib)
+            gen_pyi()
 
 
 class build(distutils.command.build.build):

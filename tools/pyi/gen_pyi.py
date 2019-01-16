@@ -8,6 +8,29 @@ import yaml
 import types
 import re
 
+"""
+This module implements generation of type stubs for PyTorch,
+enabling use of autocomplete in IDEs like PyCharm, which otherwise
+don't understand C extension modules.
+
+At the moment, this module only handles type stubs for torch and
+torch.Tensor.  It should be expanded to cover all functions which
+come from C extensions.
+
+Here's our general strategy:
+
+- Iterate through all members of torch and torch.Tensor
+    - If the function comes from a C extension, generate the type
+      hint based on the type information recorded in Declarations.yaml
+      (generate_type_hints)
+    - If the function comes natively from Python, generate the
+      type based on mypy type annotation on the type
+      (type_hint_from_python_fn)
+
+There are a number of type hints which we've special-cased;
+read do_gen_pyi for the gory details.
+"""
+
 needed_modules = set()
 
 FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: bool=False"
@@ -15,17 +38,26 @@ FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, builtins.int, slice, Tensor, List, Tuple]"
 
-blacklist = ['__init_subclass__', '__new__', '__subclasshook__', 'clamp', 'clamp_', 'device', 'grad', 'requires_grad',
-             'range']
+blacklist = [
+    '__init_subclass__',
+    '__new__',
+    '__subclasshook__',
+    'clamp',
+    'clamp_',
+    'device',
+    'grad',
+    'requires_grad',
+    'range'
+]
 
 
 def type_to_python(typename, size=None):
     """type_to_python(typename: str, size: str) -> str
 
-Transforms a Declarations.yaml typename into a Python type specification
-as used for type hints.
-"""
-    typename = typename.replace(' ', '')  # some spaces in Generator *
+    Transforms a Declarations.yaml type name into a Python type specification
+    as used for type hints.
+    """
+    typename = typename.replace(' ', '')  # normalize spaces, e.g., 'Generator *'
     if typename in {'IntList', 'TensorList'} and size is not None:
         typename += '[]'
     typename = {
@@ -54,13 +86,13 @@ as used for type hints.
 
 
 def arg_to_type_hint(arg):
-    """arg_to_type_hin(arg) -> str
+    """arg_to_type_hint(arg) -> str
 
-This takes one argument in a Declarations an returns a string
-representing this argument in a type hint signature.
-"""
+    This takes one argument in a Declarations and returns a string
+    representing this argument in a type hint signature.
+    """
     name = arg['name']
-    if name == 'from':  # keyword...
+    if name == 'from':  # from is a Python keyword...
         name += '_'
     typename = type_to_python(arg['dynamic_type'], arg.get('size'))
     if arg.get('is_nullable'):
@@ -84,7 +116,9 @@ representing this argument in a type hint signature.
 
 def sig_for_ops(opname):
     """sig_for_ops(opname : str) -> str
-returns signatures for operator special functions (__add__ etc.)"""
+
+    returns signatures for operator special functions (__add__ etc.)"""
+
     binary_ops = {'add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
                   'matmul',
                   'radd', 'rmul',                      # reverse arithmetic
@@ -96,7 +130,9 @@ returns signatures for operator special functions (__add__ etc.)"""
     unary_ops = {'neg', 'abs', 'invert'}
     skip = {'getitem', 'setitem', 'delitem', 'new'}
     to_py_type_ops = {'bool', 'float', 'long', 'index', 'int', 'nonzero'}
+
     assert opname.endswith('__') and opname.startswith('__'), "Unexpected op {}".format(opname)
+
     name = opname[2:-2]
     if name in binary_ops:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
@@ -124,21 +160,24 @@ returns signatures for operator special functions (__add__ etc.)"""
 def generate_type_hints(fname, decls, is_tensor=False):
     """generate_type_hints(fname, decls, is_tensor=False)
 
-Generates type hints for the declarations pertaining to the function
-:attr:`fname`. attr:`decls` are the declarations from the parsed
-Declarations.yaml.
-The :attr:`is_tensor` flag indicates whether we are parsing
-members of the Tensor class (true) or functions in the
-`torch` namespace (default, false).
+    Generates type hints for the declarations pertaining to the function
+    :attr:`fname`. attr:`decls` are the declarations from the parsed
+    Declarations.yaml.
+    The :attr:`is_tensor` flag indicates whether we are parsing
+    members of the Tensor class (true) or functions in the
+    `torch` namespace (default, false).
 
-This function currently encodes quite a bit about the semantics of
-the translation C++ -> Python.
-"""
+    This function currently encodes quite a bit about the semantics of
+    the translation C++ -> Python.
+    """
+
     type_hints = []
     dnames = ([d['name'] for d in decls])
     has_out = fname + '_out' in dnames
+
     if has_out:
         decls = [d for d in decls if d['name'] != fname + '_out']
+
     for decl in decls:
         skip = ((is_tensor and 'Tensor' not in decl['method_of']) or
                 'Type' in [a['dynamic_type'] for a in decl['arguments']])
@@ -147,27 +186,32 @@ the translation C++ -> Python.
             # Python only uses the TensorOptions one. This check could be taken out once
             # the tensor function is removed
             continue
+
         render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
         python_args = []
 
         has_tensor_options = 'TensorOptions' in [a['dynamic_type'] for a in decl['arguments']]
+
         for a in decl['arguments']:
             if a['dynamic_type'] != 'TensorOptions':
                 if a.get('kwarg_only', False) and render_kw_only_separator:
                     python_args.append('*')
                     render_kw_only_separator = False
                 python_args.append(arg_to_type_hint(a))
+
         if is_tensor:
             if 'self: Tensor' in python_args:
                 python_args.remove('self: Tensor')
                 python_args = ['self'] + python_args
             else:
                 raise Exception("method without self is unexpected")
+
         if has_out:
             if render_kw_only_separator:
                 python_args.append('*')
                 render_kw_only_separator = False
             python_args.append('out: Optional[Tensor]=None')
+
         if has_tensor_options:
             if render_kw_only_separator:
                 python_args.append('*')
@@ -176,12 +220,15 @@ the translation C++ -> Python.
                             "layout: layout=strided",
                             "device: Union[_device, str, None]=None",
                             "requires_grad:bool=False"]
+
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
+
         if len(python_returns) > 1:
             python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
         else:
             python_returns_s = python_returns[0]
+
         type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
         numargs = len(decl['arguments'])
         vararg_pos = int(is_tensor)
@@ -191,6 +238,7 @@ the translation C++ -> Python.
                                (not is_tensor or decl['arguments'][0]['name'] == 'self'))
 
         type_hints.append(type_hint)
+
         if have_vararg_version:
             # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
             # is an IntList or TensorList, it will be used as a vararg variant.
@@ -207,18 +255,19 @@ the translation C++ -> Python.
             python_args_s = ', '.join(python_args)
             type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
             type_hints.append(type_hint)
+
     return type_hints
 
 
 def parameters_from_signature(sig):
     """parameters_from_signature(sig) -> str
 
-Takes an inspect.Signature object :attr:`sig` and returns a string
-representing the signature (all parameters aka formal arguments)
-as we want them to show in the type hint.
+    Takes an inspect.Signature object :attr:`sig` and returns a string
+    representing the signature (all parameters aka formal arguments)
+    as we want them to show in the type hint.
 
-For this we iterate through the signature."""
-    # is adapted from standard library inspect.Signatur's __str__ function,
+    For this we iterate through the signature."""
+    # This is adapted from standard library inspect.Signature's __str__ function,
     # so it matchesPython's own way of thinking very closely
     result = []
     render_pos_only_separator = False
@@ -271,11 +320,12 @@ For this we iterate through the signature."""
 def type_hint_from_python_fn(fname, fn):
     """type_hint_from_python_fn(fname, fn) -> str
 
-given a function name fname and the function/method object fn,
-this function produces the type hint as a string, including
-return annotation.
-It uses the Python 3 inspect module.
-"""
+    given a function name fname and the function/method object fn,
+    this function produces the type hint as a string, including
+    return annotation.
+    It uses the Python 3 inspect module.
+    """
+
     sig = inspect.signature(fn)
     python_parameters = parameters_from_signature(sig)
 
@@ -292,21 +342,17 @@ It uses the Python 3 inspect module.
         return ["def {}({}): ...".format(fname, python_parameters, return_annotation)]
 
 
-def do_gen_pyi(build_lib_path):
-    """do_gen_pyi(build_lib_path)
+def do_gen_pyi():
+    """do_gen_pyi()
 
-This function generates a pyi file for torch. To do this, it imports torch and loops
-over the members of torch and torch.Tensor.
+    This function generates a pyi file for torch. To do this, it imports torch and loops
+    over the members of torch and torch.Tensor.
 
-To import torch it removes things from the import path and adds the freshly build PyTorch.
-As such it is inteded to be used from a subprocess.
-"""
-    while '' in sys.path:
-        # we don't want to have the source directory (with a torch but without torch._C) in our path
-        sys.path.remove('')
-    sys.path.insert(0, build_lib_path)
+    To import torch it removes things from the import path and adds the freshly build PyTorch.
+    As such it is intended to be used from a subprocess.
+    """
+
     import torch
-    assert torch.__file__.startswith(build_lib_path)
 
     yaml_loader = getattr(yaml, 'CLoader', yaml.loader)
 
@@ -359,6 +405,8 @@ As such it is inteded to be used from a subprocess.
             elif isinstance(fn, types.FunctionType):
                 type_hints[fname] += type_hint_from_python_fn(fname, fn)
 
+    # TODO: Maybe we shouldn't generate type hints for deprecated
+    # functions :)
     deprecated = yaml.load(open('tools/autograd/deprecated.yaml'),
                            Loader=yaml_loader)
     for d in deprecated:
@@ -452,7 +500,7 @@ As such it is inteded to be used from a subprocess.
 
 """ + '\n\n'.join(type_hints_list) + '\n\n'
 
-    header = """
+    header = """\
 from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload
 
 import builtins
@@ -493,9 +541,9 @@ class set_grad_enabled():
     def __init__(self, mode: bool) -> None: ...
     def __enter__(self) -> None: ...
     def __exit__(self, *args) -> None: ...
-
-
 """
+
+    # TODO: These are deprecated, maybe we shouldn't type hint them
     footer_classes = []
     for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
               'ShortStorage', 'CharStorage', 'ByteStorage'):
@@ -508,15 +556,15 @@ class set_grad_enabled():
     footer += '\n'.join(['{}: dtype = ...'.format(n)
                          for n in dir(torch) if isinstance(getattr(torch, n), torch.dtype)])
 
-    with open(os.path.join(build_lib_path, 'torch', '__init__.pyi'), 'w') as f:
+    with open(os.path.join('torch', '__init__.pyi'), 'w') as f:
         print(header, file=f)
         print(tensor_type_hints_s, file=f)
         print(type_hints_s, file=f)
         print(footer, file=f)
 
 
-def gen_pyi(build_lib_path):
+def gen_pyi():
     # we import torch, better do that in a subprocess
-    p = multiprocessing.Process(target=do_gen_pyi, args=(build_lib_path,))
+    p = multiprocessing.Process(target=do_gen_pyi)
     p.start()
     p.join()

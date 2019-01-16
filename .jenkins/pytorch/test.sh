@@ -33,7 +33,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip install -q hypothesis --user
+  pip install -q hypothesis mypy --user
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
