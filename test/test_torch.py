@@ -3482,7 +3482,7 @@ class _TestTorchMixin(object):
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
             out = torch.empty(size, dtype=torch.float32)
             self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)

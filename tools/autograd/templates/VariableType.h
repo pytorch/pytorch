@@ -40,7 +40,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   at::Device getDeviceFromPtr(void * data) const override;
   Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
-  std::unique_ptr<at::Generator> generator() const override;
   const char * toString() const override;
   at::TypeID ID() const override;
   at::Type & toBackend(at::Backend b) const override;

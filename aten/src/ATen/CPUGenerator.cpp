@@ -1,49 +1,75 @@
 #include <ATen/CPUGenerator.h>
-
-#define const_generator_cast(generator) \
-  dynamic_cast<const CPUGenerator&>(generator)
+#include <c10/util/C++17.h>
 
 namespace at {
 
-CPUGenerator::CPUGenerator(Context * context_)
-  : context(context_), generator(THGenerator_new())
-{}
+namespace detail {
 
-CPUGenerator::~CPUGenerator() {
-  if (generator)
-    THGenerator_free(generator);
+CPUGenerator& getDefaultCPUGenerator() {
+  std::call_once(cpu_device_flag, [&] {
+    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(default_rng_seed_val);
+  });
+  return *default_gen_cpu;
 }
 
-CPUGenerator& CPUGenerator::copy(const Generator& from) {
-  THGenerator_copy(generator, const_generator_cast(from).generator);
+std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
+  return c10::guts::make_unique<CPUGenerator>(seed_val);
+}
+
+} //namespace detail
+
+// CPUGenerator class implementation
+
+CPUGenerator::CPUGenerator(uint64_t seed_in)
+  : Generator(Device(DeviceType::CPU), seed_in), engine_(Philox4_32_10(seed_in)) {}
+
+CPUGenerator::CPUGenerator(const CPUGenerator& other)
+  : CPUGenerator(other, 
+                 std::lock_guard<std::mutex>(other.mutex)) {}
+
+CPUGenerator::CPUGenerator(const CPUGenerator &other, 
+                           const std::lock_guard<std::mutex> &other_mutex)
+  : Generator(other, other_mutex), engine_(other.engine_) {}
+
+CPUGenerator::CPUGenerator(CPUGenerator&& other)
+  : CPUGenerator(other,
+                 std::lock_guard<std::mutex>(other.mutex)) {}
+
+CPUGenerator::CPUGenerator(const CPUGenerator &&other,
+                           const std::lock_guard<std::mutex> &other_mutex)
+  : Generator(other, other_mutex), engine_(std::move(other.engine_)) {}
+
+CPUGenerator& CPUGenerator::operator=(CPUGenerator& other) {
+  if (this != &other) {
+    std::unique_lock<std::mutex> this_lock(mutex, std::defer_lock),
+                                 other_lock(other.mutex, std::defer_lock);
+    std::lock(this_lock, other_lock);
+    device_ = other.device_;
+    current_seed_ = other.current_seed_;
+    engine_ = other.engine_;
+  }
   return *this;
 }
 
-CPUGenerator& CPUGenerator::free() {
-  THGenerator_free(generator);
-  return *this;
+/* 
+* Manually seeds the engine with the seed input
+*/
+void CPUGenerator::setCurrentSeed(uint64_t seed) {
+  std::lock_guard<std::mutex> lock(mutex);
+  current_seed_ = seed;
+  engine_ = Philox4_32_10(seed);
 }
 
-uint64_t CPUGenerator::seed() {
-  return THRandom_seed(generator);
+uint32_t CPUGenerator::random() {
+  std::lock_guard<std::mutex> lock(mutex);
+  return engine_();
 }
 
-uint64_t CPUGenerator::initialSeed() {
-  return THRandom_initialSeed(generator);
-}
-
-CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
-  THRandom_manualSeed(generator, seed);
-  return *this;
-}
-
-CPUGenerator& CPUGenerator::manualSeedAll(uint64_t seed) {
-  // There's only one CPU generator
-  return manualSeed(seed);
-}
-
-void * CPUGenerator::unsafeGetTH() {
-  return generator;
+uint64_t CPUGenerator::random64() {
+  std::lock_guard<std::mutex> lock(mutex);
+  uint64_t hi = (static_cast<uint64_t>(engine_())) << 32;
+  uint64_t lo = static_cast<uint64_t>(engine_());
+  return hi | lo;
 }
 
 } // namespace at

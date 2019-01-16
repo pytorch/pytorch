@@ -57,8 +57,6 @@ namespace py = pybind11;
 
 PyObject* module;
 
-THPGenerator *THPDefaultGenerator   = nullptr;
-
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -650,12 +648,6 @@ PyObject* initModule() {
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
-
-  auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
-  THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
-    defaultGenerator);
-  // This reference is meant to be given away, so no need to incref here.
-  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultGenerator, /* incref= */ false));
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;

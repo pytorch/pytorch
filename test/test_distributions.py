@@ -1826,7 +1826,7 @@ class TestDistributions(TestCase):
         self.assertEqual(m.scale_tril, torch.cholesky(m.covariance_matrix, upper=False))
 
     def test_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(3)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
@@ -2655,6 +2655,7 @@ class TestRsample(TestCase):
             ]))
 
     def test_dirichlet_tangent_field(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
 

@@ -3,7 +3,8 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#include <TH/THGenerator.hpp>
+#include <ATen/CPUGenerator.h>
+#include <ATen/Utils.h>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {

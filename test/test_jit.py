@@ -2918,7 +2918,7 @@ class TestBatched(TestCase):
                                  idx.narrow(2, iter, max_len - iter)], 2)
                 idx = idx.narrow(2, 0, max_len)
             return idx
-
+        
         beam_batch = torch.jit.batch(batch_size=4)(beam)
 
         k = 5
@@ -2928,7 +2928,7 @@ class TestBatched(TestCase):
         hx, h_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
         cx, c_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
         embed, embed_batch = self.rand_batch(batch_size, (False, vocab_size), (False, input_size))
-        iter_num = [torch.randint(2, max_len + 1, (1,)) for i in range(batch_size)]
+        iter_num = [torch.randint(2, max_len, (1,)) for i in range(batch_size)]
         iter_num_batch = BatchTensor(iter_num, torch.tensor([]).byte())
 
         # input to hidden weights

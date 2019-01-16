@@ -79,7 +79,7 @@ def format_return_type(returns):
 def get_simple_type(arg):
     simple_type = arg['type']
     simple_type = simple_type.replace(' &', '').replace('const ', '')
-    simple_type = simple_type.replace('Generator *', 'Generator')
+    simple_type = simple_type.replace('Generator*', 'Generator')
 
     opt_match = re.match(r'c10::optional<(.+)>', simple_type)
     if opt_match:

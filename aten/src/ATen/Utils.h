@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 
@@ -125,6 +126,31 @@ inline int64_t sum_intlist(ArrayRef<int64_t> list) {
 
 inline int64_t prod_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
+}
+
+/*
+* Utility function used in tensor implementations, which
+* supplies the default generator to tensors, if an input generator
+* is not supplied. The input Generator* is also dynamic casted to
+* the backend generator type (CPU/CUDAGenerator etc.), because
+* Generator is a base class and not an interface, and some methods
+* are specific to the individual backends (for instance: incrementPhiloxOffset
+* for CUDA and random()/random64 for CPU)
+*/
+template <typename T>
+static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
+  if (!expr)
+    expr = defaultValue;
+  if(auto result = dynamic_cast<T*>(expr))
+    return result;
+  AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
+}
+
+template <typename T>
+static inline T * check_generator(Generator * expr) {
+  if(auto result = dynamic_cast<T*>(expr))
+    return result;
+  AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 
 } // at

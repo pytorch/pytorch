@@ -2,7 +2,8 @@ import torch
 import contextlib
 import warnings
 
-from torch._C import default_generator
+from torch._C import Generator
+default_generator = Generator(default=True)
 
 
 def set_rng_state(new_state):
@@ -33,6 +34,19 @@ def manual_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
+
+
+def seed():
+    r"""Sets the seed for generating random numbers to a random number. Returns
+    a 64 bit number used to seed the RNG.
+    """
+    seed = default_generator.seed()
+    import torch.cuda
+
+    if not torch.cuda._in_bad_fork:
+        torch.cuda.manual_seed_all(seed)
+
+    return seed
 
 
 def initial_seed():

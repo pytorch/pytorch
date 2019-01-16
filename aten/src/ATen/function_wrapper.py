@@ -207,8 +207,8 @@ TYPE_FORMAL_GENERIC = {
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
-    'THGenerator*': 'Generator *',
     'IntArrayRefSize': 'IntArrayRef',
+    'IntListSize': 'IntList',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -223,8 +223,8 @@ DYNAMIC_TYPE = {
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
-    'THGenerator*': 'Generator*',
     'IntArrayRefSize': 'IntArrayRef',
+    'IntListSize': 'IntList',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -291,9 +291,6 @@ CHECKED_CAST = {
             # We're punning here (Backend and DeviceType constructors coincide)
             # but DeviceType is the correct way to classify storages
             'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
-    'THGenerator*':
-        CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
     # This is a cast done via direct-construction
     'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -313,7 +310,6 @@ CHECKED_USE = {
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
     'THStorage*': '{}_.unsafeGetStorageImpl()',
-    'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
@@ -1204,7 +1200,7 @@ def create_derived(backend_type_env, declarations):
 
     def replace_with_null(argument):
         # type: (THFormal) -> bool
-        return (argument['type'] == 'THGenerator*' and
+        return (argument['type'] == 'Generator*' and
                 backend_type_env['Backend'] == 'CUDA')
 
     def requires_checked_cast(argument):
@@ -1260,7 +1256,7 @@ def create_derived(backend_type_env, declarations):
         if argument['name'] == 'device':
             return True
         return 'CUDA' in backend_type_env['Backend'] and (
-            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
+            option['mode'] == 'TH' and argument['type'] == 'Generator*')
 
     def get_arguments(arguments, option):
         # type: (List[THFormal], FunctionOption) -> List[str]
