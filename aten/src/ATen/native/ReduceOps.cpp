@@ -24,6 +24,7 @@ DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
 DEFINE_DISPATCH(mean_stub);
+DEFINE_DISPATCH(and_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
@@ -428,6 +429,29 @@ Tensor norm(const Tensor& self, Scalar p) {
   return at::native::_norm(self, p);
 }
 
+inline Tensor & _all(Tensor & result, std::unique_ptr<TensorIterator> & iter) {
+  if (iter->numel() == 0) {
+    result.fill_(1);
+  } else {
+    and_stub(iter->device_type(), *iter);
+  }
+
+  return result;
+}
+
+Tensor all(const Tensor& self) {
+  AT_CHECK(self.type().backend() == Backend::CPU ||
+    self.type().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
+    "backend, got: ", toString(self.type().backend()));
+  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte,
+    "all only supports torch.uint8 dtype");
+
+  Tensor result = at::empty({0}, self.options());
+  auto iter = make_reduction(
+    "all", result, self, {}, false, at::ScalarType::Byte);
+  return _all(result, iter);
+}
+
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::all_out(result, self, dim, keepdim);
@@ -441,7 +465,9 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
-    return at::legacy::th::_th_all_out(result, self, dim, keepdim);
+    auto iter = make_reduction(
+      "all", result, self, dim, keepdim, at::ScalarType::Byte);
+    return _all(result, iter);
   }
 }
 
