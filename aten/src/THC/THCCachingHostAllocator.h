@@ -4,9 +4,7 @@
 #include <THC/THCGeneral.h>
 
 
-#ifdef __cplusplus
 #include <c10/cuda/CUDAStream.h>
-#endif
 
 //
 // A caching allocator for CUDA host allocations (pinned memory).
@@ -27,9 +25,7 @@ THC_API THAllocator* getTHCCachingHostAllocator(void);
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
 // re-used until the event has occurred.
-#ifdef __cplusplus
 THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream);
-#endif
 
 // Releases cached pinned memory allocations via cudaHostFree
 THC_API void THCCachingHostAllocator_emptyCache(void);
