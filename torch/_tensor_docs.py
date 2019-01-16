@@ -2968,7 +2968,7 @@ add_docstr_all('pin_memory',
                r"""
 pin_memory() -> Tensor
 
-Copies the tensor to pinned memory, if it’s not already pinned.
+Copies the tensor to pinned memory, if it's not already pinned.
 """)
 
 add_docstr_all('pinverse',
