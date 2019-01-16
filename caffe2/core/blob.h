@@ -8,7 +8,7 @@
 #include <vector>
 #include "caffe2/core/common.h"
 
-#include <c10/core/blob.h>
+#include <ATen/core/blob.h>
 #include <c10/util/typeid.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"

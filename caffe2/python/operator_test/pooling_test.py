@@ -335,6 +335,69 @@ class TestPooling(hu.HypothesisTestCase):
         if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(op_type=st.sampled_from(["MaxPool", "MaxPoolND"]),
+           dim=st.integers(1, 3),
+           N=st.integers(1, 3),
+           C=st.integers(1, 3),
+           D=st.integers(3, 5),
+           H=st.integers(3, 5),
+           W=st.integers(3, 5),
+           kernel=st.integers(1, 3),
+           stride=st.integers(1, 3),
+           pad=st.integers(0, 2),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    def test_max_pool_grad(
+            self, op_type, dim, N, C, D, H, W, kernel, stride, pad, order,
+            engine, gc, dc):
+        assume(pad < kernel)
+        assume(dim > 1 or engine == "")
+        if hiputl.run_in_hip(gc, dc):
+            if dim != 2:
+                assume(engine != "CUDNN")
+            elif engine == "CUDNN":
+                assume(order == "NCHW")
+
+        if op_type.endswith("ND"):
+            op_type = op_type.replace("N", str(dim))
+
+        op = core.CreateOperator(
+            op_type,
+            ["X"],
+            ["Y"],
+            kernels=[kernel] * dim,
+            strides=[stride] * dim,
+            pads=[pad] * dim * 2,
+            order=order,
+            engine=engine,
+        )
+
+        if dim == 1:
+            size = W
+            dims = [N, C, W]
+            axes = [0, 2, 1]
+        elif dim == 2:
+            size = H * W
+            dims = [N, C, H, W]
+            axes = [0, 2, 3, 1]
+        else:
+            size = D * H * W
+            dims = [N, C, D, H, W]
+            axes = [0, 2, 3, 4, 1]
+
+        X = np.zeros((N * C, size)).astype(np.float32)
+        for i in range(N * C):
+            X[i, :] = np.arange(size, dtype=np.float32) / size
+            np.random.shuffle(X[i, :])
+        X = X.reshape(dims)
+        if order == "NHWC":
+            X = np.transpose(X, axes)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], threshold=5e-2, stepsize=1e-3)
+
 
 if __name__ == "__main__":
     import unittest

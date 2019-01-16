@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
       for (int i = 0; i < input_names.size(); ++i) {
         caffe2::BlobProto blob_proto;
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
-        caffe2::DeserializeBlob(blob_proto, workspace->CreateBlob(input_names[i]));
+        DeserializeBlob(blob_proto, workspace->CreateBlob(input_names[i]));
       }
     } else if (FLAGS_input_dims.size() || FLAGS_input_type.size()) {
       CAFFE_ENFORCE_GE(
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
           tensor->t.Resize(input_dims);
           tensor->t.mutable_data<uint8_t>();
         } else if (input_type_list[i] == "float") {
-          caffe2::TensorCPU* tensor = caffe2::BlobGetMutableTensor(blob, caffe2::CPU);
+          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
           CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
           tensor->mutable_data<float>();
@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
           workspace->HasBlob(name),
           "You requested a non-existing blob: ",
           name);
-      string serialized = caffe2::SerializeBlob(*workspace->GetBlob(name), name);
+      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
       string output_filename = output_prefix + name;
       caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }
