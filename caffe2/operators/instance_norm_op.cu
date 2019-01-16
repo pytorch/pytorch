@@ -187,7 +187,7 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& input = Input(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
-  auto output = Output(OUTPUT);
+
   auto mean = OutputSize() >= 2 ? Output(MEAN) : &mean_;
   auto inv_stdev = OutputSize() >= 3 ? Output(INV_STDEV) : &inv_stdev_;
   CAFFE_ENFORCE_EQ(4, input.ndim());
@@ -199,7 +199,7 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(C, scale.dim32(0));
   CAFFE_ENFORCE_EQ(1, bias.ndim());
   CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  output->ResizeLike(input);
+  auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
 
@@ -264,7 +264,7 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& input = Input(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
-  auto output = Output(OUTPUT);
+
   auto mean = OutputSize() >= 2 ? Output(MEAN) : &mean_;
   auto inv_stdev = OutputSize() >= 3 ? Output(INV_STDEV) : &inv_stdev_;
   CAFFE_ENFORCE_EQ(4, input.ndim());
@@ -276,7 +276,7 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(C, scale.dim32(0));
   CAFFE_ENFORCE_EQ(1, bias.ndim());
   CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  output->ResizeLike(input);
+  auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
 
@@ -344,9 +344,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& output_grad = Input(OUTPUT_GRAD);
   const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
   const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-  auto input_grad = Output(INPUT_GRAD);
-  auto scale_grad = Output(SCALE_GRAD);
-  auto bias_grad = Output(BIAS_GRAD);
+
   CAFFE_ENFORCE_EQ(4, input.ndim());
   const int N = input.dim32(0);
   const int H = input.dim32(1);
@@ -361,9 +359,9 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(H, output_grad.dim32(1));
   CAFFE_ENFORCE_EQ(W, output_grad.dim32(2));
   CAFFE_ENFORCE_EQ(C, output_grad.dim32(3));
-  input_grad->ResizeLike(input);
-  scale_grad->ResizeLike(scale);
-  bias_grad->ResizeLike(bias);
+  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<float>());
+  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<float>());
+  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<float>());
 
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
@@ -475,9 +473,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& output_grad = Input(OUTPUT_GRAD);
   const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
   const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-  auto input_grad = Output(INPUT_GRAD);
-  auto scale_grad = Output(SCALE_GRAD);
-  auto bias_grad = Output(BIAS_GRAD);
+
   CAFFE_ENFORCE_EQ(4, input.ndim());
   const int N = input.dim32(0);
   const int C = input.dim32(1);
@@ -492,9 +488,9 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(C, output_grad.dim32(1));
   CAFFE_ENFORCE_EQ(H, output_grad.dim32(2));
   CAFFE_ENFORCE_EQ(W, output_grad.dim32(3));
-  input_grad->ResizeLike(input);
-  scale_grad->ResizeLike(scale);
-  bias_grad->ResizeLike(bias);
+  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<float>());
+  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<float>());
+  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<float>());
 
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
