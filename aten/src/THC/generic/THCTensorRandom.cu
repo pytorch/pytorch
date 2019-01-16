@@ -246,7 +246,8 @@ void THCTensor_(multinomial)(struct THCState *state,
           n_sample,
           THCudaLongTensor_data(state, self),
           numDist, numCategories,
-          THCTensor_(data)(state, prefixSum));
+          THCTensor_(data)(state, prefixSum),
+	  THCTensor_(data)(state, normDist));
     } else {
       // Sample without replacement
 
