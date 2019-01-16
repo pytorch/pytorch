@@ -53,6 +53,7 @@ class ConvDNNLowPPackWeightOp final
  private:
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
+  bool TakeGConvFastPath_();
 
   bool quantize_groupwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
