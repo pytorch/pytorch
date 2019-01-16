@@ -55,7 +55,7 @@ static PyObject * THCPEvent_pynew(
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault);
 
-    new (&self->cuda_event) at::cuda::CUDAEvent(device_index, flags);
+    new (&self->cuda_event) at::cuda::CUDAEvent(flags);
   }
 
   return (PyObject *)ptr.release();
@@ -112,10 +112,11 @@ static PyObject * THCPEvent_synchronize(THCPEvent *self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_ipc_handle(THCPEvent *self) {
+static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *device) {
   HANDLE_TH_ERRORS
+  int64_t device_index = THPUtils_unpackLong(device);
   cudaIpcEventHandle_t handle;
-  self->cuda_event.ipc_handle(&handle);
+  self->cuda_event.ipc_handle(&handle, device_index);
   return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
 }
@@ -133,8 +134,7 @@ static PyMethodDef THCPEvent_methods[] = {
   {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
   {(char*)"synchronize",
     (PyCFunction)THCPEvent_synchronize, METH_NOARGS, nullptr},
-  {(char*)"ipc_handle",
-    (PyCFunction)THCPEvent_ipc_handle, METH_NOARGS, nullptr},
+  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_O, nullptr},
   {nullptr}
 };
 

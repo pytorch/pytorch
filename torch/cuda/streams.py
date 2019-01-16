@@ -184,10 +184,14 @@ class Event(torch._C._CudaEventBase):
         """
         super(Event, self).synchronize()
 
-    def _ipc_handle(self):
+    def ipc_handle(self, device=None):
         r"""Returns an IPC handle of this event. If not recorded yet, the event will
-        use the device of ``torch.cuda.current_stream()`` as its own device."""
-        return super(Event, self).ipc_handle()
+        use the given device, or use the current device if device is not specified. """
+        if device is None:
+            device = self.device
+
+        with torch.cuda.device(device):
+            return super(Event, self).ipc_handle(torch.cuda.current_device())
 
     @property
     def _as_parameter_(self):
