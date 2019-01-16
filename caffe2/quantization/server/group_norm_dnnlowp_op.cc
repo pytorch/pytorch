@@ -56,9 +56,9 @@ void GroupNormDNNLowPOp<T>::QuantizeGamma() {
       const int C = gamma.size();
       gamma_quantized_.resize(C);
       gamma_quantized_data_ = gamma_quantized_.data();
-      if (OperatorBase::InputIsType<int8::Int8TensorCPU>(GAMMA)) {
+      if (this->template InputIsType<int8::Int8TensorCPU>(GAMMA)) {
         const auto& gamma_int8 =
-            OperatorBase::Input<int8::Int8TensorCPU>(GAMMA);
+            this->template Input<int8::Int8TensorCPU>(GAMMA);
         auto& gamma_qparams = in_qparams_[GAMMA];
         gamma_qparams.scale = gamma_int8.scale;
         const T* gamma_data = gamma.template data<T>();
@@ -118,8 +118,8 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
     const auto& X_qparams = in_qparams_[INPUT];
     const auto& gamma_qparams = in_qparams_[GAMMA];
     auto& beta_qparams = in_qparams_[BETA];
-    if (OperatorBase::InputIsType<int8::Int8TensorCPU>(BETA)) {
-      const auto& beta_int8 = OperatorBase::Input<int8::Int8TensorCPU>(BETA);
+    if (this->template InputIsType<int8::Int8TensorCPU>(BETA)) {
+      const auto& beta_int8 = this->template Input<int8::Int8TensorCPU>(BETA);
       beta_qparams.scale = beta_int8.scale;
       beta_qparams.zero_point = beta_int8.zero_point;
       CAFFE_ENFORCE_LE(

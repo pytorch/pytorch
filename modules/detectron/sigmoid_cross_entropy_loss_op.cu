@@ -120,9 +120,9 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& T = Input(1);
   auto& d_avg_loss = Input(2);
-  auto* dX = Output(0);
 
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   counts_.ResizeLike(X);
   ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossGradientKernel<<<

@@ -236,6 +236,7 @@ _(aten, broadcast_tensors) \
 _(aten, btrifact) \
 _(aten, btrifact_with_info) \
 _(aten, btrisolve) \
+_(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
@@ -249,6 +250,7 @@ _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, combinations) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
