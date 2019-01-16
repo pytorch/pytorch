@@ -58,7 +58,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
