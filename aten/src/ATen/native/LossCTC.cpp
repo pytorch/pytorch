@@ -161,8 +161,6 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
-  AT_CHECK(isIntegralType(input_lengths.type().scalarType()), "input_lenghts must be integral");
-  AT_CHECK(isIntegralType(target_lengths.type().scalarType()), "target_lenghts must be integral");
 
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
@@ -365,6 +363,10 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction) {
+
+  AT_CHECK(isIntegralType(input_lengths.type().scalarType()), "input_lenghts must be integral");
+  AT_CHECK(isIntegralType(target_lengths.type().scalarType()), "target_lenghts must be integral");
+
   Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   IntList il(ilc.data<int64_t>(), ilc.numel());
