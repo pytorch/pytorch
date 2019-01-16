@@ -493,7 +493,7 @@ public:
   Tensor unsqueeze(int64_t dim) const;
   Tensor & unsqueeze_(int64_t dim);
   Tensor var(bool unbiased=true) const;
-  Tensor var(int64_t dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor var(IntList dim, bool unbiased=true, bool keepdim=false) const;
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
   Tensor norm(Scalar p=2) const;

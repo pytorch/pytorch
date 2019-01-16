@@ -66,11 +66,11 @@ TEST(TestTensorInterop, PytorchToCaffe2Op) {
   auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), at_tensor_a.getIntrusivePtr());
   auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), at_tensor_b.getIntrusivePtr());
 
-  // Test Alias
+  // Test ShareData as well
   {
-    caffe2::Tensor c2_tensor_from_aten(at_tensor_c.getIntrusivePtr());
-    BlobSetTensor(workspace.CreateBlob("c"), c2_tensor_from_aten.Alias());
-
+    auto c2_tensor_c = XBlobGetMutableTensor(workspace.CreateBlob("c"), {0}, at::kCPU);
+    c2_tensor_c.ResizeLike(at_tensor_c.getIntrusivePtr());
+    c2_tensor_c.ShareData(at_tensor_c.getIntrusivePtr());
   }
 
   {

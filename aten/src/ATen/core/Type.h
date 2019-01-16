@@ -388,7 +388,7 @@ struct CAFFE2_API Type {
   virtual Tensor unsqueeze(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor & unsqueeze_(Tensor & self, int64_t dim) const = 0;
   virtual Tensor var(const Tensor & self, bool unbiased) const = 0;
-  virtual Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) const = 0;
+  virtual Tensor var(const Tensor & self, IntList dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p) const = 0;

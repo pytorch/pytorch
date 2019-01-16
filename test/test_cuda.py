@@ -667,7 +667,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False):
+        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -702,7 +702,26 @@ class TestCuda(TestCase):
                 self.assertEqual(new_max_c, max_c_arr[0])
                 last_c_arr[0] = new_c
 
+            if reset_max_alloc:
+                torch.cuda.reset_max_memory_allocated(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
+                max_m_arr[0] = last_m_arr[0]
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
+
+            if reset_max_cached:
+                torch.cuda.reset_max_memory_cached(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
+                max_c_arr[0] = last_c_arr[0]
+
         assert_change(0)
+        assert_change(0, reset_max_alloc=True)
+        assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
         assert_change(0)
         yield
 
@@ -722,7 +741,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1)
+            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -742,7 +761,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0)
+        assert_change(0, reset_max_alloc=True)
         yield
 
         for i in range(int(N / 2)):
@@ -757,17 +776,19 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1)
+        assert_change(-1, reset_max_cached=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1)
+        assert_change(-1, reset_max_alloc=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache
+        # test empty_cache and reset_max_memory_*
         assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_max_alloc=True)
 
     def test_memory_stats(self):
         torch.cuda.empty_cache()

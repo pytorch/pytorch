@@ -219,16 +219,16 @@ class SliceOp : public Operator<Context> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -255,8 +255,8 @@ class SliceOp : public Operator<Context> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };
 
 template <class Context>
@@ -285,8 +285,8 @@ class SliceGradientOp : public Operator<Context> {
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -298,8 +298,10 @@ class SliceGradientOp : public Operator<Context> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(
+            &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -324,7 +326,7 @@ class SliceGradientOp : public Operator<Context> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };
 } // namespace caffe2
