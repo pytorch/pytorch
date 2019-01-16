@@ -51,7 +51,7 @@ TH_API THStorage* THStorage_(newWithSize4)(scalar_t, scalar_t, scalar_t, scalar_
 TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
 TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
-                                               THAllocator* allocator);
+                                               c10::Allocator* allocator);
 TH_API THStorage* THStorage_(newWithDataAndAllocator)(
     at::DataPtr&& data, ptrdiff_t size, at::Allocator* allocator);
 
