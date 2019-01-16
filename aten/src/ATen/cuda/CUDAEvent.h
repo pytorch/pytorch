@@ -106,12 +106,12 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: cudaEventRecord must be called on the same device as the event.
   void record(const CUDAStream& stream) {
-    CUDAGuard guard(stream.device_index());
+    AT_CHECK(device_index_ == stream.device_index(),
+      "Event device (", device_index_, ")  does not match recording stream's "
+      "device (", stream.device_index(), ").");
 
-    if (is_created_) {
-      AT_CHECK(device_index_ == stream.device_index(),
-        "Event device does not match recording stream's device.");
-    } else {
+    CUDAGuard guard(device_index_);
+    if (!is_created_) {
       createEvent();
     }
 
@@ -123,7 +123,10 @@ struct AT_CUDA_API CUDAEvent {
   // The event has no actual GPU resources associated with it.
   void block(const CUDAStream& stream) const {
     if (is_created_) {
-      CUDAGuard guard(stream.device_index());
+      AT_CHECK(device_index_ == stream.device_index(),
+        "Event device (", device_index_, ")  does not match recording stream's "
+        "device (", stream.device_index(), ").");
+      CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
