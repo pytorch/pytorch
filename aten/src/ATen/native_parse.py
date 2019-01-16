@@ -88,10 +88,12 @@ def parse_arguments(args, func_decl, func_name, func_return):
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
-        match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
+        match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
             argument_dict['size'] = int(match.group(1))
+        if argument_dict['type'] == 'int[]':
+            argument_dict['type'] = 'IntList'
         if default is not None:
             argument_dict['default'] = default
         # TODO: convention is that the ith-argument correspond to the i-th return, but it would
