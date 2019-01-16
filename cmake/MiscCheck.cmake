@@ -180,7 +180,7 @@ cmake_pop_check_state()
 # ---[ Check if the compiler has AVX512F support.
 cmake_push_check_state(RESET)
 if (MSVC)
-  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__")
+	set(CMAKE_REQUIRED_FLAGS "/arch:AVX512F")
 else()
   set(CMAKE_REQUIRED_FLAGS "-mavx512f")
 endif()
@@ -201,6 +201,7 @@ CHECK_CXX_SOURCE_COMPILES(
        }" CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
+  set(CAFFE2_PERF_WITH_AVX512 1)
 endif()
 cmake_pop_check_state()
 

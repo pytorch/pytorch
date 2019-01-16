@@ -40,18 +40,23 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   list (APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS "Caffe2_perfkernels_avx_interface")
   list (APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS "Caffe2_perfkernels_avx2_interface")
 
-  if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+  if (CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
     add_library(Caffe2_perfkernels_avx512 STATIC ${avx512_srcs})
     add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO)
     target_link_libraries(Caffe2_perfkernels_avx512 PRIVATE c10)
-    target_compile_options(Caffe2_perfkernels_avx512
-        PRIVATE "-mavx512f"
-        PRIVATE "-mavx512dq"
-        PRIVATE "-mavx512vl"
-        PRIVATE "-mavx2"
-        PRIVATE "-mfma"
-        PRIVATE "-mavx"
-        PRIVATE "-mf16c")
+    if (MSVC)
+      target_compile_options(Caffe2_perfkernels_avx512
+          PRIVATE "/arch:AVX512")
+    else()
+      target_compile_options(Caffe2_perfkernels_avx512
+          PRIVATE "-mavx512f"
+          PRIVATE "-mavx512dq"
+          PRIVATE "-mavx512vl"
+          PRIVATE "-mavx2"
+          PRIVATE "-mfma"
+          PRIVATE "-mavx"
+          PRIVATE "-mf16c")
+    endif()
     caffe2_interface_library (Caffe2_perfkernels_avx512 Caffe2_perfkernels_avx512_interface)
     list (APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS "Caffe2_perfkernels_avx512_interface")
   endif()
