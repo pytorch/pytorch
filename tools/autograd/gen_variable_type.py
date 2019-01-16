@@ -117,6 +117,25 @@ TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
+# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+# values temporarily and pass the values to the return variables outside of the
+# `at::AutoNonVariableTypeMode` guard block.
+DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+decltype(${base_type_call}) tmp;
+{
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  tmp = ${base_type_call};
+}
+${return_values} = ${rhs_value};
+""")
+
+DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+{
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${base_type_call};
+}
+""")
+
 SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
@@ -594,24 +613,17 @@ def emit_body(declaration):
             code_block = ''
             base_type_call = CALL_VIA_DERIVED.substitute(combined)
             if not modifies_arguments and not returns_void:
-                # If the `baseType` operation has return values, we use the `tmp` variable to hold the
-                # values temporarily and pass the values to the return variables outside of the
-                # `at::AutoNonVariableTypeMode` guard block.
-                code_block += "decltype({}) tmp;\n".format(base_type_call)
-                code_block += '{\n'
-                code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
-                code_block += '  ' + 'tmp = {};\n'.format(base_type_call)
-                code_block += '}\n'
                 if not modifies_arguments:
                     rhs_value, extra_wrapping_stmts = wrap_output("tmp")
                 else:
                     rhs_value = "tmp"
-                code_block += '{} = {};\n'.format(tie_return_values(), rhs_value)
+                code_block = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call,
+                    return_values=tie_return_values(),
+                    rhs_value=rhs_value)
             else:
-                code_block += '{\n'
-                code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
-                code_block += '  ' + '{};\n'.format(base_type_call)
-                code_block += '}\n'
+                code_block = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
             call = code_block
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
