@@ -20,7 +20,7 @@ namespace at { namespace cuda {
 * CUDAEvents are constructed lazily when first recorded unless it is
 * reconstructed from a cudaIpcEventHandle_t. The event has a device, which can
 * be specified at construction time or will be implicitly acquired using current
-* device. Later streams that record the event must share this device.
+* device. Later streams that record the event must match this device.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
