@@ -338,6 +338,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return tid == SparseCPUTensorId() || tid == SparseCUDATensorId() || tid == SparseHIPTensorId();
   }
 
+  bool is_quantize() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == QCPUTensorId() || tid == QCUDATensorId();
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();

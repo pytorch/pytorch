@@ -302,7 +302,7 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride, optional<int
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
   AT_CHECK(
-      tid == CPUTensorId() || tid == CUDATensorId(),
+      tid == CPUTensorId() || tid == CUDATensorId() || tid == QCPUTensorId() || tid == QCUDATensorId(),
       "as_strided is only implemented for strided CPU and CUDA tensors.");
   auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid, false);
   setStrided(result, size, stride, storage_offset);

@@ -489,6 +489,8 @@ inline TensorOptions dtype() {
 // we reserve the right to change dispatch based on *any* aspect of
 // TensorOptions.  WARNING: If you do this, you need to fix the calls
 // to computeTensorTypeId in caffe2/tensor.h
+// WARNING: no Support for QInt dtype here since this is only used by C2
+// we should add qint support once we have a QINT device
 inline TensorTypeId computeTensorTypeId(TensorOptions options) {
   switch (options.layout()) {
     case Layout::Strided:
@@ -549,6 +551,10 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::CUDA;
   } else if (tid == SparseHIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == QCPUTensorId()) {
+    return DeviceType::CPU;
+  } else if (tid == QCUDATensorId()) {
+    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

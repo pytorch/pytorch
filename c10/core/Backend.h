@@ -73,6 +73,10 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::SparseCUDA;
   } else if (t == SparseHIPTensorId()) {
     return Backend::SparseHIP;
+  } else if (t == QCPUTensorId()) {
+    return Backend::CPU;
+  } else if (t == QCUDATensorId()) {
+    return Backend::CUDA;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {

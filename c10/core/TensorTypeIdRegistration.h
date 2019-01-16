@@ -101,6 +101,8 @@ C10_DECLARE_TENSOR_TYPE(CPUTensorId); // PyTorch/Caffe2 supported
 C10_DECLARE_TENSOR_TYPE(CUDATensorId); // PyTorch/Caffe2 supported
 C10_DECLARE_TENSOR_TYPE(SparseCPUTensorId); // PyTorch only
 C10_DECLARE_TENSOR_TYPE(SparseCUDATensorId); // PyTorch only
+C10_DECLARE_TENSOR_TYPE(QCPUTensorId); // PyTorch only
+C10_DECLARE_TENSOR_TYPE(QCUDATensorId); // PyTorch only
 C10_DECLARE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only

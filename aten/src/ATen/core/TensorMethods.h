@@ -769,6 +769,18 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 inline Tensor Tensor::to_sparse() const {
     return type().to_sparse(*this);
 }
+inline Tensor Tensor::to_quantize() const {
+    return type().to_quantize(*this);
+}
+inline Tensor Tensor::to_real() const {
+    return type().to_real(*this);
+}
+inline Scalar Tensor::q_scale() const {
+    return type().q_scale(*this);
+}
+inline Scalar Tensor::q_offset() const {
+    return type().q_offset(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return type().to(*this, options, non_blocking, copy);
 }

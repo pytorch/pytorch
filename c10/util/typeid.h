@@ -19,6 +19,7 @@
 
 #include "c10/util/Backtrace.h"
 #include "c10/Half.h"
+#include "c10/QInt.h"
 #include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
@@ -430,15 +431,15 @@ class C10_API TypeMeta {
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
     // disabled for compilers that don't know '-Wundefined-var-template' and
     // would error at our attempt to disable it.
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic push  
-#  pragma GCC diagnostic ignored "-Wpragmas"  
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"  
-#  pragma GCC diagnostic ignored "-Wundefined-var-template"  
+#ifndef _MSC_VER
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wundefined-var-template"
 #endif
     return TypeMeta(_typeMetaDataInstance<T>());
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic pop  
+#ifndef _MSC_VER
+#  pragma GCC diagnostic pop
 #endif
   }
 
@@ -572,20 +573,21 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(7, double)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
-// 11 = undefined type id
-// 12 = Tensor (defined in tensor.h)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(13, std::string)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(14, bool)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(16, char)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(22, bool*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(23, char*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(11, c10::QInt)
+// 12 = undefined type id
+// 13 = Tensor (defined in tensor.h)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(14, std::string)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(15, bool)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(16, uint16_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(17, char)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(19, std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int32_t>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(21, std::vector<int64_t>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(22, std::vector<unsigned long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(23, bool*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, char*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, int*)
 
 // For some of the compilers, long is definied separately from int32_t and
 // int64_t. As a result we will need to actually define them separately.
@@ -605,10 +607,10 @@ using _guard_long_unique = c10::guts::conditional_t<
     _guard_long_unique_dummy<T>,
     T>;
 } // namespace detail
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(26, detail::_guard_long_unique<long>)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
-    26,
+    27,
     detail::_guard_long_unique<std::vector<long>>)
 
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

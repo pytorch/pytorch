@@ -43,6 +43,8 @@ static DLDataType getDLDataType(const Type& type) {
       throw std::logic_error("ComplexFloat is not supported by dlpack");
     case ScalarType::ComplexDouble:
       throw std::logic_error("ComplexDouble is not supported by dlpack");
+    case ScalarType::QInt:
+      throw std::logic_error("QInt is not supported by dlpack");
     case ScalarType::Undefined:
       throw std::logic_error("Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:

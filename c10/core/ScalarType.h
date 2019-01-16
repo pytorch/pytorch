@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/Half.h>
+#include <c10/QInt.h>
 #include <c10/util/typeid.h>
 
 #include <cstdint>
@@ -9,6 +10,22 @@
 #include <complex>
 
 namespace c10 {
+
+// NB: Order matters for this macro; it is relied upon in
+// _promoteTypesLookup and the serialization format.
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(_) \
+_(uint8_t,Byte,i)  /* 0 */ \
+_(int8_t,Char,i)   /* 1 */ \
+_(int16_t,Short,i) /* 2 */ \
+_(int,Int,i)       /* 3 */ \
+_(int64_t,Long,i)  /* 4 */ \
+_(at::Half,Half,d) /* 5 */ \
+_(float,Float,d)   /* 6 */ \
+_(double,Double,d) /* 7 */ \
+_(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
+_(std::complex<float>,ComplexFloat,z)   /* 9 */ \
+_(std::complex<double>,ComplexDouble,z) /* 10 */ \
+_(QInt,QInt,i) /* 11 */
 
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
@@ -39,6 +56,7 @@ _(float,Float,d)   \
 _(double,Double,d) \
 _(std::complex<float>,ComplexFloat,z) \
 _(std::complex<double>,ComplexDouble,z)
+// _(QInt,QInt,i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \
@@ -62,7 +80,7 @@ _(double,Double,d)
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1,n,_2) \
   n,
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_ENUM)
 #undef DEFINE_ENUM
   Undefined,
   NumOptions
@@ -74,7 +92,7 @@ static inline at::DataType scalarTypeToDataType(ScalarType scalar_type) {
     return caffe2::TypeIdentifier::Get<ctype>();
 
   switch(scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_CASE)
     case ScalarType::Undefined: return at::DataType::uninitialized();
     default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
   }
@@ -86,7 +104,7 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
   case ScalarType:: name : return caffe2::TypeMeta::Make<ctype>();
 
   switch(scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_CASE)
     case ScalarType::Undefined: return caffe2::TypeMeta();
     default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
   }
@@ -98,7 +116,7 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
   if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
     return ScalarType::name;                           \
   }
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_IF)
 #undef DEFINE_IF
   if (dtype == caffe2::TypeMeta()) {
     return ScalarType::Undefined;
@@ -117,7 +135,7 @@ static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
 #define DEFINE_CONSTANT(_,name,_2) \
 constexpr ScalarType k##name = ScalarType::name;
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CONSTANT)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
 
 static inline const char * toString(ScalarType t) {
@@ -125,7 +143,7 @@ static inline const char * toString(ScalarType t) {
   case ScalarType:: name : return #name;
 
   switch(t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(DEFINE_CASE)
     default:
       return "UNKNOWN_SCALAR";
   }
@@ -137,7 +155,7 @@ static inline size_t elementSize(ScalarType t) {
   case ScalarType:: name : return sizeof(ctype);
 
   switch(t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CASE_ELEMENTSIZE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_QUANTIZE(CASE_ELEMENTSIZE_CASE)
     default:
       AT_ERROR("Unknown ScalarType");
   }
@@ -164,6 +182,9 @@ static inline bool isComplexType(ScalarType t) {
           t == ScalarType::ComplexDouble);
 }
 
+static inline bool isQIntType(ScalarType t) {
+  return t == ScalarType::QInt;
+}
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This is generated according to NumPy's promote_types
   constexpr auto u1 = ScalarType::Byte;
@@ -181,6 +202,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (isComplexType(a) || isComplexType(b)) {
     AT_ERROR("promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
+  if (isQIntType(a) || isQIntType(b)) {
+    AT_ERROR("promoteTypes with quantize numbers is not handled yet; figure out what the correct rules should be");
+  }
+
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
