@@ -176,7 +176,7 @@ void addInputs(
 
 void addInputs(Node* n, const char* name, at::TensorList value) {
   Graph* g = n->owningGraph();
-  Node* list_node = g->appendNode(
+  Node* list_node = g->insertNode(
       g->createList(DynamicType::get(), fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
@@ -231,7 +231,7 @@ void setOutput(Value* value, const at::Tensor& output) {
 void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   Value* value = node->addOutput()->setType(ListType::ofTensors());
   Graph* graph = node->owningGraph();
-  Node* unpack_node = graph->appendNode(
+  Node* unpack_node = graph->insertNode(
       graph->create(prim::ListUnpack, {value}, outputs.size()));
   for (size_t i = 0; i < outputs.size(); ++i) {
     Value* output_val = unpack_node->outputs()[i];
