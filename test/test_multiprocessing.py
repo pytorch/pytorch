@@ -402,6 +402,37 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
+    def _test_event_multiprocess_child(event, p2c, c2p):
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
+        event.synchronize()
+        c2p.put(1)  # notify parent synchronization is done
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_event_multiprocess(self):
+        event = torch.cuda.Event(enable_timing=False, interprocess=True)
+        self.assertTrue(event.query())
+
+        ctx = mp.get_context('spawn')
+        p2c = ctx.SimpleQueue()
+        c2p = ctx.SimpleQueue()
+        p = ctx.Process(
+            target=TestMultiprocessing._test_event_multiprocess_child,
+            args=(event, p2c, c2p))
+        p.start()
+
+        c2p.get()  # wait for until child process is ready
+        torch.cuda._sleep(50000000)  # spin for about 50 ms
+        event.record()
+        p2c.put(0)  # notify child event is recorded
+
+        self.assertFalse(event.query())
+        c2p.get()  # wait for synchronization in child
+        self.assertTrue(event.query())
+        p.join()
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
@@ -428,8 +459,8 @@ class TestMultiprocessing(TestCase):
     def _test_event_handle_importer_consumer(handle, p2c, c2p):
         e1 = torch.cuda.Event.from_ipc_handle(
             torch.cuda.current_device(), handle)
-        c2p.put(0)  # notify parent synchronization is done
-        p2c.get()  # wait for parent before destructing child event
+        c2p.put(0)  # notify parent child is ready
+        p2c.get()  # wait for record in parent
         e1.synchronize()
         c2p.put(1)  # nofity synchronization is done in child
         p2c.get()  # wait for parent to finish before destructing child event
@@ -458,6 +489,7 @@ class TestMultiprocessing(TestCase):
         c2p.get()  # wait for synchronization in child
         self.assertTrue(e0.query())
         p2c.put(1)  # notify child that parent is done
+        p.join()
 
     def _test_event_handle_exporter_consumer(handle, p2c, c2p):
         stream = torch.cuda.Stream()
@@ -491,6 +523,7 @@ class TestMultiprocessing(TestCase):
         e0.synchronize()
         self.assertTrue(e0.query())
         p2c.put(0)
+        p.join()
 
     def _test_empty_tensor_sharing(self, dtype, device):
         q = mp.Queue()

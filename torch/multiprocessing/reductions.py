@@ -72,7 +72,8 @@ def rebuild_event(device, handle):
 
 
 def reduce_event(event):
-    return (rebuild_event, (torch.cuda.current_device(), event.ipc_handle()))
+    handle = event.ipc_handle()
+    return (rebuild_event, (event.device, handle))
 
 
 def rebuild_tensor(cls, storage, metadata):

@@ -45,7 +45,7 @@ static PyObject * THCPEvent_pynew(
 static PyObject * THCPEvent_from_ipc_handle(
     PyTypeObject *type, PyObject *args) {
   HANDLE_TH_ERRORS
-  int64_t device_index = -1;
+  long long device_index = -1;
   const char *handle_bytes = nullptr;
   int handle_size = 0;
 
