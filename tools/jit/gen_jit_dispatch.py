@@ -357,7 +357,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
-    fob = open('/tmp/aa', 'w')
+    fob = open('/tmp/bb', 'w')
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
@@ -459,11 +459,12 @@ def signature(decl, fob):
             ', but does not match the signature ' + ret_val.strip()
         return decl['schema_string'].strip()
     else:
-        if 'schema_string' in decl:
+        if 'schema_string' in decl and len(decl['schema_string'].strip()) > 0:
             # if(ret_val.strip() == decl['schema_string'].strip()):
             #     fob.write(decl['schema_string'].strip() + '\n')
             dd = Levenshtein.distance(ret_val.strip(), decl['schema_string'].strip())
-            fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + decl['schema_string'].strip() + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
+            fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + decl['schema_string'].strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
+            fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + ret_val.strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
 
     return ret_val
 
