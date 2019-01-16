@@ -256,12 +256,12 @@ void computeOutputHW(
     int W,
     int* OH,
     int* OW) {
-  Tensor input(CPU), output(CPU);
-  input.Resize(1, 1, H, W);
+  Tensor input = caffe2::empty({1, 1, H, W}, at::dtype<float>().device(CPU));
+  Tensor output(CPU);
   op->SetOutputSize(input, &output, 1);
-  CAFFE_ENFORCE_EQ(output.ndim(), 4);
-  *OH = output.dim(2);
-  *OW = output.dim(3);
+  CAFFE_ENFORCE_EQ(output.dim(), 4);
+  *OH = output.size(2);
+  *OW = output.size(3);
 }
 
 constexpr int computeMPSAlignOffset(int kernel, int pad) {
@@ -285,7 +285,7 @@ constexpr int computeMPSAlignOffset(int kernel, int pad) {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.ndim());
+  DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   for (int i = 0; i < index.size(); i++) {
@@ -306,12 +306,12 @@ utils::ConstTensorView<T> GetSubTensorView(
     return utils::ConstTensorView<T>(nullptr, {});
   }
 
-  std::vector<int> start_dims(tensor.ndim(), 0);
+  std::vector<int> start_dims(tensor.dim(), 0);
   start_dims.at(0) = dim0_start_index;
   auto st_idx = ComputeStartIndex(tensor, start_dims);
   auto ptr = tensor.data<T>() + st_idx;
 
-  auto input_dims = tensor.dims();
+  auto input_dims = tensor.sizes();
   std::vector<int> ret_dims(input_dims.begin() + 1, input_dims.end());
 
   utils::ConstTensorView<T> ret(ptr, ret_dims);
@@ -328,9 +328,9 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
     std::vector<MPSImageWrapper> wrappers(Inputs().size());
     for (auto i = 0; i < Inputs().size(); ++i) {
       const auto& X = Input(i);
-      CAFFE_ENFORCE(X.ndim() > 0 && X.ndim() <= 4);
+      CAFFE_ENFORCE(X.dim() > 0 && X.dim() <= 4);
       std::vector<int64_t> XDims = {1, 1, 1, 1};
-      XDims.assign(X.dims().begin(), X.dims().end());
+      XDims.assign(X.sizes().begin(), X.sizes().end());
 
       caffe2::Timer t;
       const auto n = XDims[0];
@@ -476,11 +476,11 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
     const auto& X = Input(0);
     const auto& mean = Input(1);
     CAFFE_ENFORCE_EQ(mean.size(), 3);
-    CAFFE_ENFORCE_EQ(X.ndim(), 4);
-    CAFFE_ENFORCE_EQ(X.dim(0), 1);
-    CAFFE_ENFORCE_EQ(X.dim(3), 4);
-    const auto H = X.dim(1);
-    const auto W = X.dim(2);
+    CAFFE_ENFORCE_EQ(X.dim(), 4);
+    CAFFE_ENFORCE_EQ(X.size(0), 1);
+    CAFFE_ENFORCE_EQ(X.size(3), 4);
+    const auto H = X.size(1);
+    const auto W = X.size(2);
 
     caffe2::Timer t;
 
@@ -749,7 +749,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
 
     auto& filter = Input(FILTER);
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(filter.ndim(), 4);
+    CAFFE_ENFORCE_EQ(filter.dim(), 4);
     // For NCHW, X.dim32(1), inputChannels
     const int C = X.featureChannels;
     const int M = filter.dim32(0);
@@ -757,7 +757,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
 
     CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
     CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
-    CAFFE_ENFORCE(bias.ndim() == 1, "");
+    CAFFE_ENFORCE(bias.dim() == 1, "");
     CAFFE_ENFORCE(bias.dim32(0) == M, "");
 
     const auto kH = kernel_h();
@@ -986,9 +986,9 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
 
     const auto& X1 = Input(1);
     CAFFE_ENFORCE_EQ(
-        X1.ndim(),
+        X1.dim(),
         1,
-        "MPSCNNMulOp: Only ndim == 1 for Input(1) is supported for now");
+        "MPSCNNMulOp: Only dim == 1 for Input(1) is supported for now");
 
     auto X1_ = [getMPSCNNContext().device
         newBufferWithBytes:X1.template data<float>()
@@ -1054,9 +1054,9 @@ class MPSCNNSubOp final : public Operator<CPUContext> {
 
     const auto& X1 = Input(1);
     CAFFE_ENFORCE_EQ(
-        X1.ndim(),
+        X1.dim(),
         1,
-        "MPSCNNSubOp: Only ndim == 1 for Input(1) is supported for now");
+        "MPSCNNSubOp: Only dim == 1 for Input(1) is supported for now");
 
     auto X1_ = [getMPSCNNContext().device
         newBufferWithBytes:X1.template data<float>()
@@ -1454,14 +1454,14 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
 
     auto& filter = Input(FILTER);
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(filter.ndim(), 4);
+    CAFFE_ENFORCE(filter.dim(), 4);
     const int output_channels = filter.dim32(1);
     const int input_channels = filter.dim32(0);
 
     CAFFE_ENFORCE(X.featureChannels == input_channels, "");
     CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
     CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
-    CAFFE_ENFORCE(bias.ndim() == 1, "");
+    CAFFE_ENFORCE(bias.dim() == 1, "");
     CAFFE_ENFORCE(bias.dim32(0) == output_channels, "");
 
     const auto kH = kernel_h();
@@ -1964,7 +1964,7 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
     auto X = inputWrapper.getImage();
     CAFFE_ENFORCE_EQ(X.numberOfImages, 1);
     const auto& R = Input(1);
-    CAFFE_ENFORCE_EQ(R.ndim(), 2);
+    CAFFE_ENFORCE_EQ(R.dim(), 2);
     CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
     const auto roiBytes = R.dim32(0) * 4 * sizeof(float16_t);
     if (!roiBuffer_ || roiBuffer_.length != roiBytes) {
@@ -2249,25 +2249,25 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     auto* out_rois = Output(0);
     auto* out_rois_probs = Output(1);
 
-    CAFFE_ENFORCE_EQ(scores.ndim(), 4, scores.ndim());
+    CAFFE_ENFORCE_EQ(scores.dim(), 4, scores.dim());
     CAFFE_ENFORCE(scores.template IsType<float>(), scores.meta().name());
-    const auto num_images = scores.dim(0);
-    const auto A = scores.dim(1);
-    const auto height = scores.dim(2);
-    const auto width = scores.dim(3);
+    const auto num_images = scores.size(0);
+    const auto A = scores.size(1);
+    const auto height = scores.size(2);
+    const auto width = scores.size(3);
     const auto K = height * width;
 
     // bbox_deltas: (num_images, A * 4, H, W)
     CAFFE_ENFORCE_EQ(
-        bbox_deltas.dims(), (vector<int64_t>{num_images, 4 * A, height, width}));
+        bbox_deltas.sizes(), (vector<int64_t>{num_images, 4 * A, height, width}));
 
     // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
-    CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<int64_t>{num_images, 3}));
+    CAFFE_ENFORCE_EQ(im_info_tensor.sizes(), (vector<int64_t>{num_images, 3}));
     CAFFE_ENFORCE(
         im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
     // anchors: (A, 4)
-    CAFFE_ENFORCE_EQ(anchors.dims(), (vector<int64_t>{A, 4}));
+    CAFFE_ENFORCE_EQ(anchors.sizes(), (vector<int64_t>{A, 4}));
     CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
     // Broadcast the anchors to all pixels
     auto all_anchors_vec =
@@ -2276,8 +2276,8 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
 
     Eigen::Map<const ERArrXXf> im_info(
         im_info_tensor.data<float>(),
-        im_info_tensor.dim(0),
-        im_info_tensor.dim(1));
+        im_info_tensor.size(0),
+        im_info_tensor.size(1));
 
     const int roi_col_count = 5;
     out_rois->Resize(0, roi_col_count);
@@ -2300,7 +2300,7 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
           &im_i_probs);
 
       int csz = im_i_boxes.rows();
-      int cur_start_idx = out_rois->dim(0);
+      int cur_start_idx = out_rois->size(0);
 
       out_rois->Extend(csz, 50);
       out_rois_probs->Extend(csz, 50);
