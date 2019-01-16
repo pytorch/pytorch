@@ -140,7 +140,7 @@ def run(paths):
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
             try:
-                declaration['schema_string'] = "aten::" + func['func'][:]
+                declaration['schema_string'] = "aten::" + func['func']
                 if '->' in func['func']:
                     func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
                 else:
