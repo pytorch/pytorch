@@ -11,7 +11,7 @@ def _get_device_index(device, optional=False):
     i.e., ``torch.device('cuda')``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
 
-    If :attr:`device` is a Python interger, it is returned as is.
+    If :attr:`device` is a Python integer, it is returned as is.
 
     If :attr:`device` is ``None``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
