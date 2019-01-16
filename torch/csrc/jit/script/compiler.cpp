@@ -29,46 +29,54 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
+
+using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
 struct Refinements {
 
   //using ordered map for deterministic graph output
-  std::map<std::string, TypePtr> types;
-  std::map<std::string, const SourceRange*> ranges;
+  std::map<std::string, TypeAndRange> mappings;
+
+  void setMapping(const std::string& name, TypeAndRange mapping) {
+    mappings[name] = mapping;
+  }
+
+  c10::optional<TypeAndRange> getName(const std::string& name) const {
+    const auto& maybe_mapping = mappings.find(name);
+    if (maybe_mapping == mappings.end()) {
+      return c10::nullopt;
+    }
+    return maybe_mapping->second;
+  }
 
   // return the intersection of the values to type mappings in a and b whose
   // types can be unified
-  static Refinements intersectRefinements(const Refinements& a, const Refinements& b) {
+  Refinements* intersectRefinements(const Refinements& other) {
     Refinements ret;
-    const auto& types_a = a.types;
-    const auto& types_b = b.types;
-
-    for (auto& name_type: types_a) {
-      TypePtr t_1 = name_type.second;
-      auto maybe_t_2 = types_b.find(name_type.first);
-      if (maybe_t_2 != types_b.end()) {
-        TypePtr t_2 = maybe_t_2->second;
-        auto maybe_unified_type = unifyTypes(t_1, t_2);
+    for (auto& name_mapping: mappings) {
+      const auto& name = name_mapping.first;
+      const auto& mapping = name_mapping.second;
+      if (auto other_mapping = other.getName(name_mapping.first)) {
+        auto maybe_unified_type = unifyTypes(mapping.first, other_mapping->first);
         if (maybe_unified_type) {
-          ret.types[name_type.first] = *maybe_unified_type;
-          ret.ranges[name_type.first] = a.ranges.at(name_type.first);
+          ret.setMapping(name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       }
     }
-    return ret;
+    mappings = std::move(ret.mappings);
+    return this;
   }
 
   // return the union of the values to type mappings in a and b whose
   // types can be unified
-  static Refinements unionRefinements(const Refinements& a, const Refinements& b) {
+  Refinements* unionRefinements(const Refinements& other) {
+    const Refinements& a = *this;
     Refinements ret;
-    const auto& types_a = a.types;
-    const auto& types_b = b.types;
-
-    for (auto& name_type: types_a) {
-      TypePtr t_1 = name_type.second;
-      auto maybe_t_2 = types_b.find(name_type.first);
-      if (maybe_t_2 != types_b.end()) {
-        TypePtr t_2 = maybe_t_2->second;
+    for (auto& name_mapping: mappings) {
+      const auto& name = name_mapping.first;
+      const auto& mapping = name_mapping.second;
+      TypePtr t_1 = mapping.first;
+      if (auto other_mapping = other.getName(name_mapping.first)) {
+        TypePtr t_2 = other_mapping->first;
         c10::optional<TypePtr> maybe_unified_type = c10::nullopt;
         if (t_1->isSubtypeOf(t_2)) {
           maybe_unified_type = t_1;
@@ -76,24 +84,21 @@ struct Refinements {
           maybe_unified_type = t_2;
         }
         if (maybe_unified_type) {
-          ret.types[name_type.first] = *maybe_unified_type;
-          ret.ranges[name_type.first] = a.ranges.at(name_type.first);
+          ret.setMapping(name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       } else {
-        ret.types[name_type.first] = t_1;
-        ret.ranges[name_type.first] = a.ranges.at(name_type.first);
+        ret.setMapping(name, mapping);
       }
     }
 
-    for (auto& name_type: types_b) {
-      TypePtr t_1 = name_type.second;
-      if (types_a.count(name_type.first) == 0) {
-        ret.types[name_type.first] = t_1;
-        ret.ranges[name_type.first] = b.ranges.at(name_type.first);
+    for (auto& name_mapping: other.mappings) {
+      if (!a.getName(name_mapping.first)) {
+        ret.setMapping(name_mapping.first, name_mapping.second);
       }
     }
 
-    return ret;
+    mappings = std::move(ret.mappings);
+    return this;
   }
 };
 
@@ -111,28 +116,24 @@ struct BoolInfo {
   Refinements true_refinements;
   Refinements false_refinements;
 
-  static BoolInfo mergeOr(BoolInfo a, BoolInfo b) {
+  BoolInfo* mergeOr(BoolInfo other) {
     // if the result of an OR is true, either a & b could have been true,
     // so we take the intersection of a.true_refinements & b.true_refinements.
     // if the result is false, both a and b had to be false,
     // so we take their union.
-    auto true_refinements =
-        Refinements::intersectRefinements(a.true_refinements, b.true_refinements);
-    auto false_refinements =
-        Refinements::unionRefinements(a.false_refinements, b.false_refinements);
-    return BoolInfo(std::move(true_refinements), std::move(false_refinements));
+    true_refinements.intersectRefinements(other.true_refinements);
+    false_refinements.unionRefinements(other.false_refinements);
+    return this;
   }
 
-  static BoolInfo mergeAnd(BoolInfo a, BoolInfo b) {
+  BoolInfo* mergeAnd(BoolInfo other) {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
     // if the result is false, either a or b could have been false,
     // so we take their intersection.
-    auto true_refinements =
-        Refinements::unionRefinements(a.true_refinements, b.true_refinements);
-    auto false_refinements =
-        Refinements::intersectRefinements(a.false_refinements, b.false_refinements);
-    return BoolInfo(std::move(true_refinements), std::move(false_refinements));
+    true_refinements.unionRefinements(other.true_refinements);
+    false_refinements.intersectRefinements(other.false_refinements);
+    return this;
   }
 };
 
@@ -953,18 +954,19 @@ struct to_ir {
   }
 
   void insertRefinements(const Refinements& ref) {
-    const auto& types = ref.types;
-    const auto& ranges = ref.ranges;
-
-    for (auto value_type: types) {
-      const std::string& name = value_type.first;
-      auto type = value_type.second;
-      auto range = *ranges.at(name);
+    for (auto name_mappings: ref.mappings) {
+      const std::string& name = name_mappings.first;
+      auto type = name_mappings.second.first;
+      const auto& range = *name_mappings.second.second;
       Value * v = environment_stack->getVar(name, range);
+      Value * output;
       if (type != NoneType::get()) {
-        auto output = graph->insert(prim::unchecked_unwrap_optional, {v});
-        environment_stack->setVar(range, name, output);
+        output = graph->insert(prim::unchecked_unwrap_optional, {v});
+      } else {
+        auto cur_type = environment_stack->getVar(name, range)->type();
+        output = graph->createNone(cur_type->expect<OptionalType>()->getElementType())->output();
       }
+      environment_stack->setVar(range, name, output);
     }
   }
 
@@ -1985,11 +1987,8 @@ struct to_ir {
           Refinements true_info, false_info;
           auto type = environment_stack->getVar(var_name, inputs[0]->range())->type();
           if (auto opt_type = type->cast<OptionalType>()) {
-            false_info.types[var_name] = opt_type->getElementType();
-            true_info.types[var_name] = NoneType::get();
-
-            true_info.ranges[var_name] = &tree->range();
-            false_info.ranges[var_name] = &tree->range();
+            false_info.setMapping(var_name, TypeAndRange(opt_type->getElementType(), &tree->range()));
+            true_info.setMapping(var_name, TypeAndRange(NoneType::get(), &tree->range()));
           }
           if (tree->kind() == TK_IS) {
             return BoolInfo(true_info, false_info);
@@ -2009,9 +2008,9 @@ struct to_ir {
         auto first = findRefinements(inputs[0]);
         auto second = findRefinements(inputs[1]);
         if (tree->kind() == TK_OR) {
-          return BoolInfo::mergeOr(first, second);
+          return *first.mergeOr(second);
         } else {
-          return BoolInfo::mergeAnd(first, second);
+          return *first.mergeAnd(second);
         }
       }
     }
