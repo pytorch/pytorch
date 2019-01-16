@@ -18,7 +18,7 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
-    elif s == '{}':
+    elif s == '[]':
         return '{}'
     elif re.match(r'{.*}', s):
         return s
