@@ -46,8 +46,6 @@ struct THCRNGState;  /* Random number generator state. */
 typedef struct THCState THCState;
 struct THCState;
 
-typedef THAllocator THCDeviceAllocator;
-
 typedef struct _THCCudaResourcesPerDevice {
   /* cuBLAS handle is lazily initialized */
   cublasHandle_t blasHandle;
@@ -68,7 +66,7 @@ THC_API void THCudaShutdown(THCState* state);
 THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
-THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
+THC_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
 

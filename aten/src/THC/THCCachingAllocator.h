@@ -8,7 +8,7 @@
 
 #include <THC/THCGeneral.h>
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
+THC_API c10::Allocator* THCCachingAllocator_get(void);
 THC_API void THCCachingAllocator_emptyCache(void);
 THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size);
