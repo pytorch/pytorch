@@ -4224,46 +4224,6 @@ a")
                 if y is not None and x_none:
                     print(x + y)
 
-    def test_opt_refinement_dce(self):
-        def check_unwrap_count(func, num_unwrap):
-            graph_str = str(torch.jit.script(func).graph)
-            self.assertEqual(graph_str.count("unchecked_unwrap"), num_unwrap)
-
-        def first_branch(x, y):
-            # type: (Optional[int], Optional[int]) -> Optional[int]
-            if x is not None:
-                y = x
-            return y
-
-        self.checkScript(first_branch, (None, 2))
-        self.checkScript(first_branch, (1, 2))
-        check_unwrap_count(first_branch, 1)  # y set by unchecked unwrap
-
-        def second_branch(x, y):
-            # type: (Optional[int], Optional[int]) -> Optional[int]
-            if x is not None:
-                pass
-            else:
-                y = x
-            return y
-
-        self.checkScript(second_branch, (None, 2))
-        self.checkScript(second_branch, (1, 2))
-        check_unwrap_count(second_branch, 0)  # y not set by unchecked unwrap
-
-        with self.disableModuleHook():
-            def both_branches(x, y):
-                # type: (Optional[int], Optional[int]) -> Optional[int]
-                if x is not None:
-                    y = x
-                else:
-                    y = x
-                return y
-
-            self.checkScript(both_branches, (None, 2))
-            self.checkScript(both_branches, (1, 2))
-            check_unwrap_count(both_branches, 0)
-
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):

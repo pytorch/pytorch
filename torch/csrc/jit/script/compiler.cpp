@@ -964,7 +964,9 @@ struct to_ir {
         output = graph->insert(prim::unchecked_unwrap_optional, {v});
       } else {
         auto cur_type = environment_stack->getVar(name, range)->type();
-        output = graph->createNone(cur_type->expect<OptionalType>()->getElementType())->output();
+        auto node = graph->createNone(cur_type->expect<OptionalType>()->getElementType());
+        graph->insertNode(node);
+        output = node->output();
       }
       environment_stack->setVar(range, name, output);
     }
