@@ -309,6 +309,3 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops
-
-# Import caffe2 ops
-import caffe2.python._import_c_extension
