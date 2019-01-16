@@ -9788,7 +9788,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         epsilon = 1e-4
 
         expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
-        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), 0, epsilon)
+        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), 1, epsilon)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
 # Functions to test negative dimension wrapping
