@@ -959,9 +959,8 @@ struct to_ir {
       auto type = name_mappings.second.first;
       const auto& range = *name_mappings.second.second;
       Value * v = environment_stack->getVar(name, range);
-      Value * output;
       if (type != NoneType::get()) {
-        output = graph->insert(prim::unchecked_unwrap_optional, {v});
+        Value * output = graph->insert(prim::unchecked_unwrap_optional, {v});
         environment_stack->setVar(range, name, output);
       }
       // todo @eellison - revisit inserting Nones when None subtypes Optional
