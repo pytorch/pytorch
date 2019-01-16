@@ -12316,7 +12316,8 @@ class TestAsync(JitTestCase):
 
         def fn(x):
             fut = torch.jit._fork(fork_body, x)
-            return torch.jit._wait(fut)
+            vals = torch.jit._wait(fut)
+            return vals[0], vals[1], x - 1
 
         traced = torch.jit.trace(fn, (torch.rand(3, 4),))
         x = torch.rand(3, 4)

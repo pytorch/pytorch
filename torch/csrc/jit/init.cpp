@@ -388,36 +388,48 @@ void initJITBindings(PyObject* module) {
   m.def("fork", [](py::function f, py::args args) {
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      // TODO node inputs
       auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
       auto body_block = fork_node->addBlock();
 
       Value *node_output;
       py::object py_func_output;
       auto retval = c10::make_intrusive<c10::ivalue::Future>();
-      {
-        // Insert new trace ops into the fork op's sub-block
-        WithInsertPoint guard(body_block);
+      // Insert new trace ops into the fork op's sub-block
+      WithInsertPoint guard(body_block);
 
-        // Run the user-supplied function
-        py_func_output = f(*args);
+      // Run the user-supplied function
+      py_func_output = f(*args);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
-        // information of this IValue is used both to record the correct type in
-        // the trace.
-        auto output_ivalue = toIValue(py_func_output);
-        Value *out_val = jit::tracer::getNestedValueTrace(output_ivalue);
-        body_block->registerOutput(out_val);
-        node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
+      // Convert the output of the user-supplied funciton to IValue. The type
+      // information of this IValue is used both to record the correct type in
+      // the trace.
+      auto output_ivalue = toIValue(py_func_output);
+      Value *out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+      body_block->registerOutput(out_val);
+      node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
 
-        // TODO lambda lift
+      // Lambda lift
 
-        // Record the ivalue in the tracer
-        jit::tracer::setFutureTrace(retval, node_output);
+      auto forked_graph = std::make_shared<Graph>();
 
-        // stuff the ivalue output in the Future
-        retval->markCompleted(output_ivalue);
-      }
+      std::unordered_map<Value*, Value*> uncaptures_map;
+      auto env = [&](Value* v) -> Value* {
+        if (!uncaptures_map.count(v)) {
+          uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+          fork_node->addInput(v);
+        }
+        return uncaptures_map[v];
+      };
+      forked_graph->block()->cloneFrom(body_block, env);
+
+      fork_node->g_(attr::Subgraph, forked_graph);
+      fork_node->eraseBlock(0);
+
+      // Record the ivalue in the tracer
+      jit::tracer::setFutureTrace(retval, node_output);
+
+      // stuff the ivalue output in the Future
+      retval->markCompleted(output_ivalue);
 
       return PythonFutureWrapper(retval);
     } else {
@@ -434,8 +446,9 @@ void initJITBindings(PyObject* module) {
       Value *fut_val = jit::tracer::getFutureTrace(fut.fut);
       auto wait_node = graph->insertNode(graph->create(Symbol::fromQualString("aten::wait"), 1));
       wait_node->addInput(fut_val);
-      wait_node->output()->setType(fut_val->type());
       jit::tracer::setValueTrace(fut.fut->value(), wait_node->output());
+      wait_node->output()->setType(fut_val->type()->containedTypes().at(0));
+
     }
     return fut.fut->value();
   });
