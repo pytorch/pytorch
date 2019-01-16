@@ -60,6 +60,8 @@ def process_types_and_backends(option):
     for arg in option.get('arguments', []):
         if arg['type'] == 'THSTensor*':
             pairs.discard(('CUDA', 'Half'))
+        if arg['type'] == 'int':
+            arg['type'] = 'int64_t'
 
     # special case remove Half for cpu unless it is explicitly enabled,
     if not option.get('cpu_half', False):
@@ -95,6 +97,11 @@ def handle_outputs_taken_as_arguments(options):
         return False
 
     for option in options:
+        if type(option['return']) == list:
+            for i in range(len(option['return'])):
+                if option['return'][i]['type'] == 'int':
+                    option['return'][i]['type'] = 'int64_t'
+            
         for arg in option['arguments']:
             # mark arguments which can be null
             if is_nullable(arg):
