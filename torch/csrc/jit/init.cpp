@@ -446,8 +446,8 @@ void initJITBindings(PyObject* module) {
       Value *fut_val = jit::tracer::getFutureTrace(fut.fut);
       auto wait_node = graph->insertNode(graph->create(Symbol::fromQualString("aten::wait"), 1));
       wait_node->addInput(fut_val);
-      jit::tracer::setValueTrace(fut.fut->value(), wait_node->output());
       wait_node->output()->setType(fut_val->type()->containedTypes().at(0));
+      jit::tracer::setValueTrace(fut.fut->value(), wait_node->output());
 
     }
     return fut.fut->value();

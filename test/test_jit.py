@@ -12323,6 +12323,11 @@ class TestAsync(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(fn(x), traced(x))
 
+        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
