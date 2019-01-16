@@ -357,7 +357,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
-    fob = open('/tmp/bb', 'w')
+    fob = open('/tmp/aa', 'w')
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
