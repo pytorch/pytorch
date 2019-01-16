@@ -133,7 +133,8 @@ static PyMethodDef THCPEvent_methods[] = {
   {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
   {(char*)"synchronize",
     (PyCFunction)THCPEvent_synchronize, METH_NOARGS, nullptr},
-  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_NOARGS, nullptr},
+  {(char*)"ipc_handle",
+    (PyCFunction)THCPEvent_ipc_handle, METH_NOARGS, nullptr},
   {nullptr}
 };
 

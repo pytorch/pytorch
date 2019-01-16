@@ -22,7 +22,7 @@ namespace at { namespace cuda {
 * device is acquired from the first recording stream. However, if constructed
 * from a handle or ipc_handle() is called before it is ever recorded, the device
 * should be explicitly specified. Later streams that record the event must share
-* this device。
+* this device.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants

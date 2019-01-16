@@ -10,8 +10,8 @@
 
 PyObject *THCPStreamClass = nullptr;
 
-static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
-{
+static PyObject * THCPStream_pynew(
+  PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
   int current_device;
@@ -21,7 +21,8 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   uint64_t cdata = 0;
 
   static char *kwlist[] = {"priority", "_cdata", nullptr};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iK", kwlist, &priority, &cdata)) {
+  if (!PyArg_ParseTupleAndKeywords(
+      args, kwargs, "|iK", kwlist, &priority, &cdata)) {
     return nullptr;
   }
 
@@ -33,7 +34,8 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   at::cuda::CUDAStream stream =
     cdata ?
     at::cuda::CUDAStream::unpack(cdata) :
-    at::cuda::getStreamFromPool(/* isHighPriority */ priority < 0 ? true : false);
+    at::cuda::getStreamFromPool(
+      /* isHighPriority */ priority < 0 ? true : false);
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
@@ -95,7 +97,8 @@ static PyObject * THCPStream_eq(THCPStream *self, THCPStream *other) {
 }
 
 static struct PyMemberDef THCPStream_members[] = {
-  {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
+  {(char*)"_cdata",
+    T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
   {nullptr}
 };
 
