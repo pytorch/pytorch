@@ -36,7 +36,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialCrossMapLRN.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
