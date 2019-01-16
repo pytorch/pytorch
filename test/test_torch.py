@@ -378,6 +378,46 @@ class _TestTorchMixin(object):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
+    def test_logical_all(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.ones([2, 3, 400], dtype=torch.uint8, device=device)
+
+            self.assertEqual(
+                torch.tensor(1, dtype=torch.uint8, device=device),
+                x.all())
+
+            self.assertEqual(
+                torch.ones([1, 3, 400], dtype=torch.uint8, device=device),
+                x.all(0, keepdim=True))
+
+            self.assertEqual(
+                torch.ones([2, 1, 400], dtype=torch.uint8, device=device),
+                x.all(1, keepdim=True))
+
+            self.assertEqual(
+                torch.ones([2, 3, 1], dtype=torch.uint8, device=device),
+                x.all(2, keepdim=True))
+
+            # set the last element to 0
+            x[-1][-1][-1] = 0
+
+            self.assertEqual(
+                torch.tensor(0, dtype=torch.uint8, device=device),
+                x.all())
+
+            y = torch.ones([1, 3, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(0, keepdim=True))
+
+            y = torch.ones([2, 1, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(1, keepdim=True))
+
+            y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(2, keepdim=True))
+
     def test_allclose(self):
         x = torch.tensor([1.0, 2.0, 3.0])
         y = torch.tensor([1.01, 2.01, 3.01])
