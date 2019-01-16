@@ -962,13 +962,9 @@ struct to_ir {
       Value * output;
       if (type != NoneType::get()) {
         output = graph->insert(prim::unchecked_unwrap_optional, {v});
-      } else {
-        auto cur_type = environment_stack->getVar(name, range)->type();
-        auto node = graph->createNone(cur_type->expect<OptionalType>()->getElementType());
-        graph->insertNode(node);
-        output = node->output();
+        environment_stack->setVar(range, name, output);
       }
-      environment_stack->setVar(range, name, output);
+      // todo @eellison - revisit inserting Nones when None subtypes Optional
     }
   }
 
