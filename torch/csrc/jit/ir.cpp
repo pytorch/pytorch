@@ -1,10 +1,8 @@
 #include <torch/csrc/jit/ir.h>
 
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
