@@ -8,9 +8,7 @@
 #undef log2
 #undef expm1
 
-#ifdef __cplusplus
 #include <c10/cuda/CUDAStream.h>
-#endif
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -20,11 +18,7 @@
 
 #cmakedefine USE_MAGMA
 
-#ifdef __cplusplus
 # define THC_EXTERNC extern "C"
-#else
-# define THC_EXTERNC extern
-#endif
 
 #ifdef _WIN32
 # if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_CUDA_BUILD_MAIN_LIB)
@@ -105,9 +99,7 @@ THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const 
 THC_API void* THCudaMalloc(THCState *state, size_t size);
 THC_API void THCudaFree(THCState *state, void* ptr);
 
-#ifdef __cplusplus
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
-#endif
 
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 

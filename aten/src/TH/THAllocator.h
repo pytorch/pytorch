@@ -2,9 +2,7 @@
 
 #include <TH/THGeneral.h>
 
-#ifdef __cplusplus
 #include <ATen/Allocator.h>
-#endif
 
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
@@ -14,20 +12,13 @@
 #define TH_ALLOCATOR_MAPPED_FROMFD 32
 #define TH_ALLOCATOR_MAPPED_UNLINK 64
 
-#ifdef __cplusplus
 using THAllocator = at::Allocator;
-#else
-// struct at_THAllocator doesn't and will never exist, but we cannot name
-// the actual struct because it's a namespaced C++ thing
-typedef struct at_THAllocator THAllocator;
-#endif
 
 /* default malloc/free allocator. malloc and realloc raise an error (using
  * THError) on allocation failure.
  */
 TH_API THAllocator* getTHDefaultAllocator(void);
 
-#ifdef __cplusplus
 // Sentinel value/type to help distinguish the file descriptor constructor from
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
@@ -109,5 +100,3 @@ protected:
   void checkFlags();
   void initializeAlloc();
 };
-
-#endif // __cplusplus
