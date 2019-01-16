@@ -29,11 +29,15 @@ std::vector<at::Tensor> layer_norm(
   if (input.requires_grad()) {
     throw std::runtime_error("Autograd not yet supported for c10 ops.");
   }
-  c10::core::opschema::LayerNorm::Cache cache;
+
+  c10::intrusive_ptr<caffe2::Blob> cache = c10::make_intrusive<caffe2::Blob>();
+  cache->GetMutable<c10::core::opschema::LayerNorm::Cache>(); // initialize cache
+
   Tensor c10_input(torch::autograd::Variable(std::move(input)).data());
   Tensor c10_output(at::empty({0}));
   Tensor c10_output_mean(at::empty({0}));
   Tensor c10_output_stdev(at::empty({0}));
+
   c10::Dispatcher<c10::core::opschema::LayerNorm>::call(ArrayRef<c10::IValue>{
     IValue(c10_input),
     IValue(c10_output),
@@ -41,7 +45,7 @@ std::vector<at::Tensor> layer_norm(
     IValue(c10_output_stdev),
     IValue(axis),
     IValue(epsilon),
-    IValue(&cache)
+    IValue(cache)
   });
   return {
     torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
