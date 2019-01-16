@@ -55,7 +55,7 @@ static PyObject * THCPEvent_pynew(
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault);
 
-    new (&self->cuda_event) at::cuda::CUDAEvent(flags);
+    new (&self->cuda_event) at::cuda::CUDAEvent(device_index, flags);
   }
 
   return (PyObject *)ptr.release();

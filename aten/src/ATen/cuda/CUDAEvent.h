@@ -18,11 +18,9 @@ namespace at { namespace cuda {
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
 *
 * CUDAEvents are constructed lazily when first recorded unless it is
-* reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
-* device is acquired from the first recording stream. However, if constructed
-* from a handle or ipc_handle() is called before it is ever recorded, the device
-* should be explicitly specified. Later streams that record the event must share
-* this device.
+* reconstructed from a cudaIpcEventHandle_t. The event has a device, which can
+* be specified at construction time or will be implicitly acquired using current
+* device. Later streams that record the event must share this device.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
@@ -30,9 +28,14 @@ struct AT_CUDA_API CUDAEvent {
 
   // Constructors
   CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
-  : flags_{flags} { }
+  : CUDAEvent(getCurrentCUDAStream().device_index(), flags) { }
 
-  CUDAEvent(DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
+  explicit CUDAEvent(
+    DeviceIndex device_index, unsigned int flags = DEFAULT_FLAGS)
+  : flags_{flags}, device_index_{device_index} { }
+
+  explicit CUDAEvent(
+      DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
     #ifndef __HIP_PLATFORM_HCC__
       device_index_ = device_index;
       CUDAGuard guard(device_index_);
@@ -71,12 +74,8 @@ struct AT_CUDA_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
-  optional<at::Device> device() const {
-    if (is_created_) {
-      return at::Device(at::kCUDA, device_index_);
-    } else {
-      return {};
-    }
+  at::Device device() const {
+    return at::Device(at::kCUDA, device_index_);
   }
 
   bool isCreated() const { return is_created_; }
@@ -110,9 +109,10 @@ struct AT_CUDA_API CUDAEvent {
     CUDAGuard guard(stream.device_index());
 
     if (is_created_) {
-      AT_CHECK(device_index_ == stream.device_index());
+      AT_CHECK(device_index_ == stream.device_index(),
+        "Event device does not match recording stream's device.");
     } else {
-      createEvent(stream.device_index());
+      createEvent();
     }
 
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
@@ -151,7 +151,7 @@ struct AT_CUDA_API CUDAEvent {
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.
-        createEvent(getCurrentCUDAStream().device_index());
+        createEvent();
       }
       CUDAGuard guard(device_index_);
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
@@ -167,11 +167,10 @@ private:
   DeviceIndex device_index_ = -1;
   cudaEvent_t event_;
 
-  void createEvent(const at::DeviceIndex deviceIndex) {
-    CUDAGuard guard(deviceIndex);
+  void createEvent() {
+    CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
     is_created_ = true;
-    device_index_ = deviceIndex;
   }
 
   void moveHelper(CUDAEvent&& other) {
