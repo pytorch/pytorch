@@ -29,7 +29,11 @@ std::vector<IValue> runNode(Node* n) {
   auto op = getOperation(n);
   Stack stack;
   for (auto input : n->inputs()) {
-    stack.push_back(*(toIValue(input)));
+    if (input->node()->kind() == prim::None) {
+      stack.emplace_back(IValue());
+    } else {
+      stack.push_back(*(toIValue(input)));
+    }
   }
   op(stack);
   auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
@@ -48,7 +52,14 @@ std::vector<IValue> runNode(Node* n) {
 }
 
 void propagateNode(Node* n) {
-  auto outputs = runNode(n);
+  std::vector<IValue> outputs;
+  try {
+    outputs = runNode(n);
+  } catch (const c10::Error& e) {
+    // catch AT_ASSERT errors. This op may not be run reached,
+    // so catch the error here & leave the op in the graph
+    return;
+  }
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
@@ -119,7 +130,7 @@ void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse);
 void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-        return v->node()->kind() == prim::Constant;
+        return v->node()->kind() == prim::Constant || v->node()->kind() == prim::None;
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
