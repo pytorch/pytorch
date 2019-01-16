@@ -577,6 +577,11 @@ struct Node {
 
   void dump() const;
 
+  std::ostream& print(
+      std::ostream& out,
+      size_t level,
+      std::vector<const Node*>* groups) const;
+
   virtual ~Node() = default;
 
   // Methods for accessing attributes
@@ -674,8 +679,9 @@ struct Node {
     return getAttr<TensorsAttr>(name);
   }
 
-  void printValue(std::ostream& out, const Symbol& name) const;
  private:
+  void printAttrValue(std::ostream& out, const Symbol& name) const;
+  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {

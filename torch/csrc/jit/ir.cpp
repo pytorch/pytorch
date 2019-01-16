@@ -123,7 +123,7 @@ static std::string escapeString(std::string s) {
   return s;
 }
 
-void Node::printValue(std::ostream& out, const Symbol& name) const {
+void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
       out << f(name);
@@ -180,12 +180,10 @@ void Node::printValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void printAttributes(
-    std::ostream& out,
-    const Node* n,
-    bool ignore_subgraph = false) {
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
   out << "[";
-  auto names = n->attributeNames();
+  auto names = attributeNames();
   int i = 0;
   for (auto name : names) {
     if (ignore_subgraph && name == attr::Subgraph)
@@ -198,7 +196,7 @@ void printAttributes(
     // bug by printing it out.
     out << name.toUnqualString() << "=";
 
-    n->printValue(out, name);
+    printAttrValue(out, name);
   }
   out << "]";
 }
@@ -209,46 +207,45 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& printNode(
+std::ostream& Node::print(
     std::ostream& out,
     size_t level,
-    const Node* n,
-    std::vector<const Node*>* groups) {
-  auto outputs = n->outputs();
-  indent(out, level) << const_value_list_with_types(outputs);
+    std::vector<const Node*>* groups) const {
+  auto outs = outputs();
+  indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
-  IR_IFM_CONST(n, PythonOp)
+  IR_IFM_CONST(this, PythonOp)
   out << "^" << value->name();
   value->writeScalars(out);
   IR_ELSE()
-  if (n->hasAttribute(attr::Subgraph) && groups) {
-    out << n->kind().toQualString() << "_" << groups->size();
-    if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
-      printAttributes(out, n, /*ignore_subgraph=*/true);
+  if (hasAttribute(attr::Subgraph) && groups) {
+    out << kind().toQualString() << "_" << groups->size();
+    if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
+      printAttributes(out, /*ignore_subgraph=*/true);
     }
-    groups->push_back(n);
+    groups->push_back(this);
   } else {
-    out << n->kind().toQualString();
-    if (n->hasAttributes()) {
-      printAttributes(out, n);
+    out << kind().toQualString();
+    if (hasAttributes()) {
+      printAttributes(out);
     }
   }
   IR_END()
-  out << "(" << n->inputs() << ")";
-  std::string scopeName = n->scopeName();
-  if (scopeName.empty()) {
+  out << "(" << inputs() << ")";
+  std::string scName = scopeName();
+  if (scName.empty()) {
     out << "\n";
   } else {
     out << ", ";
-    out << "scope: " << scopeName << "\n";
+    out << "scope: " << scName << "\n";
   }
-  for (size_t i = 0; i < n->blocks().size(); ++i) {
-    auto b = n->blocks()[i];
+  for (size_t i = 0; i < blocks().size(); ++i) {
+    auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
                            << const_value_list_with_types(b->inputs(), false)
                            << ") {\n";
-    for (auto n : b->nodes()) {
-      printNode(out, level + 2, n, groups);
+    for (auto nested : b->nodes()) {
+      nested->print(out, level + 2, groups);
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
     indent(out, level + 1) << "}\n";
@@ -257,14 +254,14 @@ std::ostream& printNode(
 }
 
 std::ostream& operator<<(std::ostream& out, const Node& n) {
-  return printNode(out, 0, &n, nullptr);
+  return n.print(out, 0, nullptr);
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
   out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
-    printNode(out, 1, n, &groups);
+    n->print(out, 1, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
