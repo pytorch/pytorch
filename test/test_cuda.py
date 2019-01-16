@@ -19,7 +19,7 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests, iter_indices
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -667,7 +667,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False):
+        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -702,7 +702,26 @@ class TestCuda(TestCase):
                 self.assertEqual(new_max_c, max_c_arr[0])
                 last_c_arr[0] = new_c
 
+            if reset_max_alloc:
+                torch.cuda.reset_max_memory_allocated(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
+                max_m_arr[0] = last_m_arr[0]
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
+
+            if reset_max_cached:
+                torch.cuda.reset_max_memory_cached(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
+                max_c_arr[0] = last_c_arr[0]
+
         assert_change(0)
+        assert_change(0, reset_max_alloc=True)
+        assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
         assert_change(0)
         yield
 
@@ -722,7 +741,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1)
+            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -742,7 +761,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0)
+        assert_change(0, reset_max_alloc=True)
         yield
 
         for i in range(int(N / 2)):
@@ -757,17 +776,19 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1)
+        assert_change(-1, reset_max_cached=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1)
+        assert_change(-1, reset_max_alloc=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache
+        # test empty_cache and reset_max_memory_*
         assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_max_alloc=True)
 
     def test_memory_stats(self):
         torch.cuda.empty_cache()
@@ -937,6 +958,9 @@ class TestCuda(TestCase):
 
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
+
+    def test_isinf(self):
+        _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
@@ -1227,6 +1251,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
+    def test_clamp(self):
+        _TestTorchMixin._test_clamp(self, 'cuda')
+
     def test_cat(self):
         SIZE = 10
         for dim in range(-3, 3):
@@ -1411,6 +1438,75 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.current_stream().device, 1)
             self.assertNotEqual(torch.cuda.current_stream(), default_stream)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_streams_multi_gpu_query(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+
+        self.assertTrue(s0.query())
+        self.assertFalse(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            s1.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_streams_multi_gpu_eq(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+            s1 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s2 = torch.cuda.current_stream()
+            s3 = torch.cuda.current_stream()
+
+        self.assertTrue(s0 == s0)
+        self.assertTrue(s0 == s1)
+        self.assertTrue(s2 == s2)
+        self.assertTrue(s2 == s3)
+        self.assertFalse(s0 == s2)
+        self.assertFalse(s1 == s3)
+
+        self.assertEqual(s0.device, s1.device)
+        self.assertEqual(s0.cuda_stream, s1.cuda_stream)
+        self.assertEqual(s2.device, s3.device)
+        self.assertEqual(s2.cuda_stream, s3.cuda_stream)
+        self.assertNotEqual(s0.device, s3.device)
+
+        self.assertEqual(hash(s0), hash(s1))
+        self.assertEqual(hash(s2), hash(s3))
+        self.assertNotEqual(hash(s0), hash(s3))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensor_device(self):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
@@ -1568,6 +1664,11 @@ class TestCuda(TestCase):
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
         self.assertEqual(x.mean(dtype=torch.float32), 1)
 
+    def test_prod_large(self):
+        # tests global reduction (should_global_reduce = true) in case of non-zero identity element
+        x = torch.ones(240000, device='cuda', dtype=torch.float32)
+        self.assertEqual(x.prod(), 1)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
@@ -1595,6 +1696,10 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_gesv(self):
+        _TestTorchMixin._test_gesv(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched(self):
@@ -1817,6 +1922,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_btrisolve(self):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
+
+    @skipIfRocm
+    def test_btriunpack(self):
+        _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_dim_reduction(self):
@@ -2137,6 +2246,9 @@ class TestCuda(TestCase):
     def test_large_trilu_indices(self):
         for test_args in tri_large_tests_args:
             _compare_large_trilu_indices(self, *test_args, device='cuda')
+
+    def test_triu_tril(self):
+        _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
 
 
 def load_ignore_file():

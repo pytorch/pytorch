@@ -97,9 +97,9 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& L         = Input(2);
   // total number of fg boxes across all FPN levels: scalar
   auto& S         = Input(3);
-  auto* avg_loss  = Output(0);
 
-  avg_loss->Resize(vector<int64_t>());
+
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   if (Y.size() == 0){
     math::Set<float, CUDAContext>(
       1, static_cast<float>(0), avg_loss->mutable_data<float>(), &context_);
@@ -150,9 +150,8 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& S          = Input(3);
   // Below is gradient of net w.r.t. avg_loss ("gradOuput"), should be all 1's
   auto& d_avg_loss = Input(4);
-  auto* d_Y_hat    = Output(0); // gradient of net w.r.t. Y_hat ("gradInput")
 
-  d_Y_hat->ResizeLike(Y_hat);
+  auto* d_Y_hat = Output(0, Y_hat.sizes(), at::dtype<float>()); // gradient of net w.r.t. Y_hat ("gradInput")
   math::Set<float, CUDAContext>(
     d_Y_hat->size(), 0.0, d_Y_hat->mutable_data<float>(), &context_);
   if (Y.size() == 0){

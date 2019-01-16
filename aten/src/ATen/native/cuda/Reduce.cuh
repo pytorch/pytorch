@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/macros/Macros.h>
 #include <functional>
 #include <iosfwd>
 #include <tuple>
@@ -146,7 +147,7 @@ struct ReduceConfig {
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, typename R>
-__launch_bounds__(nt, 4)
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void reduce_kernel(R reduction) {
   reduction.run();
 }
@@ -402,7 +403,7 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-      value = arg_t {};
+      value = ident;
       if (config.should_warp_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
         index_t step = blockDim.x * blockDim.y;

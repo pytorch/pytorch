@@ -4,7 +4,7 @@
 #include "caffe2/utils/cast.h"
 
 using caffe2::CPUContext;
-using caffe2::Tensor;
+using c10::C10Tensor;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::ConstantFill);
 C10_DEFINE_OP_SCHEMA(caffe2::ops::UniformFill);
@@ -86,8 +86,8 @@ struct MaxParameter final {
 };
 template <class T>
 struct ValuesParameter final {
-  using type = Tensor;
-  static Tensor parse(const caffe2::ArgumentHelper& helper) {
+  using type = C10Tensor;
+  static C10Tensor parse(const caffe2::ArgumentHelper& helper) {
     if (!std::is_same<T, float>::value || !helper.HasArgument("dtype")) {
       return ExtractValues<T>(helper);
     } else {
@@ -115,17 +115,17 @@ struct ValuesParameter final {
 
  private:
   template <typename Type>
-  static Tensor ExtractValues(
+  static C10Tensor ExtractValues(
       const caffe2::ArgumentHelper& helper) {
     auto source_values = helper.GetRepeatedArgument<Type>("values");
-    Tensor values{caffe2::CPU};
+    caffe2::Tensor values{caffe2::CPU};
     values.Resize(source_values.size());
     Type* values_data = values.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
     }
     // body_ = &GivenTensorFillOp::FillWithType<Type>;
-    return values;
+    return C10Tensor(values);
   }
 };
 } // namespace

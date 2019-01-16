@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/script/type_parser.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/tree_views.h>
 #include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/script/type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -15,48 +15,53 @@ struct NoneValue : SugaredValue {
 };
 
 std::shared_ptr<SugaredValue> PrintValue::call(
-  const SourceRange& loc,
-  Method & m,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  size_t n_binders) {
-    auto& g = *m.graph();
-    if (!attributes.empty())
-      throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
+    const SourceRange& loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  auto& g = *m.graph();
+  if (!attributes.empty())
+    throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
 
-    //temporary hack to allow print statements to work in python 2, where
-    //print(a, b) is treated as a (a, b) tuple input.
+  // temporary hack to allow print statements to work in python 2, where
+  // print(a, b) is treated as a (a, b) tuple input.
 
-    std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-    if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
-      auto input = lowered_inputs[0];
-      for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
-        lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
-      }
-      lowered_inputs.erase(lowered_inputs.begin());
+  std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
+  if (lowered_inputs.size() == 1 &&
+      lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
+    auto input = lowered_inputs[0];
+    for (size_t j = 0; j < input->node()->inputs().size(); ++j) {
+      lowered_inputs.insert(
+          lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
     }
-    g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                     ->setSourceLocation(std::make_shared<SourceRange>(loc)));
-    return std::make_shared<NoneValue>();
+    lowered_inputs.erase(lowered_inputs.begin());
+  }
+  g.insertNode(g.create(prim::Print, lowered_inputs, 0)
+                   ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  return std::make_shared<NoneValue>();
 }
 
-static const std::unordered_map<std::string, std::string> &builtin_cast_methods() {
+static const std::unordered_map<std::string, std::string>&
+builtin_cast_methods() {
   static std::unordered_map<std::string, std::string> builtin_cast_methods = {
-    {"byte", "_cast_Byte"},
-    {"char", "_cast_Char"},
-    {"double", "_cast_Double"},
-    {"float", "_cast_Float"},
-    {"int", "_cast_Int"},
-    {"long", "_cast_Long"},
-    {"short", "_cast_Short"},
-    {"half", "_cast_Half"}
-  };
+      {"byte", "_cast_Byte"},
+      {"char", "_cast_Char"},
+      {"double", "_cast_Double"},
+      {"float", "_cast_Float"},
+      {"int", "_cast_Int"},
+      {"long", "_cast_Long"},
+      {"short", "_cast_Short"},
+      {"half", "_cast_Half"}};
   return builtin_cast_methods;
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
-std::shared_ptr<SugaredValue> SimpleValue::attr(const SourceRange& loc, Method & m, const std::string& field) {
+std::shared_ptr<SugaredValue> SimpleValue::attr(
+    const SourceRange& loc,
+    Method& m,
+    const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value->type()->isSubtypeOf(DynamicType::get())) {
     if (builtin_cast_methods().count(field)) {
@@ -67,14 +72,15 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(const SourceRange& loc, Method &
     // functions that are just direct property lookups on tensor
     // must be registered as prim::<name>(Tensor t) -> <return_type>
     static const std::unordered_set<std::string> fields = {
-      "dtype",
-      "device",
-      "shape",
-      "is_cuda",
-      "requires_grad",
+        "dtype",
+        "device",
+        "shape",
+        "is_cuda",
+        "requires_grad",
     };
     if (fields.count(field)) {
-      auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
+      auto r =
+          m.graph()->insert(Symbol::fromQualString("prim::" + field), {value});
       return std::make_shared<SimpleValue>(r);
     }
   }
@@ -89,21 +95,25 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
     Method& m,
     const c10::optional<size_t>& size_hint) {
-  static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
+  static const auto make_simple_value =
+      [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
   };
-  if(value->type()->kind() == TypeKind::TupleType) {
+  if (value->type()->kind() == TypeKind::TupleType) {
     auto outputs = createTupleUnpack(value);
     return fmap(outputs, make_simple_value);
   } else if (value->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
-      throw ErrorReport(loc) << "cannot statically infer the expected size of a list in this context";
+      throw ErrorReport(loc)
+          << "cannot statically infer the expected size of a list in this context";
     }
     auto graph = value->owningGraph();
-    Node *unpack = graph->insertNode(graph->createListUnpack(value, *size_hint));
+    Node* unpack =
+        graph->insertNode(graph->createListUnpack(value, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   }
-  throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
+  throw ErrorReport(loc) << value->type()->str()
+                         << " cannot be used as a tuple";
 }
 
 } // namespace script

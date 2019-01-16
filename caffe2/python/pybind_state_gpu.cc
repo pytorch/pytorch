@@ -29,10 +29,8 @@ REGISTER_CUDA_OPERATOR(
     PythonGradient,
     GPUFallbackOp);
 
-REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
-REGISTER_CUDA_OPERATOR(
-    PythonDLPackGradient,
-    PythonGradientOp<CUDAContext, true>);
+REGISTER_CUDA_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
 REGISTER_BLOB_FEEDER(CUDA, TensorFeeder<CUDAContext>);
 
