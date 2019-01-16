@@ -183,7 +183,7 @@ PyObject * THCPModule_initialSeed(PyObject *_unused)
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THAllocator* allocator = THCState_getCudaHostAllocator(state);
+  c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }

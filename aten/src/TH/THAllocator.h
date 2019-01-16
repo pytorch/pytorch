@@ -12,12 +12,10 @@
 #define TH_ALLOCATOR_MAPPED_FROMFD 32
 #define TH_ALLOCATOR_MAPPED_UNLINK 64
 
-using THAllocator = at::Allocator;
-
 /* default malloc/free allocator. malloc and realloc raise an error (using
  * THError) on allocation failure.
  */
-TH_API THAllocator* getTHDefaultAllocator(void);
+TH_API c10::Allocator* getTHDefaultAllocator(void);
 
 // Sentinel value/type to help distinguish the file descriptor constructor from
 // the non-file descriptor constructor
