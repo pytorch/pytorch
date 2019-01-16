@@ -49,7 +49,7 @@ class ThreadSafeSampler
  public:
   using BatchRequestType = typename OriginalSampler::BatchRequestType;
 
-  ThreadSafeSampler(OriginalSampler sampler) : sampler_(std::move(sampler)) {}
+  explicit ThreadSafeSampler(OriginalSampler sampler) : sampler_(std::move(sampler)) {}
 
   void reset(optional<size_t> new_size) override {
     std::lock_guard<std::mutex> lock(this->mutex_);
@@ -72,6 +72,8 @@ class ThreadSafeSampler
   }
 
  private:
+  // member variable for multi-threading lock.
+  // declare it to be mutable for locking in const member function.
   mutable std::mutex mutex_;
   OriginalSampler sampler_;
 };
