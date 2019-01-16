@@ -226,4 +226,10 @@ C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<float>()}});
+C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
+    .kernel(&layer_norm_c10<double>)
+    .dispatchKey(c10::DispatchKey<1>{
+        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
+                                                 LayoutId(0),
+                                                 caffe2::TypeMeta::Id<double>()}});
 } // namespace c10
