@@ -1813,6 +1813,12 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
+        # test corner case from Issue #13867
+        torch.cuda.manual_seed(33)
+        probs = torch.randn(1000000, device='cuda').clamp(min=0) * 3e-5
+        samples = probs.multinomial(1000000, replacement=True)
+        self.assertGreater(probs[samples].min().item(), 0)
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
