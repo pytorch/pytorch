@@ -214,23 +214,25 @@ std::ostream& Node::print(
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
-  IR_IFM_CONST(this, PythonOp)
-  out << "^" << value->name();
-  value->writeScalars(out);
-  IR_ELSE()
-  if (hasAttribute(attr::Subgraph) && groups) {
-    out << kind().toQualString() << "_" << groups->size();
-    if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
-      printAttributes(out, /*ignore_subgraph=*/true);
-    }
-    groups->push_back(this);
+  if (kind() == prim::PythonOp) {
+    auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
+    out << "^" << pyOp->name();
+    pyOp->writeScalars(out);
   } else {
-    out << kind().toQualString();
-    if (hasAttributes()) {
-      printAttributes(out);
+    if (hasAttribute(attr::Subgraph) && groups) {
+      out << kind().toQualString() << "_" << groups->size();
+      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
+        printAttributes(out, /*ignore_subgraph=*/true);
+      }
+      groups->push_back(this);
+    } else {
+      out << kind().toQualString();
+      if (hasAttributes()) {
+        printAttributes(out);
+      }
     }
   }
-  IR_END()
+
   out << "(" << inputs() << ")";
   std::string scName = scopeName();
   if (scName.empty()) {
