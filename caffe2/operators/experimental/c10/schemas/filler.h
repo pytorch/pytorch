@@ -1,9 +1,10 @@
 #pragma once
 
 #include <c10/core/dispatch/DeviceId.h>
-#include "caffe2/core/tensor.h"
+#include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
+#include "caffe2/core/context_base.h"
 
 namespace caffe2 {
 namespace ops {
@@ -17,31 +18,30 @@ struct GivenTensorFill final {
   static constexpr const char* name = "given_tensor_fill";
 
   using Signature = void(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
-      const Tensor& values,
-      BaseContext* context);
+      const C10Tensor& values);
 
-  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+  static constexpr c10::guts::array<const char*, 6> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
-       "values",
-       "context"}};
+       "values"}};
 
-  static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+   static constexpr size_t num_outputs() {return 1;}
+
+   static c10::DeviceTypeId dispatch_key(
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
-      const Tensor& values,
-      BaseContext* context) {
+      const C10Tensor& values) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -56,34 +56,33 @@ struct ConstantFill final {
   static constexpr const char* name = "constant_fill";
 
   using Signature = void(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       int dtype,
-      Value value,
-      BaseContext* context);
+      Value value);
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+  static constexpr size_t num_outputs() {return 1;}
+
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "dtype",
-       "value",
-       "context"}};
+       "value"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       int dtype,
-      Value value,
-      BaseContext* context) {
+      Value value) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -92,34 +91,33 @@ struct UniformFill final {
   static constexpr const char* name = "uniform_fill";
 
   using Signature = void(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       float min,
-      float max,
-      BaseContext* context);
+      float max);
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+  static constexpr size_t num_outputs() {return 1;}
+
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "min",
-       "max",
-       "context"}};
+       "max"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<const Tensor*> inputs,
-      Tensor* output,
+      at::ArrayRef<C10Tensor> inputs,
+      const C10Tensor& output,
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       float min,
-      float max,
-      BaseContext* context) {
+      float max) {
     return c10::DeviceTypeId::CPU;
   }
 };

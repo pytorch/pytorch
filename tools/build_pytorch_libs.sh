@@ -20,6 +20,11 @@ else
   }
 fi
 
+SYNC_COMMAND="cp"
+if [ -x "$(command -v rsync)" ]; then
+    SYNC_COMMAND="rsync -lptgoD"
+fi
+
 # We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
 # and use the newer of cmake and cmake3 if so.
 CMAKE_COMMAND="cmake"
@@ -126,7 +131,7 @@ fi
 
 BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
-INSTALL_DIR="$BASE_DIR/torch"
+INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 C_FLAGS=""
@@ -170,6 +175,13 @@ fi
 
 report "Building in $BUILD_TYPE mode"
 
+function path_remove {
+  # Delete path by parts so we can never accidentally remove sub paths
+  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+}
+
 # purposefully not using build() because we need Caffe2 to build the same
 # regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
@@ -191,6 +203,21 @@ function build_caffe2() {
   fi
   if [[ -n $CMAKE_PREFIX_PATH ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
+  fi
+  if [[ -n $BLAS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DBLAS=$BLAS")
+  fi
+  if [[ -n $CUDA_NVCC_EXECUTABLE ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE")
+  fi
+  if [[ -n $USE_REDIS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_REDIS=$USE_REDIS")
+  fi
+  if [[ -n $USE_GLOG ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GLOG=$USE_GLOG")
+  fi
+  if [[ -n $USE_GFLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GFLAGS=$USE_GFLAGS")
   fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
@@ -228,8 +255,6 @@ function build_caffe2() {
 		       -DUSE_QNNPACK=$USE_QNNPACK \
 		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
-		       -DUSE_GLOG=OFF \
-		       -DUSE_GFLAGS=OFF \
 		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
 		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
 		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
@@ -237,8 +262,6 @@ function build_caffe2() {
 		       -DUSE_MKLDNN=$USE_MKLDNN \
 		       -DNCCL_EXTERNAL=$USE_CUDA \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DTORCH_INSTALL_BIN_DIR="lib" \
-		       -DTORCH_INSTALL_INCLUDE_DIR="lib/include" \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
@@ -285,21 +308,21 @@ function build_caffe2() {
           fi
       done
   fi
-
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-      report "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
-      for lib in *.dylib; do
-          report "Updating install_name for $(pwd)/$lib"
-          install_name_tool -id @rpath/$lib $lib
-      done
-      popd
-  fi
 }
 
-build_caffe2
+# In the torch/lib directory, create an installation directory
+mkdir -p $INSTALL_DIR
+
+# Build
+for arg in "$@"; do
+    if [[ "$arg" == "caffe2" ]]; then
+        build_caffe2
+    else
+        pushd "$THIRD_PARTY_DIR"
+        build $arg
+        popd
+    fi
+done
 
 pushd $TORCH_LIB_DIR > /dev/null
 
@@ -310,9 +333,20 @@ report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
 
+report "Copying $INSTALL_DIR/lib to $(pwd)"
+$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
+if [ -d "$INSTALL_DIR/lib64/" ]; then
+    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
+fi
 report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
-cp ../../aten/src/THNN/generic/THNN.h .
-cp ../../aten/src/THCUNN/generic/THCUNN.h .
+$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
+$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+
+report "Copying $INSTALL_DIR/include to $(pwd)"
+$SYNC_COMMAND -r "$INSTALL_DIR/include" .
+if [ -d "$INSTALL_DIR/bin/" ]; then
+    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
+fi
 
 # Copy the test files to pytorch/caffe2 manually
 # They were built in pytorch/torch/lib/tmp_install/test
@@ -329,7 +363,7 @@ cp ../../aten/src/THCUNN/generic/THCUNN.h .
 if [[ "$INSTALL_TEST" == "ON" ]]; then
     echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
     mkdir -p "$BASE_DIR/caffe2/cpp_test/"
-    cp -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
 fi
 
 popd > /dev/null

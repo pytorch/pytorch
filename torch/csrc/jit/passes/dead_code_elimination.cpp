@@ -18,11 +18,6 @@ class DeadCodeEliminator {
   // we mark "live" nodes that are necessary for the output. Nodes that have
   // side effects are also marked.
   void run(Block* block, bool recurse) {
-    // Find the last wildcard in the block. We cannot eliminate any mutable ops
-    // that precede the last wildcard (since they may have written to the
-    // wildcard alias set)
-    setLastWildcard();
-
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 
@@ -40,24 +35,6 @@ class DeadCodeEliminator {
   }
 
  private:
-  void setLastWildcard() {
-    if (!aliasDb_) {
-      return;
-    }
-
-    const auto& wildcards = aliasDb_->getWildcardNodes();
-    if (wildcards.empty()) {
-      return;
-    }
-
-    lastWildcard_ = *wildcards.begin();
-    for (const auto wildcard : wildcards) {
-      if (wildcard->isAfter(*lastWildcard_)) {
-        lastWildcard_ = wildcard;
-      }
-    }
-  }
-
   // Special handling for block return nodes. Unlike other nodes, the block
   // return node doesn't really "use" its inputs. Consider:
   //
@@ -227,16 +204,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      // Otherwise, there are two kinds of nodes with untracked effects:
-      // 1. Nodes that write to a value that may alias the graph inputs (since
-      //    the inputs can be used outside the graph).
-      // 2. Anything that could clobber a wildcard value.
-      bool touchesWildcard = false;
-      if (lastWildcard_) {
-        touchesWildcard = aliasDb_->hasWrites(node) &&
-            (node->isBefore(*lastWildcard_) || node == *lastWildcard_);
-      }
-      return aliasDb_->writesToInputAlias(node) || touchesWildcard;
+      return aliasDb_->hasUntrackedEffects(node);
     }
   }
 
@@ -300,7 +268,6 @@ class DeadCodeEliminator {
   std::unordered_set<Node*> marked_;
   std::unordered_set<const Value*> liveValues_;
   std::unordered_set<const Value*> liveAliases_;
-  c10::optional<const Node*> lastWildcard_;
   std::function<void(const std::unordered_set<const Value*>&)> deleteCallback_ =
       [](const std::unordered_set<const Value*>&) {};
 };
