@@ -16,7 +16,6 @@
 #include <utility>
 
 namespace c10 {
-
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,

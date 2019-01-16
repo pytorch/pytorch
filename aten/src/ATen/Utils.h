@@ -74,7 +74,7 @@ static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char *
              " for argument #", pos, " '", name, "'");
   }
   if (expr.is_variable()) {  // TODO: change this to `.requires_grad()` when Variable and Tensor are merged
-    AT_ERROR("Expected Variable to not require gradient for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
   }
   return expr.unsafeGetTensorImpl();
 }
@@ -94,7 +94,7 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
                " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.is_variable()) {  // TODO: change this to `.requires_grad()` when Variable and Tensor are merged
-      AT_ERROR("Expected Variable to not require gradient for sequence element ",
+      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
                i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
