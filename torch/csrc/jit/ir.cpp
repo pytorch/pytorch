@@ -282,6 +282,13 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   return out;
 }
 
+const char* toString(AttributeKind kind) {
+  static const char* names[] = {
+      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs"};
+  JIT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
+  return names[int(kind)];
+}
+
 std::ostream& Graph::prettyPrint(std::ostream& out) {
   std::vector<at::Tensor> tensor_table;
   PythonPrint(out, *this, tensor_table);

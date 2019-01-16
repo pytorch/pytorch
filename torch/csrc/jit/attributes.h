@@ -15,12 +15,6 @@ namespace jit {
 constexpr int max_tensor_display_size = 10;
 
 enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs };
-static inline const char* toString(AttributeKind kind) {
-  static const char* names[] = {
-      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs"};
-  JIT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
-  return names[int(kind)];
-}
 
 struct AttributeValue {
   AttributeValue(Symbol name) : name(name) {}
