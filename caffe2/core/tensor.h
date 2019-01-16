@@ -83,6 +83,7 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -435,11 +436,6 @@ class CAFFE2_API Tensor final {
   }
 
   inline at::IntList sizes() const {
-    return impl_.get()->sizes();
-  }
-
-  // To be deprecated
-  inline at::IntList dims() const {
     return impl_.get()->sizes();
   }
 

@@ -107,6 +107,7 @@ def cast_tensor(tensor, t):
 
 S = 10
 M = 50
+G = 275000000
 
 
 def make_tensor(t, *sizes):
@@ -243,6 +244,10 @@ def large_2d_lapack(t):
     return t(1000, 1000).normal_()
 
 
+def giant_1d_ones(t):
+    return t(G).copy_(torch.ones(G))
+
+
 def long_type(t):
     return torch.cuda.LongTensor if 'cuda' in t.__module__ else torch.LongTensor
 
@@ -356,6 +361,10 @@ tests = [
     ('mean', small_3d, lambda t: []),
     ('mean', small_3d, lambda t: [-1], 'neg_dim'),
     ('mean', small_3d, lambda t: [1], 'dim'),
+    ('mean', giant_1d_ones, lambda t: [], '64bit_indexing',
+        # Double here because otherwise the CPU result will be
+        # wrong.
+        [torch.DoubleTensor]),
     ('mode', small_3d, lambda t: []),
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),

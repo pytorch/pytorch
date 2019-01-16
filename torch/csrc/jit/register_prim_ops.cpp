@@ -737,7 +737,18 @@ RegisterOperators reg({
               return 0;
             };
           } else {
-            AT_ERROR("Unsupported list type: ", lt->getElementType()->str());
+            return [=](Stack& stack) {
+              auto glist = pop(stack);
+              const auto& list = glist.toGenericList()->elements();
+              AT_CHECK(
+                  list.size() == num_outputs,
+                  "Expected ",
+                  num_outputs,
+                  " elements in a list but found ",
+                  list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
           }
         }),
     Operator(
@@ -782,7 +793,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
             auto val = pop(stack);
-            JIT_ASSERTM(!val.isNone(), "Unwrapping null optional");
+            AT_CHECK(!val.isNone(), "Unwrapping null optional");
             push(stack, val);
             return 0;
           };
