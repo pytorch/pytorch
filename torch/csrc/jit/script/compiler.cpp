@@ -37,7 +37,7 @@ struct Refinements {
   std::map<std::string, TypeAndRange> mappings;
 
   void setMapping(const std::string& name, TypeAndRange mapping) {
-    mappings[name] = mapping;
+    mappings[name] = std::move(mapping);
   }
 
   c10::optional<TypeAndRange> getName(const std::string& name) const {
