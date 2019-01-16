@@ -20,7 +20,7 @@ namespace at { namespace cuda {
 * CUDAEvents are constructed lazily when first recorded unless it is
 * reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
 * device is acquired from the first recording stream. However, if reconstructed
-* from a handle the device should be explicitly specified, or if ipc_handle() is
+* from a handle, the device should be explicitly specified; or if ipc_handle() is
 * called before the event is ever recorded, it will use the current device.
 * Later streams that record the event must match this device.
 */
