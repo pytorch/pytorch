@@ -150,9 +150,8 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& S          = Input(3);
   // Below is gradient of net w.r.t. avg_loss ("gradOuput"), should be all 1's
   auto& d_avg_loss = Input(4);
-  auto* d_Y_hat    = Output(0); // gradient of net w.r.t. Y_hat ("gradInput")
 
-  d_Y_hat->ResizeLike(Y_hat);
+  auto* d_Y_hat = Output(0, Y_hat.sizes(), at::dtype<float>()); // gradient of net w.r.t. Y_hat ("gradInput")
   math::Set<float, CUDAContext>(
     d_Y_hat->size(), 0.0, d_Y_hat->mutable_data<float>(), &context_);
   if (Y.size() == 0){

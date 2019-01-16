@@ -412,22 +412,6 @@ Tensor avg_pool3d_backward(const Tensor & grad_output, const Tensor & self, IntL
   return at::legacy::th::_thnn_avg_pool3d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
 }
 
-std::tuple<Tensor &,Tensor &> fractional_max_pool2d_out(Tensor & output, Tensor & indices, const Tensor & self, IntList kernel_size, IntList output_size, const Tensor & random_samples) {
-  return at::legacy::th::_thnn_fractional_max_pool2d_forward_out(output, indices, self, kernel_size, output_size, random_samples);
-}
-
-std::tuple<Tensor,Tensor> fractional_max_pool2d(const Tensor & self, IntList kernel_size, IntList output_size, const Tensor & random_samples) {
-  return at::legacy::th::_thnn_fractional_max_pool2d_forward(self, kernel_size, output_size, random_samples);
-}
-
-Tensor & fractional_max_pool2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntList kernel_size, IntList output_size, const Tensor & indices) {
-  return at::legacy::th::_thnn_fractional_max_pool2d_backward_out(grad_input, grad_output, self, kernel_size, output_size, indices);
-}
-
-Tensor fractional_max_pool2d_backward(const Tensor & grad_output, const Tensor & self, IntList kernel_size, IntList output_size, const Tensor & indices) {
-  return at::legacy::th::_thnn_fractional_max_pool2d_backward(grad_output, self, kernel_size, output_size, indices);
-}
-
 std::tuple<Tensor &,Tensor &> max_pool2d_with_indices_out(Tensor & output, Tensor & indices, const Tensor & self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode) {
   return at::legacy::th::_thnn_max_pool2d_with_indices_forward_out(output, indices, self, kernel_size, stride, padding, dilation, ceil_mode);
 }

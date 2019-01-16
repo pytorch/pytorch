@@ -466,7 +466,7 @@ add_docstr_all('bernoulli_',
     The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
     value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
 
-    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    :attr:`self` can have integral ``dtype``, but :attr:`p_tensor` must have
     floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`

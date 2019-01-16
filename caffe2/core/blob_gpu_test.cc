@@ -61,21 +61,22 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
 
-TYPED_TEST(TensorGPUTest, TensorAlias) {
+TYPED_TEST(TensorGPUTest, TensorShareData) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CUDA);
+  Tensor other_tensor(dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  Tensor other_tensor = tensor.Alias();
+  other_tensor.ShareData(tensor);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
 }
 
-TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
+TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
@@ -84,9 +85,9 @@ TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
   vector<int> alternate_dims(1);
   alternate_dims[0] = 2 * 3 * 5;
   Tensor tensor(dims, CUDA);
+  Tensor other_tensor(alternate_dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  Tensor other_tensor = tensor.Alias();
-  other_tensor.Resize(alternate_dims);
+  other_tensor.ShareData(tensor);
   EXPECT_EQ(other_tensor.dim(), 1);
   EXPECT_EQ(other_tensor.dim32(0), alternate_dims[0]);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
@@ -94,15 +95,16 @@ TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
 }
 
-TYPED_TEST(TensorGPUTest, NoLongerAliasAfterNumelChanges) {
+TYPED_TEST(TensorGPUTest, NoLongerSharesAfterResize) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CUDA);
+  Tensor other_tensor(dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  Tensor other_tensor = tensor.Alias();
+  other_tensor.ShareData(tensor);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   auto* old_pointer = other_tensor.data<TypeParam>();
 
