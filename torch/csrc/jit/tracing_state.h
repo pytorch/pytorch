@@ -47,6 +47,9 @@ struct TORCH_API TracingState
 
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
       value_map;
+  // TODO weak refcount
+  std::unordered_map<c10::intrusive_ptr<c10::ivalue::Future>, Value*>
+      future_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
   bool force_outplace = false;

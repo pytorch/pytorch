@@ -76,6 +76,24 @@ void setValueTrace(const IValue& v, Value* value) {
   }
 }
 
+void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value) {
+  getTracingState()->future_map[fut] = value;
+}
+
+Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut) {
+  auto& state = getTracingState();
+
+  auto& future_map = getTracingState()->future_map;
+  auto it = future_map.find(fut);
+  if (it == future_map.end()) {
+    std::ostringstream oss;
+    oss << "Tried to trace Future that the tracer was not aware of.";
+    throw std::runtime_error(oss.str());
+  }
+  return it->second;
+}
+
+
 void addInputs(Node* n, const char* name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
