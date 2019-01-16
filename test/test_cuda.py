@@ -1806,7 +1806,7 @@ class TestCuda(TestCase):
 
         # test corner case from Issue #13867
         torch.cuda.manual_seed(33)
-        probs = torch.randn(1_000_000, device='cuda').clamp(min=0)*3e-5
+        probs = torch.randn(1_000_000, device='cuda').clamp(min=0) * 3e-5
         samples = probs.multinomial(1_000_000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
