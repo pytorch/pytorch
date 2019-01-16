@@ -821,9 +821,9 @@ class CrossEntropyLoss(_WeightedLoss):
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
-    The `input` is expected to contain scores for each class.
+    The `input` is expected to contain raw, unnormalized scores for each class.
 
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
+     `input` has to be a Tensor of size either :math:`(minibatch, C)` or
     :math:`(minibatch, C, d_1, d_2, ..., d_K)`
     with :math:`K \geq 2` for the `K`-dimensional case (described later).
 

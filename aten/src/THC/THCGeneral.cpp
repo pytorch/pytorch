@@ -178,7 +178,7 @@ struct THCRNGState* THCState_getRngState(THCState *state)
   return state->rngState;
 }
 
-THAllocator* THCState_getCudaHostAllocator(THCState* state)
+c10::Allocator* THCState_getCudaHostAllocator(THCState* state)
 {
   return state->cudaHostAllocator;
 }
@@ -381,7 +381,7 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
 void* THCudaMalloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
-  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
+  c10::Allocator* allocator = state->cudaDeviceAllocator;
   return allocator->raw_allocate(size);
 }
 
@@ -392,7 +392,7 @@ void THCudaFree(THCState *state, void* ptr) {
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
-  THAllocator* allocator = state->cudaHostAllocator;
+  c10::Allocator* allocator = state->cudaHostAllocator;
   return allocator->allocate(size);
 }
 
@@ -405,7 +405,7 @@ void THCudaHostRecord(THCState *state, void *ptr) {
 cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
 {
   size_t cachedBytes = 0;
-  THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
+  c10::Allocator* allocator = state->cudaDeviceAllocator;
 
   *largestBlock = 0;
   /* get info from CUDA first */

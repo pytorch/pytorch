@@ -18,13 +18,17 @@ namespace caffe2 {
 namespace {
 
 const std::string kNetPos("net_pos");
+const std::string kNetId("model_id");
 constexpr size_t kBufferSize = 64;
 
 // TODO: We probably don't want use protobuf as annotation in the future.
 void AnnotateOpIndex(NetDef* net) {
   int i = 0;
+  auto net_id =
+      ArgumentHelper(*net).GetSingleArgument<std::string>("model_id", "");
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
+    AddArgument(kNetId, net_id, &op);
   }
 }
 

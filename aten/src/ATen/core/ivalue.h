@@ -4,7 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <c10/core/blob.h>
+#include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/thread_pool.h>
 

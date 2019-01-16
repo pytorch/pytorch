@@ -182,12 +182,12 @@ int loadInput(
             tensor->t.Resize(input_dims);
             tensor->t.mutable_data<uint8_t>();
           } else if (input_type_list[i] == "float") {
-            caffe2::TensorCPU* tensor = caffe2::BlobGetMutableTensor(blob, caffe2::CPU);
+            caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
             CHECK_NOTNULL(tensor);
             tensor->Resize(input_dims);
             tensor->mutable_data<float>();
           } else if (input_type_list[i] == "int") {
-            caffe2::TensorCPU* tensor = caffe2::BlobGetMutableTensor(blob, caffe2::CPU);
+            caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
             CHECK_NOTNULL(tensor);
             tensor->Resize(input_dims);
             tensor->mutable_data<int>();
@@ -358,7 +358,7 @@ void writeOutput(
 #endif
       } else {
         writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-            caffe2::BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
+            BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
             output_prefix,
             name,
             index,
@@ -369,7 +369,7 @@ void writeOutput(
       CAFFE_ENFORCE(
           index == 0,
           "Binary file only support one output.");
-      string serialized = caffe2::SerializeBlob(*workspace->GetBlob(name), name);
+      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
       string output_filename = output_prefix + name;
       caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }

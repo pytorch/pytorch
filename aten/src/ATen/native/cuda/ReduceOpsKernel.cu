@@ -33,13 +33,13 @@ void sum_kernel_impl(TensorIterator& iter) {
 }
 
 template <typename scalar_t>
-void std_kernel_impl(TensorIterator& iter, bool unbiased) {
-  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t> { unbiased }, WelfordData<scalar_t> {});
+void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t> { unbiased, take_sqrt }, WelfordData<scalar_t> {});
 }
 
 template <>
-void std_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased) {
-  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float> { unbiased }, WelfordData<float> {});
+void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float> { unbiased, take_sqrt }, WelfordData<float> {});
 }
 
 #ifdef __HIPCC__
@@ -62,9 +62,9 @@ void prod_kernel_impl(TensorIterator& iter) {
   }), 1);
 }
 
-static void std_kernel_cuda(TensorIterator& iter, bool unbiased) {
+static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&]() {
-    std_kernel_impl<scalar_t>(iter, unbiased);
+    std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
   });
 }
 
@@ -119,9 +119,17 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-REGISTER_DISPATCH(std_stub, &std_kernel_cuda);
+void and_kernel_cuda(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a && b;
+    }), true);
+}
+
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 
 }} // namespace at::native

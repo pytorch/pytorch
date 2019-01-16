@@ -206,22 +206,6 @@ struct Node : public Attributes<Node> {
   friend const_graph_node_list_iterator;
 
  private:
-  // each node but Return/Param
-  // is associated with exactly one place in the node list...
-  // of the graph_
-  // this circular is a doubly-linked list. The Return node is used as the
-  // sentinel for the beginning and end of the list such that the list never has
-  // null pointers.
-  // - next_in_graph[0] is next pointer
-  // - next_in_graph[1] is prev pointer
-  //
-  // Using an array to allow the same iterator class for forward and
-  // reverse node lists
-  //
-  // This list represents a topological sort
-
-  Node* next_in_graph[2] = {nullptr, nullptr};
-
   const NodeKind kind_;
   std::vector<Value*> inputs_;
   std::vector<Value*> outputs_;
@@ -241,6 +225,16 @@ struct Node : public Attributes<Node> {
  protected:
   TORCH_API Node(Graph* graph_, NodeKind kind_); // defined after graph
  public:
+  // each node but Return/Param
+  // is associated with exactly one place in the node list...
+  // of the graph_
+  // this circular is a doubly-linked list, the Return node is used as the
+  // sentinel for the beginning and end of the list such that the list never has
+  // null pointers next_in_graph[0] is next pointer next_in_graph[1] is prev
+  // pointer using an array to allow the same iterator class for forward and
+  // reverse node lists This list represents a topological sort
+  Node* next_in_graph[2] = {nullptr, nullptr};
+
   Node*& next() {
     return next_in_graph[kNextDirection];
   }
@@ -481,7 +475,7 @@ struct Node : public Attributes<Node> {
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
   // NOTE: Does not check that value dependencies are preserved, see
-  //   moveAfterTopologicallyValid
+  //   AliasDb::moveAfterTopologicallyValid
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -491,26 +485,11 @@ struct Node : public Attributes<Node> {
   //
   TORCH_API void moveAfter(Node* n);
 
-  // Move 'this' (already in the graph) after 'n' in the topological order.
-  //
-  // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two gurantees about the postcondition of the node list:
-  //   - `this` is directly after `n`.
-  //   - only nodes between `this` and `n` have been moved
-  //
-  // Returns `false` if it's impossible to move `this` after `n` without
-  // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb);
-
-  // Like moveAfterTopologicallyValid, but only returns if the move is
-  // possible, without actually performing it.
-  TORCH_API bool couldMoveAfterTopologically(Node* n, const AliasDb& aliasdb);
-
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
   //
   // NOTE: Does not check that value dependencies are preserved, see
-  //   moveBeforeTopologicallyValid
+  //   AliasDb::moveBeforeTopologicallyValid
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -518,21 +497,6 @@ struct Node : public Attributes<Node> {
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   TORCH_API void moveBefore(Node* n);
-
-  // Move 'this' (already in the graph) before 'n' in the topological order.
-  //
-  // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two gurantees about the postcondition of the node list:
-  //   - `this` is directly before `n`.
-  //   - only nodes between `this` and `n` have been moved
-  //
-  // Returns `false` if it's impossible to move `this` after `n` without
-  // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb);
-
-  // Like moveBeforeTopologicallyValid, but only returns if the move is
-  // possible, without actually performing it.
-  TORCH_API bool couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb);
 
   // Remove the input at 'i' from this node.
   //
@@ -617,12 +581,6 @@ struct Node : public Attributes<Node> {
 
  private:
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(
-      Node* movePoint,
-      MoveSide moveSide,
-      const AliasDb& aliasDb,
-      bool dryRun);
-  void move(Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
