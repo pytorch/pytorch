@@ -35,7 +35,7 @@ void NonVariableTypeMode::set_enabled(bool enabled) {
   NonVariableTypeMode_enabled = enabled;
 }
 
-#else // C10_MOBILE
+#else // C10_MOBILE || defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 bool NonVariableTypeMode::is_enabled() {
   throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
@@ -45,7 +45,7 @@ void NonVariableTypeMode::set_enabled(bool enabled) {
   throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
 }
 
-#endif // C10_MOBILE
+#endif
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
