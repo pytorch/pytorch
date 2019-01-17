@@ -369,6 +369,76 @@ fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
 
 
 @weak_script
+def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
+                                       output_ratio=None, return_indices=False,
+                                       _random_samples=None):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+    r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
+
+    Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+
+    The max-pooling operation is applied in :math:`kT \times kH \times kW` regions by a stochastic
+    step size determined by the target output size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        kernel_size: the size of the window to take a max over.
+                     Can be a single number :math:`k` (for a square kernel of :math:`k \times k \times k`)
+                     or a tuple :math:`(kT \times kH \times kW)`
+        output_size: the target output size of the form :math:`oT \times oH \times oW`.
+                     Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
+                      :math:`oH \times oH \times oH`
+        output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
+                      This has to be a number or tuple in the range (0, 1)
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
+
+    Examples::
+        >>> input = torch.randn(20, 16, 50, 32, 16)
+        >>> # pool of cubic window of size=3, and target output size 13x12x11
+        >>> F.fractional_max_pool3d(input, 3, output_size=(13, 12, 11))
+        >>> # pool of cubic window and target output size being half of input size
+        >>> F.fractional_max_pool3d(input, 3, output_ratio=(0.5, 0.5, 0.5))
+
+    .. _Fractional MaxPooling:
+        http://arxiv.org/abs/1412.6071
+    """
+    if output_size is None and output_ratio is None:
+        raise ValueError("fractional_max_pool3d requires specifying either "
+                         "an output_size or an output_ratio")
+    if output_size is None:
+        _output_ratio = _triple(torch.jit._unwrap_optional(output_ratio))
+        _output_size = [int(input.size(2) * _output_ratio[0]),
+                        int(input.size(3) * _output_ratio[1]),
+                        int(input.size(4) * _output_ratio[2])]
+    else:
+        _output_size = torch.jit._unwrap_optional(output_size)
+
+    if _random_samples is None:
+        _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
+    else:
+        _random_samples = torch.jit._unwrap_optional(_random_samples)
+    return torch._C._nn.fractional_max_pool3d(input, kernel_size, _output_size, _random_samples)
+
+
+@weak_script
+def _fractional_max_pool3d(input, kernel_size, output_size=None,
+                           output_ratio=None, return_indices=False,
+                           _random_samples=None):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    return fractional_max_pool3d_with_indices(input, kernel_size, output_size,
+                                              output_ratio, return_indices,
+                                              _random_samples)[0]
+
+fractional_max_pool3d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=4,
+    default=False,
+    if_true=fractional_max_pool3d_with_indices,
+    if_false=_fractional_max_pool3d)
+
+
+@weak_script
 def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
                             dilation=1, ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa

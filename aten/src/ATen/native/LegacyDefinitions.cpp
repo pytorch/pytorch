@@ -705,10 +705,6 @@ std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
 }
 
-Tensor all(const Tensor & self) {
-  return at::legacy::th::_th_all(self);
-}
-
 Tensor any(const Tensor & self) {
   return at::legacy::th::_th_any(self);
 }

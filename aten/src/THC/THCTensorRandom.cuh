@@ -121,18 +121,19 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
 }
 
 template <typename T>
-__device__ int binarySearchForMultinomial(T* dist,
+__device__ int binarySearchForMultinomial(T* cumdist,
+                                          T* dist,
                                           int size,
                                           T val) {
   int start = 0;
   int end = size;
-  // dist[size - 1] = 0 => all zero prob dist
-  assert(THCNumerics<T>::gt(dist[size - 1], 0));
+  // cumdist[size - 1] = 0 => all zero prob dist
+  assert(THCNumerics<T>::gt(cumdist[size - 1], 0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
 
-    T midVal = dist[mid];
+    T midVal = cumdist[mid];
     if (THCNumerics<T>::lt(midVal, val)) {
       start = mid + 1;
     } else {
@@ -149,8 +150,8 @@ __device__ int binarySearchForMultinomial(T* dist,
     start = size - 1;
   }
 
-  T curVal = dist[start];
-  while(start >= 1 && THCNumerics<T>::eq(dist[start - 1], curVal)) start--;
+  T curVal = cumdist[start];
+  while(start >= 1 && THCNumerics<T>::eq(dist[start], 0)) start--;
 
   return start;
 }
@@ -299,7 +300,8 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
                                  int64_t* dest,
                                  int64_t distributions,
                                  int categories,
-                                 T* normDistPrefixSum) {
+                                 T* normDistPrefixSum,
+                                 T* normDist) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on. However, no matter
@@ -322,6 +324,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
         // Find the bucket that a uniform sample lies in
         int choice = binarySearchForMultinomial<T>(
           normDistPrefixSum + curDist * categories,
+          normDist + curDist * categories,
           categories,
           r);
 
@@ -363,6 +366,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
       // Find the bucket that a uniform sample lies in
       int choice = binarySearchForMultinomial<T>(
         normDistPrefixSum + curDist * categories,
+        origDist + curDist * categories,
         categories,
         r);
 

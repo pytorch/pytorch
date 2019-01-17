@@ -321,8 +321,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  at::IntList values_dims = values.dims();
-  at::IntList origin_dims = original_input.dims();
+  at::IntList values_dims = values.sizes();
+  at::IntList origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   T* output_data = output->template mutable_data<T>();
