@@ -233,10 +233,10 @@ def test_distributed(executable, test_module, test_directory, options):
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
-                    devnull = open(os.devnull, 'w')
-                    noprefix_opt = '--noprefix' if subprocess.call(
-                        'mpiexec -n 1 --noprefix bash -c ""', shell=True,
-                        stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
+                    with open(os.devnull, 'w') as devnull:
+                        noprefix_opt = '--noprefix' if subprocess.call(
+                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
                     mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 

@@ -1,6 +1,6 @@
 #include "observers/perf_observer.h"
 #include "observers/observer_config.h"
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
 #include "caffe2/core/flags.h"
 #include "observers/net_observer_reporter_print.h"
 #endif
@@ -10,7 +10,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
 C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
@@ -45,7 +45,7 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
     return caffe2::make_unique<PerfNetObserver>(subject);
   });
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
   // for aibench usage
   caffe2::ObserverConfig::setReporter(
       caffe2::make_unique<caffe2::NetObserverReporterPrint>());

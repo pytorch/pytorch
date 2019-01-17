@@ -7,12 +7,10 @@ from hypothesis import assume, given
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
+from caffe2.python import core, utils, workspace
 import caffe2.python.hypothesis_test_util as hu
 import unittest
 import os
-
-import unittest
 
 
 def _cudnn_supports(
@@ -108,7 +106,7 @@ def _conv_2d_shuffle_offsets(
     w0 = [[w0] * input_channels] * output_channels
     return (
         np.array([e] * batch_size).astype(np.float32),
-        np.array(w0).astype(np.float32).transpose((0, 2, 3, 1))
+        utils.NCHW2NHWC(np.array(w0).astype(np.float32))
     )
 
 
@@ -163,8 +161,8 @@ class TestConvolution(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, o, w, b] if use_bias else [X, o, w]
 
@@ -247,8 +245,8 @@ class TestConvolution(hu.HypothesisTestCase):
         w = np.ones((output_channels, kernel, kernel, input_channels), np.float32) - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, o, w, b] if use_bias else [X, o, w]
 
@@ -334,9 +332,9 @@ class TestConvolution(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
 
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
-            w0 = w0.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
+            w0 = utils.NHWC2NCHW(w0)
 
         inputs = [X, o, w, b] if use_bias else [X, o, w]
 
@@ -425,8 +423,8 @@ class TestConvolution(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, o, w, b] if use_bias else [X, o, w]
 
@@ -495,8 +493,8 @@ class TestConvolution(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, o, w, b] if use_bias else [X, o, w]
         # Error handling path.

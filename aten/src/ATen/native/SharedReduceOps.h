@@ -29,6 +29,7 @@ struct WelfordData {
 template <typename scalar_t, typename acc_scalar_t>
 struct WelfordOps {
   bool unbiased;
+  bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t>;
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data) const {
@@ -59,7 +60,10 @@ struct WelfordOps {
   }
   inline C10_DEVICE scalar_t project(acc_t acc) const {
     int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
-    return (divisor > 0) ? (scalar_t)device_sqrt(acc.m2 / divisor) : (scalar_t)NAN;
+    auto ret = (divisor > 0) ?
+      (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
+      : NAN;
+    return (scalar_t) ret;
   }
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
@@ -70,7 +74,8 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(bool unbiased) : unbiased(unbiased) {
+  WelfordOps(bool unbiased, bool take_sqrt)
+    : unbiased(unbiased), take_sqrt(take_sqrt) {
   }
 };
 

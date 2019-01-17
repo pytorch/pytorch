@@ -1,5 +1,3 @@
-#ifdef USE_CUDA
-
 #include <torch/csrc/autograd/functions/comm.h>
 
 #include <torch/csrc/autograd/function.h>
@@ -31,7 +29,6 @@ Scatter::Scatter(
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
 variable_list Scatter::apply(variable_list&& inputs) {
-#ifdef USE_CUDA
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
@@ -63,16 +60,12 @@ variable_list Scatter::apply(variable_list&& inputs) {
   set_history(variables, grad_fn);
 
   return variables;
-#else
-  AT_ERROR("Scatter is only supported in CUDA environments");
-#endif
 }
 
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
 variable_list Gather::apply(variable_list&& inputs) {
-#ifdef USE_CUDA
   bool all_are_zero_dim = true;
   for (const auto& input : inputs) {
     AT_CHECK(
@@ -125,12 +118,7 @@ variable_list Gather::apply(variable_list&& inputs) {
   auto variable = torch::cuda::gather(tensors, dim_, destination_index);
   set_history(variable, grad_fn);
   return {variable};
-#else
-  AT_ERROR("Gather is only supported in CUDA environments");
-#endif
 }
 
 } // namespace autograd
 } // namespace torch
-
-#endif

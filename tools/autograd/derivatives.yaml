@@ -138,13 +138,19 @@
 - name: alias(Tensor self)
   self: grad
 
-# The two items below are necessary because TensorIterator doesn't work on
-# Variables (codegen does not unwrap the input Tensor for any(*) without this).
+# The four items below are necessary because TensorIterator doesn't work on
+# Variables (codegen does not unwrap the input Tensor for all() and any() ).
 - name: any(Tensor self)
   self: not_implemented("any")
 
 - name: any(Tensor self, int64_t dim, bool keepdim)
   self: not_implemented("any")
+
+- name: all(Tensor self)
+  self: not_implemented("all")
+
+- name: all(Tensor self, int64_t dim, bool keepdim)
+  self: not_implemented("all")
 
 - name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
@@ -852,7 +858,7 @@
 - name: var(Tensor self, bool unbiased)
   self: var_backward(grad, self, unbiased)
 
-- name: var(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: var(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad, self, dim, unbiased, keepdim)
 
 - name: view(Tensor self, IntList size)
@@ -1068,6 +1074,9 @@
 - name: fractional_max_pool2d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
 
+- name: fractional_max_pool3d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
+  self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, indices)
+
 - name: max_pool2d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
 
@@ -1161,6 +1170,10 @@
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
+  self: zeros_like(self)
+
+- name: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
+  grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
@@ -1381,6 +1394,9 @@
 # mkldnn
 - name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
   self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
+
+- name: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, false, false, false, grad_input_mask)
 
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)

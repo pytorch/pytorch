@@ -1,13 +1,12 @@
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/attributes.h>
+#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
-
 
 namespace torch {
 namespace jit {
@@ -19,7 +18,7 @@ static bool isPrint(char s) {
 
 void printQuotedString(std::ostream& stmt, const std::string& str) {
   stmt << "\"";
-  for(auto s : str) {
+  for (auto s : str) {
     switch (s) {
       case '\\':
         stmt << "\\\\";
@@ -58,8 +57,10 @@ void printQuotedString(std::ostream& stmt, const std::string& str) {
           // C++ io has stateful formatting settings. Messing with
           // them is probably worse than doing this manually.
           char buf[4] = "000";
-          buf[2] += s % 8; s /= 8;
-          buf[1] += s % 8; s /= 8;
+          buf[2] += s % 8;
+          s /= 8;
+          buf[1] += s % 8;
+          s /= 8;
           buf[0] += s;
           stmt << "\\" << buf;
         }
@@ -70,10 +71,10 @@ void printQuotedString(std::ostream& stmt, const std::string& str) {
 }
 
 static bool isValidIdentifierChar(char c, size_t pos) {
-  return islower(c) || isupper(c) || c == '_' ||  (pos > 0 && isdigit(c));
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
 }
 
-static bool isValidIdentifier(const std::string & name) {
+static bool isValidIdentifier(const std::string& name) {
   if (name.size() == 0)
     return false;
   for (size_t i = 0; i < name.size(); ++i) {
@@ -90,21 +91,24 @@ struct QualifiedName;
 using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
 struct QualifiedName : c10::intrusive_ptr_target {
   QualifiedName(QualifiedNamePtr prefix, std::string name)
-  : prefix_(std::move(prefix)), name_(std::move(name)) {}
+      : prefix_(std::move(prefix)), name_(std::move(name)) {}
   QualifiedNamePtr prefix_;
   std::string name_;
   static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
-    return c10::make_intrusive<QualifiedName>(std::move(prefix), std::move(name));
+    return c10::make_intrusive<QualifiedName>(
+        std::move(prefix), std::move(name));
   }
   static QualifiedNamePtr create(std::string name) {
-    return c10::make_intrusive<QualifiedName>(QualifiedNamePtr(), std::move(name));
+    return c10::make_intrusive<QualifiedName>(
+        QualifiedNamePtr(), std::move(name));
   }
   std::string str() const {
     std::stringstream ss;
     emit(ss);
     return ss.str();
   }
-private:
+
+ private:
   void emit(std::ostream& out) const {
     if (isValidIdentifier(name_)) {
       if (prefix_) {
@@ -127,7 +131,6 @@ void createTensorToParameterNameMap(
     const script::Module& module,
     const QualifiedNamePtr& prefix,
     std::unordered_map<at::Tensor*, QualifiedNamePtr>& result) {
-
   for (const auto& elem : module.get_parameters()) {
     const script::NamedParameter& param = elem.value();
     result[param.slot()] = QualifiedName::create(prefix, param.name);
@@ -138,9 +141,9 @@ void createTensorToParameterNameMap(
   }
 }
 
-  // some names are valid identifiers but off limits because
-  // they are keywords or namespaces used in the output
-  const static std::unordered_set<std::string> reserved_names = {
+// some names are valid identifiers but off limits because
+// they are keywords or namespaces used in the output
+const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
     "_", // avoid the confusing unnamed _
     "aten",
@@ -188,7 +191,7 @@ void createTensorToParameterNameMap(
     "while",
     "with",
     "yield",
-  };
+};
 
 struct PythonPrintPass {
   std::ostream& out;
@@ -221,21 +224,23 @@ struct PythonPrintPass {
   // we only do this if
   // (1) it is a constant, or
   // (2) the temporary is unnamed, is single output, is used once,
-  //     and would appear in the same order when the expression tree is reparsed.
+  //     and would appear in the same order when the expression tree is
+  //     reparsed.
   // The last case can be checked
   // becuase when we emit a expresion tree in the parser,
-  // we do a left-to-right postorder traversal of the expression tree (emit children, then emit op).
-  // The reverse of this is a right-to-left preorder traversal of the tree.
-  // By doing a right-to-left preorder traversal of the inputs of a node,
-  // while also scanning the list of emitted nodes backward, we can see if
-  // they line up with what would happen when parsed the node as an expression. While they line
-  // up we collapse them into an inline expression.
+  // we do a left-to-right postorder traversal of the expression tree (emit
+  // children, then emit op). The reverse of this is a right-to-left preorder
+  // traversal of the tree. By doing a right-to-left preorder traversal of the
+  // inputs of a node, while also scanning the list of emitted nodes backward,
+  // we can see if they line up with what would happen when parsed the node as
+  // an expression. While they line up we collapse them into an inline
+  // expression.
 
-  // The inductive step is that the right-most input should be produced by the node
-  // immediatly before the current node if it is in tree order.
+  // The inductive step is that the right-most input should be produced by the
+  // node immediatly before the current node if it is in tree order.
 
   bool isConstantLike(Node* n) {
-    switch(n->kind()) {
+    switch (n->kind()) {
       case prim::Constant:
       case prim::Undefined:
       case prim::None:
@@ -247,7 +252,8 @@ struct PythonPrintPass {
 
   bool canInline(Value* v) {
     Node* n = v->node();
-    // there must be only 1 values, otherwise we need an assignment to handle the multiple outout values
+    // there must be only 1 values, otherwise we need an assignment to handle
+    // the multiple outout values
     if (n->outputs().size() != 1)
       return false;
     // if it is used more than once, then we need a variable
@@ -263,19 +269,23 @@ struct PythonPrintPass {
     if (n->blocks().size() != 0)
       return false;
     // if it is a loop-carried input, we need a variable
-    // otherwise the condition or trip count may be emitted in the wrong order w.r.t. to it
+    // otherwise the condition or trip count may be emitted in the wrong order
+    // w.r.t. to it
     if (use.user->kind() == prim::Loop && use.offset >= 2)
       return false;
     return true;
   }
 
-  // block_point is the current node in the reverse linear scan of the emitted nodes
-  // v is the current value in the tree traversal that may match with block_point's output.
+  // block_point is the current node in the reverse linear scan of the emitted
+  // nodes v is the current value in the tree traversal that may match with
+  // block_point's output.
   Node* scanValue(Node* block_point, Value* v) {
     Node* n = v->node();
     JIT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
 
-    if (n == block_point && canInline(v)) { // the node must be at the expected point of the typical tree traversal
+    if (n == block_point &&
+        canInline(v)) { // the node must be at the expected point of the typical
+                        // tree traversal
       // recursively see if we can inline the inputs to this input
       block_point = scanNode(block_point);
       output_inline_.insert(n);
@@ -289,21 +299,21 @@ struct PythonPrintPass {
   Node* previousNonConstant(Node* n) {
     do {
       n = n->prev();
-    } while(isConstantLike(n));
+    } while (isConstantLike(n));
     return n;
   }
 
   Node* scanNode(Node* n) {
     // don't bother to scan nodes we have already determined to be inline
-    if(output_inline_.count(n)) {
+    if (output_inline_.count(n)) {
       return n;
     }
-    for(auto b : n->blocks()) {
+    for (auto b : n->blocks()) {
       scanBlock(b);
     }
     Node* block_point = previousNonConstant(n);
-    for(auto it = n->inputs().rbegin(),
-             end = n->inputs().rend(); it != end; ++it) {
+    for (auto it = n->inputs().rbegin(), end = n->inputs().rend(); it != end;
+         ++it) {
       block_point = scanValue(block_point, *it);
     }
     return block_point;
@@ -311,7 +321,7 @@ struct PythonPrintPass {
 
   void scanBlock(Block* b) {
     scanNode(b->return_node());
-    for(auto node : b->nodes().reverse()) {
+    for (auto node : b->nodes().reverse()) {
       scanNode(node);
     }
   }
@@ -321,7 +331,7 @@ struct PythonPrintPass {
     // ConstantPool, which is also N^2 in the size of the constants,
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
-    for(size_t i = 0; i < tensor_table_.size(); ++i) {
+    for (size_t i = 0; i < tensor_table_.size(); ++i) {
       if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
         return i;
       }
@@ -333,18 +343,19 @@ struct PythonPrintPass {
 
   std::unordered_set<Node*> seen_constants;
   void buildConstantList(Node* n, std::vector<Node*>& constants) {
-    for(auto input : n->inputs()) {
-      if (isConstantLike(input->node()) && seen_constants.count(input->node()) == 0) {
+    for (auto input : n->inputs()) {
+      if (isConstantLike(input->node()) &&
+          seen_constants.count(input->node()) == 0) {
         constants.push_back(input->node());
         seen_constants.insert(input->node());
       }
     }
-    for(auto b : n->blocks()) {
+    for (auto b : n->blocks()) {
       buildConstantList(b, constants);
     }
   }
   void buildConstantList(Block* b, std::vector<Node*>& constants) {
-    for(auto n : b->nodes())
+    for (auto n : b->nodes())
       buildConstantList(n, constants);
     buildConstantList(b->return_node(), constants);
   }
@@ -352,9 +363,11 @@ struct PythonPrintPass {
   // anything we have used.
   size_t next_id = 0;
 
-  std::string genNameImpl(const std::string& candidate, std::unordered_set<std::string>& used) {
+  std::string genNameImpl(
+      const std::string& candidate,
+      std::unordered_set<std::string>& used) {
     std::string name = candidate;
-    while(used.count(name) || reserved_names.count(name)) {
+    while (used.count(name) || reserved_names.count(name)) {
       name = candidate + std::to_string(next_id++);
     }
     used.insert(name);
@@ -377,7 +390,7 @@ struct PythonPrintPass {
     std::stringstream ss;
     if (candidate.size() == 0 || isdigit(candidate[0]))
       ss << "_";
-    for(char c : candidate) {
+    for (char c : candidate) {
       if (isupper(c) || islower(c) || isdigit(c) || c == '_')
         ss << c;
       else
@@ -405,7 +418,7 @@ struct PythonPrintPass {
     assignValue(v, useOf(w));
   }
   void assignValuesToTheirUniqueNames(at::ArrayRef<Value*> values) {
-    for(auto v : values) {
+    for (auto v : values) {
       assignValue(v, genUniqueNameFor(v));
     }
   }
@@ -421,16 +434,12 @@ struct PythonPrintPass {
 
   ResourceGuard WithIndented() {
     level++;
-    return ResourceGuard([this]{
-      level--;
-    });
+    return ResourceGuard([this] { level--; });
   }
 
   template <class T0, class T1, class F>
-  void zipWith(
-      at::ArrayRef<T0> list_a,
-      at::ArrayRef<T1> list_b,
-      F action) const {
+  void zipWith(at::ArrayRef<T0> list_a, at::ArrayRef<T1> list_b, F action)
+      const {
     auto it_a = list_a.begin();
     auto it_b = list_b.begin();
 
@@ -443,7 +452,11 @@ struct PythonPrintPass {
     }
   }
 
-  void printValueList(std::ostream& stmt, at::ArrayRef<Value*> list, const char* begin = "", const char* end = "") {
+  void printValueList(
+      std::ostream& stmt,
+      at::ArrayRef<Value*> list,
+      const char* begin = "",
+      const char* end = "") {
     stmt << begin;
     auto delimiter = "";
     for (auto* value : list) {
@@ -454,10 +467,8 @@ struct PythonPrintPass {
     stmt << end;
   }
 
-  void printAssignment(
-      at::ArrayRef<Value*> lhs,
-      at::ArrayRef<Value*> rhs) {
-    if(lhs.size() > 0) {
+  void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
+    if (lhs.size() > 0) {
       indent();
       printValueList(out, lhs);
       out << " = ";
@@ -483,40 +494,42 @@ struct PythonPrintPass {
     }
   }
 
-  // our way of encoding loops makes them difficult to turn back into python syntax.
-  // we have to check properties of the condition and trip count inputs to
-  // figure out which one it initially was
+  // our way of encoding loops makes them difficult to turn back into python
+  // syntax. we have to check properties of the condition and trip count inputs
+  // to figure out which one it initially was
   static bool shouldEmitAsForLoop(LoopView stmt) {
-      auto trip_count = toIValue(stmt.maxTripCount());
-      auto cond_input = toIValue(stmt.inputCond());
-      auto cond_next = toIValue(stmt.nextCond());
+    auto trip_count = toIValue(stmt.maxTripCount());
+    auto cond_input = toIValue(stmt.inputCond());
+    auto cond_next = toIValue(stmt.nextCond());
 
-      bool condition_is_always_true = cond_input && cond_input->toBool() && cond_next &&
-        cond_next->toBool();
-      bool trip_count_is_specified = !trip_count || // trip is not a constant
-          trip_count->toInt() != std::numeric_limits<int64_t>::max() || // it is a constant but not the default one
-          stmt.currentTripCount()->uses().size() > 0; // it is actually being used in the body.
+    bool condition_is_always_true =
+        cond_input && cond_input->toBool() && cond_next && cond_next->toBool();
+    bool trip_count_is_specified = !trip_count || // trip is not a constant
+        trip_count->toInt() !=
+            std::numeric_limits<int64_t>::max() || // it is a constant but not
+                                                   // the default one
+        stmt.currentTripCount()->uses().size() >
+            0; // it is actually being used in the body.
 
-      if (condition_is_always_true) {
-        // if the trip count was not specified this was a user-written while True:
-        return trip_count_is_specified;
-      } else {
-        // this must be a while loop, but check that there isn't _also_ a trip count
-        if (trip_count_is_specified) {
-          throw script::ErrorReport(stmt.node()->getSourceLocation())
-              << "loop cannot be printed as python because it has gone through an optimization "
-              << "that combined while and for loops. File a bug.";
-        }
-        return false;
+    if (condition_is_always_true) {
+      // if the trip count was not specified this was a user-written while True:
+      return trip_count_is_specified;
+    } else {
+      // this must be a while loop, but check that there isn't _also_ a trip
+      // count
+      if (trip_count_is_specified) {
+        throw script::ErrorReport(stmt.node()->getSourceLocation())
+            << "loop cannot be printed as python because it has gone through an optimization "
+            << "that combined while and for loops. File a bug.";
       }
+      return false;
+    }
   }
 
   void printLoop(LoopView stmt) {
-
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
     // and assign node->outputs() to the new values at the end of each trip.
-
 
     bool emit_as_for_loop = shouldEmitAsForLoop(stmt);
 
@@ -553,9 +566,11 @@ struct PythonPrintPass {
       // the condition is always True
       size_t offset = emit_as_for_loop ? 1 : 0;
       auto body_block = stmt.bodyBlock();
-      ArrayRef<Value*> loop_carried_block_inputs = body_block->inputs().slice(offset);
+      ArrayRef<Value*> loop_carried_block_inputs =
+          body_block->inputs().slice(offset);
       printBlock(body_block, loop_carried_block_inputs.size() > 0);
-      printAssignment(loop_carried_block_inputs, body_block->outputs().slice(offset));
+      printAssignment(
+          loop_carried_block_inputs, body_block->outputs().slice(offset));
     }
   }
 
@@ -602,7 +617,8 @@ struct PythonPrintPass {
         // this node is safe to inline, so assign the output value
         // to that expression directly
         // guard against really long lines
-        if (output_inline_.count(node) > 0 && ss.str().size() + level * 2 < 40) {
+        if (output_inline_.count(node) > 0 &&
+            ss.str().size() + level * 2 < 40) {
           assignValue(node->output(), ss.str());
           return;
         }
@@ -622,7 +638,7 @@ struct PythonPrintPass {
       const char* the_type,
       size_t list_size,
       const IValue& the_list) {
-    if(list_size == 0) {
+    if (list_size == 0) {
       stmt << "annotate(List[" << the_type << "], [])";
     } else {
       stmt << the_list;
@@ -630,30 +646,32 @@ struct PythonPrintPass {
   }
 
   void printConstant(std::ostream& stmt, const IValue& v) {
-    if(v.isTensor()) {
+    if (v.isTensor()) {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if(v.isString()) {
+    } else if (v.isString()) {
       printQuotedString(stmt, v.toStringRef());
-    } else if(v.isDevice()) {
+    } else if (v.isDevice()) {
       std::stringstream ss;
       ss << v.toDevice();
       stmt << "torch.device(";
       printQuotedString(stmt, ss.str());
       stmt << ")";
-    } else if(v.isTensorList()) {
+    } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for(const auto& t : v.toTensorListRef()) {
+      for (const auto& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
-    } else if(v.isBoolList()) {
-      printMaybeAnnotatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
-    } else if(v.isIntList()) {
+    } else if (v.isBoolList()) {
+      printMaybeAnnotatedConstantList(
+          stmt, "bool", v.toBoolListRef().size(), v);
+    } else if (v.isIntList()) {
       printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
-    } else if(v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
+    } else if (v.isDoubleList()) {
+      printMaybeAnnotatedConstantList(
+          stmt, "float", v.toDoubleListRef().size(), v);
     } else {
       stmt << v;
     }
@@ -661,7 +679,7 @@ struct PythonPrintPass {
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(std::ostream& stmt, Node* node) {
-    switch(node->kind()) {
+    switch (node->kind()) {
       case PythonOp::Kind: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
@@ -692,10 +710,10 @@ struct PythonPrintPass {
 
         // XXX - when None has an Optional[T] type, we must ensure that type
         // can be recovered on parsing. It cannot be recovered if it will be
-        // matched to schema with free variables. If it is used only in places where
-        // there is schema and the scheme has no free variables, then we can
-        // recover it without annotation. Otherwise, we annotate None with the right
-        // optional type
+        // matched to schema with free variables. If it is used only in places
+        // where there is schema and the scheme has no free variables, then we
+        // can recover it without annotation. Otherwise, we annotate None with
+        // the right optional type
         const auto& uses = node->output()->uses();
         bool all_usable_schema =
             std::all_of(uses.begin(), uses.end(), [](const Use& u) {
@@ -704,9 +722,9 @@ struct PythonPrintPass {
                   return false;
                 }
                 return !schema->arguments()
-                    .at(u.offset)
-                    .type()
-                    ->hasFreeVariables();
+                            .at(u.offset)
+                            .type()
+                            ->hasFreeVariables();
               }
               return false;
             });
@@ -714,7 +732,8 @@ struct PythonPrintPass {
         if (all_usable_schema) {
           stmt << "None";
         } else {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", None)";
         }
       } break;
       case prim::ImplicitTensorToNum: {
@@ -731,14 +750,15 @@ struct PythonPrintPass {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
       case prim::Print: {
-        printValueList(stmt, node->inputs(), "print(",")");
+        printValueList(stmt, node->inputs(), "print(", ")");
       } break;
       case prim::TupleConstruct: {
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index) << "]";
+        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
+             << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
@@ -750,7 +770,8 @@ struct PythonPrintPass {
         // to infer the type on import
         if (node->inputs().size() == 0 &&
             !node->output()->type()->isSubtypeOf(DynamicType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", [])";
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", [])";
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
@@ -759,25 +780,24 @@ struct PythonPrintPass {
         // the subgraph gets emitted as another function
         auto name = genMethodName("__forked_function");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
-        worklist.emplace_back([graph, name, this] {
-          printFunctionDefinition(*graph, name);
-        });
+        worklist.emplace_back(
+            [graph, name, this] { printFunctionDefinition(*graph, name); });
         // and we put a call to fork which invokes that function.
         stmt << "fork(self." << name;
-        for(Value* v : node->inputs()) {
+        for (Value* v : node->inputs()) {
           stmt << ", " << useOf(v);
         }
         stmt << ")";
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation()) << "closures are not exportable";
+          throw script::ErrorReport(node->getSourceLocation())
+              << "closures are not exportable";
         }
         auto name = genMethodName("__lambda");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
-        worklist.emplace_back([graph, name, this] {
-          printFunctionDefinition(*graph, name);
-        });
+        worklist.emplace_back(
+            [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
       default: {
@@ -788,25 +808,26 @@ struct PythonPrintPass {
           // doing it here ensures we do not have fix up archives later
           stmt << "torch." << kind.toUnqualString() << "(";
         } else {
-          stmt << "ops." << kind.ns().toUnqualString() << "." << kind.toUnqualString() << "(";
+          stmt << "ops." << kind.ns().toUnqualString() << "."
+               << kind.toUnqualString() << "(";
         }
         const FunctionSchema& schema = node->schema();
         for (size_t i = 0; i < node->inputs().size(); ++i) {
-            if (i > 0) {
-              stmt << ", ";
+          if (i > 0) {
+            stmt << ", ";
+          }
+          auto v = useOf(node->inputs().at(i));
+          // print the kwarg name if it is a kwarg only argument.
+          if (i < schema.arguments().size()) {
+            auto arg = schema.arguments().at(i);
+            if (arg.kwarg_only()) {
+              stmt << arg.name() << "=";
             }
-            auto v = useOf(node->inputs().at(i));
-            // print the kwarg name if it is a kwarg only argument.
-            if (i < schema.arguments().size()) {
-              auto arg = schema.arguments().at(i);
-              if (arg.kwarg_only()) {
-                stmt << arg.name() << "=";
-              }
-            } else {
-              // vararg functions like format can have extra arguments
-              JIT_ASSERT(schema.is_vararg());
-            }
-            stmt << v;
+          } else {
+            // vararg functions like format can have extra arguments
+            JIT_ASSERT(schema.is_vararg());
+          }
+          stmt << v;
         }
         stmt << ")";
       } break;
@@ -814,9 +835,9 @@ struct PythonPrintPass {
   }
 
   std::ostream& printBlock(Block* root, bool block_has_other_statements) {
-    // pythons weird 'pass' syntax creates a bunch of places where we have to check
-    // if this block would be empty. But not everything in a block is a node.
-    // Sometimes if, loop, and return statements will follow this block
+    // pythons weird 'pass' syntax creates a bunch of places where we have to
+    // check if this block would be empty. But not everything in a block is a
+    // node. Sometimes if, loop, and return statements will follow this block
     // and block_has_other_statements == true.
     if (!block_has_other_statements &&
         root->nodes().begin() == root->nodes().end()) {
@@ -829,22 +850,26 @@ struct PythonPrintPass {
     return out;
   }
 
-  void printDefaultValue(const TypePtr& typ, std::ostream& stmt, const IValue& value) {
-    // xxx - many weak script modules store default values for broadcasting lists
-    // that are not actually the same type as the argument. We can only serialize
-    // default values that will implicitly convert to their declared return type
-    // since we do not need to serialize these built-in modules with their defaults,
-    // we just drop them for now.
+  void printDefaultValue(
+      const TypePtr& typ,
+      std::ostream& stmt,
+      const IValue& value) {
+    // xxx - many weak script modules store default values for broadcasting
+    // lists that are not actually the same type as the argument. We can only
+    // serialize default values that will implicitly convert to their declared
+    // return type since we do not need to serialize these built-in modules with
+    // their defaults, we just drop them for now.
     if (typ->kind() == ListType::Kind &&
         (value.isInt() || value.isDouble() || value.isBool())) {
       return;
     }
     stmt << "=";
     if (value.isTensor() && !value.toTensor().defined()) {
-      // XXX - because undefined tensors are not stored as None, we need special handling.
-      // otherwise they get printed as CONSTANTS.c0 and then cannot be recreated because
-      // constant nodes cannot have an undefined value in them.
-      // The right solution is to make None of type Tensor actually be an IValue None.
+      // XXX - because undefined tensors are not stored as None, we need special
+      // handling. otherwise they get printed as CONSTANTS.c0 and then cannot be
+      // recreated because constant nodes cannot have an undefined value in
+      // them. The right solution is to make None of type Tensor actually be an
+      // IValue None.
       stmt << "None";
       return;
     }
@@ -855,7 +880,6 @@ struct PythonPrintPass {
       const std::string& name,
       const std::vector<c10::optional<IValue>>& defaults = {},
       const std::vector<std::string>& param_names = {}) {
-
     used_names_.clear(); // each graph can reuse local names
 
     // we always print constants at the top of the function, in the order
@@ -869,9 +893,10 @@ struct PythonPrintPass {
     // last param_names.size() arguments to the graph are parameters and not
     // actual inputs, we will print these as, e.g. self.foo.bar
     // while we print the true_inputs out as parameters
-    auto true_inputs = graph.inputs().slice(0, graph.inputs().size() - param_names.size());
+    auto true_inputs =
+        graph.inputs().slice(0, graph.inputs().size() - param_names.size());
     auto param_names_it = param_names.begin();
-    for(auto param : graph.inputs().slice(true_inputs.size())) {
+    for (auto param : graph.inputs().slice(true_inputs.size())) {
       assignValue(param, *param_names_it++);
     }
     assignValuesToTheirUniqueNames(true_inputs);
@@ -910,7 +935,9 @@ struct PythonPrintPass {
       std::ostream& out_,
       std::vector<at::Tensor>& tensor_table,
       bool enforce_importable)
-      : out(out_), tensor_table_(tensor_table), enforce_importable_(enforce_importable) {}
+      : out(out_),
+        tensor_table_(tensor_table),
+        enforce_importable_(enforce_importable) {}
 
   // TODO: we should consider forcing functions to return a single value
   // instead of handling this tuple logic both in the compiler and the printer
@@ -929,7 +956,7 @@ struct PythonPrintPass {
       const std::vector<c10::optional<IValue>>& defaults = {},
       const std::vector<std::string>& param_names = {}) {
     printFunctionDefinition(graph, name, defaults, param_names);
-    while(!worklist.empty()) {
+    while (!worklist.empty()) {
       out << "\n\n";
       auto work = worklist.back();
       worklist.pop_back();
@@ -937,8 +964,10 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;;
-    createTensorToParameterNameMap(method.owner(), QualifiedName::create("self"),  parameter_names);
+    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
+    ;
+    createTensorToParameterNameMap(
+        method.owner(), QualifiedName::create("self"), parameter_names);
     printMethod(method, parameter_names);
   }
   void printMethod(
@@ -950,18 +979,21 @@ struct PythonPrintPass {
         [&](at::Tensor* slot) { return parameter_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
-    auto defaults = fmap(method.getSchema().arguments(), [](const Argument& arg) {
-      return arg.default_value();
-    });
+    auto defaults = fmap(
+        method.getSchema().arguments(),
+        [](const Argument& arg) { return arg.default_value(); });
     printFunction(graph, name, defaults, param_names);
   }
   void printModule(script::Module& module) {
-    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;;
-    createTensorToParameterNameMap(module, QualifiedName::create("self"),  parameter_names);
-    for(auto& method : module.get_methods()) {
+    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
+    ;
+    createTensorToParameterNameMap(
+        module, QualifiedName::create("self"), parameter_names);
+    for (auto& method : module.get_methods()) {
       const std::string& name = method.value()->name();
       // we skip __forked_functions because they actually get inlined into their
-      // callers, exporting them again will lead to more code generated on each export
+      // callers, exporting them again will lead to more code generated on each
+      // export
       if (name.find("__forked_function") == 0) {
         continue;
       }
@@ -970,19 +1002,31 @@ struct PythonPrintPass {
   }
 };
 
-TORCH_API void PythonPrint(std::ostream& out, const Graph& graph, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+TORCH_API void PythonPrint(
+    std::ostream& out,
+    const Graph& graph,
+    std::vector<at::Tensor>& tensor_table,
+    bool enforce_importable) {
   PythonPrintPass pp(out, tensor_table, enforce_importable);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   pp.printFunction(const_cast<Graph&>(graph), "graph");
 }
 
-TORCH_API void PythonPrint(std::ostream& out, const script::Method& method, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+TORCH_API void PythonPrint(
+    std::ostream& out,
+    const script::Method& method,
+    std::vector<at::Tensor>& tensor_table,
+    bool enforce_importable) {
   PythonPrintPass pp(out, tensor_table, enforce_importable);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   pp.printMethod(const_cast<script::Method&>(method));
 }
 
-TORCH_API void PythonPrint(std::ostream& out, const script::Module& module, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+TORCH_API void PythonPrint(
+    std::ostream& out,
+    const script::Module& module,
+    std::vector<at::Tensor>& tensor_table,
+    bool enforce_importable) {
   PythonPrintPass pp(out, tensor_table, enforce_importable);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   pp.printModule(const_cast<script::Module&>(module));
@@ -997,18 +1041,18 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // schema to editing this list here. These cases should only be things
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
-    prim::Constant,
-    prim::fork,
-    prim::ListConstruct,
-    prim::ListUnpack,
-    prim::None,
-    prim::Print,
-    prim::PythonOp,
-    prim::TupleConstruct,
-    prim::TupleIndex,
-    prim::TupleSlice,
-    prim::TupleUnpack,
-    prim::Undefined,
+      prim::Constant,
+      prim::fork,
+      prim::ListConstruct,
+      prim::ListUnpack,
+      prim::None,
+      prim::Print,
+      prim::PythonOp,
+      prim::TupleConstruct,
+      prim::TupleIndex,
+      prim::TupleSlice,
+      prim::TupleUnpack,
+      prim::Undefined,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -1016,21 +1060,21 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // to be correctly printed for export (a process that happens before
   // optimization passes run)
   const static std::unordered_set<Symbol> unneeded = {
-    onnx::Reshape, // only used in onnx
-    onnx::Shape, // only used in onnx
-    prim::AnyDefined, // temporarily inserted by autograd
-    prim::AutogradAdd, // temporarily inserted by autograd
-    prim::ConstantChunk, // optimization pass adds it
-    prim::DifferentiableGraph, // optimization pass adds it
-    prim::BroadcastSizes, // optimization pass (fuser) adds it
-    prim::ChunkSizes, // optimization pass (fuser) adds it
-    prim::Drop, // used in interpreter only
-    prim::FusedConcat, // optimization pass adds it
-    prim::FusionGroup, // optimization pass adds it
-    prim::Load, // used in interpreter only
-    prim::MMTreeReduce, // used as an optimization
-    prim::MMBatchSide, // used as an optimization
-    prim::Store, // used in interpreter only
+      onnx::Reshape, // only used in onnx
+      onnx::Shape, // only used in onnx
+      prim::AnyDefined, // temporarily inserted by autograd
+      prim::AutogradAdd, // temporarily inserted by autograd
+      prim::ConstantChunk, // optimization pass adds it
+      prim::DifferentiableGraph, // optimization pass adds it
+      prim::BroadcastSizes, // optimization pass (fuser) adds it
+      prim::ChunkSizes, // optimization pass (fuser) adds it
+      prim::Drop, // used in interpreter only
+      prim::FusedConcat, // optimization pass adds it
+      prim::FusionGroup, // optimization pass adds it
+      prim::Load, // used in interpreter only
+      prim::MMTreeReduce, // used as an optimization
+      prim::MMBatchSide, // used as an optimization
+      prim::Store, // used in interpreter only
 
   };
 

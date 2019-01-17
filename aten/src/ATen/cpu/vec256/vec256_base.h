@@ -273,6 +273,7 @@ public:
   DEFINE_COMP(>)
   DEFINE_COMP(<)
 #undef DEFINE_COMP
+
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {

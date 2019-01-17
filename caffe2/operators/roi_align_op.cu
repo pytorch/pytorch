@@ -150,19 +150,17 @@ template <>
 bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
+   // RoI pooled data
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     // Handle empty rois
-    Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->template mutable_data<float>();
+    Output(0, {0, X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
     return true;
   }
 
   assert(sampling_ratio_ >= 0);
 
-  Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
+  auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
   int output_size = Y->size();
   RoIAlignForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),

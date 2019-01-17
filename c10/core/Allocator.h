@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <memory>
 
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
 

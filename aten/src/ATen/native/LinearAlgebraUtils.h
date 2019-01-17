@@ -41,6 +41,28 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+/* Checks a necessary property for the triu and tril implementations, hence the name.
+ * Here batch contiguity is checked for tensors with greater than 4 dimensions.
+ * Contiguous tensors and tensors with less than 3 dimensions pass this check
+ */ 
+static inline bool checkTrilTriuBatchContiguous(const Tensor& tensor) {
+  // Complete contiguity is the most desired property, which is why
+  // we return true if the tensor is contiguous
+  if (tensor.is_contiguous()) return true;
+
+  int64_t dims = tensor.dim();
+
+  // Tensors with dimension less than 4 are handled by default
+  if (dims <= 3) return true;
+
+  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
+  for (int64_t i = dims - 3; i >= 0; i--) {
+    if (expected_stride != tensor.stride(i)) return false;
+    expected_stride *= tensor.size(i);
+  }
+  return true;
+}
+
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
   switch (sc_type) {
@@ -85,6 +107,18 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
     }
+  }
+}
+
+/*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name) {
+  if (info < 0) {
+    AT_ERROR(name, ": Argument ", -info, " has illegal value");
+  } else if (info > 0) {
+    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
   }
 }
 
