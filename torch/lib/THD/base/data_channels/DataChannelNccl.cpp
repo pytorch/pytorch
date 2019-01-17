@@ -412,7 +412,7 @@ void DataChannelNccl::allReduce(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
-      *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
@@ -461,7 +461,7 @@ void DataChannelNccl::allGather(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
-      *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
@@ -511,7 +511,7 @@ void DataChannelNccl::reduce(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
-      *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
@@ -563,7 +563,7 @@ void DataChannelNccl::broadcast(
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
-      *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {

@@ -2321,8 +2321,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
     ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
     ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
-    ("cuda::THCCachingAllocator", ("hip::THHCachingAllocator", API_C10)),
-    ("THCCachingAllocator", ("THHCachingAllocator", API_C10)),
+    ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
+    ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them

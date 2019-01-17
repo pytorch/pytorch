@@ -100,7 +100,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     cudaFree(0);
   }
 

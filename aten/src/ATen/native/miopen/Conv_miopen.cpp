@@ -522,7 +522,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   cache.insert(args.params, *algo);
   wsscache.insert(args.params, perfResults.memory);
 
-  THCCachingAllocator_emptyCache();
+  c10::hip::THHCachingAllocator_emptyCache();
 }
 
 template<typename algo_t>

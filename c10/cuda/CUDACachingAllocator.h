@@ -10,23 +10,38 @@
 namespace c10 {
 namespace cuda {
 
-// TODO: Name this something nicer
+// TODO: Turn this into an honest to goodness class. I briefly attempted to do
+// this, but it was a bit irritating to figure out how to also correctly
+// apply pimpl pattern so I didn't have to leak any internal implementation
+// details in the header (CUDACachingAllocator could be made a pimpl, but
+// you also need to appropriately define a class which is a subclass
+// of Allocator. Not impossible, but required a bit more surgery than
+// I wanted to do at the time.)
+//
+// Why is this using a namespace rather than old-style THCCachingAllocator_
+// prefix?  Mostly because it made the HIPify rules easier to write; _ is
+// not counted as a word boundary, so you would otherwise have to list each
+// of these functions.
 
-C10_CUDA_API Allocator* THCCachingAllocator_get(void);
-C10_CUDA_API void THCCachingAllocator_emptyCache(void);
-C10_CUDA_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
-C10_CUDA_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size);
-C10_CUDA_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream stream);
-C10_CUDA_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device);
-C10_CUDA_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device);
-C10_CUDA_API void     THCCachingAllocator_resetMaxMemoryAllocated(int device);
-C10_CUDA_API uint64_t THCCachingAllocator_currentMemoryCached(int device);
-C10_CUDA_API uint64_t THCCachingAllocator_maxMemoryCached(int device);
-C10_CUDA_API void     THCCachingAllocator_resetMaxMemoryCached(int device);
+namespace CUDACachingAllocator {
 
-C10_CUDA_API std::mutex* THCCachingAllocator_getCudaFreeMutex();
+C10_CUDA_API Allocator* get();
+C10_CUDA_API void emptyCache();
+C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
+C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
+C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
+C10_CUDA_API uint64_t currentMemoryAllocated(int device);
+C10_CUDA_API uint64_t maxMemoryAllocated(int device);
+C10_CUDA_API void     resetMaxMemoryAllocated(int device);
+C10_CUDA_API uint64_t currentMemoryCached(int device);
+C10_CUDA_API uint64_t maxMemoryCached(int device);
+C10_CUDA_API void     resetMaxMemoryCached(int device);
 
-C10_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle);
+C10_CUDA_API std::mutex* getFreeMutex();
+
+C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
+
+} // namespace CUDACachingAllocator
 
 }} // namespace c10::cuda
 
