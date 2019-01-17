@@ -4,7 +4,7 @@
 
 #include "caffe2/core/common.h"
 
-#ifdef CAFFE2_PERF_WITH_AVX512
+/*#ifdef CAFFE2_PERF_WITH_AVX512
 #if !defined(__AVX512F__) || !defined(__AVX512DQ__) || !defined(__AVX512VL__)
 #error( \
     "You found a build system error: CAFFE2_PERF_WITH_AVX512 is defined" \
@@ -20,4 +20,4 @@
     "is defined (via e.g. -mavx512f, -mavx512dq, and -mavx512vl) " \
     "but CAFFE2_PERF_WITH_AVX512 is not defined.");
 #endif // CAFFE2_PERF_WITH_AVX512
-#endif
+#endif*/
