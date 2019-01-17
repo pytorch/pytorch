@@ -62,6 +62,8 @@ def process_types_and_backends(option):
             pairs.discard(('CUDA', 'Half'))
         if arg['type'] == 'int':
             arg['type'] = 'int64_t'
+        if arg['type'] == 'float':
+            arg['type'] = 'double'
 
     # special case remove Half for cpu unless it is explicitly enabled,
     if not option.get('cpu_half', False):
@@ -101,6 +103,8 @@ def handle_outputs_taken_as_arguments(options):
             for i in range(len(option['return'])):
                 if option['return'][i]['type'] == 'int':
                     option['return'][i]['type'] = 'int64_t'
+                if option['return'][i]['type'] == 'float':
+                    option['return'][i]['type'] = 'double'
             
         for arg in option['arguments']:
             # mark arguments which can be null
