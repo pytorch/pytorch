@@ -12,10 +12,12 @@ except ImportError:
 
 
 # [temp translations]
-# We want to be able to move from the current custom func schema to the
-# JIT signature schema incrementally. So we do do raw type translations
-# to avoid having to change all downstream tools before absolutely necessary
-# due to fundamental changes.
+# We're currently incrementally moving from the custom func schema to the
+# JIT signature schema incrementally. This will reduce overall complexity
+# and increase compliance between these components. So for now we do simple
+# type translations to continue to emit the legacy func schema for further
+# processing by downstream tools. This will helps us avoid having to prematurely
+# change all downstream tools to detect these new types.
 def temp_type_translations(typ):
     if typ == 'Tensor[]':
         return 'TensorList'
@@ -40,6 +42,9 @@ def parse_default(s):
         return s
     elif s == 'None':
         return 'c10::nullopt'
+    # The JIT signature schema uses Mean, but in particular C++ needs
+    # the legacy Reduction::Mean. So we'll continue emiting that until
+    # we change this at either a JIT schema or C++ level.
     elif s == 'Mean':
         return 'Reduction::Mean'
     try:
