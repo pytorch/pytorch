@@ -1,9 +1,8 @@
 #include <THC/THCCachingAllocator.h>
 
-#include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/Exceptions.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/util/UniqueVoidPtr.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -13,7 +12,11 @@
 #include <mutex>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+namespace at {
+namespace cuda {
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -42,7 +45,7 @@
 
 namespace {
 
-using stream_set = std::unordered_set<at::cuda::CUDAStream>;
+using stream_set = std::unordered_set<cuda::CUDAStream>;
 
 const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
@@ -159,7 +162,7 @@ struct THCCachingAllocator
       small_blocks(BlockComparator) {}
 
   DeviceStats &get_stats_for_device(int device) {
-    THAssert(device >= 0);
+    AT_ASSERT(device >= 0);
     if ((size_t) device >= device_stats.size()) {
       device_stats.resize(device + 1);
     }
@@ -172,7 +175,7 @@ struct THCCachingAllocator
     std::lock_guard<std::mutex> lock(mutex);
 
     int device;
-    AT_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
 
     // process outstanding cudaEvents
     process_events();
@@ -202,7 +205,7 @@ struct THCCachingAllocator
 
           size_t device_free;
           size_t device_total;
-          AT_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+          C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
           const auto& stats = get_stats_for_device(device);
 
           // "total capacity": total global memory on GPU
@@ -230,7 +233,7 @@ struct THCCachingAllocator
             format_size(device_free), " free; ",
             format_size(stats.amount_cached - stats.amount_allocated), " cached)");
         } else {
-          AT_CUDA_CHECK(err);
+          C10_CUDA_CHECK(err);
         }
       }
       stats.increaseCached(alloc_size);
@@ -298,7 +301,7 @@ struct THCCachingAllocator
     std::lock_guard<std::mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
-      THError("invalid device pointer: %p", ptr);
+      AT_ERROR("invalid device pointer: %p", ptr);
     }
     while (block->prev) {
       block = block->prev;
@@ -336,12 +339,12 @@ struct THCCachingAllocator
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
-  void recordStream(void* ptr, at::cuda::CUDAStream stream)
+  void recordStream(void* ptr, cuda::CUDAStream stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
-      THError("invalid device pointer: %p", ptr);
+      AT_ERROR("invalid device pointer: %p", ptr);
     }
     if (stream.stream() == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
@@ -354,7 +357,7 @@ struct THCCachingAllocator
   /** moves a block into the free block list */
   void free_block(Block* block)
   {
-    THAssert(!block->allocated && block->event_count == 0);
+    AT_ASSERT(!block->allocated && block->event_count == 0);
     bool small = block->size <= kSmallAlloc;
     auto& free_blocks = small ? small_blocks : large_blocks;
     try_merge_blocks(block, block->prev, free_blocks);
@@ -436,7 +439,7 @@ struct THCCachingAllocator
     while (it != end) {
       Block* block = *it;
       if (!block->prev && !block->next) {
-        AT_CUDA_CHECK(cudaFree((void*)block->ptr));
+        C10_CUDA_CHECK(cudaFree((void*)block->ptr));
         get_stats_for_device(block->device).decreaseCached(block->size);
         auto cur = it;
         ++it;
@@ -459,16 +462,16 @@ struct THCCachingAllocator
   void insert_events(Block* block)
   {
     int prev_device;
-    AT_CUDA_CHECK(cudaGetDevice(&prev_device));
+    C10_CUDA_CHECK(cudaGetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
-    THAssert(block->stream_uses.empty());
+    AT_ASSERT(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
-      AT_CUDA_CHECK(cudaSetDevice(it->device_index()));
+      C10_CUDA_CHECK(cudaSetDevice(it->device_index()));
 
       cudaEvent_t event;
-      AT_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-      AT_CUDA_CHECK(cudaEventRecord(event, it->stream()));
+      C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+      C10_CUDA_CHECK(cudaEventRecord(event, it->stream()));
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
@@ -493,10 +496,10 @@ struct THCCachingAllocator
       if (err == cudaErrorNotReady) {
         break;
       } else if (err != cudaSuccess) {
-        AT_CUDA_CHECK(err);
+        C10_CUDA_CHECK(err);
       }
 
-      AT_CUDA_CHECK(cudaEventDestroy(event));
+      C10_CUDA_CHECK(cudaEventDestroy(event));
 
       block->event_count--;
       if (block->event_count == 0) {
@@ -516,86 +519,86 @@ static void CudaCachingDeleter(void* ptr) {
 // NB: I decided not to fold this into THCCachingAllocator, because the latter
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publically exposed
-struct CudaCachingAllocator : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
+struct CudaCachingAllocator : public Allocator {
+  DataPtr allocate(size_t size) const override {
     int device;
-    THCudaCheck(cudaGetDevice(&device));
+    C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      caching_allocator.malloc(&r, size, at::cuda::getCurrentCUDAStream(device));
+      caching_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &CudaCachingDeleter, at::Device(at::DeviceType::CUDA, device)};
+    return {r, r, &CudaCachingDeleter, Device(DeviceType::CUDA, device)};
   }
-  at::DeleterFnPtr raw_deleter() const override {
+  DeleterFnPtr raw_deleter() const override {
     return &CudaCachingDeleter;
   }
 };
 
 CudaCachingAllocator device_allocator;
 
-THC_API at::Allocator* THCCachingAllocator_get(void)
+Allocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
 }
 
-THC_API void THCCachingAllocator_emptyCache(void) {
+void THCCachingAllocator_emptyCache(void) {
   caching_allocator.emptyCache();
 }
 
-THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
   caching_allocator.cacheInfo(dev_id, cachedAndFree, largestBlock);
 }
 
-THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
+void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
 {
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-THC_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream stream)
+void THCCachingAllocator_recordStream(void *ptr, cuda::CUDAStream stream)
 {
   caching_allocator.recordStream(ptr, stream);
 }
 
-THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
+std::mutex* THCCachingAllocator_getCudaFreeMutex()
 {
   return &caching_allocator.cuda_free_mutex;
 }
 
 static inline void assertValidDevice(int device) {
   int device_count;
-  THCudaCheck(cudaGetDeviceCount(&device_count));
-  THAssertMsg(0 <= device && device < device_count, "Invalid device argument.");
+  C10_CUDA_CHECK(cudaGetDeviceCount(&device_count));
+  AT_ASSERTM(0 <= device && device < device_count, "Invalid device argument.");
 }
 
-THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device)
+uint64_t THCCachingAllocator_currentMemoryAllocated(int device)
 {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).amount_allocated;
 }
 
-THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
+uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_allocated;
 }
 
-THC_API void THCCachingAllocator_resetMaxMemoryAllocated(int device) {
+void THCCachingAllocator_resetMaxMemoryAllocated(int device) {
   assertValidDevice(device);
   DeviceStats& stats = caching_allocator.get_stats_for_device(device);
   stats.max_amount_allocated = stats.amount_allocated;
 }
 
-THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device)
+uint64_t THCCachingAllocator_currentMemoryCached(int device)
 {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).amount_cached;
 }
 
-THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
+uint64_t THCCachingAllocator_maxMemoryCached(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_cached;
 }
 
-THC_API void THCCachingAllocator_resetMaxMemoryCached(int device) {
+void THCCachingAllocator_resetMaxMemoryCached(int device) {
   assertValidDevice(device);
   DeviceStats& stats = caching_allocator.get_stats_for_device(device);
   stats.max_amount_cached = stats.amount_cached;
@@ -634,16 +637,16 @@ AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   // enable IPC access to that mem block.
   void *dev = nullptr;
   auto ipc_handle = reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
-  THCudaCheck(cudaIpcOpenMemHandle(&dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
+  C10_CUDA_CHECK(cudaIpcOpenMemHandle(&dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
   // devPtr has to be deleted in same device when created.
   int curr_device;
-  THCudaCheck(cudaGetDevice(&curr_device));
+  C10_CUDA_CHECK(cudaGetDevice(&curr_device));
   auto sp = std::shared_ptr<void>(
       dev,
       [handle, curr_device](void *ptr) {
-        at::cuda::CUDAGuard device_guard(curr_device);
+        cuda::CUDAGuard device_guard(curr_device);
         std::lock_guard<std::mutex> lock(IpcMutex);
-        THCudaCheck(cudaIpcCloseMemHandle(ptr));
+        C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;
   // To eliminate an additional search, we can use insert().
@@ -655,3 +658,4 @@ AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   return sp;
 }
 
+}} // namespace at::cuda
