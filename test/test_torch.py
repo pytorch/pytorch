@@ -1169,18 +1169,27 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     def test_pdist_norm(self):
+        def test_pdist_single(shape, device, p, dtype, trans):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            if trans:
+                x.transpose_(-2, -1)
+            actual = torch.pdist(x, p=p)
+            expected = brute_pdist(x, p=p)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(torch.allclose(expected, actual))
+
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1), (2, 3, 4)]:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
-                        x = torch.randn(shape, device=device)
-                        if trans:
-                            x.transpose_(-2, -1)
-                        actual = torch.pdist(x, p=p)
-                        expected = brute_pdist(x, p=p)
-                        self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        for dtype in [torch.float32, torch.float64]:
+                            test_pdist_single(shape, device, p, dtype, trans)
+
+            # do a simplified comparison with big inputs, see:
+            # https://github.com/pytorch/pytorch/issues/15511
+            for dtype in [torch.float32, torch.float64]:
+                test_pdist_single((1000, 2), device, 2, dtype, False)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
