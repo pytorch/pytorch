@@ -2807,28 +2807,21 @@ pdist = _add_docstr(torch.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
-If the input tensor has shape ... B x N x M, the result will be tensor with
-shape ... B x N * (N - 1) / 2. Every dimension prior to the last two are
-treated as independent batches of N vectors, each with M elements. If we use
-ordinal numbers to refer to the vectors in a batch, the last dimension of the
-output will be ordered as:
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
+if the rows are contiguous.
 
-```
-[dist(1, 2), dist(1, 2), ..., dist(1, N), dist(2, 3), ..., dist(N-1, N)]
-```
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
 
-The square verion of pdist that has redundant distances and the diagonal can be
-be computed with
-`torch.norm(inpup[..., None, :] - input[..., None, :, :], p=p, dim=-1)`.
-Appropriately selecting and flattening the upper triangular of the
-last two dimensions will produce identical results as pdist.
-
-This function is similar to
-`scipy.spatial.distance.pdist(input, 'minkowski', p=p)`
-if :math:`p \in (0, \infty)`.
+This function is equivalent to `scipy.spatial.distance.pdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
 
 Args:
-    input: input tensor of shape :math:`... \times N \times M`.
+    input: input tensor of shape :math:`N \times M`.
     p: p value for the p-norm distance to calculate between each vector pair
         :math:`\in [0, \infty]`.
 """)
