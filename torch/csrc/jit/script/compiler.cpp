@@ -31,47 +31,48 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
+
+// Holds mappings from a variable name to a refined type for that variable
+// E.g if x is not None is true than we can refine x from type t? to t.
 struct Refinements {
 
   //using ordered map for deterministic graph output
-  std::map<std::string, TypeAndRange> mappings;
+  std::map<std::string, TypeAndRange> mappings_;
 
   void setRefinement(const std::string& name, TypeAndRange mapping) {
-    mappings[name] = std::move(mapping);
+    mappings_[name] = std::move(mapping);
   }
 
   c10::optional<TypeAndRange> getRefinement(const std::string& name) const {
-    const auto& maybe_mapping = mappings.find(name);
-    if (maybe_mapping == mappings.end()) {
+    const auto& maybe_mapping = mappings_.find(name);
+    if (maybe_mapping == mappings_.end()) {
       return c10::nullopt;
     }
     return maybe_mapping->second;
   }
 
-  // return the intersection of the values to type mappings in a and b whose
+  // return the intersection of the values to type mappings between this
   // types can be unified
-  Refinements* intersectRefinements(const Refinements& other) {
+  void intersectRefinements(const Refinements& other) {
     Refinements ret;
-    for (auto& name_mapping: mappings) {
+    for (const auto& name_mapping: mappings_) {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
       if (auto other_mapping = other.getRefinement(name_mapping.first)) {
-        auto maybe_unified_type = unifyTypes(mapping.first, other_mapping->first);
+        const auto maybe_unified_type = unifyTypes(mapping.first, other_mapping->first);
         if (maybe_unified_type) {
           ret.setRefinement(name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       }
     }
-    mappings = std::move(ret.mappings);
-    return this;
+    mappings_ = std::move(ret.mappings_);
   }
 
   // return the union of the values to type mappings in a and b whose
   // types can be unified
-  Refinements* unionRefinements(const Refinements& other) {
-    const Refinements& a = *this;
+  void unionRefinements(const Refinements& other) {
     Refinements ret;
-    for (auto& name_mapping: mappings) {
+    for (const auto& name_mapping: mappings_) {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
       TypePtr t_1 = mapping.first;
@@ -91,14 +92,13 @@ struct Refinements {
       }
     }
 
-    for (auto& name_mapping: other.mappings) {
-      if (!a.getRefinement(name_mapping.first)) {
+    for (auto& name_mapping: other.mappings_) {
+      if (getRefinement(name_mapping.first)) {
         ret.setRefinement(name_mapping.first, name_mapping.second);
       }
     }
 
-    mappings = std::move(ret.mappings);
-    return this;
+    mappings_ = std::move(ret.mappings_);
   }
 };
 
@@ -109,30 +109,30 @@ struct Refinements {
 
 struct BoolInfo {
   BoolInfo(Refinements true_refinements, Refinements false_refinements)
-      : true_refinements(std::move(true_refinements)),
-        false_refinements(std::move(false_refinements)){};
+      : true_refinements_(std::move(true_refinements)),
+        false_refinements_(std::move(false_refinements)){};
   BoolInfo() = default;
 
-  Refinements true_refinements;
-  Refinements false_refinements;
+  Refinements true_refinements_;
+  Refinements false_refinements_;
 
-  BoolInfo* mergeOr(BoolInfo other) {
+  BoolInfo* mergeOr(const BoolInfo& other) {
     // if the result of an OR is true, either a & b could have been true,
     // so we take the intersection of a.true_refinements & b.true_refinements.
     // if the result is false, both a and b had to be false,
     // so we take their union.
-    true_refinements.intersectRefinements(other.true_refinements);
-    false_refinements.unionRefinements(other.false_refinements);
+    true_refinements_.intersectRefinements(other.true_refinements_);
+    false_refinements_.unionRefinements(other.false_refinements_);
     return this;
   }
 
-  BoolInfo* mergeAnd(BoolInfo other) {
+  BoolInfo* mergeAnd(const BoolInfo& other) {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
     // if the result is false, either a or b could have been false,
     // so we take their intersection.
-    true_refinements.unionRefinements(other.true_refinements);
-    false_refinements.intersectRefinements(other.false_refinements);
+    true_refinements_.unionRefinements(other.true_refinements_);
+    false_refinements_.intersectRefinements(other.false_refinements_);
     return this;
   }
 };
@@ -940,21 +940,22 @@ struct to_ir {
   }
 
   Value* emitTernaryIf(const TernaryIf& expr) {
-    auto bool_info = findRefinements(expr.cond());
+    const auto& bool_info = findRefinements(expr.cond());
     Value* cond_value = emitCond(expr.cond());
     auto true_expr = [&] {
-      insertRefinements(bool_info.true_refinements);
+      insertRefinements(bool_info.true_refinements_);
       return emitExpr(expr.true_expr());
     };
     auto false_expr = [&] {
-      insertRefinements(bool_info.false_refinements);
+      insertRefinements(bool_info.false_refinements_);
       return emitExpr(expr.false_expr());
     };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  // Insert subtyping refinements
   void insertRefinements(const Refinements& ref) {
-    for (auto name_mappings: ref.mappings) {
+    for (const auto name_mappings: ref.mappings_) {
       const std::string& name = name_mappings.first;
       auto type = name_mappings.second.first;
       const auto& range = *name_mappings.second.second;
@@ -973,7 +974,7 @@ struct to_ir {
       const TreeRef& second_expr,
       bool is_or) {
 
-    auto first_bool_info = findRefinements(first_expr);
+    const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
     const Refinements* first_expr_refinements;
@@ -981,11 +982,11 @@ struct to_ir {
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
-      first_expr_refinements = &first_bool_info.true_refinements;
-      second_expr_refinements = &first_bool_info.false_refinements;
+      first_expr_refinements = &first_bool_info.true_refinements_;
+      second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
-      first_expr_refinements = &first_bool_info.false_refinements;
-      second_expr_refinements = &first_bool_info.true_refinements;
+      first_expr_refinements = &first_bool_info.false_refinements_;
+      second_expr_refinements = &first_bool_info.true_refinements_;
     }
 
     auto get_first_expr = [&] {
@@ -1062,13 +1063,13 @@ struct to_ir {
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
-    auto bool_info = findRefinements(stmt.cond());
+    const auto bool_info = findRefinements(stmt.cond());
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
-    auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch(), bool_info.true_refinements);
-    auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch(), bool_info.false_refinements);
+    auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch(), bool_info.true_refinements_);
+    auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch(), bool_info.false_refinements_);
 
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).
@@ -1979,7 +1980,7 @@ struct to_ir {
       case TK_IS:
       case TK_ISNOT: {
         const auto& inputs = tree->trees();
-        if (inputs[0]->kind() == TK_VAR && inputs[1]->kind() == TK_NONE) {
+        if (inputs.at(0)->kind() == TK_VAR && inputs.at(1)->kind() == TK_NONE) {
           const std::string& var_name = Var(inputs[0]).name().name();
           Refinements true_info, false_info;
           auto type = environment_stack->getVar(var_name, inputs[0]->range())->type();
@@ -1997,7 +1998,7 @@ struct to_ir {
       case TK_NOT:{
         const auto& inputs = tree->trees();
         auto bool_info = findRefinements(inputs[0]);
-        return BoolInfo(bool_info.false_refinements, bool_info.true_refinements);
+        return BoolInfo(bool_info.false_refinements_, bool_info.true_refinements_);
       }
       case TK_OR:
       case TK_AND: {
