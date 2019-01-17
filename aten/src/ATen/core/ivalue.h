@@ -39,7 +39,7 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 };
 
 template <typename Elem>
-struct C10_EXPORT List : c10::intrusive_ptr_target {
+struct CAFFE2_API List : c10::intrusive_ptr_target {
  private:
   std::vector<Elem> elements_;
 
@@ -67,7 +67,7 @@ struct C10_EXPORT List : c10::intrusive_ptr_target {
 
 struct Future;
 
-struct C10_EXPORT Tuple : public List<IValue> {
+struct CAFFE2_API Tuple : public List<IValue> {
   using List<IValue>::List;
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
