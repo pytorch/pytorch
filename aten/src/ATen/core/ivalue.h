@@ -196,23 +196,22 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
-  IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
+  IValue(intrusive_ptr<caffe2::Blob> blob)
+  : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
-    // and
-    //      store it as a Tensor instead.
-    payload.as_intrusive_ptr =
-        c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+    // and store it as a Tensor instead.
+    payload.as_intrusive_ptr = blob.release();
   }
   bool isBlob() const {
     return Tag::Blob == tag;
   }
-  caffe2::Blob& toBlob() & {
+  c10::intrusive_ptr<caffe2::Blob> toBlob() && {
     AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+    return moveToIntrusivePtr<caffe2::Blob>();
   }
-  const caffe2::Blob& toBlob() const& {
+  c10::intrusive_ptr<caffe2::Blob> toBlob() const & {
     AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+    return toIntrusivePtr<caffe2::Blob>();;
   }
 
   // Tuple
@@ -674,6 +673,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
