@@ -69,7 +69,7 @@ signature.
   corresponding Python numerical types. However, you probably don't want to use `Scalar`. It's
   really used for binding to TH/THC code "real" types where the Python APIs you are binding to are
   actually different types. `double` and `int64_t` argument types should suffice for most algorithms.
-- `Generator*`, the state for a random number generator,
+- `Generator?`, the state for a random number generator,
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
