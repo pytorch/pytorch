@@ -956,7 +956,7 @@ struct to_ir {
 
   // Insert subtyping refinements
   void insertRefinements(const Refinements& ref) {
-    for (const auto name_mappings : ref.mappings_) {
+    for (const auto& name_mappings : ref.mappings_) {
       const std::string& name = name_mappings.first;
       auto type = name_mappings.second.first;
       const auto& range = *name_mappings.second.second;
