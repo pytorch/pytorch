@@ -121,11 +121,10 @@ baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
-decltype(${base_type_call}) tmp;
-{
+auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  tmp = ${base_type_call};
-}
+  return ${base_type_call};
+})();
 ${return_values} = ${rhs_value};
 """)
 
