@@ -59,13 +59,13 @@ void adagrad_fp16_update_prefetch__avx_f16c(
     at::Half* nh_n, // prefetch ptr
     float epsilon,
     float lr) {
-  constexpr size_t kSize = 8;
+  constexpr int kSize = 8;
   auto i = 0;
   for (; i + kSize <= N; i += kSize) {
-    _mm_prefetch(&w_n[i], _MM_HINT_T0);
-    _mm_prefetch(&h_n[i], _MM_HINT_T0);
-    _mm_prefetch(&nw_n[i], _MM_HINT_T0);
-    _mm_prefetch(&nh_n[i], _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(&w_n[i]), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(&h_n[i]), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(&nw_n[i]), _MM_HINT_T0);
+    _mm_prefetch(reinterpret_cast<const char*>(&nh_n[i]), _MM_HINT_T0);
 
     // only convert momentum and embedding, gradient is fp32
     __m256 gi = _mm256_loadu_ps(g + i);
@@ -119,7 +119,7 @@ void adagrad_update__avx_f16c(
     float epsilon,
     float decay,
     float lr) {
-  constexpr size_t kSize = 8;
+  constexpr int kSize = 8;
   auto i = 0;
   for (; i + kSize <= N; i += kSize) {
     __m256 gi = _mm256_loadu_ps(g + i);
