@@ -12,6 +12,7 @@
 #include <aten/src/ATen/Context.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/thread_pool.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/SmallVector.h>
 
