@@ -94,6 +94,16 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <stdint.h>
 #include <unordered_map>
 
+// Note [chooseAlgorithm doesn't respect mathType]
+// You might be wondering, why not call cudnnSetConvolutionMathType in the 
+// convolution descriptor (cdesc) setter, before calling chooseAlgorithm...
+// Turns out, the mathType returned by the chooseAlgorithm can be different 
+// from what we set in the descriptor and hence, we have to explicitly update it 
+// after the chooseAlgorithm has found the best pair of algorithm+mathType. 
+// Otherwise, even though we'll be calling cudnnConvolutionForward with the 
+// fastest algorithm, under the hood, cudnn will run it with the slower kernel 
+// since it sees fastest algorithm combination with a sub optimal mathType.
+
 namespace at { namespace native {
 
 // TODO: Go through all the checking code again and make sure
@@ -827,6 +837,7 @@ void raw_cudnn_convolution_forward_out(
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
   // whether to use Tensor cores or not
+  // See Note [chooseAlgorithm doesn't respect mathType]
   AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType));
 
   Constant one(dataType, 1);
@@ -950,6 +961,7 @@ void raw_cudnn_convolution_backward_input_out(
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
   // whether to use Tensor cores or not
+  // See Note [chooseAlgorithm doesn't respect mathType]
   AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType));
 
   Constant one(dataType, 1);
@@ -1090,6 +1102,7 @@ void raw_cudnn_convolution_backward_weight_out(
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
   // whether to use Tensor cores or not
+  // See Note [chooseAlgorithm doesn't respect mathType]
   AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType));
 
   Constant one(dataType, 1);
