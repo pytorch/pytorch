@@ -129,7 +129,7 @@ fi
 git add -f build/bin
 
 # Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
@@ -138,7 +138,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
 fi
 
 # Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   mkdir -p c10/build
   pushd c10/build
   cmake ..
