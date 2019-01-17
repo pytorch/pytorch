@@ -1631,10 +1631,10 @@
     CPU: _round_out_cpu
     CUDA: _round_out_cuda
 
-- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   matches_jit_signature: True
 
-- func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
 
 - func: relu(Tensor self) -> Tensor
   matches_jit_signature: True
@@ -3762,10 +3762,10 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: rrelu_with_noise_out(Tensor output, Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise_out(Tensor output, Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   matches_jit_signature: True
   python_module: nn
 
@@ -3776,7 +3776,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: rrelu_with_noise_(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise_(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
 
 - func: softplus_out(Tensor output, Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
