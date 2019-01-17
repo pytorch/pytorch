@@ -13,8 +13,9 @@ bool GatherOp<CUDAContext>::RunOnDevice() {
 template <>
 template <typename Index>
 bool GatherOp<CUDAContext>::DoRunWithType() {
-    return DispatchHelper<TensorTypes2<int8_t,int16_t,int32_t,int64_t,long,float,double,
-           GenericTensorImplementation>,Index>::call(this, Input(DATA));
+    return DispatchHelper<TensorTypes2<int8_t,int16_t,int32_t,int64_t,
+           uint8_t,at::Half,long,float,double,GenericTensorImplementation>,
+           Index>::call(this, Input(DATA));
 }
 
 template <>

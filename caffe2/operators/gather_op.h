@@ -177,7 +177,7 @@ class GatherOp : public Operator<Context> {
   template <typename Index>
       bool DoRunWithType() {
           return DispatchHelper<TensorTypes2<int8_t,int16_t,int32_t,int64_t,
-                 long,float,double,GenericTensorImplementation>,
+                 uint8_t,at::Half,long,float,double,GenericTensorImplementation>,
                  Index>::call(this, Input(DATA));
       }
 
