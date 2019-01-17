@@ -439,6 +439,11 @@ class CAFFE2_API Tensor final {
     return impl_.get()->sizes();
   }
 
+  // To be deprecated
+  inline at::IntList dims() const {
+    return impl_.get()->sizes();
+  }
+
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }

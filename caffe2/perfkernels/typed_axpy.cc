@@ -36,6 +36,8 @@ void TypedAxpyHalffloat__base(
   }
 }
 
+decltype(TypedAxpyHalffloat__base) TypedAxpyHalffloat__avx2_fma;
+decltype(TypedAxpyHalffloat__base) TypedAxpyHalffloat__avx_f16c;
 template <>
 void TypedAxpy<at::Half, float>(
     int N,
@@ -57,6 +59,8 @@ void TypedAxpy_uint8_float__base(
   }
 }
 
+decltype(TypedAxpy_uint8_float__base) TypedAxpy_uint8_float__avx2_fma;
+decltype(TypedAxpy_uint8_float__base) TypedAxpy_uint8_float__avx_f16c;
 template <>
 void TypedAxpy<std::uint8_t, float>(
     int N,

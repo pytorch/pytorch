@@ -1897,13 +1897,21 @@
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
 
+- func: norm(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
 
-- func: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
+- func: norm(Tensor self, Scalar? p, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: norm_out(Tensor result, Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
+- func: norm(Tensor self, Scalar? p, IntList[1] dim, bool keepdim=false) -> Tensor
+  variants: function, method
+
+- func: norm_out(Tensor result, Tensor self, Scalar? p, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
+- func: norm_out(Tensor result, Tensor self, Scalar? p, IntList[1] dim, bool keepdim=false) -> Tensor
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
@@ -3416,6 +3424,30 @@
   dispatch:
     CPU: fractional_max_pool2d_backward_cpu
     CUDA: fractional_max_pool2d_backward_cuda
+
+- func: fractional_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+  python_module: nn
+  dispatch:
+    CPU: fractional_max_pool3d_out_cpu
+    CUDA: fractional_max_pool3d_out_cuda
+
+- func: fractional_max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+  python_module: nn
+  dispatch:
+    CPU: fractional_max_pool3d_cpu
+    CUDA: fractional_max_pool3d_cuda
+
+- func: fractional_max_pool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor indices) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: fractional_max_pool3d_backward_out_cpu
+    CUDA: fractional_max_pool3d_backward_out_cuda
+
+- func: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor indices) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: fractional_max_pool3d_backward_cpu
+    CUDA: fractional_max_pool3d_backward_cuda
 
 - func: max_pool2d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
   python_module: nn

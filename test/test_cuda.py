@@ -1813,6 +1813,12 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
+        # test corner case from Issue #13867
+        torch.cuda.manual_seed(33)
+        probs = torch.randn(1000000, device='cuda').clamp(min=0) * 3e-5
+        samples = probs.multinomial(1000000, replacement=True)
+        self.assertGreater(probs[samples].min().item(), 0)
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -2204,6 +2210,11 @@ class TestCuda(TestCase):
         a /= 100000000
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
+
+    @skipIfRocm
+    def test_norm_type_conversion(self):
+        a = torch.ones(65536).cuda().half()
+        self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
     @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak

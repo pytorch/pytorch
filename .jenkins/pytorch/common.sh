@@ -25,6 +25,8 @@ set -ex
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
+export IS_PYTORCH_CI=1
+
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
 # note: printf is used instead of echo to avoid backslash
