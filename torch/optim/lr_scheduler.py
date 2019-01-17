@@ -178,7 +178,7 @@ class StepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def get_weight_decay(self):
-        return [base_weight_decay * self.gamma ** (self.last_epoch // self.step_size) if base_weight_decay else None
+        return [base_weight_decay * self.gamma if base_weight_decay else None
                 for base_weight_decay in self.base_weight_decays]
 
 
@@ -219,8 +219,7 @@ class MultiStepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def get_weight_decay(self):
-        return [base_weight_decay * self.gamma ** bisect_right(self.milestones,
-                                                               self.last_epoch) if base_weight_decay else None
+        return [base_weight_decay * self.gamma ** self.milestones[self.last_epoch] if base_weight_decay else None
                 for base_weight_decay in self.base_weight_decays]
 
 
@@ -245,7 +244,7 @@ class ExponentialLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def get_weight_decay(self):
-        return [base_weight_decay * self.gamma ** self.last_epoch if base_weight_decay else None
+        return [base_weight_decay * self.gamma if base_weight_decay else None
                 for base_weight_decay in self.base_weight_decays]
 
 
@@ -295,8 +294,9 @@ class CosineAnnealingLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def get_weight_decay(self):
-        return [self.eta_min + (base_weight_decay - self.eta_min) *
-                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2 if base_weight_decay else None
+        return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 
+                (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
+                (base_weight_decay - self.eta_min) + self.eta_min if base_weight_decay else None
                 for base_weight_decay in self.base_weight_decays]
 
 
