@@ -151,7 +151,6 @@ _(aten, _th_max) \
 _(aten, _th_median) \
 _(aten, _th_min) \
 _(aten, _th_mode) \
-_(aten, _th_norm) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \

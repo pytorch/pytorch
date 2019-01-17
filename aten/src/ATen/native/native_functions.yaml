@@ -1897,13 +1897,21 @@
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
 
+- func: norm(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
 
-- func: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
+- func: norm(Tensor self, Scalar? p, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: norm_out(Tensor result, Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
+- func: norm(Tensor self, Scalar? p, IntList[1] dim, bool keepdim=false) -> Tensor
+  variants: function, method
+
+- func: norm_out(Tensor result, Tensor self, Scalar? p, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
+- func: norm_out(Tensor result, Tensor self, Scalar? p, IntList[1] dim, bool keepdim=false) -> Tensor
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function

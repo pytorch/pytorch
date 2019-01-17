@@ -570,8 +570,15 @@
 - name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim)
+- name: norm(Tensor self, Scalar? p, IntList dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
+
+- name: norm(Tensor self, Scalar? p, ScalarType dtype)
+  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result).to(self.type().scalarType())
+
+
+- name: norm(Tensor self, Scalar? p, IntList dim, bool keepdim, ScalarType dtype)
+  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result, dim, keepdim).to(self.type().scalarType())
 
 - name: _pdist_forward(Tensor self, double p)
   self: _pdist_backward(grad, self, p, result)
