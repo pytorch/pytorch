@@ -8,7 +8,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <stdlib.h>
 #include <stdint.h>
 

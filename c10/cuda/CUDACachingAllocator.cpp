@@ -1,4 +1,4 @@
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
@@ -15,7 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace at {
+namespace c10 {
 namespace cuda {
 
 //
@@ -625,7 +625,7 @@ namespace {
   std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 }
 
-AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
+std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   std::lock_guard<std::mutex> lock(IpcMutex);
 
   auto iter = ipcMemHandle_to_devptr.find(handle);
@@ -658,4 +658,4 @@ AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   return sp;
 }
 
-}} // namespace at::cuda
+}} // namespace c10::cuda
