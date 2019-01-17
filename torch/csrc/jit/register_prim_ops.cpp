@@ -810,7 +810,8 @@ RegisterOperators reg({
             InterpreterState forked_interprester(code);
             InterpreterContinuation continuation(
                 forked_interprester,
-                Stack(stack.end() - n_inputs, stack.end()));
+                Stack(stack.end() - n_inputs, stack.end()),
+                autograd::GradMode::is_enabled());
             drop(stack, n_inputs);
 
             push(stack, forked_interprester.getFuture());
