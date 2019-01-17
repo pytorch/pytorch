@@ -460,11 +460,11 @@ def signature(decl, fob):
         return decl['schema_string'].strip()
     else:
         if 'schema_string' in decl and len(decl['schema_string'].strip()) > 0:
-            if(ret_val.strip() == decl['schema_string'].strip()):
-                fob.write(decl['schema_string'].strip() + '\n')
-            # dd = Levenshtein.distance(ret_val.strip(), decl['schema_string'].strip())
-            # fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + decl['schema_string'].strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
-            # fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + ret_val.strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
+            # if(ret_val.strip() == decl['schema_string'].strip()):
+            #     fob.write(decl['schema_string'].strip() + '\n')
+            dd = Levenshtein.distance(ret_val.strip(), decl['schema_string'].strip())
+            fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + decl['schema_string'].strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
+            fob.write(str(dd) + '\t' + ret_val.strip() + '\t' + ret_val.strip() + "\n")# + '\t' + str(Levenshtein.editops(ret_val.strip(), decl['schema_string'].strip())) + '\n')
 
     return ret_val
 

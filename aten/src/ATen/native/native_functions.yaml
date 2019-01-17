@@ -64,6 +64,7 @@
      CUDA: fused_dropout_cuda
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
+  matches_jit_signature: True
   variants: function
   dispatch:
      CUDA: masked_scale_cuda
@@ -75,18 +76,22 @@
   matches_jit_signature: True
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
+  matches_jit_signature: True
 
 - func: dropout_(Tensor self, float p, bool train) -> Tensor
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+  matches_jit_signature: True
 
 - func: feature_dropout_(Tensor self, float p, bool train) -> Tensor
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
+  matches_jit_signature: True
 
 - func: alpha_dropout_(Tensor self, float p, bool train) -> Tensor
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
+  matches_jit_signature: True
 
 - func: feature_alpha_dropout_(Tensor self, float p, bool train) -> Tensor
 
@@ -184,7 +189,8 @@
 - func: all(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: allclose(Tensor self, Tensor other, float rtol=1e-5, float atol=1e-8, bool equal_nan=False) -> bool
+- func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
+  matches_jit_signature: True
   variants: function, method
 
 - func: any(Tensor self, int dim, bool keepdim=False) -> Tensor
@@ -314,6 +320,7 @@
 - func: bartlett_window(int window_length, bool periodic, TensorOptions options=[]) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+  matches_jit_signature: True
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator* generator=nullptr) -> Tensor
@@ -556,11 +563,13 @@
     CUDA: cudnn_affine_grid_generator_backward
 
 - func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_batch_norm
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
 - func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_batch_norm_backward
 
@@ -981,7 +990,7 @@
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
 
-- func: group_norm(Tensor input, int num_groups, Tensor? weight=[], Tensor? bias=[], float eps=1e-5, bool cudnn_enabled=True) -> Tensor
+- func: group_norm(Tensor input, int num_groups, Tensor? weight=[], Tensor? bias=[], float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
 # FFT
 
@@ -1036,6 +1045,7 @@
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
+  matches_jit_signature: True
   variants: function
 
 - func: inverse(Tensor self) -> Tensor
@@ -1052,7 +1062,8 @@
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
 
-- func: isclose(Tensor self, Tensor other, float rtol=1e-5, float atol=1e-8, bool equal_nan=False) -> Tensor
+- func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: isnan(Tensor self) -> Tensor
@@ -1103,7 +1114,7 @@
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
 
-- func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=[], Tensor? bias=[], float eps=1e-5, bool cudnn_enable=True) -> Tensor
+- func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=[], Tensor? bias=[], float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=[]) -> Tensor
 
@@ -1111,6 +1122,7 @@
   matches_jit_signature: True
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
+  matches_jit_signature: True
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
   matches_jit_signature: True
@@ -1244,6 +1256,7 @@
   matches_jit_signature: True
 
 - func: matrix_rank(Tensor self, float tol, bool symmetric=False) -> Tensor
+  matches_jit_signature: True
 
 - func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
   matches_jit_signature: True
@@ -1332,10 +1345,12 @@
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: miopen_batch_norm
 
 - func: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: miopen_batch_norm_backward
 
@@ -1446,6 +1461,7 @@
   device_guard: false
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
@@ -1456,6 +1472,7 @@
     CUDA: batch_norm_backward_cuda
 
 - func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
@@ -1470,15 +1487,20 @@
 
 - func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-6, bool keepdim=False) -> Tensor
+- func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
+  matches_jit_signature: True
 
 - func: pdist(Tensor self, float p=2) -> Tensor
+  matches_jit_signature: True
 
 - func: _pdist_forward(Tensor self, float p=2) -> Tensor
+  matches_jit_signature: True
 
 - func: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
+  matches_jit_signature: True
 
-- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-8) -> Tensor
+- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor
+  matches_jit_signature: True
   variants: function
 
 - func: permute(Tensor self, int[] dims) -> Tensor
@@ -1492,6 +1514,7 @@
   variants: function, method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: scalar_tensor(Scalar s, *, TensorOptions options=[]) -> Tensor
@@ -1589,11 +1612,13 @@
   device_guard: false
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int pooledHeight, int pooledWidth, float spatialScale) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CPU: RoiPooling2d_forward_cpu
     CUDA: RoiPooling2d_forward_cuda
 
 - func: RoiPooling2d_backward(Tensor input, Tensor rois, int pooledHeight, int pooledWidth, float spatialScale, Tensor gradOutput, Tensor argmaxes) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CPU: RoiPooling2d_backward_cpu
     CUDA: RoiPooling2d_backward_cuda
@@ -2053,7 +2078,7 @@
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   matches_jit_signature: True
 
-- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-6, bool swap=False, int reduction=Reduction::Mean) -> Tensor
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Reduction::Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
   matches_jit_signature: True
