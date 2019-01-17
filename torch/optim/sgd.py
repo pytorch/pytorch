@@ -16,11 +16,11 @@ class SGD(Optimizer):
         weight_decay (float, optional): weight decay factor (default: 0)
         l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
-            `Fixing Weight Decay Regularization in Adam` (default: True)
+            `Decoupled Weight Decay Regularization` (default: True)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
 
-    .. _Fixing Weight Decay Regularization in Adam:
+    .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
 
     Example:
