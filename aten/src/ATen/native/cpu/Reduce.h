@@ -83,7 +83,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     "the accumulate type must be default-constructible"
   );
   iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
-    auto reduction_body = [&](acc_t& acc, int64_t begin, int64_t end) {
+    auto reduction_body = [&](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       sub_iter.serial_for_each([&acc, &ops, &init](int ntensors, char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors == 2);
         char *in = data[1];
@@ -93,20 +93,26 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
           in += stride;
         }
       }, {begin, end});
+      return acc;
     };
     acc_t total_acc = init;
     auto numel = sub_iter.numel();
     if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
-      reduction_body(total_acc, 0, numel);
+      total_acc = reduction_body(total_acc, 0, numel);
     } else {
       int max_threads = at::get_max_threads();
       AT_ASSERT(max_threads > 0);
+      static_assert(
+        !std::is_same<acc_t, bool>::value,
+        "Concurrently modifying different references into std::vector<bool> is UB."
+      );
       std::vector<acc_t> buffer((unsigned)max_threads, init);
       at::parallel_for(0, numel, internal::GRAIN_SIZE,
-      [&](int64_t begin, int64_t end) {
-        auto& acc = buffer[at::get_thread_num()];
-        reduction_body(acc, begin, end);
-      });
+        [&](int64_t begin, int64_t end) {
+          auto& acc = buffer[at::get_thread_num()];
+          acc = reduction_body(acc, begin, end);
+        }
+      );
       for (int i = 0; i < max_threads; ++i) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
