@@ -29,7 +29,7 @@ class DataLoaderThread(Thread):
         self.tgt += [unpickle(self.path)]
         
 class DataProvider:
-    BATCH_REGEX = re.compile('^data_batch_(\d+)(\.\d+)?$')
+    BATCH_REGEX = re.compile(r'^data_batch_(\d+)(\.\d+)?$')
     def __init__(self, data_dir, batch_range=None, init_epoch=1, init_batchnum=None, dp_params={}, test=False):
         if batch_range == None:
             batch_range = DataProvider.get_batch_nums(data_dir)

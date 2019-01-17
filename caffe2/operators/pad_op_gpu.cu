@@ -403,12 +403,11 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
+  
+  auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1),
       dY.dim32(2) - pad_t() - pad_b(),
-      dY.dim32(3) - pad_l() - pad_r());
+      dY.dim32(3) - pad_l() - pad_r()}, at::dtype<float>());
   const int input_size = dY.size();
   const int padded_height = dY.dim32(2);
   const int padded_width = dY.dim32(3);
@@ -484,12 +483,11 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
+  
+  auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1) - pad_t() - pad_b(),
       dY.dim32(2) - pad_l() - pad_r(),
-      dY.dim32(3));
+      dY.dim32(3)}, at::dtype<float>());
   const int input_size = dY.size();
   const int padded_height = dY.dim32(1);
   const int padded_width = dY.dim32(2);

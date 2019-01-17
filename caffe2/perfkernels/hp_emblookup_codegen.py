@@ -37,7 +37,9 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
 
         if prefetch:
             code.append(
-                "        _mm_prefetch((&ip_next_T0[%d]), _MM_HINT_T0);" % (regid)
+                "        _mm_prefetch(\n"
+                "            reinterpret_cast<const char*>(&ip_next_T0[%d]), _MM_HINT_T0);"
+                % (regid)
             )
         else:
             code.append(
@@ -122,11 +124,11 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         code.extend(compute(j, InType, use_weights, isa, prefetch))
     code.append("      }")
 
-    code.append("      if (normalize_by_lengths == false) {")
+    code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
     for i in range(0, uf):
         j = 8 * i
         code.append("        _mm256_storeu_ps(&op[" + str(j) + "], vop" + str(j) + ");")
-    code.append("      } else if (lengths[rangeIndex]) {")
+    code.append("      } else {")
     # inv of length
     code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
     for i in range(0, uf):
@@ -178,7 +180,10 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         else:
             assert False
 
-        code.append("          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);")
+        code.append(
+            "          _mm_prefetch(\n"
+            "              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);"
+        )
 
         return code
 
@@ -311,7 +316,6 @@ elif opts.fused:
     filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
 else:
     filename = "embedding_lookup_avx2.cc"
-fout = open(filename, "w")
 
 options = [
     ["int32_t", "int32_t", "float", "float", "float", "float"],
@@ -422,10 +426,10 @@ for o in options:
 
 code.append("} // namespace caffe2")
 
-for c in code:
-    # print(c, file = fout)
-    fout.write(c + "\n")
-fout.close()
+with open(filename, "w") as fout:
+    for c in code:
+        # print(c, file = fout)
+        fout.write(c + "\n")
 
 
 print("Created " + filename)

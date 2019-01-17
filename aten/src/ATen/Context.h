@@ -203,6 +203,16 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline size_t getNumGPUs() {
+  if (hasCUDA()) {
+    return detail::getCUDAHooks().getNumGPUs();
+  }
+  if (hasHIP()) {
+    return detail::getHIPHooks().getNumGPUs();
+  }
+  return 0;
+}
+
 static inline bool hasMKL() {
   return globalContext().hasMKL();
 }

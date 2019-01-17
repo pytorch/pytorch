@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/assertions.h>
@@ -7,26 +8,26 @@
 #include <torch/csrc/jit/stack.h>
 #include <torch/csrc/jit/type.h>
 #include <torch/csrc/utils/functional.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/Backtrace.h>
 
+#include <cstdint>
+#include <iostream>
 #include <memory>
 #include <mutex>
-#include <vector>
-#include <iostream>
-#include <cstdint>
 #include <unordered_map>
+#include <vector>
 
-namespace torch { namespace jit { namespace tracer {
+namespace torch {
+namespace jit {
+namespace tracer {
 
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
-struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
+struct TORCH_API TracingState
+    : public std::enable_shared_from_this<TracingState> {
   TracingState();
   ~TracingState();
 
@@ -44,14 +45,14 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
     }
   };
 
-  std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
+  std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
+      value_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
   bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
-    [](const Variable& var) {return "";};
+      [](const Variable& var) { return ""; };
 };
-
 
 // This is meant to be used as a thread local place, where we can store extra
 // info that gets lost when we call into ATen from Python bindings. One example
@@ -62,18 +63,18 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
 // information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntListTrace : std::vector<Value*> {
-    IntListTrace(int size)
-      : std::vector<Value*>(size, nullptr) {}
+    IntListTrace(int size) : std::vector<Value*>(size, nullptr) {}
   };
 
   static bool empty() {
     return stash.intlists.empty();
   }
 
-  TORCH_API static void stashIntListElem(const std::string& arg_name,
-                                         size_t size,
-                                         size_t idx,
-                                         const Variable& var);
+  TORCH_API static void stashIntListElem(
+      const std::string& arg_name,
+      size_t size,
+      size_t idx,
+      const Variable& var);
 
   static bool hasIntList(const std::string& arg_name) {
     return stash.intlists.count(arg_name) > 0;
@@ -88,10 +89,11 @@ struct ArgumentStash {
   // Value stashing: Use these methods to stash arguments which correspond
   // to regular Value*'s in the graph. i.e. they don't require special
   // handling like in the case of IntLists
-  TORCH_API static void stashValue(const std::string& arg_name,
-                                   size_t idx,
-                                   const Variable& var,
-                                   const TypePtr& type=nullptr);
+  TORCH_API static void stashValue(
+      const std::string& arg_name,
+      size_t idx,
+      const Variable& var,
+      const TypePtr& type = nullptr);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;
@@ -103,13 +105,14 @@ struct ArgumentStash {
     return info;
   }
 
-private:
+ private:
   static thread_local ArgumentStash stash;
   std::unordered_map<std::string, IntListTrace> intlists;
   std::unordered_map<std::string, Value*> values;
 };
 
-// Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
+// Retrieve or set the current tracing state. Returns a nullptr if tracing is
+// disabled.
 TORCH_API const std::shared_ptr<TracingState>& getTracingState();
 TORCH_API void setTracingState(std::shared_ptr<TracingState> state);
 
@@ -118,20 +121,21 @@ inline bool isTracing() {
 }
 
 using warn_fn_type = void (*)(const std::string& msg);
-TORCH_API extern const char * WARN_PYTHON_DATAFLOW;
-TORCH_API extern const char * WARN_CONSTRUCTOR;
-TORCH_API extern const char * WARN_RESIZE;
-TORCH_API void _do_warn(const char * _reason, const char * _kind);
-inline void warn(const char * _reason, const char * _kind=nullptr) {
+TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
+TORCH_API extern const char* WARN_CONSTRUCTOR;
+TORCH_API extern const char* WARN_RESIZE;
+TORCH_API void _do_warn(const char* _reason, const char* _kind);
+inline void warn(const char* _reason, const char* _kind = nullptr) {
   if (const auto& state = getTracingState()) {
-    if (!state->warn) return;
+    if (!state->warn)
+      return;
     _do_warn(_reason, _kind);
   }
 }
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
-  NoWarn(): state(getTracingState()) {
+  NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
       state->warn = false;
@@ -146,4 +150,6 @@ struct TORCH_API NoWarn {
   bool prev;
 };
 
-}}} // namespace torch::jit::tracer
+} // namespace tracer
+} // namespace jit
+} // namespace torch

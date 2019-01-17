@@ -79,6 +79,9 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
 
   void reset() override;
 
+  /// Pretty prints the `Functional` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Forwards the `input` tensor to the underlying (bound) function object.
   Tensor forward(Tensor input);
 

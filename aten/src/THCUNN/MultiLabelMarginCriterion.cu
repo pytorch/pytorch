@@ -4,12 +4,16 @@
 #include <THC/THCReduceApplyUtils.cuh>
 #include <TH/THHalf.h>
 #include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <c10/macros/Macros.h>
 
 #include <thrust/functional.h>
 
 #define MULTILABELMARGIN_THREADS 1024
 
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS(MULTILABELMARGIN_THREADS)
+#endif
 __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output,
                                                                    Dtype *input,
                                                                    THCIndex_t *target,
@@ -77,6 +81,9 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
 }
 
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS(MULTILABELMARGIN_THREADS)
+#endif
 __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gradInput,
                                                                       Dtype *gradOutput,
                                                                       Dtype *input,
