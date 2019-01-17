@@ -19,6 +19,9 @@ namespace at {
 /// The solution to the above problem is to add `at::NonVariableTypeMode`, which
 /// when enabled will cause `legacyTensorType()` and `getType()` to always return
 /// non-Variable type, even if the tensor being called on is a variable.
+///
+/// TODO: Since `torch::NoGradGuard` serves the same purpose in libtorch, we should
+/// merge these two thread-local guards.
 
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
 /// thread_local is not supported. In that case, we don't provide
