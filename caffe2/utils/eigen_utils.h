@@ -5,8 +5,6 @@
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
-// need it for erf
-#include "unsupported/Eigen/SpecialFunctions"
 
 #include "caffe2/core/logging.h"
 
