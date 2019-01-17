@@ -73,7 +73,7 @@ class TCPStore : public Store {
   void waitHelper_(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout);
-  void cleanup_();
+  void waitForWorkers_();
 
   bool isServer_;
   int storeSocket_ = -1;
@@ -83,7 +83,7 @@ class TCPStore : public Store {
   PortType tcpStorePort_;
 
   int numWorkers_;
-  const std::string cleanupKey_;
+  const std::string initKey_;
   const std::string regularPrefix_;
 
   // Only needs to be launched as the server

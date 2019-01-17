@@ -284,7 +284,7 @@ TCPStore::TCPStore(
       tcpStoreAddr_(masterAddr),
       tcpStorePort_(masterPort),
       numWorkers_(numWorkers),
-      cleanupKey_("init/"),
+      initKey_("init/"),
       regularPrefix_("/") {
   if (isServer_) {
     // Opening up the listening socket
@@ -295,10 +295,11 @@ TCPStore::TCPStore(
   }
   // Connect to the daemon
   storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+
+  waitForWorkers_();
 }
 
 TCPStore::~TCPStore() {
-  cleanup_();
   ::close(storeSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
@@ -308,14 +309,14 @@ TCPStore::~TCPStore() {
   }
 }
 
-void TCPStore::cleanup_() {
-  addHelper_(cleanupKey_, 1);
+void TCPStore::waitForWorkers_() {
+  addHelper_(initKey_, 1);
   // Let server block until all workers have completed, this ensures that
   // the server daemon thread is always running until the very end
   if (isServer_) {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
-      std::vector<uint8_t> value = getHelper_(cleanupKey_);
+      std::vector<uint8_t> value = getHelper_(initKey_);
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
