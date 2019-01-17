@@ -1256,7 +1256,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
 
-const char* toString(AttributeKind kind);
-
 } // namespace jit
 } // namespace torch
