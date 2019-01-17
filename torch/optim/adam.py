@@ -19,14 +19,14 @@ class Adam(Optimizer):
         weight_decay (float, optional): weight decay factor (default: 0)
         l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
-            `Fixing Weight Decay Regularization in Adam` (default: True)
+            `Decoupled Weight Decay Regularization` (default: True)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
-    .. _Fixing Weight Decay Regularization in Adam:
+    .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
