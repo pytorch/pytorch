@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/DeviceId.h>
+#include <ATen/core/dispatch/DeviceId.h>
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>

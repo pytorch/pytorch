@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/OpSchema.h>
+#include <ATen/core/dispatch/OpSchema.h>
 #include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>

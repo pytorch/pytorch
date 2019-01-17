@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/Dispatcher.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 // TODO Better error message when this definition is missing
 
