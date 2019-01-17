@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -29,14 +29,12 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
 
 // Holds mappings from a variable name to a refined type for that variable
 // E.g if x is not None is true than we can refine x from type t? to t.
 struct Refinements {
-
-  //using ordered map for deterministic graph output
+  // using ordered map for deterministic graph output
   std::map<std::string, TypeAndRange> mappings_;
 
   void setRefinement(const std::string& name, TypeAndRange mapping) {
@@ -55,13 +53,15 @@ struct Refinements {
   // types can be unified
   void intersectRefinements(const Refinements& other) {
     Refinements ret;
-    for (const auto& name_mapping: mappings_) {
+    for (const auto& name_mapping : mappings_) {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
       if (auto other_mapping = other.getRefinement(name_mapping.first)) {
-        const auto maybe_unified_type = unifyTypes(mapping.first, other_mapping->first);
+        const auto maybe_unified_type =
+            unifyTypes(mapping.first, other_mapping->first);
         if (maybe_unified_type) {
-          ret.setRefinement(name, TypeAndRange(*maybe_unified_type, mapping.second));
+          ret.setRefinement(
+              name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       }
     }
@@ -72,7 +72,7 @@ struct Refinements {
   // types can be unified
   void unionRefinements(const Refinements& other) {
     Refinements ret;
-    for (const auto& name_mapping: mappings_) {
+    for (const auto& name_mapping : mappings_) {
       const auto& name = name_mapping.first;
       const auto& mapping = name_mapping.second;
       TypePtr t_1 = mapping.first;
@@ -85,15 +85,16 @@ struct Refinements {
           maybe_unified_type = t_2;
         }
         if (maybe_unified_type) {
-          ret.setRefinement(name, TypeAndRange(*maybe_unified_type, mapping.second));
+          ret.setRefinement(
+              name, TypeAndRange(*maybe_unified_type, mapping.second));
         }
       } else {
         ret.setRefinement(name, mapping);
       }
     }
 
-    for (auto& name_mapping: other.mappings_) {
-      if (getRefinement(name_mapping.first)) {
+    for (auto& name_mapping : other.mappings_) {
+      if (!getRefinement(name_mapping.first)) {
         ret.setRefinement(name_mapping.first, name_mapping.second);
       }
     }
@@ -955,13 +956,13 @@ struct to_ir {
 
   // Insert subtyping refinements
   void insertRefinements(const Refinements& ref) {
-    for (const auto name_mappings: ref.mappings_) {
+    for (const auto name_mappings : ref.mappings_) {
       const std::string& name = name_mappings.first;
       auto type = name_mappings.second.first;
       const auto& range = *name_mappings.second.second;
-      Value * v = environment_stack->getVar(name, range);
+      Value* v = environment_stack->getVar(name, range);
       if (type != NoneType::get()) {
-        Value * output = graph->insert(prim::unchecked_unwrap_optional, {v});
+        Value* output = graph->insert(prim::unchecked_unwrap_optional, {v});
         environment_stack->setVar(range, name, output);
       }
       // todo @eellison - revisit inserting Nones when None subtypes Optional
@@ -973,7 +974,6 @@ struct to_ir {
       const TreeRef& first_expr,
       const TreeRef& second_expr,
       bool is_or) {
-
     const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
@@ -1068,8 +1068,10 @@ struct to_ir {
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
-    auto save_true = emitSingleIfBranch(true_block, stmt.trueBranch(), bool_info.true_refinements_);
-    auto save_false = emitSingleIfBranch(false_block, stmt.falseBranch(), bool_info.false_refinements_);
+    auto save_true = emitSingleIfBranch(
+        true_block, stmt.trueBranch(), bool_info.true_refinements_);
+    auto save_false = emitSingleIfBranch(
+        false_block, stmt.falseBranch(), bool_info.false_refinements_);
 
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).
@@ -1983,10 +1985,14 @@ struct to_ir {
         if (inputs.at(0)->kind() == TK_VAR && inputs.at(1)->kind() == TK_NONE) {
           const std::string& var_name = Var(inputs[0]).name().name();
           Refinements true_info, false_info;
-          auto type = environment_stack->getVar(var_name, inputs[0]->range())->type();
+          auto type =
+              environment_stack->getVar(var_name, inputs[0]->range())->type();
           if (auto opt_type = type->cast<OptionalType>()) {
-            false_info.setRefinement(var_name, TypeAndRange(opt_type->getElementType(), &tree->range()));
-            true_info.setRefinement(var_name, TypeAndRange(NoneType::get(), &tree->range()));
+            false_info.setRefinement(
+                var_name,
+                TypeAndRange(opt_type->getElementType(), &tree->range()));
+            true_info.setRefinement(
+                var_name, TypeAndRange(NoneType::get(), &tree->range()));
           }
           if (tree->kind() == TK_IS) {
             return BoolInfo(true_info, false_info);
@@ -1995,10 +2001,11 @@ struct to_ir {
           }
         }
       } break;
-      case TK_NOT:{
+      case TK_NOT: {
         const auto& inputs = tree->trees();
         auto bool_info = findRefinements(inputs[0]);
-        return BoolInfo(bool_info.false_refinements_, bool_info.true_refinements_);
+        return BoolInfo(
+            bool_info.false_refinements_, bool_info.true_refinements_);
       }
       case TK_OR:
       case TK_AND: {
@@ -2219,7 +2226,7 @@ struct to_ir {
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (*v->type() != *elem_type)  {
+          if (*v->type() != *elem_type) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
