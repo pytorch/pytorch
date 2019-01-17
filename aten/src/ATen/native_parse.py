@@ -35,6 +35,7 @@ def parse_default(s):
             return s
 
 
+# [temp translations]
 # We want to be able to move from the current custom func schema to the
 # JIT signature schema incrementally. So we do do raw type translations
 # to avoid having to change all downstream tools before absolutely necessary
@@ -50,7 +51,7 @@ def temp_type_translations(typ):
 
 
 def sanitize_type(typ):
-    if typ == 'Generator?':
+    if typ == 'Generator*':
         return 'Generator *'
     return typ
 
@@ -87,17 +88,25 @@ def parse_arguments(args, func_decl, func_name, func_return):
         t, name = type_and_name
         default = None
 
+        # Enables Generator? by translating to legacy Generator*. See [temp translations]
+        if t == 'Generator?':
+            t = 'Generator*'
+
         if '=' in name:
             ns = name.split('=', 1)
+            # This enables Tensor? x=None and translates to legacy
+            # "Tensor? x=[]". See [temp translations].
+            if t == 'Tensor?' and ns[1] == 'None':
+                ns[1] = "[]"
+            # This enables "Generator? x = None and translates to legacy
+            # "Generator* x = nullptr". See [temp translations].
+            if t == 'Generator*' and ns[1] == 'None':
+                ns[1] = 'nullptr'
             name, default = ns[0], parse_default(ns[1])
 
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
-        if argument_dict['is_nullable'] and argument_dict['type'] == 'Tensor' and default == "c10::nullopt":
-            default = "{}"
-        if argument_dict['type'] == 'Generator *' and default == "c10::nullopt":
-            default = "nullptr"
         match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
