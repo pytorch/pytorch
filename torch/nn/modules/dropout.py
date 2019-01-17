@@ -40,8 +40,8 @@ class Dropout(_DropoutNd):
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
 
     Shape:
-        - Input: `Any`. Input can be of any shape
-        - Output: `Same`. Output is of the same shape as input
+        - Input: :math:`(*)`. Input can be of any shape
+        - Output: :math:`(*)`. Output is of the same shape as input
 
     Examples::
 
@@ -173,8 +173,8 @@ class AlphaDropout(_DropoutNd):
             in-place
 
     Shape:
-        - Input: `Any`. Input can be of any shape
-        - Output: `Same`. Output is of the same shape as input
+        - Input: :math:`(*)`. Input can be of any shape
+        - Output: :math:`(*)`. Output is of the same shape as input
 
     Examples::
 
