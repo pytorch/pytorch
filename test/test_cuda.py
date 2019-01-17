@@ -107,6 +107,7 @@ def cast_tensor(tensor, t):
 
 S = 10
 M = 50
+G = 275000000
 
 
 def make_tensor(t, *sizes):
@@ -243,6 +244,10 @@ def large_2d_lapack(t):
     return t(1000, 1000).normal_()
 
 
+def giant_1d_ones(t):
+    return t(G).copy_(torch.ones(G))
+
+
 def long_type(t):
     return torch.cuda.LongTensor if 'cuda' in t.__module__ else torch.LongTensor
 
@@ -356,6 +361,10 @@ tests = [
     ('mean', small_3d, lambda t: []),
     ('mean', small_3d, lambda t: [-1], 'neg_dim'),
     ('mean', small_3d, lambda t: [1], 'dim'),
+    ('mean', giant_1d_ones, lambda t: [], '64bit_indexing',
+        # Double here because otherwise the CPU result will be
+        # wrong.
+        [torch.DoubleTensor]),
     ('mode', small_3d, lambda t: []),
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),
@@ -667,7 +676,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False):
+        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -702,7 +711,26 @@ class TestCuda(TestCase):
                 self.assertEqual(new_max_c, max_c_arr[0])
                 last_c_arr[0] = new_c
 
+            if reset_max_alloc:
+                torch.cuda.reset_max_memory_allocated(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
+                max_m_arr[0] = last_m_arr[0]
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
+
+            if reset_max_cached:
+                torch.cuda.reset_max_memory_cached(device)
+                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
+                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
+                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
+                max_c_arr[0] = last_c_arr[0]
+
         assert_change(0)
+        assert_change(0, reset_max_alloc=True)
+        assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
         assert_change(0)
         yield
 
@@ -722,7 +750,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1)
+            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -742,7 +770,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0)
+        assert_change(0, reset_max_alloc=True)
         yield
 
         for i in range(int(N / 2)):
@@ -757,17 +785,19 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1)
+        assert_change(-1, reset_max_cached=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1)
+        assert_change(-1, reset_max_alloc=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache
+        # test empty_cache and reset_max_memory_*
         assert_change(0, empty_cache=True)
+        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_max_alloc=True)
 
     def test_memory_stats(self):
         torch.cuda.empty_cache()
@@ -1783,6 +1813,12 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
+        # test corner case from Issue #13867
+        torch.cuda.manual_seed(33)
+        probs = torch.randn(1000000, device='cuda').clamp(min=0) * 3e-5
+        samples = probs.multinomial(1000000, replacement=True)
+        self.assertGreater(probs[samples].min().item(), 0)
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -2174,6 +2210,11 @@ class TestCuda(TestCase):
         a /= 100000000
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
+
+    @skipIfRocm
+    def test_norm_type_conversion(self):
+        a = torch.ones(65536).cuda().half()
+        self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
     @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak

@@ -123,7 +123,7 @@ class SubgraphSlicer {
 
   std::pair<graph_node_list::iterator, bool> scanNode(
       Node* consumer,
-      const AliasDb& aliasDb) {
+      AliasDb& aliasDb) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
         consumer = SubgraphUtils::createSingletonSubgraph(
@@ -147,10 +147,10 @@ class SubgraphSlicer {
   c10::optional<Node*> tryMerge(
       Node* consumer,
       Node* producer,
-      const AliasDb& aliasDb) {
+      AliasDb& aliasDb) {
     JIT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
-        producer->moveBeforeTopologicallyValid(consumer, aliasDb);
+        aliasDb.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
       return c10::nullopt;

@@ -204,6 +204,21 @@ function build_caffe2() {
   if [[ -n $CMAKE_PREFIX_PATH ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
   fi
+  if [[ -n $BLAS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DBLAS=$BLAS")
+  fi
+  if [[ -n $CUDA_NVCC_EXECUTABLE ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE")
+  fi
+  if [[ -n $USE_REDIS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_REDIS=$USE_REDIS")
+  fi
+  if [[ -n $USE_GLOG ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GLOG=$USE_GLOG")
+  fi
+  if [[ -n $USE_GFLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GFLAGS=$USE_GFLAGS")
+  fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_COMMAND} $BASE_DIR \
@@ -240,8 +255,6 @@ function build_caffe2() {
 		       -DUSE_QNNPACK=$USE_QNNPACK \
 		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
-		       -DUSE_GLOG=OFF \
-		       -DUSE_GFLAGS=OFF \
 		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
 		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
 		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \

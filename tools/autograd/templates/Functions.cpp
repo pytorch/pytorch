@@ -114,10 +114,21 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   return self_scaled * scale_v;
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, IntList dim, bool keepdim) {
+  IntList sizes = self.sizes();
   if (!keepdim && self.dim() != 0) {
-    grad = grad.unsqueeze(dim);
-    norm = norm.unsqueeze(dim);
+    if (dim.size()==1) {
+      grad = grad.unsqueeze(dim[0]);
+      norm = norm.unsqueeze(dim[0]);
+    } else {
+      auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
+      for (size_t i = 0; i < sizes.size(); i++){
+        if (dims_to_unsqueeze[i]) {
+          grad = grad.unsqueeze(i);
+          norm = norm.unsqueeze(i);
+        }
+      }
+    }
   }
   return norm_backward(grad, self, p_, norm);
 }

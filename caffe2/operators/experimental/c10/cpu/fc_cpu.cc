@@ -98,15 +98,12 @@ void fc_op_cpu_impl(
       math_type);
   // Add bias term
   Tensor bias_multiplier(cache->bias_multiplier_);
-  if (bias_multiplier.numel() != M) {
-    // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier.Resize(M);
-    caffe2::math::Set<DataType, Context>(
-        M,
-        caffe2::convert::To<float, DataType>(1),
-        bias_multiplier.template mutable_data<DataType>(),
-        static_cast<Context*>(&context));
-  }
+  ReinitializeTensor(&bias_multiplier, {M}, at::dtype<DataType>().device(CPU));
+  caffe2::math::Set<DataType, Context>(
+      M,
+      caffe2::convert::To<float, DataType>(1),
+      bias_multiplier.template mutable_data<DataType>(),
+      static_cast<Context*>(&context));
   caffe2::math::Gemm<DataType, Context, caffe2::DefaultEngine>(
       CblasNoTrans,
       CblasNoTrans,

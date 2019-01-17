@@ -321,7 +321,7 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
       "Not compiling with FBGEMM. "
@@ -751,17 +751,14 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
 
-# ---[ ROCm
-if(USE_ROCM)
- include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${ROCBLAS_PATH}/include)
- include_directories(SYSTEM ${ROCFFT_PATH}/include)
- include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
- include_directories(SYSTEM ${HIPRAND_PATH}/include)
- include_directories(SYSTEM ${ROCRAND_PATH}/include)
- include_directories(SYSTEM ${THRUST_PATH})
+  include_directories(SYSTEM ${HIP_PATH}/include)
+  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+  include_directories(SYSTEM ${ROCFFT_PATH}/include)
+  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
+  include_directories(SYSTEM ${HIPRAND_PATH}/include)
+  include_directories(SYSTEM ${ROCRAND_PATH}/include)
+  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -826,6 +823,7 @@ if(USE_GLOO)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
     endif()
+    add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
 endif()
 
