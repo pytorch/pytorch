@@ -180,13 +180,10 @@ struct GraphFuser {
   }
 
   bool containsGradSumToSize(Node* fusion_group) {
-    auto subgraph = &getSubgraph(fusion_group);
-    for (Node* n : subgraph->nodes()) {
-      if (n->kind() == aten::_grad_sum_to_size) {
-        return true;
-      }
-    }
-    return false;
+    auto nodes = getSubgraph(fusion_group).nodes();
+    return std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+	return n->kind() == aten::_grad_sum_to_size;
+      }) != nodes.end();
   }
 
   bool isFusable(Node* node) {
@@ -366,7 +363,7 @@ struct GraphFuser {
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
       if (input->type()->isSubtypeOf(DynamicType::get()))
-	tensor_insert_idx = i;
+        tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
     // them
@@ -380,9 +377,10 @@ struct GraphFuser {
           in_group->setType(input->type());
           inputs_map[input] = in_group;
           group->insertInput(tensor_insert_idx, input);
-	  tensor_insert_idx++;
-	} else if (n->kind() == aten::_grad_sum_to_size &&
-		   input->type()->isSubtypeOf(ListType::ofInts())) {
+          tensor_insert_idx++;
+        } else if (
+            n->kind() == aten::_grad_sum_to_size &&
+            input->type()->isSubtypeOf(ListType::ofInts())) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;

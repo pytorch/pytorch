@@ -102,7 +102,7 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
-  std::vector<size_t>& outputGradSumToSizes() {
+  std::vector<int64_t>& outputGradSumToSizes() {
     return outputGradSumToSizes_;
   }
 
@@ -132,7 +132,7 @@ struct TORCH_API KernelSpec {
   uint64_t nInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
-  std::vector<size_t> outputGradSumToSizes_;
+  std::vector<int64_t> outputGradSumToSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::

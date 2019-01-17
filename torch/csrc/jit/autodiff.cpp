@@ -1009,8 +1009,9 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
-  // TODO: we are sometimes emitting expressions like GradSumToSize(GradSumToSize(x,
-  // s1), s2), which are equivalent to SumToSize(x, s2), and could save us some
+  // TODO: we are sometimes emitting expressions like
+  // _grad_sum_to_size(_grad_sum_so_size(x, s1), s2), which are equivalent to
+  // _grad_sum_to_size(x, s2), and could save us some
   // captures, but I'm not 100% sure how to optimize this at this stage, since
   // we don't know which GradOf blocks will be stitched together to form the
   // derivative. I guess a smart analysis could implement this, but I didn't

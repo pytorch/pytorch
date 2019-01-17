@@ -53,7 +53,6 @@ const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
   return getFusionBackends().at(backend_type);
 }
 
-
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
 static std::atomic<size_t> next_kernel_id{0};
@@ -87,13 +86,14 @@ static const Node* usedInFusedChunk(const Value* input) {
 static void setInputChunkDescriptors(KernelSpec& spec) {
   spec.inputChunks().reserve((spec.graph())->inputs().size());
   for (const Value* input : (spec.graph())->inputs()) {
-    if (input->type()->isSubtypeOf(DynamicType::get())) {
-      if (const Node* chunk = usedInFusedChunk(input)) {
-        spec.inputChunks().emplace_back(
-            chunk->i(attr::chunks), chunk->i(attr::dim));
-      } else {
-        spec.inputChunks().emplace_back(1, 0);
-      }
+    if (!input->type()->isSubtypeOf(DynamicType::get())) {
+      continue;
+    }
+    if (const Node* chunk = usedInFusedChunk(input)) {
+      spec.inputChunks().emplace_back(
+          chunk->i(attr::chunks), chunk->i(attr::dim));
+    } else {
+      spec.inputChunks().emplace_back(1, 0);
     }
   }
 }
@@ -107,6 +107,14 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     const Value* val = queue.back();
     queue.pop_back();
     const Node* producer = val->node();
+    // Here we assume that only tensor inputs are used in
+    // the computation of the outputs.
+    // This is currently true, as the only inputs will be
+    // sizes (for _grad_sum_to_size as the derivative
+    // of broadcasts), which will only be used after
+    // the fusion kernel, and Tensors.
+    // This needs to be revisited when you start allowing
+    // other things e.g. nonconstant scalars.
     if (producer->kind() == prim::Param &&
         val->type()->isSubtypeOf(DynamicType::get())) {
       inputs.insert(val);
@@ -148,12 +156,15 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
-// This function moves GradSumToSize nodes inside a fusion group to the end of
-// the fusion group. Note that correctness relies on the invariant that
-// GradSumToSize is only applied to gradient nodes created by autodiff. This is
-// important because it ensures that in the mul and div nodes only one argument
-// (in the case of diff the numerator) has a summed value. If two arguments to
-// mul had one, we would be in trouble, but thanks to the chain rule, we're OK.
+// This function moves _grad_sum_to_size nodes along the computation graph
+// of the fusion group to the outputs and then records the shape inputs
+// in order for summation to be applied after the kernel.
+// Note that the correctness relies on the invariant that
+// _grad_sum_to_size is only applied to gradient nodes created by autodiff.
+// This is important because it ensures that in the mul and div nodes only
+// one argument (in the case of diff the numerator) has a summed value.
+// If two arguments to mul had one, we would be in trouble, but thanks
+// to the chain rule, we're OK.
 void processGradSumToSize(KernelSpec& spec) {
   auto graph = spec.graph();
 
@@ -172,10 +183,11 @@ void processGradSumToSize(KernelSpec& spec) {
       "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       // add this used to be prim::AutogradAdd
   }};
-  // Scan the graph. As we will delete nodes, we use the backward ordering.
-  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
+  // Scan the graph. We will delete nodes. We want later (in the graph)
+  // _grad_sum_to_size nodes to have priority over earlier ones. Thus
+  // we scan backwards.
+  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend(); it++) {
     auto* node = *it;
-    ++it; // We delete the GradSumToSize nodes, so increment the iterator now.
     if (node->kind() == aten::_grad_sum_to_size) {
       use_list uses_to_process(node->output()->uses());
       while (!uses_to_process.empty()) {
@@ -203,10 +215,15 @@ void processGradSumToSize(KernelSpec& spec) {
               user->output()->uses().begin(),
               user->output()->uses().end());
         } else if (user->kind() == aten::_grad_sum_to_size) {
-          // we can just keep the last, so we're done here (this case might not
-          // happen due to how we organize the search and remove nodes...)
+          // this case should not happen due to how we organize the search
+          // and remove nodes
+          JIT_ASSERT(false);
         } else if (user->kind() == prim::Return) {
-          // only if we don't already have a sumToSize for this
+          // only if we don't already have a _grad_sum_to_size for this,
+          // because we want later (in the graph) nodes to be preferrable
+          // to earlier ones and we iterate backwards
+          // The implicit assumption is that if we have several _grad_sumtosizes
+          // "in parallel" (from addition) they are the same.
           if (outputGradSumToSizes[offset] == -1) {
             // note: we make the assumption that the sizes are inputs to the
             // fusion group (rather than something calculated).
@@ -222,7 +239,7 @@ void processGradSumToSize(KernelSpec& spec) {
       // remove the GradSumToSize node, a new node outside the fusion graph
       // will be inserted below
       node->output()->replaceAllUsesWith(node->inputs()[0]);
-      node->destroy();
+      it.destroyCurrent();
     }
   }
 }
