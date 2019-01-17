@@ -59,7 +59,7 @@ private:
   }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
-    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
+    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.sizes());
   }
 
   at::Tensor peek(size_t i, size_t N) {
@@ -167,7 +167,7 @@ private:
       descriptor << "-" << a;
 
     std::string descriptor_sized =
-        descriptor.str() + "-" + caffe2::to_string(InputSize());
+        descriptor.str() + "-" + c10::to_string(InputSize());
     std::string descriptor_var_args = descriptor.str() + "-*";
     if (op_to_key.count(descriptor_sized) > 0) {
       return op_to_key[descriptor_sized];

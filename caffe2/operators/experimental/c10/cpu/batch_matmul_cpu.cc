@@ -1,6 +1,7 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/batch_matmul.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -12,21 +13,23 @@ namespace {
 
 template <class T, class Context>
 void batch_matmul_op_cpu_impl(
-    const Tensor& A,
-    const Tensor& B,
-    Tensor* Y,
+    const C10Tensor& A_,
+    const C10Tensor& B_,
+    const C10Tensor& Y_,
     int trans_a,
     int trans_b,
     int broadcast,
-    int use_scratch,
-    caffe2::ops::BatchMatmul::State* state,
-    BaseContext* context) {
+    caffe2::ops::BatchMatmul::State* state) {
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor Y(Y_);
+  CPUContext context;
   using Engine = caffe2::DefaultEngine;
 
-  auto ndims_A = A.ndim();
-  auto dims_A = A.dims();
-  auto ndims_B = B.ndim();
-  auto dims_B = B.dims();
+  auto ndims_A = A.dim();
+  auto dims_A = A.sizes().vec();
+  auto ndims_B = B.dim();
+  auto dims_B = B.sizes().vec();
 
   auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {
     std::stringstream ss;
@@ -78,9 +81,9 @@ void batch_matmul_op_cpu_impl(
         dims_B[0],
         "Vector-vector product requires each of the vectors to "
         "be the same size.");
-    Y->Resize(1);
+    Y.Resize(1);
     math::Dot<T, Context>(
-        dims_A[0], data_A, data_B, Y->template mutable_data<T>(), static_cast<Context*>(context));
+        dims_A[0], data_A, data_B, Y.template mutable_data<T>(), static_cast<Context*>(&context));
   } else {
     bool A_broadcasted = false, B_broadcasted = false;
     if (ndims_A == 1) {
@@ -232,8 +235,8 @@ void batch_matmul_op_cpu_impl(
     }
 
     // Allocate output tensor
-    Y->Resize(new_dims);
-    auto* Y_data = Y->template mutable_data<T>();
+    Y.Resize(new_dims);
+    auto* Y_data = Y.template mutable_data<T>();
 
     // Zero batch dimension indicates no elements
     if (num_sub_batches == 0 || num_outer_batches == 0) {
@@ -257,7 +260,7 @@ void batch_matmul_op_cpu_impl(
           0.0f,
           Y_data + p * Y_stride,
           M * N,
-          static_cast<Context*>(context));
+          static_cast<Context*>(&context));
     }
   }
 }

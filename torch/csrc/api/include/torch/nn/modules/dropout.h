@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <vector>
@@ -11,7 +11,7 @@ namespace torch {
 namespace nn {
 
 /// Options for `Dropout` and `FeatureDropout`.
-struct DropoutOptions {
+struct TORCH_API DropoutOptions {
   /* implicit */ DropoutOptions(double rate = 0.5);
   /// The probability with which a particular component of the input is set to
   /// zero.
@@ -36,12 +36,16 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
 ///
 /// See https://pytorch.org/docs/stable/nn.html#torch.nn.Dropout to learn more
 /// about the exact semantics of this module.
-class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
+class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
   using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
+
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `Dropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// Applies spatial [Dropout](https://arxiv.org/abs/1207.0580) to inputs with
@@ -53,12 +57,17 @@ class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
 /// [Dropout3d](https://pytorch.org/docs/stable/nn.html#torch.nn.Dropout3d) for
 /// 3-D features. This `FeatureDropout` module can instead deal with both 2-D
 /// and 3-D features.
-class FeatureDropoutImpl : public detail::DropoutImplBase<FeatureDropoutImpl> {
+class TORCH_API FeatureDropoutImpl
+    : public detail::DropoutImplBase<FeatureDropoutImpl> {
  public:
   using detail::DropoutImplBase<FeatureDropoutImpl>::DropoutImplBase;
+
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `FeatureDropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// A `ModuleHolder` subclass for `DropoutImpl`.

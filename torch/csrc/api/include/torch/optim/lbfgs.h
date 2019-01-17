@@ -14,7 +14,7 @@
 namespace torch {
 namespace optim {
 
-struct LBFGSOptions {
+struct TORCH_API LBFGSOptions {
   LBFGSOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(int64_t, max_iter) = 20;
@@ -24,7 +24,7 @@ struct LBFGSOptions {
   TORCH_ARG(size_t, history_size) = 100;
 };
 
-class LBFGS : public LossClosureOptimizer {
+class TORCH_API LBFGS : public LossClosureOptimizer {
  public:
   template <typename ParameterContainer>
   explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
@@ -65,8 +65,8 @@ class LBFGS : public LossClosureOptimizer {
     archive("H_diag", self.H_diag, /*is_buffer=*/true);
     archive("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
     archive("prev_loss", self.prev_loss, /*is_buffer=*/true);
-    detail::serialize(archive, "old_dirs", self.old_dirs);
-    detail::serialize(archive, "old_stps", self.old_stps);
+    optim::serialize(archive, "old_dirs", self.old_dirs);
+    optim::serialize(archive, "old_stps", self.old_stps);
   }
 };
 } // namespace optim

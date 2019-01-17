@@ -64,7 +64,7 @@ def _load_cudart():
         return lib
 
     raise RuntimeError(
-        "couldn't find libcudart. Make sure CUDA libraries are installed in a"
+        "couldn't find libcudart. Make sure CUDA libraries are installed in a "
         "default location, or that they're in {}."
         .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
                 'LD_LIBRARY_PATH'))
@@ -86,7 +86,7 @@ http://www.nvidia.com/Download/index.aspx""")
 The NVIDIA driver on your system is too old (found version {}).
 Please update your GPU driver by downloading and installing a new
 version from the URL: http://www.nvidia.com/Download/index.aspx
-Alternatively, go to: http://pytorch.org to install
+Alternatively, go to: https://pytorch.org to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
@@ -96,7 +96,7 @@ def _check_capability():
     Found GPU%d %s which requires CUDA_VERSION >= %d for
      optimal performance and fast startup time, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
-     using instructions from http://pytorch.org
+     using instructions from https://pytorch.org
     """
 
     old_gpu_warn = """
@@ -375,7 +375,7 @@ def empty_cache():
 
 
 def memory_allocated(device=None):
-    r"""Returns the current GPU memory usage by tensors in bytes for a given
+    r"""Returns the current GPU memory occupied by tensors in bytes for a given
     device.
 
     Arguments:
@@ -394,8 +394,14 @@ def memory_allocated(device=None):
 
 
 def max_memory_allocated(device=None):
-    r"""Returns the maximum GPU memory usage by tensors in bytes for a given
+    r"""Returns the maximum GPU memory occupied by tensors in bytes for a given
     device.
+
+    By default, this returns the peak allocated memory since the beginning of
+    this program. :func:`~torch.cuda.reset_max_memory_allocated` can be used to
+    reset the starting point in tracking this metric. For example, these two
+    functions can measure the peak allocated memory usage of each iteration in a
+    training loop.
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
@@ -408,6 +414,25 @@ def max_memory_allocated(device=None):
     """
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_maxMemoryAllocated(device)
+
+
+def reset_max_memory_allocated(device=None):
+    r"""Resets the starting point in tracking maximum GPU memory occupied by
+    tensors for a given device.
+
+    See :func:`~torch.cuda.max_memory_allocated` for details.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    device = _get_device_index(device, optional=True)
+    return torch._C._cuda_resetMaxMemoryAllocated(device)
 
 
 def memory_cached(device=None):
@@ -431,6 +456,12 @@ def max_memory_cached(device=None):
     r"""Returns the maximum GPU memory managed by the caching allocator in bytes
     for a given device.
 
+    By default, this returns the peak cached memory since the beginning of this
+    program. :func:`~torch.cuda.reset_max_memory_cached` can be used to reset
+    the starting point in tracking this metric. For example, these two functions
+    can measure the peak cached memory amount of each iteration in a training
+    loop.
+
     Arguments:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :meth:`~torch.cuda.current_device`,
@@ -442,6 +473,25 @@ def max_memory_cached(device=None):
     """
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_maxMemoryCached(device)
+
+
+def reset_max_memory_cached(device=None):
+    r"""Resets the starting point in tracking maximum GPU memory managed by the
+    caching allocator for a given device.
+
+    See :func:`~torch.cuda.max_memory_cached` for details.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    device = _get_device_index(device, optional=True)
+    return torch._C._cuda_resetMaxMemoryCached(device)
 
 
 def _host_allocator():

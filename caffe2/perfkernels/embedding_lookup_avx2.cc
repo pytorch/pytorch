@@ -5,9 +5,10 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
-#include <caffe2/core/common.h>
-#include <caffe2/core/types.h>
+#include <ATen/core/Half.h>
+#include <c10/util/Logging.h>
 #include <immintrin.h>
+#include <cassert>
 
 namespace caffe2 {
 
@@ -72,39 +73,47 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
-        _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
-        _mm_prefetch((&ip_next_T0[80]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[80]), _MM_HINT_T0);
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
-        _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
-        _mm_prefetch((&ip_next_T0[112]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[112]), _MM_HINT_T0);
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -121,7 +130,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -178,23 +187,27 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
-        _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -203,7 +216,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -248,20 +261,22 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -300,14 +315,15 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -354,7 +370,8 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
               &op[j],
               _mm256_fmadd_ps(
                   vwgt, _mm256_loadu_ps(&ip[j]), _mm256_loadu_ps(&op[j])));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
           op[j] += wgt * ip[j];
@@ -487,39 +504,47 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
-        _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
         // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
-        _mm_prefetch((&ip_next_T0[80]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[80]), _MM_HINT_T0);
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
         // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
-        _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
         // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
-        _mm_prefetch((&ip_next_T0[112]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[112]), _MM_HINT_T0);
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -536,7 +561,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -593,23 +618,27 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
         // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
-        _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -618,7 +647,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -663,20 +692,22 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
-        _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -715,14 +746,15 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -769,7 +801,8 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
               &op[j],
               _mm256_fmadd_ps(
                   vwgt, _mm256_loadu_ps(&ip[j]), _mm256_loadu_ps(&op[j])));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
           op[j] += wgt * ip[j];
@@ -906,7 +939,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -930,7 +964,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -954,7 +989,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (64)))),
             vop64);
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -978,7 +1014,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (96)))),
             vop96);
-        _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -998,7 +1035,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1015,7 +1052,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1076,7 +1113,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1100,7 +1138,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1120,7 +1159,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1129,7 +1168,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1178,7 +1217,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1198,12 +1238,12 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1246,7 +1286,8 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1254,10 +1295,10 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1307,9 +1348,10 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
                   _mm256_cvtph_ps(_mm_loadu_si128(
                       reinterpret_cast<const __m128i*>(&ip[j]))),
                   _mm256_loadu_ps(&op[j])));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
-        at::Half vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
@@ -1447,7 +1489,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1471,7 +1514,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1495,7 +1539,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (64)))),
             vop64);
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1519,7 +1564,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (96)))),
             vop96);
-        _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1539,7 +1585,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1556,7 +1602,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1617,7 +1663,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1641,7 +1688,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (32)))),
             vop32);
-        _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1661,7 +1709,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1670,7 +1718,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1719,7 +1767,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1739,12 +1788,12 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1787,7 +1836,8 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (0)))),
             vop0);
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1795,10 +1845,10 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1848,9 +1898,10 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
                   _mm256_cvtph_ps(_mm_loadu_si128(
                       reinterpret_cast<const __m128i*>(&ip[j]))),
                   _mm256_loadu_ps(&op[j])));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
-        at::Half vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
@@ -1992,7 +2043,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2040,7 +2092,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (64))))),
             _mm256_add_ps(vop64, vbio));
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2084,7 +2137,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2101,7 +2154,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2166,7 +2219,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2210,7 +2264,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2219,7 +2273,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2272,7 +2326,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2292,12 +2347,12 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2344,7 +2399,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2352,10 +2408,10 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2410,7 +2466,8 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
                   _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
                       reinterpret_cast<const __m128i*>(&ip[j])))),
                   _mm256_add_ps(_mm256_loadu_ps(&op[j]), vbio)));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
           op[j] += wgt * ((float)ip[j]) + bio;
@@ -2551,7 +2608,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2599,7 +2657,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (64))))),
             _mm256_add_ps(vop64, vbio));
-        _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2643,7 +2702,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2660,7 +2719,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2725,7 +2784,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2769,7 +2829,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2778,7 +2838,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2831,7 +2891,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2851,12 +2912,12 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2903,7 +2964,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (0))))),
             _mm256_add_ps(vop0, vbio));
-        _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
+        _mm_prefetch(
+            reinterpret_cast<const char*>(&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2911,10 +2973,10 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2969,7 +3031,8 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
                   _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
                       reinterpret_cast<const __m128i*>(&ip[j])))),
                   _mm256_add_ps(_mm256_loadu_ps(&op[j]), vbio)));
-          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
+          _mm_prefetch(
+              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
         for (; j < block_size; j++) {
           op[j] += wgt * ((float)ip[j]) + bio;

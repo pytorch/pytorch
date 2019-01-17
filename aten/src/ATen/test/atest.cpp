@@ -1,7 +1,6 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "test_seed.h"
+#include <ATen/ATen.h>
 
 #include<iostream>
 using namespace std;
@@ -23,8 +22,7 @@ void trace() {
 
 // TEST_CASE( "atest", "[]" ) {
 TEST(atest, atest) {
-  manual_seed(123, at::kCPU);
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   auto foo = rand({12, 6});
 
@@ -94,7 +92,7 @@ TEST(atest, atest) {
   if (at::hasCUDA()) {
     int isgone = 0;
     {
-      auto base = CUDA(kFloat).tensor({1, 2, 3});
+      auto base = at::empty({1,2,3}, TensorOptions(kCUDA));
       auto f2 = CUDA(kFloat).tensorFromBlob(
           base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
     }

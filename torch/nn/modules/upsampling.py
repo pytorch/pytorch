@@ -3,8 +3,10 @@ import warnings
 
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
@@ -12,8 +14,9 @@ class Upsample(Module):
     `minibatch x channels x [optional depth] x [optional height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
-    The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear
-    for 3D, 4D and 5D input Tensor, respectively.
+    The algorithms available for upsampling are nearest neighbor and linear,
+    bilinear, bicubic and trilinear for 3D, 4D and 5D input Tensor,
+    respectively.
 
     One can either give a :attr:`scale_factor` or the target output :attr:`size` to
     calculate the output size. (You cannot give both, as it is ambiguous)
@@ -21,8 +24,8 @@ class Upsample(Module):
     Args:
         size (tuple, optional): a tuple of ints `([optional D_out], [optional H_out], W_out)` output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
-        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
-                                    Default: `nearest`
+        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear`,
+            `bicubic` and `trilinear`. Default: `nearest`
         align_corners (bool, optional): if True, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is `linear`,
@@ -44,11 +47,12 @@ class Upsample(Module):
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
-        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
-        output and input pixels, and thus the output values can depend on the
-        input size. This was the default behavior for these modes up to version
-        0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See below for concrete examples on how this affects the outputs.
+        (`linear`, `bilinear`, `bicubic`, and `trilinear`) don't proportionally
+        align the output and input pixels, and thus the output values can depend
+        on the input size. This was the default behavior for these modes up to
+        version 0.3.1. Since then, the default behavior is
+        ``align_corners = False``. See below for concrete examples on how this
+        affects the outputs.
 
     .. note::
         If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.
@@ -112,15 +116,19 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
 
     def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
         super(Upsample, self).__init__()
+        self.name = type(self).__name__
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
         self.align_corners = align_corners
 
+    @weak_script_method
     def forward(self, input):
+        warnings.warn("nn.{} is deprecated. Use nn.functional.interpolate instead.".format(self.name))
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
@@ -132,6 +140,7 @@ class Upsample(Module):
         return info
 
 
+@weak_module
 class UpsamplingNearest2d(Upsample):
     r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input
     channels.
@@ -175,11 +184,8 @@ class UpsamplingNearest2d(Upsample):
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingNearest2d, self).forward(input)
 
-
+@weak_module
 class UpsamplingBilinear2d(Upsample):
     r"""Applies a 2D bilinear upsampling to an input signal composed of several input
     channels.
@@ -223,7 +229,3 @@ class UpsamplingBilinear2d(Upsample):
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
-
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingBilinear2d, self).forward(input)

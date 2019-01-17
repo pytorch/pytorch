@@ -6,7 +6,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -24,21 +24,21 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   void DeformableIm2col(
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* data_col);
   void DeformableCol2im(
       const T* data_col,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_im);
   void DeformableCol2imCoord(
       const T* data_col,
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_offset);
 
  protected:
@@ -71,7 +71,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
 
  private:
   Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   // Input: X, o, W, b
@@ -96,8 +96,8 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
   bool RunOnDeviceWithOrderNCHW() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;

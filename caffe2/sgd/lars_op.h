@@ -21,24 +21,24 @@ class LarsOp final : public Operator<Context> {
     auto& X = Input(0);
     auto& dX = Input(1);
     CAFFE_ENFORCE(
-        dX.size() == X.size(), "Gradient size doesn't match parameter size.");
+        dX.numel() == X.numel(), "Gradient size doesn't match parameter size.");
     CAFFE_ENFORCE_GE(offset_, 0);
     CAFFE_ENFORCE_GE(lr_min_, 0);
 
     auto& wd = Input(2);
     auto& trust = Input(3);
     auto& lr_max = Input(4);
-    auto* lr_rescaled = Output(0);
-    lr_rescaled->Resize(vector<int64_t>{1});
 
-    X_norm_tensor_.Resize(1);
+    auto* lr_rescaled = Output(0, vector<int64_t>{1}, at::dtype<T>());
+
+    ReinitializeTensor(&X_norm_tensor_, {1}, at::dtype<T>().device(Context::GetDeviceType()));
     T* X_norm_ = X_norm_tensor_.template mutable_data<T>();
 
-    dX_norm_tensor_.Resize(1);
+    ReinitializeTensor(&dX_norm_tensor_, {1}, at::dtype<T>().device(Context::GetDeviceType()));
     T* dX_norm_ = dX_norm_tensor_.template mutable_data<T>();
 
     ComputeNorms(
-        dX.size(),
+        dX.numel(),
         X.template data<T>(),
         dX.template data<T>(),
         X_norm_,
@@ -84,8 +84,8 @@ class LarsOp final : public Operator<Context> {
   T offset_;
   T lr_min_;
 
-  Tensor X_norm_tensor_{Context::GetDeviceType()};
-  Tensor dX_norm_tensor_{Context::GetDeviceType()};
+  Tensor X_norm_tensor_;
+  Tensor dX_norm_tensor_;
 };
 
 } // namespace caffe2

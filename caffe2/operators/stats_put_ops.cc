@@ -25,6 +25,12 @@ OPERATOR_SCHEMA(AveragePut)
     .Arg(
         "magnitude_expand",
         "(*int64_t*): number to multiply input values by (used when inputting floats, as stats can only receive integers")
+    .Arg(
+        "bound",
+        "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
+    .Arg(
+        "default_value",
+        "(*float*): Optionally provide a default value for recieving empty tensors")
     .SetDoc(R"DOC(
     Consume a value and pushes it to the global stat registry as an average.
 
@@ -51,6 +57,12 @@ OPERATOR_SCHEMA(IncrementPut)
     .Arg(
         "magnitude_expand",
         "(*int64_t*): number to multiply input values by (used when inputting floats, as stats can only receive integers")
+    .Arg(
+        "bound",
+        "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
+    .Arg(
+        "default_value",
+        "(*float*): Optionally provide a default value for recieving empty tensors")
     .SetDoc(R"DOC(
     Consume a value and pushes it to the global stat registry as an sum.
 
@@ -77,6 +89,12 @@ OPERATOR_SCHEMA(StdDevPut)
     .Arg(
         "magnitude_expand",
         "(*int64_t*): number to multiply input values by (used when inputting floats, as stats can only receive integers")
+    .Arg(
+        "bound",
+        "(*boolean*): whether or not to clamp inputs to the max inputs allowed")
+    .Arg(
+        "default_value",
+        "(*float*): Optionally provide a default value for recieving empty tensors")
     .SetDoc(R"DOC(
       Consume a value and pushes it to the global stat registry as an standard deviation.
 

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MSECriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MSECriterion.c"
 #else
 
 void THNN_(MSECriterion_updateOutput)(
@@ -12,7 +12,7 @@ void THNN_(MSECriterion_updateOutput)(
   THNN_CHECK_SHAPE(input, target);
 
   if (reduction != Reduction::None) {
-    THTensor_(resize1d)(output, 1);
+    THTensor_(resize0d)(output);
 
     accreal sum = 0;
 
@@ -21,10 +21,10 @@ void THNN_(MSECriterion_updateOutput)(
       sum += z*z;
     );
 
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= THTensor_(nElement)(input);
 
-    THTensor_(set1d)(output, 0, (scalar_t)sum);
+    THTensor_(set0d)(output, (scalar_t)sum);
     return;
   }
 
@@ -48,8 +48,8 @@ void THNN_(MSECriterion_updateGradInput)(
 
   if (reduction != Reduction::None) {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-    scalar_t norm = reduction == Reduction::ElementwiseMean ? 2./((scalar_t)THTensor_(nElement)(input)) : 2.;
-    norm *= THTensor_(get1d)(gradOutput, 0);
+    scalar_t norm = reduction == Reduction::Mean ? 2./((scalar_t)THTensor_(nElement)(input)) : 2.;
+    norm *= THTensor_(get0d)(gradOutput);
     TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       *gradInput_data = norm * (*input_data - *target_data);
     );

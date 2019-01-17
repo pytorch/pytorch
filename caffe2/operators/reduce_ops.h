@@ -29,12 +29,15 @@ class ReduceOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    const int ndim = X.ndim();
+
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -42,8 +45,8 @@ class ReduceOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
-    std::vector<int> Y_dims;
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+    std::vector<int64_t> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
@@ -56,7 +59,7 @@ class ReduceOp final : public Operator<Context> {
         Y_dims.push_back(X_dims[i]);
       }
     }
-    Y->Resize(Y_dims);
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
     return reducer_.template Forward<T>(
         X_dims,
         axes_,
@@ -89,12 +92,15 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& dY = Input(0);
     const auto& X = Input(1);
     const auto& Y = Input(2);
-    auto* dX = Output(0);
-    const int ndim = X.ndim();
+
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -102,12 +108,12 @@ class ReduceGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return reducer_.template Backward<T>(
         dY_dims,
         dX_dims,

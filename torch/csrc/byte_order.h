@@ -2,7 +2,7 @@
 #define THP_BYTE_ORDER_H
 
 #include <cstdint>
-#include <stddef.h>
+#include <cstddef>
 #include <THHalf.h>
 
 enum THPByteOrder {

@@ -1,8 +1,8 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "THCP.h"
+#include <torch/csrc/cuda/THCP.h>
 
-#include "override_macros.h"
+#include <torch/csrc/cuda/override_macros.h>
 
 #include <system_error>
 #include <memory>

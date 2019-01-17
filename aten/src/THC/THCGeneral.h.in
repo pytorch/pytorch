@@ -2,24 +2,23 @@
 #define THC_GENERAL_INC
 
 #include <TH/THGeneral.h>
-#include "THAllocator.h"
+#include <TH/THAllocator.h>
 #undef log10
 #undef log1p
 #undef log2
 #undef expm1
 
-#include "cuda.h"
-#include "cuda_runtime.h"
-#include "cublas_v2.h"
-#include "cusparse.h"
+#include <c10/cuda/CUDAStream.h>
+
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+
+#include <cusparse.h>
 
 #cmakedefine USE_MAGMA
 
-#ifdef __cplusplus
 # define THC_EXTERNC extern "C"
-#else
-# define THC_EXTERNC extern
-#endif
 
 #ifdef _WIN32
 # if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_CUDA_BUILD_MAIN_LIB)
@@ -44,11 +43,8 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-typedef struct CUDAStreamInternals THCStream;
 typedef struct THCState THCState;
 struct THCState;
-
-typedef THAllocator THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
   /* cuBLAS handle is lazily initialized */
@@ -69,24 +65,16 @@ THC_API void THCudaShutdown(THCState* state);
 /* 1; otherwise, 0. */
 THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
-THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
-THC_API struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device);
-
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
-THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
+THC_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
 
 /* State manipulators and accessors */
 THC_API int THCState_getNumDevices(THCState* state);
 
-/* Stream API */
-THC_API void THCState_setStream(THCState *state, THCStream* stream);
-THC_API void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream);
-
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
-THC_API THCStream* THCState_getStream(THCState *state);
 
 /* BLAS and sparse handles */
 THC_API cublasHandle_t THCState_getCurrentBlasHandle(THCState *state);
@@ -109,9 +97,7 @@ THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const 
 THC_API void* THCudaMalloc(THCState *state, size_t size);
 THC_API void THCudaFree(THCState *state, void* ptr);
 
-#ifdef __cplusplus
 at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
-#endif
 
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 

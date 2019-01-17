@@ -114,7 +114,6 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),

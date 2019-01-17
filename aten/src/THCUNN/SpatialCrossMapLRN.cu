@@ -1,14 +1,15 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
-#include "common.h"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
+#include <THCUNN/common.h>
+#include <c10/macros/Macros.h>
 
 template <typename Dtype, typename Acctype>
 __global__ void
-#if __CUDA_ARCH__ >= 320
-__launch_bounds__(CUDA_NUM_THREADS)
+#if __CUDA_ARCH__ >= 320 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS)
 #endif
 LRNFillScale(const int nthreads, const Dtype* const in,
     const int num, const int channels, const int height,
@@ -122,5 +123,5 @@ __global__ void LRNComputeDiff(const int nthreads,
 }
 
 
-#include "generic/SpatialCrossMapLRN.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialCrossMapLRN.cu>
+#include <THC/THCGenerateFloatTypes.h>

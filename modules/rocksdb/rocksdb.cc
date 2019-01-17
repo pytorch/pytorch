@@ -21,8 +21,10 @@
 #include "rocksdb/db.h"
 #include "rocksdb/utilities/leveldb_options.h"
 
-CAFFE2_DEFINE_int(caffe2_rocksdb_block_size, 65536,
-                  "The caffe2 rocksdb block size when writing a rocksdb.");
+C10_DEFINE_int(
+    caffe2_rocksdb_block_size,
+    65536,
+    "The caffe2 rocksdb block size when writing a rocksdb.");
 
 namespace caffe2 {
 namespace db {

@@ -1,4 +1,4 @@
-#include "TCPStore.hpp"
+#include <c10d/TCPStore.hpp>
 
 #include <poll.h>
 
@@ -22,6 +22,12 @@ enum class WaitResponseType : uint8_t { STOP_WAITING };
 // Simply start the daemon thread
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
+  // Use control pipe to signal instance destruction to the daemon thread.
+  if (pipe(controlPipeFd_.data()) == -1) {
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "TCPStoreDaemon run");
+  }
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
@@ -49,13 +55,6 @@ void TCPStoreDaemon::join() {
 }
 
 void TCPStoreDaemon::run() {
-  // Create the control pipe
-  if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error(
-        "Failed to create the control pipe to start the "
-        "TCPStoreDaemon run");
-  }
-
   std::vector<struct pollfd> fds;
   fds.push_back({.fd = storeListenSocket_, .events = POLLIN});
   // Push the read end of the pipe to signal the stopping of the daemon run
@@ -68,7 +67,7 @@ void TCPStoreDaemon::run() {
       fds[i].revents = 0;
     }
 
-    SYSCHECK(::poll(fds.data(), fds.size(), -1));
+    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
 
     // TCPStore's listening socket has an event and it should now be able to
     // accept new connections.
@@ -352,7 +351,7 @@ void TCPStore::wait(
   if (timeout != kNoTimeout) {
     struct timeval timeoutTV = {.tv_sec = timeout.count() / 1000,
                                 .tv_usec = (timeout.count() % 1000) * 1000};
-    SYSCHECK(::setsockopt(
+    SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
         storeSocket_,
         SOL_SOCKET,
         SO_RCVTIMEO,

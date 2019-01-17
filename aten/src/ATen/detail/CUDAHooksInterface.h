@@ -2,8 +2,9 @@
 
 #include <ATen/Allocator.h>
 #include <ATen/core/Generator.h>
-#include <ATen/core/Registry.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
+
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>
@@ -131,23 +132,11 @@ struct CAFFE2_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct CAFFE2_API CUDAHooksArgs {};
 
-AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
-  AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
 CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
-
-/// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
-/// error handling functions, when CUDA is available. These functions will first
-/// default to no-ops. When the `ATen` GPU library is loaded, they will be set to
-/// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
-/// with only a single pointer indirection, while virtual dispatch would require
-/// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct CAFFE2_API DynamicCUDAInterface {
-  static void (*set_device)(int32_t);
-  static void (*get_device)(int32_t*);
-  static void (*unchecked_set_device)(int32_t);
-};
 } // namespace detail
 } // namespace at

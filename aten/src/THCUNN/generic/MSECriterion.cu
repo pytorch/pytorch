@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/MSECriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/MSECriterion.cu"
 #else
 
 void THNN_(MSECriterion_updateOutput)(
@@ -13,7 +13,7 @@ void THNN_(MSECriterion_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (reduction != Reduction::None) {
-    THCTensor_(resize1d)(state, output, 1);
+    THCTensor_(resize0d)(state, output);
 
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -24,19 +24,19 @@ void THNN_(MSECriterion_updateOutput)(
     thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
     thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
     accreal sum = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       input_data, input_data+size, target_data, (accreal) 0,
       thrust::plus<accreal>(), mse_functor<scalar_t, accreal>());
 
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= size;
 
     THCTensor_(free)(state, input);
     THCTensor_(free)(state, target);
 
-    THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
+    THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
     return;
   }
 
@@ -64,8 +64,8 @@ void THNN_(MSECriterion_updateGradInput)(
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
     THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-    accreal norm = reduction == Reduction::ElementwiseMean ? (accreal)(2)/size : (accreal)(2);
-    norm *= ScalarConvert<scalar_t, accreal>::to(THCTensor_(get1d)(state, gradOutput, 0));
+    accreal norm = reduction == Reduction::Mean ? (accreal)(2)/size : (accreal)(2);
+    norm *= ScalarConvert<scalar_t, accreal>::to(THCTensor_(get0d)(state, gradOutput));
 
     input = THCTensor_(newContiguous)(state, input);
     target = THCTensor_(newContiguous)(state, target);
@@ -78,7 +78,7 @@ void THNN_(MSECriterion_updateGradInput)(
     thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
     thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       input_data, input_data+size, target_data, gradInput_data,
@@ -105,14 +105,14 @@ void THNN_(MSECriterion_updateGradInput)(
   thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, gradInput_data,
     mse_updateGradInput_functor<scalar_t, accreal>(2));
 
   thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     gradInput_data, gradInput_data+size, gradOutput_data, gradInput_data,

@@ -115,18 +115,12 @@ Y:
     .Arg(
         "pads",
         "*(type: [int]; default: [])* Controls the amount of padding applied to the input feature map before computation.")
-    .Arg(
-        "adjs",
-        "*(type: [int]; default: [])*")
+    .Arg("adjs", "*(type: [int]; default: [])*")
     .Arg(
         "order",
         "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
-    .Arg(
-        "shared_buffer",
-        "*(type: int; default: 0)*")
-    .Arg(
-        "no_bias",
-        "*(type: bool; default: False)* ")
-    .InheritOnnxSchema("ConvTranspose");
+    .Arg("shared_buffer", "*(type: int; default: 0)*")
+    .Arg("no_bias", "*(type: bool; default: False)* ")
+    .InheritOnnxSchema();
 
 } // namespace caffe2

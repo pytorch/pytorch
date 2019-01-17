@@ -79,11 +79,11 @@ class CTCOpsTest(test_util.TestCase):
     def test_ctc_cost_gpu(self):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
-                                    cuda_gpu_id=0),
+                                    device_id=0),
             is_test=False)
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
-                                    cuda_gpu_id=0),
+                                    device_id=0),
             is_test=False,
             skip_input_lengths=True)
 
@@ -99,10 +99,10 @@ class CTCOpsTest(test_util.TestCase):
     def test_ctc_forward_only_gpu(self):
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
-                                    cuda_gpu_id=0),
+                                    device_id=0),
             is_test=True)
         self.verify_cost(
             caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA,
-                                    cuda_gpu_id=0),
+                                    device_id=0),
             is_test=True,
             skip_input_lengths=True)

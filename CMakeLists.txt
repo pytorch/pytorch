@@ -5,10 +5,14 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+set(CMAKE_INSTALL_MESSAGE NEVER)
+
 set(CMAKE_CXX_STANDARD 11)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -48,6 +52,26 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+# For MSVC,
+# 1. Replace /Zi and /ZI with /Z7
+# 2. Switch off incremental linking in debug builds
+if (MSVC)
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if(${flag_var} MATCHES "/Z[iI]")
+      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+    endif(${flag_var} MATCHES "/Z[iI]")
+  endforeach(flag_var)
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
+      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+endif(MSVC)
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -55,6 +79,7 @@ include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
+option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -69,16 +94,17 @@ cmake_dependent_option(
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
-    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-option(USE_ROCM "Use ROCm" OFF)
+option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_GLOG "Use GLOG" ON)
@@ -86,22 +112,22 @@ option(USE_LEVELDB "Use LEVELDB" ON)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_METAL "Use Metal for iOS build" ON)
-option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
-option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_NUMA "Use NUMA (only available on Linux)" ON)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
+option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
+option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
@@ -111,8 +137,6 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
-option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
-option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -131,6 +155,22 @@ SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
+endif()
+
+if (BUILD_ATEN_ONLY)
+  set(BUILD_CAFFE2_OPS OFF)
+  set(BUILD_PYTHON OFF)
+  set(USE_NUMA OFF)
+  set(USE_LEVELDB OFF)
+  set(USE_GFLAGS OFF)
+  set(USE_GLOG OFF)
+  set(USE_NCCL OFF)
+  set(USE_NNPACK OFF)
+  set(USE_NUMPY OFF)
+  set(USE_OPENCV OFF)
+  set(USE_MKLDNN OFF)
+  set(USE_DISTRIBUTED OFF)
+  set(USE_LMDB OFF)
 endif()
 
 # ---[ Utils
@@ -177,6 +217,10 @@ include(ExternalProject)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
+
+if(USE_FBGEMM)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
 
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
@@ -272,6 +316,10 @@ if (APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+endif()
+
+if (EMSCRIPTEN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
@@ -397,6 +445,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake

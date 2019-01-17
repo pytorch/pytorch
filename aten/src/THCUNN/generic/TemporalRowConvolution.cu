@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalRowConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalRowConvolution.cu"
 #else
 
 static inline void THNN_(TemporalRowConvolution_shapeCheck)(

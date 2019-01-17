@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/AccumulateType.h"
+#include <ATen/AccumulateType.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -106,7 +106,7 @@ template <typename scalar_t>
 __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     int64_t *input, int64_t *indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, int64_t *bag_size) {
+    int64_t stride, int mode, const int64_t *bag_size) {
 
   using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
@@ -177,17 +177,21 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    const Tensor &grad,
                                    const Tensor &indices,
                                    const Tensor &offset2bag,
-                                   const Tensor &bag_size_,
+                                   const Tensor &bag_size,
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode) {
-
-  Tensor &bag_size = const_cast<Tensor &>(bag_size_);
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ptrdiff_t numel = indices.numel();
+
+  if (numel == 0) {
+    // all empty bags
+    return grad_weight;
+  }
+
   int64_t stride = grad_weight.stride(0);
 
   auto sorted_indices = at::empty_like(indices);
@@ -392,7 +396,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 
     default:
       AT_ERROR(
-          "Unknown mode for embedding_bag_backward_cuda %d", mode);
+          "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
 }
 
