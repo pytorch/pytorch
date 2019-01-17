@@ -12052,6 +12052,48 @@ class TestAsync(JitTestCase):
         with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
             wait_script_nest(x)
 
+    def test_async_grad_guard_with_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.enable_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, True)
+        self.assertEqual(after_wait, True)
+
+    def test_async_grad_guard_no_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.no_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, False)
+        self.assertEqual(after_wait, False)
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
