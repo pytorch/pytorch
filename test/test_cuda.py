@@ -1437,6 +1437,7 @@ class TestCuda(TestCase):
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
