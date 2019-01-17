@@ -54,6 +54,62 @@ static void prod_kernel_impl(TensorIterator& iter) {
   });
 }
 
+static void norm_kernel_tensor_iterator_impl(
+    TensorIterator& iter,
+    Scalar p) {
+  float val;
+  if (p.isIntegral()) {
+    val = p.to<int64_t>();
+  } else if (p.isFloatingPoint()) {
+    val = p.to<float>();
+  } else {
+    AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
+  }
+
+
+  if (val == 0) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        NormZeroOps<scalar_t>(),
+        scalar_t(0)
+      );
+    });
+  } else if (val == 1) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        NormOneOps<scalar_t>(),
+        scalar_t(0)
+      );
+    });
+  } else if (val == INFINITY) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        AbsMaxOps<scalar_t>(),
+        std::numeric_limits<scalar_t>::min()
+      );
+    });
+  } else if (val == -INFINITY) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        AbsMinOps<scalar_t>(),
+        std::numeric_limits<scalar_t>::max()
+      );
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        NormOps<scalar_t> { scalar_t(val) },
+        scalar_t(0)
+      );
+    });
+  }
+}
+
 static void and_kernel_impl(TensorIterator& iter) {
   binary_kernel_reduce_vec(
     iter,
@@ -84,6 +140,7 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 
 }}  // namespace at::native

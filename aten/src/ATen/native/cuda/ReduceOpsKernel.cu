@@ -14,17 +14,6 @@
 
 namespace at { namespace native {
 
-namespace {
-
-template <typename scalar_t>
-struct SimpleCopy {
-  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
-    return a;
-  }
-};
-
-} // namespace
-
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void sum_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
@@ -86,6 +75,30 @@ void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
 }
 #endif // __HIPCC__
 
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
+void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
+  float p;
+  if (val.isIntegral()) {
+     p = val.to<int64_t>();
+  } else if (val.isFloatingPoint()) {
+     p = val.to<acc_t>();
+  } else {
+     AT_ERROR("norm_kernel_cuda_impl expects norm to be integer or float");
+  }
+
+  if (p == static_cast<float>(0)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<acc_t>(), 0);
+  } else if (p == static_cast<float>(1)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<acc_t>(), 0);
+  } else if (p == static_cast<float>(INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<acc_t>(), std::numeric_limits<acc_t>::min());
+  } else if (p == static_cast<float>(-INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<acc_t>(), std::numeric_limits<acc_t>::max());
+  } else {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<acc_t>{ acc_t(p) }, 0);
+  }
+}
+
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
@@ -119,6 +132,18 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
+  if (iter.type().scalarType() == kHalf) {
+    return norm_kernel_cuda_impl<at::Half, float>(iter, p);
+  } else if (iter.type(1).scalarType() == kHalf && iter.type().scalarType() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
+  }
+  AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&]() {
+    norm_kernel_cuda_impl<scalar_t>(iter, p);
+  });
+}
+
 void and_kernel_cuda(TensorIterator& iter) {
   gpu_reduce_kernel<uint8_t, uint8_t>(
     iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
@@ -130,6 +155,7 @@ REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_cuda);
 REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 
 }} // namespace at::native
