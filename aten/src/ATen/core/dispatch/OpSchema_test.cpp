@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 
 using namespace c10;
+using at::Tensor;
 
 static_assert(details::is_tensor_arg<Tensor>::value, "");
 static_assert(details::is_tensor_arg<const Tensor&>::value, "");
