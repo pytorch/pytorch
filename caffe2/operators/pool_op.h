@@ -238,6 +238,7 @@ struct AveragePoolFunctor {
       Context* context) const;
 
   const bool count_include_pad;
+  Tensor ones{Context::GetDeviceType()};
 };
 
 template <class Context>
