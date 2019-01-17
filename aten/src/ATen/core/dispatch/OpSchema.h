@@ -48,7 +48,7 @@ template<size_t index, size_t offset, class Head, class... Tail>
 struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index == 0 && is_tensor_arg<Head>::value>> {
   static at::Tensor call(ArrayRef<IValue> args) {
     if (!args[offset].isTensor()) {
-      throw std::runtime_error("Expected argument " + std::to_string(offset) + " to be of type Tensor but found different type.");
+      throw std::runtime_error("Expected argument " + guts::to_string(offset) + " to be of type Tensor but found different type.");
     }
     return args[offset].toTensor();
   }
