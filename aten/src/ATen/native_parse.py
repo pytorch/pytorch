@@ -11,6 +11,21 @@ except ImportError:
     from yaml import Loader
 
 
+# [temp translations]
+# We want to be able to move from the current custom func schema to the
+# JIT signature schema incrementally. So we do do raw type translations
+# to avoid having to change all downstream tools before absolutely necessary
+# due to fundamental changes.
+def temp_type_translations(typ):
+    if typ == 'Tensor[]':
+        return 'TensorList'
+    if typ == 'int':
+        return 'int64_t'
+    if typ == 'float':
+        return 'double'
+    return typ
+
+
 def parse_default(s):
     if s.lower() == 'true':
         return True
@@ -18,6 +33,7 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
+    # Enables [] argument by translating to legacy {}. See [temp translations]
     elif s == '[]':
         return '{}'
     elif re.match(r'{.*}', s):
@@ -33,21 +49,6 @@ def parse_default(s):
             return float(s)
         except Exception:
             return s
-
-
-# [temp translations]
-# We want to be able to move from the current custom func schema to the
-# JIT signature schema incrementally. So we do do raw type translations
-# to avoid having to change all downstream tools before absolutely necessary
-# due to fundamental changes.
-def temp_type_translations(typ):
-    if typ == 'Tensor[]':
-        return 'TensorList'
-    if typ == 'int':
-        return 'int64_t'
-    if typ == 'float':
-        return 'double'
-    return typ
 
 
 def sanitize_type(typ):
@@ -107,10 +108,12 @@ def parse_arguments(args, func_decl, func_name, func_return):
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
+        # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
         match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
             argument_dict['size'] = int(match.group(1))
+        # Enables int[] by translating to legacy IntList. See [temp translations]
         if argument_dict['type'] == 'int[]':
             argument_dict['type'] = 'IntList'
         argument_dict['type'] = temp_type_translations(argument_dict['type'])
