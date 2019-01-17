@@ -56,14 +56,13 @@ signature.
     - `IndexTensor` (a.k.a. `IntTensor`)
   These type names were inherited from TH, and may be renamed soon, so
   don't commit them to memory.
-- `TensorList`.  A `TensorList` argument translates into a C++ argument of type `ArrayRef<Tensor>`
+- `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
-- `IntList`.  `IntList` accepts an optional length specifier, e.g., `IntList[2]`, which
+- `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
-- `int64_t`. There is no `int`; ATen policy is to use `int64_t` in the API anywhere you would
-  have ordinarily passed an `int` or `size_t`.
-- `double`. There is no `float`; ATen policy is to use `double` anywhere you would have used `float`.
+- `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
+- `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int64_t` and `double` can only bind to the
@@ -117,10 +116,10 @@ are applied when those positional arguments are not specified.
 
 Here are the supported default values:
 
-* Numbers (e.g., `0` or `5.0` for `int64_t`, `double` and `IntList`
-  with an explicit length (e.g., `IntList[2]`)--in the case of IntList,
-  a number is replicated to fill the length (e.g., `IntList[2] x=2`
-  is equivalent to `IntList[2] x={2,2}`.
+* Numbers (e.g., `0` or `5.0` for `int64_t`, `double` and `int[]`
+  with an explicit length (e.g., `int[2]`)--in the case of `int[]`
+  a number is replicated to fill the length (e.g., `int[2] x=2`
+  is equivalent to `int[2] x={2,2}`.
 * Lists of numbers (e.g., `{0, 0}`) for `IntList`.
 * Booleans (e.g., `true`) for `bool`.
 * Empty initializer lists (e.g., `{}`) for `Tensor` (this implicitly changes
@@ -140,7 +139,7 @@ Tuple return:
 ```
 
 The following are permissible on ReturnType:
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+- `Tensor` and `Tensor[]`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
   respectively (unless the operation is in-place, in which case the return type
   is `Tensor&`.
 - A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
@@ -211,7 +210,7 @@ device_guard: false
 By default, ATen code generation will generate a DeviceGuard invocation,
 which will ensure that kernel code will run with the current device set
 to match the device of the first Tensor argument (or first tensor of
-the first TensorList argument, if the function takes a list of tensors).
+the first Tensor[] argument, if the function takes a list of tensors).
 For the most part, this means kernel authors do not have to worry about
 setting devices.
 
