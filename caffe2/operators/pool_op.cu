@@ -689,25 +689,53 @@ __global__ void AveragePool3DBackwardNHWCCUDAKernel(
 } // namespace
 
 template <>
-template <typename T, StorageOrder kOrder>
-bool AveragePoolFunctor<CUDAContext>::GlobalPoolingForward(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    CUDAContext* context) const {
-  if (kOrder == StorageOrder::NCHW) {
-    const std::array<int, 2> dims = {N * C, HxW};
-    const int axis = 1;
-    math::ReduceMean<float, CUDAContext>(
-        2, dims.data(), 1, &axis, 1.0f, X, Y, context);
-  } else {
-    const std::array<int, 3> dims = {N, HxW, C};
-    const int axis = 1;
-    math::ReduceMean<float, CUDAContext>(
-        3, dims.data(), 1, &axis, 1.0f, X, Y, context);
+template <>
+bool AveragePoolFunctor<CUDAContext>::
+    GlobalPoolingForward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CUDAContext* context) const {
+  const std::array<int, 2> dims = {N * C, HxW};
+  const int axis = 1;
+  math::ReduceMean<float, CUDAContext>(
+      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+  return true;
+}
+
+template <>
+template <>
+bool AveragePoolFunctor<CUDAContext>::
+    GlobalPoolingForward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CUDAContext* context) const {
+  if (ones.numel() != HxW) {
+    ones.Resize(HxW);
+    math::Set<float, CUDAContext>(
+        HxW, 1.0f, ones.mutable_data<float>(), context);
   }
+  math::GemmStridedBatched<float, CUDAContext>(
+      CblasTrans,
+      CblasNoTrans,
+      N,
+      C,
+      1,
+      HxW,
+      1.0f / static_cast<float>(HxW),
+      X,
+      HxW * C,
+      ones.data<float>(),
+      0,
+      0.0f,
+      Y,
+      C,
+      context);
   return true;
 }
 
@@ -1719,25 +1747,36 @@ __global__ void MaxPool3DBackwardNHWCCUDAKernel(
 } // namespace
 
 template <>
-template <typename T, StorageOrder kOrder>
-bool MaxPoolFunctor<CUDAContext>::GlobalPoolingForward(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    CUDAContext* context) const {
-  if (kOrder == StorageOrder::NCHW) {
-    const std::array<int, 2> dims = {N * C, HxW};
-    const int axis = 1;
-    math::ReduceMax<float, CUDAContext>(
-        2, dims.data(), 1, &axis, 1.0f, X, Y, context);
-  } else {
-    const std::array<int, 3> dims = {N, HxW, C};
-    const int axis = 1;
-    math::ReduceMax<float, CUDAContext>(
-        3, dims.data(), 1, &axis, 1.0f, X, Y, context);
-  }
+template <>
+bool MaxPoolFunctor<CUDAContext>::
+    GlobalPoolingForward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CUDAContext* context) const {
+  const std::array<int, 2> dims = {N * C, HxW};
+  const int axis = 1;
+  math::ReduceMax<float, CUDAContext>(
+      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+  return true;
+}
+
+template <>
+template <>
+bool MaxPoolFunctor<CUDAContext>::
+    GlobalPoolingForward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* X,
+        float* Y,
+        CUDAContext* context) const {
+  const std::array<int, 3> dims = {N, HxW, C};
+  const int axis = 1;
+  math::ReduceMax<float, CUDAContext>(
+      3, dims.data(), 1, &axis, 1.0f, X, Y, context);
   return true;
 }
 
