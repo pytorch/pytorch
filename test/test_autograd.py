@@ -2227,6 +2227,7 @@ class TestAutograd(TestCase):
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    @skipIfRocm
     def test_pdist_large(self):
         def func(x):
             return torch.pdist(x, p=2)
