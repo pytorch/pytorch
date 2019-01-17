@@ -1,5 +1,5 @@
-#include <c10/core/dispatch/Dispatcher.h>
-#include <c10/core/opschema/layer_norm.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/opschema/layer_norm.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/autograd/variable.h>
 

@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/cast.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"

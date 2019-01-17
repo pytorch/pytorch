@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/dispatch/DispatchKey.h>
+#include <ATen/core/dispatch/DispatchKey.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/core/DeviceType.h>

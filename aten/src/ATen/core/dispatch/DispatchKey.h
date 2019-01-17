@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/core/dispatch/DeviceId.h>
-#include <c10/core/dispatch/LayoutId.h>
+#include <ATen/core/dispatch/DeviceId.h>
+#include <ATen/core/dispatch/LayoutId.h>
 #include <c10/util/typeid.h>
 
 #include <vector>

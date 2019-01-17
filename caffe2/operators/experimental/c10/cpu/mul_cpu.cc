@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/operators/experimental/c10/schemas/mul.h"
 #include "caffe2/utils/math.h"
