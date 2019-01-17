@@ -1,14 +1,15 @@
 #pragma once
 
-#include <ATen/core/Scalar.h>
-#include <ATen/core/Tensor.h>
+#include <condition_variable>
+#include <type_traits>
+
+#include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/thread_pool.h>
 
-#include <type_traits>
+#include <ATen/core/Tensor.h>
 
 namespace c10 {
 struct IValue;
