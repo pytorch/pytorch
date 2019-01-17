@@ -69,6 +69,8 @@ class RNNBase(Module):
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
                 w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
                 b_ih = Parameter(torch.Tensor(gate_size))
+                # Second bias vector included for CuDNN compatibility. Only one
+                # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
                 layer_params = (w_ih, w_hh, b_ih, b_hh)
 
