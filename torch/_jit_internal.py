@@ -24,9 +24,6 @@ _weak_types = weakref.WeakKeyDictionary()
 # argument
 _boolean_dispatched = weakref.WeakKeyDictionary()
 
-# Listing of possible overloads for
-_overloaded_fns = weakref.WeakKeyDictionary()
-
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -152,21 +149,6 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         "arg_name": arg_name
     }
     return fn
-
-
-def overload(*args):
-    """
-    Overload the decorated method with the method names provided. The first
-    match in will be chosen as the overload.
-
-    ```
-    @torch._jit_internal.overload('forward_tensor', 'forward_tuple')
-    ```
-    """
-    def decorator(fn):
-        _overloaded_fns[fn] = args
-        return fn
-    return decorator
 
 
 try:

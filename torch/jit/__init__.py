@@ -10,7 +10,7 @@ from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING, _boolean_dispatched, _overloaded_fns
+    COMPILATION_PENDING, _boolean_dispatched
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -670,20 +670,10 @@ def _try_get_dispatched_fn(fn):
 
 
 def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__func__') or not hasattr(fn, '__self__'):
+    if not hasattr(fn, '__self__'):
         # Only allow overloads for bound methods
         return None
-
-    if isinstance(fn.__func__, types.BuiltinFunctionType):
-        # Special handling for weak modules (stored as self -> fn_name -> overloads)
-        weak_overloads = _overloaded_fns.get(fn.__self__)
-        if weak_overloads is None:
-            return None
-        overloads = weak_overloads.get(fn.__name__)
-    else:
-        overloads = _overloaded_fns.get(fn.__func__)
-    if overloads is None:
-        return None
+    overloads = fn.__self__._overloads.get(fn.__name__, [])
     return [getattr(fn.__self__, overload) for overload in overloads]
 
 
@@ -959,6 +949,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         original_init = getattr(cls, '__init__', lambda self: None)
         super_constants = getattr(super(cls), '_constants_set', set())
         cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1206,26 +1197,11 @@ if _enabled:
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
+            # Copy overloads
+            self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
+
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
-
-            # Copy overloads since the original may be killed, but the weak module
-            # still needs to know how to resolve overloads
-            for name in dir(original):
-                item = getattr(original, name)
-                if not callable(item):
-                    continue
-                if not hasattr(item, '__func__'):
-                    continue
-                entry = _overloaded_fns.get(item.__func__)
-                if entry is not None:
-                    if self in _overloaded_fns:
-                        _overloaded_fns[self][item.__name__] = entry
-                    else:
-                        _overloaded_fns[self] = {
-                            item.__name__: entry
-                        }
-                    del _overloaded_fns[item.__func__]
 
         def __getattr__(self, attr):
             # Try to get the attribute directly, if that fails, fall back to the

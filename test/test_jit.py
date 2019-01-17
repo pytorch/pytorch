@@ -9206,6 +9206,8 @@ a")
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
             def __init__(self):
                 super(W, self).__init__()
 
@@ -9214,7 +9216,6 @@ a")
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x[0] + 5
 
-            @torch._jit_internal.overload('forward_tensor', 'forward_tuple')
             def forward(self, x):
                 # manually do argument switching
                 if isinstance(x, tuple):
