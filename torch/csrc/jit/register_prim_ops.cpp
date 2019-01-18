@@ -799,6 +799,10 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    // This op can be removed in preprocessing before being run in the interpreter
+    // (but is currently not removed), even when it is removed it needs to remain
+    // a registered op so that constant prop can run.
+    Operator("prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)", noop),
     Operator(
         prim::fork,
         [](const Node* node) {
