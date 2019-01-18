@@ -465,6 +465,7 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(n.blocks().begin(), n.blocks().end());
           })
       .NS(addBlock)
+      .NS(isNone)
 
 #define AS(name) def(#name, &Node::name)
       // methods from Attributes

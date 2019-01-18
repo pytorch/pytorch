@@ -118,8 +118,7 @@ bool isDifferentiable(Node* n) {
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant || n->kind() == prim::Undefined ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::None)
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
   if (differentiable_ops.find(n))
     return true;
@@ -378,12 +377,12 @@ class GradientHelper {
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
       // handle the case that min/max is None
       Value* min = inputs.at(1);
-      bool min_must_be_none = min->node()->kind() == prim::None;
+      bool min_must_be_none = min->mustBeNone();
       Value* max = inputs.at(2);
-      bool max_must_be_none = max->node()->kind() == prim::None;
-      // XXX - this formula is wrong when min or max are not stricly prim::None
-      // but may be None dynamically. In this case an internal compiler error
-      // will get thrown when trying to generate expressions involving the
+      bool max_must_be_none = max->mustBeNone();
+      // XXX - this formula is wrong when min or max are not stricly a constant
+      // None but may be None dynamically. In this case an internal compiler
+      // error will get thrown when trying to generate expressions involving the
       // values of min/max
       if (!min_must_be_none && !max_must_be_none) {
         return {grads.at(0) *
@@ -735,8 +734,7 @@ class GradientHelper {
       return {backward_value->node()->output(0), nullptr};
 
     } else if (
-        node->kind() == prim::Constant || node->kind() == prim::Undefined ||
-        node->kind() == prim::None) {
+        node->kind() == prim::Constant || node->kind() == prim::Undefined) {
       return {};
     }
     throw std::runtime_error(

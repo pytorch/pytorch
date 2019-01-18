@@ -951,11 +951,11 @@ def pow(g, self, exponent):
 
 
 def clamp(g, self, min, max):
-    # min or max may be prim::None that we need to dispatch to
+    # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().kind() == "prim::None":
+    if min.node().isNone():
         return clamp_max(g, self, max)
-    elif max.node().kind() == "prim::None":
+    elif max.node().isNone():
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')

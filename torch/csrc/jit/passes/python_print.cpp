@@ -243,7 +243,6 @@ struct PythonPrintPass {
     switch (n->kind()) {
       case prim::Constant:
       case prim::Undefined:
-      case prim::None:
         return true;
       default:
         return false;
@@ -721,12 +720,14 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
-      case prim::Constant: {
-        IValue v = toIValue(node->output()).value();
-        printConstant(stmt, v);
-      } break;
-      case prim::Undefined:
-      case prim::None: {
+      case prim::Constant:
+      case prim::Undefined: {
+        if (node->kind() == prim::Constant && !node->isNone()) {
+          IValue v = toIValue(node->output()).value();
+          printConstant(stmt, v);
+          break;
+        }
+
         if (node->output()->type()->isSubtypeOf(NoneType::get())) {
           stmt << "None";
           break;
@@ -1072,7 +1073,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ListConstruct,
       prim::DictConstruct,
       prim::ListUnpack,
-      prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,

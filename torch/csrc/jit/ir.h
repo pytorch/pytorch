@@ -392,6 +392,7 @@ struct Node {
   bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+  TORCH_API bool isNone() const;
 
   TORCH_API bool isNondeterministic() const;
   TORCH_API bool hasSideEffects() const;

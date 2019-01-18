@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/constants.h>
-#include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch {
 namespace jit {
@@ -64,8 +64,6 @@ Value* insertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
-    n->destroy();
-    n = g.create(prim::None);
     n->output()->setType(NoneType::get());
   } else {
     throw constant_not_supported_error(
@@ -145,6 +143,11 @@ RegisterOperators reg({
             auto d = c10::Device(node->s(attr::value));
             return [d](Stack& stack) {
               push(stack, d);
+              return 0;
+            };
+          } else if (type == NoneType::get()) {
+            return [](Stack& stack) {
+              push(stack, IValue());
               return 0;
             };
           } else {

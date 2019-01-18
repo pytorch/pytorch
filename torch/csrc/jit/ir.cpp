@@ -637,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->kind() == prim::None;
+  return node_->isNone();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -753,6 +753,10 @@ bool Node::matches(
     }
   }
   return true;
+}
+
+bool Node::isNone() const {
+  return kind_ == prim::Constant && !this->hasAttributes();
 }
 
 void Node::dump() const {
@@ -1179,7 +1183,7 @@ Node* Graph::createUndefined() {
 }
 
 Node* Graph::createNone(TypePtr typ) {
-  Node* n = create(prim::None);
+  Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
