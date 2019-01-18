@@ -55,13 +55,20 @@ class FillerOp : public Operator<Context> {
     if (InputSize()) {
       auto shape = vector<int64_t>{};
       if (input_as_shape_) {
-        // Shape input must be in CPU context
-        auto& input = this->template Input<Tensor>(0, CPU);
+        Tensor input;
+        if (this->InputIsTensorType(0, CPU)) {
+          // originally, shape input must be in CPU context
+          input = this->template Input<Tensor>(0, CPU);
+        } else {
+          // in ONNX case, we allow shape to be in CUDA context
+          input = Input(0);
+        }
         CAFFE_ENFORCE_EQ(
             input.dim(),
             1,
             "When input_as_shape is true, the input must be a 1D tensor of "
             "data type int64_t");
+        CAFFE_ENFORCE(input.numel() > 0);
         auto* shape_data = input.template data<int64_t>();
         shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
       } else {
