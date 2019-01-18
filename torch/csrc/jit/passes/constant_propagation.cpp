@@ -19,6 +19,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Loop, // TODO: handle Loop
     prim::Constant,
     prim::Undefined,
+    prim::unchecked_unwrap_optional, //TODO remove
     prim::None, // it is already a constant and propagating it will lose
                 // important type information about which Optional type it is
     // TODO (zach): we should consider skipping tensor factories in the cases
