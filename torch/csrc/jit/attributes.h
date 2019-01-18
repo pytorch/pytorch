@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/interned_strings.h>
 
 namespace torch {
