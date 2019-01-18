@@ -110,7 +110,7 @@ Tensor & eq_(Tensor& self, Scalar other) {
 }
 
 Tensor & eq_(Tensor& self, const Tensor & other) {
-  return at::_th_ge_(self, other);
+  return at::_th_eq_(self, other);
 }
 
 Tensor & ne_(Tensor& self, Scalar other) {

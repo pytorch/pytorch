@@ -292,14 +292,9 @@ void Module::load(serialize::InputArchive& archive) {
     archive.read(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    // Modules that have no state at all (parameters or buffers) are currently
-    // not stored in Protobuf at all, so we can just skip them.
-    if (!child.value()->parameters_.is_empty() ||
-        !child.value()->buffers_.is_empty()) {
-      serialize::InputArchive child_archive;
-      archive.read(child.key(), child_archive);
-      child.value()->load(child_archive);
-    }
+    serialize::InputArchive child_archive;
+    archive.read(child.key(), child_archive);
+    child.value()->load(child_archive);
   }
 }
 
@@ -355,6 +350,22 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
         "to modules() or named_modules()");
   }
   return std::const_pointer_cast<Module>(ptr);
+}
+
+serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const std::shared_ptr<nn::Module>& module) {
+  AT_CHECK(module != nullptr, "Cannot serialize empty module");
+  module->save(archive);
+  return archive;
+}
+
+serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    const std::shared_ptr<nn::Module>& module) {
+  AT_CHECK(module != nullptr, "Cannot deserialize empty module");
+  module->load(archive);
+  return archive;
 }
 } // namespace nn
 } // namespace torch
