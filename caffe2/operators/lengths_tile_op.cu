@@ -22,7 +22,7 @@ template <>
 bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   auto& data = Input(DATA);
   auto& lengths = Input(LENGTHS);
-  
+
 
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
@@ -45,8 +45,8 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   auto numElements = total_length * numElementsPerRow;
   auto numBlocks = CAFFE_GET_BLOCKS(numElements);
 
-  rowMappingHost_.Resize(total_length);
-  rowMappingDevice_.Resize(total_length);
+  ReinitializeTensor(&rowMappingHost_, {total_length}, at::dtype<int32_t>().device(CPU));
+  ReinitializeTensor(&rowMappingDevice_, {total_length}, at::dtype<int32_t>().device(CPU));
   auto* rowOffsets = rowMappingHost_.mutable_data<int32_t>();
   int32_t outputRow = 0;
   for (int64_t i = 0; i < lengths_size; i++) {

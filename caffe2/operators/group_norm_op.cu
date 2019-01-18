@@ -326,8 +326,10 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
     float* dbeta_data) {
   const int size = N * G * D * HxW;
   const int C = G * D;
-  ds_.Resize(N, G);
-  db_.Resize(N, G);
+  ReinitializeTensor(
+      &ds_, {N, G}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(
+      &db_, {N, G}, at::dtype<float>().device(CUDA));
   float* ds_data = ds_.mutable_data<float>();
   float* db_data = db_.mutable_data<float>();
   if (order_ == StorageOrder::NCHW) {

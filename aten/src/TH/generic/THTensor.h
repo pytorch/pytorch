@@ -4,16 +4,9 @@
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
-#ifdef __cplusplus
 #include <c10/core/TensorImpl.h>
-#endif
 
-#ifdef __cplusplus
 #define THTensor at::TensorImpl
-#else
-typedef struct at_Tensor_Impl at_Tensor_Impl;
-#define THTensor at_Tensor_Impl
-#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THTensor type.

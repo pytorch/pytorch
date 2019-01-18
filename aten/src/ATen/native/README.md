@@ -218,6 +218,19 @@ that case, code generation of the device guard can be disabled by adding
 in which case this field would go away.  If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
+### `matches_jit_signature`
+
+```
+matches_jit_signature: True
+```
+
+This will verify that the func syntax follows the JIT signature schema. This
+is a temporary attribute and doesn't need to be set by developers outside the
+core team. Remove it if you trigger asserts and add @cpuhrsch to your PR. It
+serves as a means of tracking an ongoing schema unification with the goal of
+aligning func syntax with other components of PyTorch in order to reduce
+overall complexity and match coverage of different function descriptions.
+
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the
