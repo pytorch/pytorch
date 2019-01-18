@@ -41,7 +41,7 @@ using at::ScalarType;
 using at::Tensor;
 using namespace torch::autograd::utils;
 
-#ifndef _MSC_VER
+#ifdef _MSC_VER
 // TODO: remove this
 // When building on Windows, `PyStructSequence_UnnamedField` could not be
 // resolved by the linker for some reason, which cause error in building:
