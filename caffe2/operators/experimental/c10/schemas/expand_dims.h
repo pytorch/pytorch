@@ -20,7 +20,7 @@ struct ExpandDims final {
   using Signature = void(
       const at::Tensor& input,
       const at::Tensor& output,
-      intrusive_ptr<c10::ivalue::IntList> dims,
+      ArrayRef<int64_t> dims,
       intrusive_ptr<Blob> state);
 
   static constexpr size_t num_dispatch_args() {return 1;}

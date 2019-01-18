@@ -14,7 +14,7 @@ struct Concat final {
   static constexpr const char* name = "concat";
 
   using Signature = void(
-      intrusive_ptr<ivalue::TensorList> inputs,
+      ArrayRef<at::Tensor> inputs,
       const at::Tensor& output,
       const at::Tensor& split_info,
       int add,
