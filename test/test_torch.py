@@ -27,7 +27,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1141,6 +1141,36 @@ class _TestTorchMixin(object):
                         expected = brute_pdist(x, p=p)
                         self.assertEqual(expected.shape, actual.shape)
                         self.assertTrue(torch.allclose(expected, actual))
+
+
+    def test_cdist_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for r1 in [0, 2]:
+                for m in[0, 5]:
+                    for r2 in[0, 3]:
+                        x = torch.zeros((r1, m), device=device)
+                        y = torch.zeros((r2, m), device=device)
+                        if r1 == 0 or r2 == 0:
+                            self.assertEqual(torch.empty(r1, r2, device=device), torch.cdist(x, y))
+                        else:
+                            self.assertEqual(torch.zeros(r1, r2, device=device), torch.cdist(x, y))
+
+    def test_cdist_norm(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for r1 in [3, 4, 5, 6]:
+                for m in [2, 3, 4, 10]:
+                    for r2 in [4, 6, 7, 8]:
+                        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                            x = torch.randn(r1, m, device=device)
+                            y = torch.randn(r2, m, device=device)
+                            actual = torch.cdist(x, y, p=p)
+                            expected = brute_cdist(x, y, p=p)
+                            self.assertEqual(expected.shape, actual.shape)
+                            self.assertTrue(torch.allclose(expected, actual))
+
+
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):

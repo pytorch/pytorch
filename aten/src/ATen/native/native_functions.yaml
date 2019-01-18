@@ -1265,6 +1265,8 @@
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
 
+- func: cdist(Tensor x1, Tensor x2, double p=2) -> Tensor
+
 - func: pdist(Tensor self, double p=2) -> Tensor
 
 - func: _pdist_forward(Tensor self, double p=2) -> Tensor

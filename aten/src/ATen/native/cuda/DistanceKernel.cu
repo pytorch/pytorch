@@ -160,6 +160,33 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   }
 }
 
+template <typename scalar_t, typename F>
+__global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2, const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m) {
+
+}
+
+void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, double p) {
+    int64_t r1 = x1.size(-2);
+    int64_t r2 = x2.size(-2);
+    int64_t m = x1.size(-1);
+    const dim3 grid(r1, r2);
+    const dim3 block(1, forward_threads);
+
+    AT_DISPATCH_FLOATING_TYPES(self.type(), "cdist_cuda", [&] {
+        if (p == 0.0) {
+            cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+        } else if (p == 1.0) {
+            cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+        } else if (p == 2.0) {
+            cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+        } else if (std::isinf(p)) {
+            cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+        } else {
+            cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+        }
+    });
+}
+
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   int64_t b = self.size(0);
   int64_t n = self.size(1);
@@ -220,5 +247,6 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 
 }} // at::native
