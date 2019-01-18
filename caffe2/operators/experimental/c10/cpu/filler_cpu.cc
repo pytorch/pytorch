@@ -13,17 +13,17 @@ using c10::ivalue::TensorList;
 namespace caffe2 {
 namespace {
 void filler_init(
-    intrusive_ptr<ivalue::TensorList> inputs,
+    ArrayRef<at::Tensor> inputs,
     const at::Tensor& output_,
-    intrusive_ptr<ivalue::IntList> shape,
-    intrusive_ptr<ivalue::IntList> extra_shape,
+    ArrayRef<int64_t> shape,
+    ArrayRef<int64_t> extra_shape,
     bool input_as_shape) {
   Tensor output{C10Tensor(output_)};
-  if (inputs->elements().size()) {
+  if (inputs.size()) {
     auto real_shape = vector<int64_t>{};
     if (input_as_shape) {
       // Shape input must be in CPU context
-      Tensor input(inputs->elements()[0]);
+      Tensor input(inputs[0]);
       CAFFE_ENFORCE_EQ(
           input.dim(),
           1,
@@ -33,23 +33,23 @@ void filler_init(
       real_shape.insert(
           real_shape.end(), shape_data, shape_data + input.dim32(0));
     } else {
-      Tensor input(inputs->elements()[0]);
+      Tensor input(inputs[0]);
       real_shape.insert(
           real_shape.end(), input.sizes().begin(), input.sizes().end());
     }
-    real_shape.insert(real_shape.end(), extra_shape->elements().begin(), extra_shape->elements().end());
+    real_shape.insert(real_shape.end(), extra_shape.begin(), extra_shape.end());
     output.Resize(real_shape);
   } else {
-    output.Resize(shape->elements());
+    output.Resize(shape);
   }
 }
 
 template <class Type, class Context>
 void given_tensor_fill_op_cpu_impl(
-    intrusive_ptr<ivalue::TensorList> inputs,
+    ArrayRef<at::Tensor> inputs,
     const at::Tensor& output_,
-    intrusive_ptr<ivalue::IntList> shape,
-    intrusive_ptr<ivalue::IntList> extra_shape,
+    ArrayRef<int64_t> shape,
+    ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
     const at::Tensor& values_) {
   Tensor output{C10Tensor(output_)};
@@ -71,10 +71,10 @@ void given_tensor_fill_op_cpu_impl(
 }
 
 void constant_fill_op_cpu_impl(
-    intrusive_ptr<ivalue::TensorList> inputs,
+    ArrayRef<at::Tensor> inputs,
     const at::Tensor& output_,
-    intrusive_ptr<ivalue::IntList> shape,
-    intrusive_ptr<ivalue::IntList> extra_shape,
+    ArrayRef<int64_t> shape,
+    ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
     int dtype,
     c10::IValue value) {
@@ -117,10 +117,10 @@ void constant_fill_op_cpu_impl(
 }
 
 void uniform_fill_op_cpu_impl(
-    intrusive_ptr<ivalue::TensorList> inputs,
+    ArrayRef<at::Tensor> inputs,
     const at::Tensor& output_,
-    intrusive_ptr<ivalue::IntList> shape,
-    intrusive_ptr<ivalue::IntList> extra_shape,
+    ArrayRef<int64_t> shape,
+    ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
     float min,
     float max) {
@@ -129,11 +129,11 @@ void uniform_fill_op_cpu_impl(
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
-  if (inputs->elements().size() == 3) {
-    CAFFE_ENFORCE_EQ(1, Tensor(inputs->elements()[1]).numel(), "min blob must be scalar");
-    CAFFE_ENFORCE_EQ(1, Tensor(inputs->elements()[2]).numel(), "max blob must be scalar");
-    min = *Tensor(inputs->elements()[1]).template data<float>();
-    max = *Tensor(inputs->elements()[2]).template data<float>();
+  if (inputs.size() == 3) {
+    CAFFE_ENFORCE_EQ(1, Tensor(inputs[1]).numel(), "min blob must be scalar");
+    CAFFE_ENFORCE_EQ(1, Tensor(inputs[2]).numel(), "max blob must be scalar");
+    min = *Tensor(inputs[1]).template data<float>();
+    max = *Tensor(inputs[2]).template data<float>();
     if (min > max) {
       auto shape = output.sizes().vec();
       shape[0] = 0;

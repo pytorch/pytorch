@@ -19,10 +19,10 @@ struct GivenTensorFill final {
   static constexpr const char* name = "given_tensor_fill";
 
   using Signature = void(
-      intrusive_ptr<ivalue::TensorList>inputs,
+      ArrayRef<at::Tensor> inputs,
       const at::Tensor& output,
-      intrusive_ptr<ivalue::IntList> shape,
-      intrusive_ptr<ivalue::IntList> extra_shape,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
       const at::Tensor& values);
 
@@ -46,10 +46,10 @@ struct ConstantFill final {
   static constexpr const char* name = "constant_fill";
 
   using Signature = void(
-      intrusive_ptr<ivalue::TensorList> inputs,
+      ArrayRef<at::Tensor> inputs,
       const at::Tensor& output,
-      intrusive_ptr<ivalue::IntList> shape,
-      intrusive_ptr<ivalue::IntList> extra_shape,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
       int dtype,
       IValue value);
@@ -75,10 +75,10 @@ struct UniformFill final {
   static constexpr const char* name = "uniform_fill";
 
   using Signature = void(
-      intrusive_ptr<ivalue::TensorList> inputs,
+      ArrayRef<at::Tensor> inputs,
       const at::Tensor& output,
-      intrusive_ptr<ivalue::IntList> shape,
-      intrusive_ptr<ivalue::IntList> extra_shape,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
       float min,
       float max);
