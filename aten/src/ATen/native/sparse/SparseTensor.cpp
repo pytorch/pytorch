@@ -329,7 +329,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());  // TODO: remove this when Variable and Tensor are merged
+  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {
