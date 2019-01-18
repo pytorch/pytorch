@@ -32,6 +32,7 @@
 #include "python_variable_methods_dispatch.h"
 
 #include <stdexcept>
+#include <iostream>
 
 using at::DeviceGuard;
 using at::device_of;
@@ -345,6 +346,8 @@ static PyTypeObject _struct_sequence_template = {
 int
 PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
 {
+    std::cout << "entering PyStructSequence_InitType2(" << type << "," << desc << ")" << std::endl;
+    std::cout << "desc->fields = " << desc->fields << std::endl;
     PyObject *dict;
     PyMemberDef* members;
     Py_ssize_t n_members, n_unnamed_members, i, k;
@@ -359,11 +362,15 @@ PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
 #endif
 
     n_unnamed_members = 0;
-    for (i = 0; desc->fields[i].name != NULL; ++i)
+    for (i = 0; desc->fields[i].name != NULL; ++i) {
+        std::cout << "looping fields at file " << __FILE__ << " line " << __LINE__ << " function " <<  __func__ << ", i=" << i << " name=" << desc->fields[i].name << std::endl;
         if (desc->fields[i].name == PyStructSequence_UnnamedField)
             n_unnamed_members++;
+    }
     n_members = i;
+    std::cout << "n_members = " << n_members << std::endl;
 
+    std::cout << "memcpy(" << type << ", " << &_struct_sequence_template << ", " << sizeof(PyTypeObject) << ");" << std::endl;
     memcpy(type, &_struct_sequence_template, sizeof(PyTypeObject));
     type->tp_base = &PyTuple_Type;
     type->tp_name = desc->name;
@@ -376,6 +383,7 @@ PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
     }
 
     for (i = k = 0; i < n_members; ++i) {
+        std::cout << "looping fields at file " << __FILE__ << " line " << __LINE__ << " function " <<  __func__ << ", i=" << i << " k=" << k << " name=" << desc->fields[i].name << std::endl;
         if (desc->fields[i].name == PyStructSequence_UnnamedField)
             continue;
         members[k].name = desc->fields[i].name;
@@ -386,6 +394,7 @@ PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
         members[k].doc = desc->fields[i].doc;
         k++;
     }
+    std::cout << "k = " << k << std::endl;
     members[k].name = NULL;
 
     type->tp_members = members;
@@ -410,14 +419,16 @@ PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
     SET_DICT_FROM_SIZE(visible_length_key, desc->n_in_sequence);
     SET_DICT_FROM_SIZE(real_length_key, n_members);
     SET_DICT_FROM_SIZE(unnamed_fields_key, n_unnamed_members);
-
+    std::cout << "leaving PyStructSequence_InitType2" << std::endl;
     return 0;
 }
 
 void
 PyStructSequence_InitType(PyTypeObject *type, PyStructSequence_Desc *desc)
 {
-    (void)::PyStructSequence_InitType2(type, desc);
+    std::cout << "entering PyStructSequence_InitType" << std::endl;
+    (void)testing_namedtuple::PyStructSequence_InitType2(type, desc);
+    std::cout << "leaving PyStructSequence_InitType" << std::endl;
 }
 
 
