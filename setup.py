@@ -143,8 +143,10 @@
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
+from distutils import dir_util
 import setuptools.command.build_ext
 import setuptools.command.develop
+import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
@@ -176,9 +178,8 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'rebuild':
-        sys.argv[i], arg = 'build', 'build'
-    if arg == 'build':
+    if arg == 'rebuild' or arg == 'build':
+        sys.argv[i], arg = 'develop', 'develop'
         emit_build_warning = True
 
 if VERBOSE_SCRIPT:
@@ -229,15 +230,61 @@ else:
         pass
 report("Building wheel {}-{}".format(package_name, version))
 
-report('-- Building version ' + version)
-version_path = os.path.join(cwd, 'torch', 'version.py')
-with open(version_path, 'w') as f:
-    f.write("__version__ = '{}'\n".format(version))
-    # NB: This is not 100% accurate, because you could have built the
-    # library code with DEBUG, but csrc without DEBUG (in which case
-    # this would claim to be a release build when it's not.)
-    f.write("debug = {}\n".format(repr(DEBUG)))
-    f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+build_deps_ran = False
+
+
+# all the work we need to do _before_ setup runs
+def build_deps(cmake):
+    global build_deps_ran
+    if build_deps_ran:
+        return
+    build_deps_ran = True
+    tools.setup_helpers.configure.RERUN_CMAKE = bool(cmake)
+    report('-- Building version ' + version)
+    version_path = os.path.join(cwd, 'torch', 'version.py')
+    with open(version_path, 'w') as f:
+        f.write("__version__ = '{}'\n".format(version))
+        # NB: This is not 100% accurate, because you could have built the
+        # library code with DEBUG, but csrc without DEBUG (in which case
+        # this would claim to be a release build when it's not.)
+        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+
+    def check_file(f):
+        if not os.path.exists(f):
+            report("Could not find {}".format(f))
+            report("Did you run 'git submodule update --init --recursive'?")
+            sys.exit(1)
+
+    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+
+    check_pydep('yaml', 'pyyaml')
+    check_pydep('typing', 'typing')
+
+    build_caffe2()
+
+    # Use copies instead of symbolic files.
+    # Windows has very poor support for them.
+    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    for sym_file, orig_file in zip(sym_files, orig_files):
+        same = False
+        if os.path.exists(sym_file):
+            if filecmp.cmp(sym_file, orig_file):
+                same = True
+            else:
+                os.remove(sym_file)
+        if not same:
+            shutil.copyfile(orig_file, sym_file)
+
+    dir_util.copy_tree('torch/lib/tmp_install/share', 'torch/share')
+    dir_util.copy_tree('third_party/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
 
 ################################################################################
 # Building dependent libraries
@@ -298,8 +345,14 @@ class develop(setuptools.command.develop.develop):
         setuptools.command.develop.develop.initialize_options(self)
 
     def run(self):
-        tools.setup_helpers.configure.RERUN_CMAKE = bool(self.cmake)
+        build_deps(self.cmake)
         setuptools.command.develop.develop.run(self)
+
+
+class install(setuptools.command.install.install):
+    def run(self):
+        build_deps(True)
+        setuptools.command.install.install.run(self)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -361,7 +414,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
-        self.build_deps()
         self.create_compile_commands()
         # The caffe2 extensions are created in
         # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
@@ -404,46 +456,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
-
-    def build_deps(self):
-        report('setup.py::build_deps::run()')
-        # Check if you remembered to check out submodules
-
-        def check_file(f):
-            if not os.path.exists(f):
-                report("Could not find {}".format(f))
-                report("Did you run 'git submodule update --init --recursive'?")
-                sys.exit(1)
-
-        check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-
-        check_pydep('yaml', 'pyyaml')
-        check_pydep('typing', 'typing')
-
-        build_caffe2()
-
-        # Use copies instead of symbolic files.
-        # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
-        for sym_file, orig_file in zip(sym_files, orig_files):
-            same = False
-            if os.path.exists(sym_file):
-                if filecmp.cmp(sym_file, orig_file):
-                    same = True
-                else:
-                    os.remove(sym_file)
-            if not same:
-                shutil.copyfile(orig_file, sym_file)
-
-        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
-        self.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
 
     def create_compile_commands(self):
         def load(filename):
@@ -710,6 +722,7 @@ if USE_ROCM:
 cmdclass = {
     'build_ext': build_ext,
     'develop': develop,
+    'install': install,
     'clean': clean,
 }
 
