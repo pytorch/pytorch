@@ -138,9 +138,14 @@
 - name: alias(Tensor self)
   self: grad
 
-# The two items below are necessary because TensorIterator doesn't work on
-# Variables (codegen does not unwrap the input Tensor for all(*) without this
-# line).
+# The four items below are necessary because TensorIterator doesn't work on
+# Variables (codegen does not unwrap the input Tensor for all() and any() ).
+- name: any(Tensor self)
+  self: not_implemented("any")
+
+- name: any(Tensor self, int64_t dim, bool keepdim)
+  self: not_implemented("any")
+
 - name: all(Tensor self)
   self: not_implemented("all")
 

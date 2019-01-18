@@ -705,10 +705,6 @@ std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
 }
 
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
-}
-
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_out(result, self, p, dim, maxnorm);
 }
