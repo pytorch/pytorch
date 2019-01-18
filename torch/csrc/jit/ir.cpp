@@ -96,12 +96,92 @@ std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   return out;
 }
 
-void printAttributes(
-    std::ostream& out,
-    const Node* n,
-    bool ignore_subgraph = false) {
+template <typename T>
+static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "[";
-  auto names = n->attributeNames();
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << item;
+  }
+  out << "]";
+}
+
+static std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while (pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
+void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
+  switch (kindOf(name)) {
+    case AttributeKind::f:
+      out << f(name);
+      break;
+    case AttributeKind::fs:
+      printPrimList(out, fs(name));
+      break;
+    case AttributeKind::i:
+      out << i(name);
+      break;
+    case AttributeKind::is:
+      printPrimList(out, is(name));
+      break;
+    case AttributeKind::s:
+      out << "\"" << escapeString(s(name)) << "\"";
+      break;
+    case AttributeKind::ss:
+      printPrimList(out, ss(name));
+      break;
+    case AttributeKind::t: {
+      at::Tensor tensor = t(name);
+      // 1-elem tensors are usually boxed scalars, so print them like it
+      if (tensor.numel() == 1) {
+        auto scalar_tensor = tensor.view({}).item();
+        out << "{";
+        if (scalar_tensor.isFloatingPoint()) {
+          out << scalar_tensor.toDouble();
+        } else {
+          out << scalar_tensor.toLong();
+        }
+        out << "}";
+      } else if (tensor.numel() <= max_tensor_display_size) {
+        // TODO: This is awful code.  Also it doesn't work on Windows.
+        std::ostringstream tensor_ss;
+        tensor_ss << tensor;
+        std::string tensor_s{tensor_ss.str()};
+        // Remove newlines
+        std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+        out << tensor_s;
+      } else {
+        out << "<Tensor>";
+      }
+      break;
+    }
+    case AttributeKind::ts:
+      out << "[<Tensors>]";
+      break;
+    case AttributeKind::g:
+      out << "<Graph>";
+      break;
+    case AttributeKind::gs:
+      out << "[<Graphs>]";
+      break;
+  }
+}
+
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
+  out << "[";
+  auto names = attributeNames();
   int i = 0;
   for (auto name : names) {
     if (ignore_subgraph && name == attr::Subgraph)
@@ -114,7 +194,7 @@ void printAttributes(
     // bug by printing it out.
     out << name.toUnqualString() << "=";
 
-    n->printValue(out, name);
+    printAttrValue(out, name);
   }
   out << "]";
 }
@@ -125,46 +205,47 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& printNode(
+std::ostream& Node::print(
     std::ostream& out,
     size_t level,
-    const Node* n,
-    std::vector<const Node*>* groups) {
-  auto outputs = n->outputs();
-  indent(out, level) << const_value_list_with_types(outputs);
+    std::vector<const Node*>* groups) const {
+  auto outs = outputs();
+  indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
-  IR_IFM_CONST(n, PythonOp)
-  out << "^" << value->name();
-  value->writeScalars(out);
-  IR_ELSE()
-  if (n->hasAttribute(attr::Subgraph) && groups) {
-    out << n->kind().toQualString() << "_" << groups->size();
-    if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
-      printAttributes(out, n, /*ignore_subgraph=*/true);
-    }
-    groups->push_back(n);
+  if (kind() == prim::PythonOp) {
+    auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
+    out << "^" << pyOp->name();
+    pyOp->writeScalars(out);
   } else {
-    out << n->kind().toQualString();
-    if (n->hasAttributes()) {
-      printAttributes(out, n);
+    if (hasAttribute(attr::Subgraph) && groups) {
+      out << kind().toQualString() << "_" << groups->size();
+      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
+        printAttributes(out, /*ignore_subgraph=*/true);
+      }
+      groups->push_back(this);
+    } else {
+      out << kind().toQualString();
+      if (hasAttributes()) {
+        printAttributes(out);
+      }
     }
   }
-  IR_END()
-  out << "(" << n->inputs() << ")";
-  std::string scopeName = n->scopeName();
-  if (scopeName.empty()) {
+
+  out << "(" << inputs() << ")";
+  std::string scName = scopeName();
+  if (scName.empty()) {
     out << "\n";
   } else {
     out << ", ";
-    out << "scope: " << scopeName << "\n";
+    out << "scope: " << scName << "\n";
   }
-  for (size_t i = 0; i < n->blocks().size(); ++i) {
-    auto b = n->blocks()[i];
+  for (size_t i = 0; i < blocks().size(); ++i) {
+    auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
                            << const_value_list_with_types(b->inputs(), false)
                            << ") {\n";
-    for (auto n : b->nodes()) {
-      printNode(out, level + 2, n, groups);
+    for (auto nested : b->nodes()) {
+      nested->print(out, level + 2, groups);
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
     indent(out, level + 1) << "}\n";
@@ -173,14 +254,14 @@ std::ostream& printNode(
 }
 
 std::ostream& operator<<(std::ostream& out, const Node& n) {
-  return printNode(out, 0, &n, nullptr);
+  return n.print(out, 0, nullptr);
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
   out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
-    printNode(out, 1, n, &groups);
+    n->print(out, 1, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
