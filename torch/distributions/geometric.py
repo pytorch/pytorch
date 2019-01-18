@@ -9,8 +9,9 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 class Geometric(Distribution):
     r"""
-    Creates a Geometric distribution parameterized by :attr:`probs`, where :attr:`probs` is the probability of
-    success of Bernoulli trials. It represents the probability that in :math:`k + 1` Bernoulli trials, the
+    Creates a Geometric distribution parameterized by :attr:`probs`,
+    where :attr:`probs` is the probability of success of Bernoulli trials.
+    It represents the probability that in :math:`k + 1` Bernoulli trials, the
     first :math:`k` trials failed, before seeing a success.
 
     Samples are non-negative integers [0, :math:`\inf`).
