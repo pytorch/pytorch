@@ -80,6 +80,21 @@ DONT_REQUIRE_DERIVATIVE = {
     '_coalesced_',
 }
 
+# When a function modifies its input tensors, it should only change the input tensors'
+# storage data in-place, and should never change their storage pointers.
+#
+# The code templates `SAVE_TENSOR_STORAGE_PTR` / `ENFORCE_SAME_TENSOR_STORAGE` /
+# `SAVE_TENSORLIST_STORAGE_PTRS` / `ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST`
+# implement the checks for this invariant.
+#
+# The following list contains functions that we don't enforce the invariant on.
+DONT_ENFORCE_SAME_TENSOR_STORAGE = {
+    # These functions are expected to change storage pointer of input tensor
+    '_th_set_',
+    # TODO: Fix these functions to update input tensor in-place
+    'tril_', 'triu_',
+}
+
 METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
@@ -116,6 +131,31 @@ TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
+
+SAVE_TENSOR_STORAGE_PTR = CodeTemplate("""\
+StorageImpl* ${tensor_name}_storage_ptr_saved = (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage().unsafeGetStorageImpl() : nullptr;
+""")
+
+ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
+if (${tensor_name}_storage_ptr_saved) AT_ASSERT(${tensor_name}_storage_ptr_saved == ${tensor_name}.storage().unsafeGetStorageImpl());
+""")
+
+SAVE_TENSORLIST_STORAGE_PTRS = CodeTemplate("""\
+std::vector<StorageImpl*> ${tensorlist_name}_storage_ptrs_saved(${tensorlist_name}.size());
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) {
+    ${tensorlist_name}_storage_ptrs_saved[i] = ${tensorlist_name}[i].storage().unsafeGetStorageImpl();
+  }
+}
+""")
+
+ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_storage_ptrs_saved[i]) {
+    AT_ASSERT(${tensorlist_name}_storage_ptrs_saved[i] == ${tensorlist_name}[i].storage().unsafeGetStorageImpl());
+  }
+}
+""")
 
 SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
@@ -583,6 +623,17 @@ def emit_body(declaration):
             return 'as_variable({})'.format(call), []
 
     def emit_call(env):
+        pre_call_block = ''
+        post_call_block = ''
+        if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_STORAGE:
+            if 'unpacked_tensors' in env:
+                for arg in env['unpacked_tensors']:
+                    pre_call_block += SAVE_TENSOR_STORAGE_PTR.substitute(tensor_name=arg);
+                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg);
+            if 'unpacked_tensorlists' in env:
+                for arg in env['unpacked_tensorlists']:
+                    pre_call_block += SAVE_TENSORLIST_STORAGE_PTRS.substitute(tensorlist_name=arg);
+                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST.substitute(tensorlist_name=arg);
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
@@ -596,6 +647,10 @@ def emit_body(declaration):
         call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
+        if pre_call_block:
+            call = pre_call_block + call
+        if post_call_block:
+            call += '\n' + post_call_block
         return call
 
     def tie_return_values():
@@ -687,6 +742,8 @@ def unpack_args(env, declaration):
 
     body = []
     unpacked_args = []
+    unpacked_tensors = []
+    unpacked_tensorlists = []
     for i, arg in enumerate(declaration['arguments']):
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
@@ -704,6 +761,11 @@ def unpack_args(env, declaration):
                 suffix=suffix,
                 ref='&' if ref else '',
             ))
+
+            if dynamic_type == 'TensorList':
+                unpacked_tensorlists.append(arg['name'])
+            elif dynamic_type != 'SparseTensorRef':
+                unpacked_tensors.append(arg['name'])
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's stll getting the non-variable from the variable
@@ -713,6 +775,8 @@ def unpack_args(env, declaration):
         unpacked_args.append(arg['name'] + '_')
 
     env['unpacked_args'] = unpacked_args
+    env['unpacked_tensors'] = unpacked_tensors
+    env['unpacked_tensorlists'] = unpacked_tensorlists
     return body
 
 
