@@ -1316,6 +1316,9 @@ RegisterOperators reg2({
           return [=](Stack& stack) {
             int64_t a, b;
             pop(stack, a, b);
+            if (b == 0) {
+              throw std::runtime_error("division by 0");
+            }
             push(stack, static_cast<double>(a) / static_cast<double>(b));
             return 0;
           };

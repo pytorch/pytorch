@@ -4636,18 +4636,27 @@ a")
             self.checkScript(div_int_nofuture, (), optimize=True)
             self.checkScript(div_float_nofuture, (), optimize=True)
 
-    def test_floor_div(self):
+    def test_floor_normal_div(self):
         @torch.jit.script
         def foo(a, b):
             # type: (int, int) -> int
             return a // b
-        for i in range(-8, 8):
-            for j in range(-8, 8):
-                if j != 0:
-                    self.assertEqual(foo(i, j), i // j)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-                        foo(i, j)
+
+        @torch.jit.script
+        def div(a, b):
+            # type: (int, int) -> float
+            return a / b
+
+        for floor_div in [True, False]:
+            func = foo if floor_div else div
+            for i in range(-8, 8):
+                for j in range(-8, 8):
+                    if j != 0:
+                        val = i // j if floor_div else i / j
+                        self.assertEqual(func(i, j), val)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
+                            func(i, j)
 
     def test_number_augassign(self):
         def func():
