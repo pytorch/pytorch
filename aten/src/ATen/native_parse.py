@@ -19,10 +19,16 @@ except ImportError:
 # processing by downstream tools. This will helps us avoid having to prematurely
 # change all downstream tools to detect these new types.
 def temp_type_translations(typ):
+    # Enables Tensor[] by translating to legacy TensorList. See [temp translations]
     if typ == 'Tensor[]':
         return 'TensorList'
+    # Enables int[] by translating to legacy IntList. See [temp translations]
+    if typ == 'int[]':
+        return 'IntList'
+    # Enables int by translating to legacy int64_t. See [temp translations]
     if typ == 'int':
         return 'int64_t'
+    # Enables float by translating to legacy double. See [temp translations]
     if typ == 'float':
         return 'double'
     return typ
@@ -118,9 +124,6 @@ def parse_arguments(args, func_decl, func_name, func_return):
         if match:
             argument_dict['type'] = 'IntList'
             argument_dict['size'] = int(match.group(1))
-        # Enables int[] by translating to legacy IntList. See [temp translations]
-        if argument_dict['type'] == 'int[]':
-            argument_dict['type'] = 'IntList'
         argument_dict['type'] = temp_type_translations(argument_dict['type'])
         if default is not None:
             argument_dict['default'] = default
