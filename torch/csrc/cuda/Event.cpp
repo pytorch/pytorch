@@ -90,7 +90,10 @@ static PyObject * THCPEvent_get_cuda_event(THCPEvent *self) {
 static PyObject * THCPEvent_get_device(THCPEvent *self) {
   HANDLE_TH_ERRORS
   at::optional<at::Device> device = self->cuda_event.device();
-  return device ? THPDevice_New(device.value()) : Py_BuildValue((char*)"");
+  if (!device) {
+    Py_RETURN_NONE;
+  }
+  return THPDevice_New(device.value());
   END_HANDLE_TH_ERRORS
 }
 
