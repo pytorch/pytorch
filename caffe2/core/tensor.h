@@ -373,6 +373,10 @@ class CAFFE2_API Tensor final {
     return impl_;
   }
 
+  bool defined() const {
+    return impl_;
+  }
+
   /**
    * Returns a const raw void* pointer of the underlying storage. mutable_data()
    * or raw_mutable_data() must have been called prior to this function call.
