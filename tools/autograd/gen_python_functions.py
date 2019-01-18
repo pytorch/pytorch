@@ -126,8 +126,7 @@ static PyStructSequence_Desc desc${namedtuple_type_index} = {
 static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
-  int ret = PyStructSequence_InitType2(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
-  if (ret < 0) throw std::runtime_error("Unable to initialize type torch.return_types.${name}");
+  PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
   namedtuple_type_initialized${namedtuple_type_index} = true;
 }
 """)
