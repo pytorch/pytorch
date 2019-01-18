@@ -5,7 +5,7 @@
 #define CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
 #include <immintrin.h>
 #endif
-#include <ATen/core/Half.h>
+#include <c10/util/Half.h>
 #include <c10/util/Logging.h>
 
 namespace caffe2 {
