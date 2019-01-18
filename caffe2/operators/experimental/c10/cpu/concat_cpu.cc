@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    at::ArrayRef<C10Tensor> inputs,
-    const C10Tensor& output_,
-    const C10Tensor& split_,
+    ArrayRef<at::Tensor> inputs,
+    const at::Tensor& output_,
+    const at::Tensor& split_,
     int axis,
     int add_axis) {
-  Tensor output(output_);
-  Tensor split(split_);
+  Tensor output{C10Tensor(output_)};
+  Tensor split{C10Tensor(split_)};
   CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));

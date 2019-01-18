@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/dispatch/DeviceId.h>
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
 #include "caffe2/core/context_base.h"
+#include <ATen/core/ivalue.h>
 
 namespace caffe2 {
 namespace ops {
@@ -13,9 +14,9 @@ struct Concat final {
   static constexpr const char* name = "concat";
 
   using Signature = void(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const C10Tensor& split_info,
+      ArrayRef<at::Tensor> inputs,
+      const at::Tensor& output,
+      const at::Tensor& split_info,
       int add,
       int add_axis);
 
@@ -25,11 +26,7 @@ struct Concat final {
       {"inputs", "output", "split_info_output", "add", "add_axis"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const C10Tensor& split_info,
-      int add,
-      int add_axis) {
+      at::ArrayRef<IValue> arguments) {
     return c10::DeviceTypeId::CPU;
   }
 };
