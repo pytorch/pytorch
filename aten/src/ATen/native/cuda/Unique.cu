@@ -40,7 +40,6 @@ template <typename scalar_t>
         Tensor sorted_indices = at::arange(0, num_inp, self.type().toScalarType(kLong));
         int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
         thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
-//        num_out = (thrust::unique_by_key(policy, output_data, output_data + num_inp, inverse_indices_ptr)).second - inverse_indices_ptr;
         Tensor inv_loc = at::empty({num_inp}, self.type().toScalarType(kLong));
         inverse_indices = at::empty({num_inp}, self.type().toScalarType(kLong));
         int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
