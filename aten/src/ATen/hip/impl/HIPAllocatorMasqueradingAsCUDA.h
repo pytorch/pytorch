@@ -23,6 +23,6 @@ public:
   DeleterFnPtr raw_deleter() const override {
     return allocator_->raw_deleter();
   }
-}
+};
 
 }} // namespace c10::hip
