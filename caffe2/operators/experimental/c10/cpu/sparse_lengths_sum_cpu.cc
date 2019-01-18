@@ -11,14 +11,14 @@ namespace {
 
 template <typename InputType, typename IndexType>
 void sparse_lengths_sum_op_cpu_impl(
-    const C10Tensor& dataInput_,
-    const C10Tensor& indicesInput_,
-    const C10Tensor& lengthsInput_,
-    const C10Tensor& output_) {
-  Tensor dataInput(dataInput_);
-  Tensor indicesInput(indicesInput_);
-  Tensor lengthsInput(lengthsInput_);
-  Tensor output(output_);
+    const at::Tensor& dataInput_,
+    const at::Tensor& indicesInput_,
+    const at::Tensor& lengthsInput_,
+    const at::Tensor& output_) {
+  Tensor dataInput{C10Tensor(dataInput_)};
+  Tensor indicesInput{C10Tensor(indicesInput_)};
+  Tensor lengthsInput{C10Tensor(lengthsInput_)};
+  Tensor output{C10Tensor(output_)};
 
   using T = float;
   constexpr bool USE_MEAN = false;

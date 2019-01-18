@@ -1,7 +1,8 @@
 #pragma once
 
 #include <ATen/core/dispatch/DeviceId.h>
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
 #include "caffe2/core/context_base.h"
@@ -18,12 +19,12 @@ struct GivenTensorFill final {
   static constexpr const char* name = "given_tensor_fill";
 
   using Signature = void(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
+      ArrayRef<at::Tensor> inputs,
+      const at::Tensor& output,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
-      const C10Tensor& values);
+      const at::Tensor& values);
 
   static constexpr c10::guts::array<const char*, 6> parameter_names = {
       {"inputs",
@@ -36,33 +37,22 @@ struct GivenTensorFill final {
    static constexpr size_t num_outputs() {return 1;}
 
    static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
-      bool input_as_shape,
-      const C10Tensor& values) {
+      c10::ArrayRef<c10::IValue> args) {
     return c10::DeviceTypeId::CPU;
   }
 };
 
 struct ConstantFill final {
-  union Value {
-    float as_float;
-    int32_t as_int32;
-    int64_t as_int64;
-    bool as_bool;
-  };
   static constexpr const char* name = "constant_fill";
 
   using Signature = void(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
+      ArrayRef<at::Tensor> inputs,
+      const at::Tensor& output,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
       int dtype,
-      Value value);
+      IValue value);
 
   static constexpr size_t num_outputs() {return 1;}
 
@@ -76,13 +66,7 @@ struct ConstantFill final {
        "value"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
-      bool input_as_shape,
-      int dtype,
-      Value value) {
+      c10::ArrayRef<c10::IValue> args) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -91,10 +75,10 @@ struct UniformFill final {
   static constexpr const char* name = "uniform_fill";
 
   using Signature = void(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
+      ArrayRef<at::Tensor> inputs,
+      const at::Tensor& output,
+      ArrayRef<int64_t> shape,
+      ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
       float min,
       float max);
@@ -111,13 +95,7 @@ struct UniformFill final {
        "max"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<C10Tensor> inputs,
-      const C10Tensor& output,
-      const std::vector<int64_t>& shape,
-      const std::vector<int>& extra_shape,
-      bool input_as_shape,
-      float min,
-      float max) {
+      c10::ArrayRef<c10::IValue> args) {
     return c10::DeviceTypeId::CPU;
   }
 };

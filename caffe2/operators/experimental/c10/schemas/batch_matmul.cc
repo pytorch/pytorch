@@ -37,6 +37,9 @@ struct BroadcastParameter final {
 } // namespace
 
 namespace caffe2 {
+
+CAFFE_KNOWN_TYPE(ops::BatchMatmul::State);
+
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::BatchMatmul,
     ops::BatchMatmul::State,
