@@ -13,7 +13,7 @@ struct FullyConnected final {
 
   struct State final {
     vector<int64_t> Y_shape_cache_;
-    at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor{CPU}));
+    at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
   };
 
   using Signature = void(
