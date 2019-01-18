@@ -164,12 +164,7 @@ void removeExtraLoopOutputs(Node* node) {
 void ConstantPropagation(Node* n, const AliasDb& aliasDb) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-<<<<<<< HEAD
-        return v->node()->kind() == prim::Constant ||
-            v->node()->kind() == prim::None;
-=======
         return v->node()->kind() == prim::Constant;
->>>>>>> move prim::None to prim::Constant
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
