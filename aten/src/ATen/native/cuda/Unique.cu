@@ -7,6 +7,8 @@
 #include <tuple>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
+#include <thrust/scan.h>
+#include <thrust/scatter.h>
 
 namespace at {
 namespace native{
@@ -30,20 +32,26 @@ template <typename scalar_t>
     Tensor output = input.clone();
     output = output.view(-1);
     scalar_t* output_data = output.data<scalar_t>();
-    int64_t num_out;
     Tensor inverse_indices;
     if (!return_inverse) {
         inverse_indices = at::empty({0},  self.type().toScalarType(kLong));
         thrust::sort(policy, output_data, output_data + num_inp);
-        scalar_t* output_end = thrust::unique(policy, output_data, output_data + num_inp);
-        num_out = output_end - output_data;
     } else {
-        inverse_indices = at::arange(0, num_inp, self.type().toScalarType(kLong));
+        Tensor sorted_indices = at::arange(0, num_inp, self.type().toScalarType(kLong));
+        int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
+        thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
+//        num_out = (thrust::unique_by_key(policy, output_data, output_data + num_inp, inverse_indices_ptr)).second - inverse_indices_ptr;
+        Tensor inv_loc = at::empty({num_inp}, self.type().toScalarType(kLong));
+        inverse_indices = at::empty({num_inp}, self.type().toScalarType(kLong));
+        int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
         int64_t* inverse_indices_ptr = inverse_indices.data<int64_t>();
-        thrust::sort_by_key(policy, output_data, output_data + num_inp, inverse_indices_ptr);
-        num_out = (thrust::unique_by_key(policy, output_data, output_data + num_inp, inverse_indices_ptr)).second - inverse_indices_ptr;
+        thrust::adjacent_difference(policy, output_data, output_data + num_inp, inv_loc_ptr, [=] __device__ (scalar_t a, scalar_t b) -> int64_t { if (a != b) {return 1;} else { return 0; }});
+        inv_loc[0] = 0;
+        thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
+        thrust::scatter(policy,inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_ptr, inverse_indices_ptr);
         inverse_indices.resize_(input.sizes());
-    }    
+    }
+    int64_t num_out = thrust::unique(policy, output_data, output_data + num_inp) - output_data;
     output.resize_(num_out);
 
     THCudaCheck(cudaGetLastError());
