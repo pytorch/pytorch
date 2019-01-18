@@ -107,7 +107,7 @@ def AddNullInput(model, reader, batch_size, img_size, dtype):
     )
 
 
-def SaveModel(args, train_model, epoch):
+def SaveModel(args, train_model, epoch, use_ideep):
     prefix = "[]_{}".format(train_model._device_prefix, train_model._devices[0])
     predictor_export_meta = pred_exp.PredictorExportMeta(
         predict_net=train_model.net.Proto(),
@@ -134,10 +134,11 @@ def SaveModel(args, train_model, epoch):
         db_type="minidb",
         db_destination=model_path,
         predictor_export_meta=predictor_export_meta,
+        use_ideep = use_ideep
     )
 
 
-def LoadModel(path, model):
+def LoadModel(path, model, use_ideep):
     '''
     Load pretrained model from file
     '''
@@ -148,8 +149,14 @@ def LoadModel(path, model):
     predict_init_net = core.Net(pred_utils.GetNet(
         meta_net_def, predictor_constants.PREDICT_INIT_NET_TYPE))
 
-    predict_init_net.RunAllOnGPU()
-    init_net.RunAllOnGPU()
+    if use_ideep: 
+        predict_init_net.RunAllOnIDEEP()
+    else: 
+        predict_init_net.RunAllOnGPU()
+    if use_ideep: 
+        init_net.RunAllOnIDEEP()
+    else: 
+        init_net.RunAllOnGPU()
 
     assert workspace.RunNetOnce(predict_init_net)
     assert workspace.RunNetOnce(init_net)
@@ -288,12 +295,19 @@ def Train(args):
     log.info("Using epoch size: {}".format(args.epoch_size))
 
     # Create ModelHelper object
-    train_arg_scope = {
-        'order': 'NCHW',
-        'use_cudnn': True,
-        'cudnn_exhaustive_search': True,
-        'ws_nbytes_limit': (args.cudnn_workspace_limit_mb * 1024 * 1024),
-    }
+    if args.use_ideep:
+        train_arg_scope = {
+            'use_cudnn': False,
+            'cudnn_exhaustive_search': False,
+            'training_mode': 1
+        }
+    else:
+        train_arg_scope = {
+            'order': 'NCHW',
+            'use_cudnn': True,
+            'cudnn_exhaustive_search': True,
+            'ws_nbytes_limit': (args.cudnn_workspace_limit_mb * 1024 * 1024),
+        }
     train_model = model_helper.ModelHelper(
         name='resnext' + str(args.num_layers), arg_scope=train_arg_scope
     )
@@ -469,6 +483,7 @@ def Train(args):
         rendezvous=rendezvous,
         optimize_gradient_memory=False,
         cpu_device=args.use_cpu,
+        ideep=args.use_ideep,
         shared_model=args.use_cpu,
         combine_spatial_bn=args.use_cpu,
     )
@@ -482,11 +497,17 @@ def Train(args):
     test_model = None
     if (args.test_data is not None):
         log.info("----- Create test net ----")
-        test_arg_scope = {
-            'order': "NCHW",
-            'use_cudnn': True,
-            'cudnn_exhaustive_search': True,
-        }
+        if use_ideep:
+            test_arg_scope = {
+                'use_cudnn': False,
+                'cudnn_exhaustive_search': False,
+            }
+        else:
+            test_arg_scope = {
+                'order': "NCHW",
+                'use_cudnn': True,
+                'cudnn_exhaustive_search': True,
+            }
         test_model = model_helper.ModelHelper(
             name='resnext' + str(args.num_layers) + "_test",
             arg_scope=test_arg_scope,
@@ -526,7 +547,7 @@ def Train(args):
     epoch = 0
     # load the pre-trained model and reset epoch
     if args.load_model_path is not None:
-        LoadModel(args.load_model_path, train_model)
+        LoadModel(args.load_model_path, train_model, args.use_ideep)
 
         # Sync the model params
         data_parallel_model.FinalizeAfterCheckpoint(train_model)
@@ -564,7 +585,7 @@ def Train(args):
         )
 
         # Save the model for each epoch
-        SaveModel(args, train_model, epoch)
+        SaveModel(args, train_model, epoch, args.use_ideep)
 
         model_path = "%s/%s_" % (
             args.file_store_path,
@@ -638,6 +659,8 @@ def main():
                         help="Load previously saved model to continue training")
     parser.add_argument("--use_cpu", type=bool, default=False,
                         help="Use CPU instead of GPU")
+    parser.add_argument("--use_ideep", type=bool, default=False,
+                        help="Use ideep")
     parser.add_argument('--dtype', default='float',
                         choices=['float', 'float16'],
                         help='Data type used for training')

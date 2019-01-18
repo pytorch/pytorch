@@ -130,14 +130,6 @@ Tensor & atan2_(Tensor& self, const Tensor & other) {
   return at::legacy::th::_th_atan2_(self, other);
 }
 
-Tensor & tril_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_(self, diagonal);
-}
-
-Tensor & triu_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_(self, diagonal);
-}
-
 Tensor & digamma_(Tensor& self) {
   return at::legacy::th::_th_digamma_(self);
 }
@@ -270,22 +262,6 @@ Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, i
 
 Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
   return at::legacy::th::_th_cross(self, other, dim);
-}
-
-Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_out(result, self, diagonal);
-}
-
-Tensor triu(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu(self, diagonal);
-}
-
-Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_out(result, self, diagonal);
-}
-
-Tensor tril(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril(self, diagonal);
 }
 
 Tensor trace(const Tensor & self) {
@@ -727,14 +703,6 @@ std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const 
 
 std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
-}
-
-Tensor all(const Tensor & self) {
-  return at::legacy::th::_th_all(self);
-}
-
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
 }
 
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

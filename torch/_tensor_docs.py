@@ -466,7 +466,7 @@ add_docstr_all('bernoulli_',
     The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
     value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
 
-    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    :attr:`self` can have integral ``dtype``, but :attr:`p_tensor` must have
     floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
@@ -1261,6 +1261,13 @@ add_docstr_all('is_contiguous',
 is_contiguous() -> bool
 
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
+""")
+
+add_docstr_all('is_floating_point',
+               r"""
+is_floating_point() -> bool
+
+Returns True if the data type of :attr:`self` is a floating point data type.
 """)
 
 add_docstr_all('is_set_to',

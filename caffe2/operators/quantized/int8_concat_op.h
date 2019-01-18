@@ -55,7 +55,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
       }
       Y_dims[axis_] += Xi.t.size(axis_);
     }
-    Y->t.Resize(Y_dims);
+    ReinitializeTensor(&Y->t, Y_dims, at::dtype<uint8_t>().device(CPU));
     int before = X0.t.size_to_dim(axis_);
     int after = X0.t.size_from_dim(axis_ + 1);
     const auto C_total = Y_dims[axis_];

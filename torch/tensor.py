@@ -255,9 +255,9 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
-    def norm(self, p="fro", dim=None, keepdim=False):
+    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func: `torch.norm`"""
-        return torch.norm(self, p, dim, keepdim)
+        return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""

@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/python_print.h>

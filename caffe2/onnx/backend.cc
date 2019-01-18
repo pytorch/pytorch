@@ -6,7 +6,7 @@
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
 #include "onnx/checker.h"
 #include "onnx/optimizer/optimize.h"
 #endif
@@ -69,7 +69,7 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   return d;
 }
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
 ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
   std::vector<std::string> passes{"fuse_consecutive_transposes",
                                   "eliminate_nop_transpose",
@@ -1456,7 +1456,7 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
   ModelProto init_model = OptimizeOnnx(onnx_model, true);
   ModelProto pred_model = OptimizeOnnx(onnx_model, false);
 #else
@@ -1560,7 +1560,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   ModelProto onnx_model;
   ParseProtoFromLargeString(onnx_model_str, &onnx_model);
 
-#if !CAFFE2_MOBILE
+#if !C10_MOBILE
   ::ONNX_NAMESPACE::checker::check_model(onnx_model);
 #endif
 

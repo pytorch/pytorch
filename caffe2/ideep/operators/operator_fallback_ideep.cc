@@ -18,12 +18,10 @@
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/generate_proposals_op.h>
 #include <caffe2/operators/given_tensor_fill_op.h>
-#include <caffe2/operators/leaky_relu_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
-#include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/roi_align_rotated_op.h>
 #include <caffe2/operators/scale_op.h>
@@ -32,9 +30,21 @@
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/stop_gradient.h>
-#include <caffe2/sgd/adam_op.h>
+#include <caffe2/operators/order_switch_ops.h>
+#include <caffe2/operators/softmax_with_loss_op.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
+#include <caffe2/queue/queue_ops.h>
+#include <caffe2/operators/tensor_protos_db_input.h>
+
+#ifdef CAFFE2_USE_GLOO
+#include <caffe2/contrib/gloo/common_world_ops.h>
+#include <caffe2/contrib/gloo/broadcast_ops.h>
+#include <caffe2/contrib/gloo/allreduce_ops.h>
+#include <caffe2/contrib/gloo/allgather_ops.h>
+#include <caffe2/contrib/gloo/barrier_ops.h>
+#include <caffe2/contrib/gloo/reduce_scatter_ops.h>
+#endif
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -52,9 +62,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Reshape,
-    IDEEPFallbackOp<ReshapeOp<float, CPUContext>, SkipIndices<1>>);
 
 // filter operators
 REGISTER_IDEEP_OPERATOR(
@@ -109,7 +116,7 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
-  
+
 // ctc decoder operators
 REGISTER_IDEEP_OPERATOR(
     CTCGreedyDecoder,
@@ -133,9 +140,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     LearningRate,
     IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    LeakyRelu,
-    IDEEPFallbackOp<LeakyReluOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     Mul,
     IDEEPFallbackOp<
@@ -170,14 +174,55 @@ REGISTER_IDEEP_OPERATOR(
     ConvTransposeGradient,
     IDEEPFallbackOp<ConvTransposeGradientOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
-    LeakyReluGradient,
-    IDEEPFallbackOp<LeakyReluGradientOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
     MulGradient,
     IDEEPFallbackOp<BinaryElementwiseGradientOp<
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
-REGISTER_IDEEP_OPERATOR(Adam, IDEEPFallbackOp<AdamOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(TensorProtosDBInput, IDEEPFallbackOp<TensorProtosDBInput<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(CloseBlobsQueue, IDEEPFallbackOp<CloseBlobsQueueOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    SoftmaxWithLoss,
+    IDEEPFallbackOp<SoftmaxWithLossOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    SoftmaxWithLossGradient,
+    IDEEPFallbackOp<SoftmaxWithLossGradientOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    NHWC2NCHW,
+    IDEEPFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    NCHW2NHWC,
+    IDEEPFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
+
+#ifdef CAFFE2_USE_GLOO
+namespace gloo {
+// gloo operators
+REGISTER_IDEEP_OPERATOR(
+    CreateCommonWorld,
+    IDEEPFallbackOp<CreateCommonWorld<CPUContext>, SkipIndices<0>>);
+REGISTER_IDEEP_OPERATOR(
+    CloneCommonWorld,
+    IDEEPFallbackOp<CloneCommonWorld<CPUContext>, SkipIndices<0>>);
+REGISTER_IDEEP_OPERATOR(
+    DestroyCommonWorld,
+    IDEEPFallbackOp<DestroyCommonWorld>);
+REGISTER_IDEEP_OPERATOR(
+    Broadcast,
+    IDEEPFallbackOp<BroadcastOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Allreduce,
+    IDEEPFallbackOp<AllreduceOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Allgather,
+    IDEEPFallbackOp<AllgatherOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Barrier,
+    IDEEPFallbackOp<BarrierOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    ReduceScatter,
+    IDEEPFallbackOp<ReduceScatterOp<CPUContext>>);
+
+} // namespace gloo
+#endif
 
 } // namespace caffe2

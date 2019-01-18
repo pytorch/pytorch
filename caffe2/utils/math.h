@@ -19,6 +19,7 @@ extern "C" {
 
 namespace caffe2 {
 
+// TODO: Change dims related arguments to int64_t?
 class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
@@ -73,6 +74,8 @@ template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
 template <typename T, class Context>
 void Inv(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Erf(const int N, const T* x, T* y, Context* context);
 
 #define C10_DECLARE_COMPARE_OP(Comp)                                         \
   template <typename T, class Context>                                       \

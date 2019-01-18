@@ -89,8 +89,8 @@ class ImageInputOp final
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
-  Tensor prefetched_image_{CPU};
-  Tensor prefetched_label_{CPU};
+  Tensor prefetched_image_;
+  Tensor prefetched_label_;
   vector<Tensor> prefetched_additional_outputs_;
   Tensor prefetched_image_on_device_;
   Tensor prefetched_label_on_device_;
@@ -120,8 +120,8 @@ class ImageInputOp final
   int crop_;
   std::vector<float> mean_;
   std::vector<float> std_;
-  Tensor mean_gpu_{Context::GetDeviceType()};
-  Tensor std_gpu_{Context::GetDeviceType()};
+  Tensor mean_gpu_;
+  Tensor std_gpu_;
   bool mirror_;
   bool is_test_;
   bool use_caffe_datum_;
@@ -377,16 +377,24 @@ ImageInputOp<Context>::ImageInputOp(
   for (int i = 0; i < num_decode_threads_; ++i) {
     randgen_per_thread_.emplace_back(meta_randgen());
   }
-  prefetched_image_.Resize(
-      int64_t(batch_size_),
-      int64_t(crop_),
-      int64_t(crop_),
-      int64_t(color_ ? 3 : 1));
+  ReinitializeTensor(
+      &prefetched_image_,
+      {int64_t(batch_size_),
+       int64_t(crop_),
+       int64_t(crop_),
+       int64_t(color_ ? 3 : 1)},
+      at::dtype<uint8_t>().device(CPU));
+  std::vector<int64_t> sizes;
   if (label_type_ != SINGLE_LABEL && label_type_ != SINGLE_LABEL_WEIGHTED) {
-    prefetched_label_.Resize(int64_t(batch_size_), int64_t(num_labels_));
+    sizes = std::vector<int64_t>{int64_t(batch_size_), int64_t(num_labels_)};
   } else {
-    prefetched_label_.Resize(vector<int64_t>(1, batch_size_));
+    sizes = std::vector<int64_t>{batch_size_};
   }
+  // data type for prefetched_label_ is actually not known here..
+  ReinitializeTensor(
+      &prefetched_label_,
+      sizes,
+      at::dtype<int>().device(CPU));
 
   for (int i = 0; i < additional_output_sizes_.size(); ++i) {
     prefetched_additional_outputs_on_device_.emplace_back();
@@ -1256,8 +1264,14 @@ bool ImageInputOp<Context>::CopyPrefetched() {
     // TODO: support color jitter and color lighting in gpu_transform
     if (gpu_transform_) {
       if (!mean_std_copied_) {
-        mean_gpu_.Resize(mean_.size());
-        std_gpu_.Resize(std_.size());
+        ReinitializeTensor(
+            &mean_gpu_,
+            {static_cast<int64_t>(mean_.size())},
+            at::dtype<float>().device(Context::GetDeviceType()));
+        ReinitializeTensor(
+            &std_gpu_,
+            {static_cast<int64_t>(std_.size())},
+            at::dtype<float>().device(Context::GetDeviceType()));
 
         context_.template CopyFromCPU<float>(
             mean_.size(),
