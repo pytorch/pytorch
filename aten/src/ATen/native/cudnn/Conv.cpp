@@ -95,8 +95,8 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <unordered_map>
 
 // Note [chooseAlgorithm doesn't respect mathType]
-// You might be wondering, why not call cudnnSetConvolutionMathType in the 
-// convolution descriptor (cdesc) setter, before calling chooseAlgorithm...
+// You might be wondering, why are we calling cudnnSetConvolutionMathType after
+// calling chooseAlgorithm...
 // Turns out, the mathType returned by the chooseAlgorithm can be different 
 // from what we set in the descriptor and hence, we have to explicitly update it 
 // after the chooseAlgorithm has found the best pair of algorithm+mathType. 
@@ -669,11 +669,6 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
 
   if (args.params.deterministic && !benchmark) {
     algoPerf->algo = search::DEFAULT_ALGO;
-    if (dataType == CUDNN_DATA_HALF) {
-      algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
-    } else {
-      algoPerf->mathType = CUDNN_DEFAULT_MATH;
-    }
     search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
     return;
   }
@@ -704,11 +699,6 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
       *algoPerf = perfResults;
   } else {
       algoPerf->algo = search::DEFAULT_ALGO;
-      if (dataType == CUDNN_DATA_HALF) {
-        algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
-      } else {
-        algoPerf->mathType = CUDNN_DEFAULT_MATH;
-      }
       search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
   }
 }
@@ -731,11 +721,6 @@ Workspace chooseAlgorithm(
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
     algoPerf->algo = search::DEFAULT_ALGO;
-    if (dataType == CUDNN_DATA_HALF) {
-      algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
-    } else {
-      algoPerf->mathType = CUDNN_DEFAULT_MATH;
-    }
     search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
     search::cache().insert(args.params, *algoPerf);
     return Workspace(algoPerf->memory);
@@ -820,19 +805,19 @@ void raw_cudnn_convolution_forward_out(
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{ input, output, weight };
+  cudnnConvolutionFwdAlgoPerf_t fwdAlgPerf;
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(weight);
   args.odesc.set(output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, &(fwdAlgPerf.mathType));
 
   // TODO: when we do legacy group convolution support, we'll repeatedly
   // reinitialize the workspace for each convolution we do.  This is
   // wasteful; we'd rather reuse the workspace.  OTOH, legacy group
   // convolution support is already pretty slow, so this might not
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
-  cudnnConvolutionFwdAlgoPerf_t fwdAlgPerf;
   Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &fwdAlgPerf);
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
@@ -949,14 +934,14 @@ void raw_cudnn_convolution_backward_input_out(
   auto dataType = getCudnnDataType(grad_output);
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
+  cudnnConvolutionBwdDataAlgoPerf_t bwdDataAlgPerf;
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
   args.wdesc.set(weight);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, &(bwdDataAlgPerf.mathType));
 
-  cudnnConvolutionBwdDataAlgoPerf_t bwdDataAlgPerf;
   Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &bwdDataAlgPerf);
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
@@ -1090,14 +1075,14 @@ void raw_cudnn_convolution_backward_weight_out(
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
+  cudnnConvolutionBwdFilterAlgoPerf_t bwdFilterAlgPerf;
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(grad_weight);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, &(bwdFilterAlgPerf.mathType));
 
-  cudnnConvolutionBwdFilterAlgoPerf_t bwdFilterAlgPerf;
   Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &bwdFilterAlgPerf);
 
   // update convDesc mathType since cudnn now requires both algo + mathType to figure out
