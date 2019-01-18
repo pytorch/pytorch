@@ -56,9 +56,11 @@ class FillerOp : public Operator<Context> {
       auto shape = vector<int64_t>{};
       if (input_as_shape_) {
         Tensor input;
+        bool on_cpu = false;
         if (this->InputIsTensorType(0, CPU)) {
           // originally, shape input must be in CPU context
           input = this->template Input<Tensor>(0, CPU);
+          on_cpu = true;
         } else {
           // in ONNX case, we allow shape to be in CUDA context
           input = Input(0);
@@ -70,7 +72,13 @@ class FillerOp : public Operator<Context> {
             "data type int64_t");
         CAFFE_ENFORCE(input.numel() > 0);
         auto* shape_data = input.template data<int64_t>();
-        shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        if (!on_cpu) {
+          std::unique_ptr<int64_t[]> shape_data_copy = caffe2::make_unique<int64_t[]>(input.dim32(0));
+          context_.template CopyToCPU<int64_t>(input.dim32(0), shape_data, shape_data_copy.get());
+          shape.insert(shape.end(), shape_data_copy.get(), shape_data_copy.get() + input.dim32(0));
+        } else {
+          shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        }
       } else {
         auto& input = Input(0);
         shape.insert(shape.end(), input.sizes().begin(), input.sizes().end());
