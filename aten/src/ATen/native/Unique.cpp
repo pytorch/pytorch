@@ -142,5 +142,13 @@ std::tuple<Tensor, Tensor> unique_dim(const Tensor& self, int64_t dim, const boo
   return at::unique(self, sorted, return_inverse, dim);
 }
 
+std::tuple<Tensor, Tensor> _unique(const Tensor& self, const bool sorted, const bool return_inverse) {
+  return at::unique(self, sorted, return_inverse);
+}
+
+std::tuple<Tensor, Tensor> _unique_dim(const Tensor& self, int64_t dim, const bool sorted, const bool return_inverse) {
+  return at::unique(self, sorted, return_inverse, dim);
+}
+
 }  // namespace native
 }  // namespace at
