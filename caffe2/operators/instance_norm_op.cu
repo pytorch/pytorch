@@ -378,7 +378,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto dim_stride = C;
 
   if (InputSize() < 5) {
-    mean_.Resize(N, C);
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
     auto mean_mutable_data = mean_.mutable_data<float>();
     InstanceNormMeanKernel<<<
         CAFFE_GET_BLOCKS(N * C),
@@ -401,7 +401,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto mean_data = mean.data<float>();
 
   if (InputSize() < 6) {
-    inv_stdev_.Resize(N, C);
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
     auto inv_stdev_mutable_data = inv_stdev_.mutable_data<float>();
     InstanceNormInvStdevKernel<<<
         CAFFE_GET_BLOCKS(N * C),

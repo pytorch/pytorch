@@ -63,6 +63,9 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -735,7 +738,7 @@ def brute_pdist(inp, p=2):
     k = n * (n - 1) // 2
     if k == 0:
         # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
     square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
     unroll = square.view(square.shape[:-2] + (n * n,))
     inds = torch.ones(k, dtype=torch.int)

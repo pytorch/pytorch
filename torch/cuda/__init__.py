@@ -536,6 +536,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
         torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
+    torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
 @staticmethod

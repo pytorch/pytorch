@@ -6523,6 +6523,19 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
+    def test_trace_nested_datatypes(self):
+        @torch.jit.script
+        def foo(x):
+            return [[x + 1, x - 1], [x + 2, x - 2]]
+
+        def bar(x):
+            list_stuff = foo(x)
+            return list_stuff[0][0], list_stuff[1][1]
+
+        traced = torch.jit.trace(bar, torch.rand(3, 4))
+        x = torch.rand(5, 6)
+        self.assertEqual(bar(x), traced(x))
+
     @suppress_warnings
     def test_onnx_export_func_with_warnings(self):
         @torch.jit.script
@@ -9427,6 +9440,17 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    def test_view_write(self):
+        def fn(x, y):
+            l = []
+            l.append(x)
+            x_view = l[0]
+            a = x + x
+            x_view.add_(y)
+            b = x + x
+            return a == b
+        self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -11677,7 +11701,7 @@ def add_nn_module_test(*args, **kwargs):
     module_name = name.split("_")[0]
 
     module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal._weak_types.get(module) is None:
+    if module is None or torch._jit_internal.weak_types.get(module) is None:
         return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
@@ -12038,6 +12062,48 @@ class TestAsync(JitTestCase):
         x = torch.rand(3, 4, 5)
         with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
             wait_script_nest(x)
+
+    def test_async_grad_guard_with_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.enable_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, True)
+        self.assertEqual(after_wait, True)
+
+    def test_async_grad_guard_no_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.no_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, False)
+        self.assertEqual(after_wait, False)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
