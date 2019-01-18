@@ -270,6 +270,13 @@ class PoissonNLLLoss(_Loss):
         >>> target = torch.randn(5, 2)
         >>> output = loss(log_input, target)
         >>> output.backward()
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+          the same shape as the input
     """
     __constants__ = ['log_input', 'full', 'eps', 'reduction']
 
@@ -350,10 +357,10 @@ class KLDivLoss(_Loss):
 
 
     Shape:
-        - input: :math:`(N, *)` where `*` means, any number of additional
+        - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
-        - target: :math:`(N, *)`, same shape as the input
-        - output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
           the same shape as the input
 
     """
@@ -571,6 +578,8 @@ class BCEWithLogitsLoss(_Loss):
          - Input: :math:`(N, *)` where `*` means, any number of additional
            dimensions
          - Target: :math:`(N, *)`, same shape as the input
+         - Output: scalar. If `reduce` is False, then :math:`(N, *)`, same
+           shape as input.
 
      Examples::
 
@@ -640,8 +649,9 @@ class HingeEmbeddingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of dimensions. The sum operation
+          operates over all the elements.
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
     """
     __constants__ = ['margin', 'reduction']
@@ -797,8 +807,9 @@ class SoftMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
 
     """

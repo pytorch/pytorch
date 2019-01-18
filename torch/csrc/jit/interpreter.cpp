@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/assertions.h>
@@ -729,7 +730,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // the current thread will continue running before it suspends.
         InterpreterState state(intrusive_from_this());
         e.future->addCallback([state]() {
-          c10::global_work_queue().run(InterpreterContinuation(state, Stack()));
+          c10::global_work_queue().run(InterpreterContinuation(state, Stack(),
+              autograd::GradMode::is_enabled()));
         });
 
         return true;
@@ -880,5 +882,10 @@ c10::intrusive_ptr<Future> InterpreterState::getFuture() {
 InterpreterState::InterpreterState(
     c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
     : pImpl(std::move(pImpl_)) {}
+
+void InterpreterContinuation::operator()() {
+  autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  state.runAsync(stack);
+}
 } // namespace jit
 } // namespace torch
