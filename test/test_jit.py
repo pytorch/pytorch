@@ -4636,7 +4636,7 @@ a")
             self.checkScript(div_int_nofuture, (), optimize=True)
             self.checkScript(div_float_nofuture, (), optimize=True)
 
-    def test_floor_normal_div(self):
+    def test_int_div(self):
         @torch.jit.script
         def foo(a, b):
             # type: (int, int) -> int
