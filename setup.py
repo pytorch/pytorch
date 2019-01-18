@@ -168,6 +168,7 @@ import importlib
 from tools.setup_helpers.configure import *
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
+import tools.setup_helpers.configure
 
 ################################################################################
 # Parameters parsed from environment
@@ -375,8 +376,7 @@ for lib in dep_libs:
         description = 'Rebuild {} external library'.format(lib)
 
         def run(self):
-            global RERUN_CMAKE
-            RERUN_CMAKE = False
+            tools.setup_helpers.configure.RERUN_CMAKE = False
             build_libs([self.lib])
     rebuild_dep.lib = lib
     rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
@@ -557,8 +557,7 @@ class rebuild(distutils.command.build.build):
     ] + distutils.command.build.build.sub_commands
 
     def run(self):
-        global RERUN_CMAKE
-        RERUN_CMAKE = False
+        tools.setup_helpers.configure.RERUN_CMAKE = False
         distutils.command.build.build.run(self)
 
 
