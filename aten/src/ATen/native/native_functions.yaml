@@ -1632,7 +1632,7 @@
     CUDA: _round_out_cuda
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
+  matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
 
