@@ -67,7 +67,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::TensorList:
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
-      return out << v.toBlob();
+      return out << *v.toBlob();
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:

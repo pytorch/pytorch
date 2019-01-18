@@ -139,7 +139,6 @@ _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
-_(aten, _th_all) \
 _(aten, _th_any) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
@@ -152,7 +151,6 @@ _(aten, _th_max) \
 _(aten, _th_median) \
 _(aten, _th_min) \
 _(aten, _th_mode) \
-_(aten, _th_norm) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -236,6 +234,7 @@ _(aten, broadcast_tensors) \
 _(aten, btrifact) \
 _(aten, btrifact_with_info) \
 _(aten, btrisolve) \
+_(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
@@ -249,6 +248,7 @@ _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, combinations) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \

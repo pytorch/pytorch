@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/cuda/Resize.cuh>
 #include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
@@ -62,6 +63,12 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
   return tensor;
+}
+
+Tensor empty_strided_cuda(IntList size, IntList stride, const TensorOptions& options) {
+  auto t = at::native::empty_cuda({0}, options);
+  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
+  return t;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {

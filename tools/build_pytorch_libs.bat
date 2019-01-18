@@ -11,7 +11,7 @@ set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
 
 IF NOT DEFINED INSTALL_DIR (
-  set "INSTALL_DIR=%cd:\=/%/torch/"
+  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
 ) ELSE (
   set "INSTALL_DIR=%INSTALL_DIR:\=/%"
 )
@@ -20,8 +20,10 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
-set LINK_FLAGS=/DEBUG:FULL
+set LINK_FLAGS=
 : End cmake variables
+
+if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
@@ -89,9 +91,11 @@ goto :process_args
 set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
+  set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 )
 IF "%REL_WITH_DEB_INFO%"=="1" (
   set BUILD_TYPE=RelWithDebInfo
+  set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 )
 
 :: sccache will fail if all cores are used for compiling
@@ -144,6 +148,11 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
+copy /Y "%INSTALL_DIR%\lib\*" .
+IF EXIST "%INSTALL_DIR%\bin" (
+  copy /Y "%INSTALL_DIR%\bin\*" .
+)
+xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -236,13 +245,11 @@ goto:eof
                   -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DTORCH_INSTALL_BIN_DIR="lib" ^
-                  -DTORCH_INSTALL_INCLUDE_DIR="lib/include" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DUSE_ROCM=%USE_ROCM%
+                  -DUSE_ROCM=%USE_ROCM% %EXTRA_CAFFE2_CMAKE_FLAGS%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
 

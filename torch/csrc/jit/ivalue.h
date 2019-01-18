@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/core/ivalue.h>
 
 namespace torch {

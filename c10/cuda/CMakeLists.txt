@@ -63,7 +63,11 @@ add_subdirectory(test)
 install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
 foreach(file ${C10_CUDA_HEADERS})
   get_filename_component( dir ${file} DIRECTORY )
-  install( FILES ${file} DESTINATION lib/include/c10/cuda/${dir} )
+  install( FILES ${file} DESTINATION include/c10/cuda/${dir} )
 endforeach()
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
-  DESTINATION lib/include/c10/cuda/impl)
+  DESTINATION include/c10/cuda/impl)
+
+if (MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
+endif()

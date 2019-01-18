@@ -33,13 +33,13 @@ class CWrapPlugin(object):
 
         Template('PyBool_Check($arg)')
 
-        Note that the name of the identifier that will be subsituted must be
+        Note that the name of the identifier that will be substituted must be
         $arg.
 
         Args:
             arg: a Python object with a 'type' field representing the type
             to generate a check string for.
-            option: dictionary containing the information for this specific
+            option: a dictionary containing the information for this specific
             option.
 
         Returns:

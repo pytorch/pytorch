@@ -4,10 +4,11 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -82,6 +83,7 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -94,6 +96,21 @@ class CAFFE2_API Tensor final {
   Tensor(const Tensor& src, DeviceType type)
       : Tensor(type) {
     CopyFrom(src);
+  }
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
+
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
   }
 
   Tensor Clone() const {
@@ -532,6 +549,11 @@ class CAFFE2_API Tensor final {
   }
 };
 
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
 CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(

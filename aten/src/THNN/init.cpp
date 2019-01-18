@@ -157,9 +157,6 @@
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialFractionalMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialDilatedMaxPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -191,12 +188,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricDilatedMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricFractionalMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialReflectionPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricUpSamplingNearest.c>
