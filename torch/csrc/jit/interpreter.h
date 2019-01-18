@@ -73,16 +73,15 @@ struct Suspend : public std::exception {
 };
 
 struct InterpreterContinuation {
-  InterpreterContinuation(InterpreterState state_, Stack stack_)
-      : state(state_), stack(std::move(stack_)) {}
+  InterpreterContinuation(InterpreterState state_, Stack stack_, bool grad_mode_enabled_)
+      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_) {}
 
-  void operator()() {
-    state.runAsync(stack);
-  }
+  void operator()();
 
  private:
   InterpreterState state;
   Stack stack;
+  bool grad_mode_enabled;
 };
 } // namespace jit
 } // namespace torch

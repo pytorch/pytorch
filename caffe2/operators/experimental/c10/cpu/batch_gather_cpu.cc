@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/batch_gather.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -12,12 +12,12 @@ namespace {
 
 template <class TInd>
 void batch_gather_op_cpu_impl(
-    const C10Tensor& data_,
-    const C10Tensor& indices_,
-    const C10Tensor& output_) {
-  Tensor data(data_);
-  Tensor indices(indices_);
-  Tensor output(output_);
+    const at::Tensor& data_,
+    const at::Tensor& indices_,
+    const at::Tensor& output_) {
+  Tensor data{C10Tensor(data_)};
+  Tensor indices{C10Tensor(indices_)};
+  Tensor output{C10Tensor(output_)};
   CPUContext context;
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");

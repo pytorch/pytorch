@@ -25,4 +25,7 @@ using reduce_norm_fn =
     void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
+using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
+DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
+
 }} // namespace at::native
