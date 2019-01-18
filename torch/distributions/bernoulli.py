@@ -21,7 +21,7 @@ class Bernoulli(ExponentialFamily):
         tensor([ 0.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
     arg_constraints = {'probs': constraints.unit_interval,

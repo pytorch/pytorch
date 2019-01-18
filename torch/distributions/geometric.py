@@ -22,7 +22,7 @@ class Geometric(Distribution):
         tensor([ 2.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
+        probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
     arg_constraints = {'probs': constraints.unit_interval,

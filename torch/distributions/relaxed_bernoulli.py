@@ -16,7 +16,7 @@ class LogitRelaxedBernoulli(Distribution):
 
     Args:
         temperature (Tensor): relaxation temperature
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
@@ -104,7 +104,7 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Args:
         temperature (Tensor): relaxation temperature
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
     arg_constraints = {'probs': constraints.unit_interval,
