@@ -133,6 +133,8 @@ class Event(torch._C._CudaEventBase):
     @classmethod
     def from_ipc_handle(cls, device, handle):
         r"""Reconstruct an event from an IPC handle on the given device."""
+        if type(device) is int:
+            device = torch.device(type='cuda', index=device)
         return super(Event, cls).from_ipc_handle(device, handle)
 
     def record(self, stream=None):

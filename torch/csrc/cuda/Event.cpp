@@ -45,21 +45,21 @@ static PyObject * THCPEvent_pynew(
 static PyObject * THCPEvent_from_ipc_handle(
     PyTypeObject *type, PyObject *args) {
   HANDLE_TH_ERRORS
-  long long device_index = -1;
+  THPDevice * device = nullptr;
   const char *handle_bytes = nullptr;
   int handle_size = 0;
 
   // cannot use bool 'p' and bytearray 'Y' as they are not available in Python 2
   if (!PyArg_ParseTuple(
-      args, "Ls#", &device_index, &handle_bytes, &handle_size)) {
+      args, "Os#", &device, &handle_bytes, &handle_size)) {
     return nullptr;
   }
 
   AT_CHECK(handle_size == sizeof(cudaIpcEventHandle_t),
     "cudaIpcEventHandle_t expects byte-like object of size ",
     sizeof(cudaIpcEventHandle_t), ", but got ", handle_size);
-  AT_CHECK(device_index >= 0, "Reconstructing event from handle requires "
-    "a non-negtive device index, but got ", device_index)
+  AT_CHECK(device->device.type() == at::kCUDA, "Event can only be created on "
+    "CUDA devices, but got device type ", device->device.type())
 
   // no need to release the handle byte array as it is automatically managed
   // by the corresponding THCPEvent python object.
@@ -73,7 +73,7 @@ static PyObject * THCPEvent_from_ipc_handle(
 
   cudaIpcEventHandle_t handle;
   std::memcpy(&handle, handle_bytes, handle_size);
-  new (&self->cuda_event) at::cuda::CUDAEvent(device_index, &handle);
+  new (&self->cuda_event) at::cuda::CUDAEvent(device->device.index(), &handle);
 
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
