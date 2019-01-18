@@ -673,7 +673,9 @@ def _try_get_overloaded_fn(fn):
     if not hasattr(fn, '__self__'):
         # Only allow overloads for bound methods
         return None
-    overloads = fn.__self__._overloads.get(fn.__name__, [])
+    overloads = fn.__self__._overloads.get(fn.__name__, None)
+    if overloads is None:
+        return None
     return [getattr(fn.__self__, overload) for overload in overloads]
 
 
