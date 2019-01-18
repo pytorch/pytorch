@@ -52,7 +52,7 @@ using namespace torch::autograd::utils;
 // To resolve this issue, we temporarily disable unnamed field in gen_python_functions.py
 // and manually define this global variable
 char *PyStructSequence_UnnamedField = "unnamed field";
-#endif  // #ifndef _MSC_VER
+#endif  // #ifdef _MSC_VER
 
 namespace torch { namespace autograd {
 
