@@ -1770,6 +1770,16 @@ void Caffe2Backend::BuildTensorFillingOp(
         memcpy(&f, &onnx_tensor.raw_data(), sizeof(float));
         c2_values->set_f(f);
       }
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE){
+      c2_dtype->set_i(caffe2::TensorProto::DOUBLE);
+      if (onnx_tensor.double_data_size() > 0) {
+        c2_values->set_f(static_cast<float>(onnx_tensor.double_data(0)));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(double));
+        double d;
+        memcpy(&d, &onnx_tensor.raw_data(), sizeof(double));
+        c2_values->set_f(static_cast<float>(d));
+      }
     } else if (onnx_tensor.data_type() == TensorProto::INT64){
       c2_dtype->set_i(caffe2::TensorProto::INT64);
       if (onnx_tensor.int64_data_size() > 0) {
@@ -1792,7 +1802,9 @@ void Caffe2Backend::BuildTensorFillingOp(
       }
     } else {
       // TODO: to support more data type
-      CAFFE_THROW("Unsupported dtype.");
+      std::stringstream oss;
+      oss << "Unsupported dtype: " << onnx_tensor.data_type();
+      CAFFE_THROW(oss.str());
     }
     // ConstantFill uses value
     c2_op->set_type("ConstantFill");
