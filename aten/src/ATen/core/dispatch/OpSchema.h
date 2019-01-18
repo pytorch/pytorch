@@ -36,13 +36,13 @@ inline DeviceTypeId to_device_type_id(DeviceType device_type) {
 
 inline TensorParameterDispatchKey tensor_to_dispatch_key(const at::Tensor& tensor) {
   return TensorParameterDispatchKey{
-      to_device_type_id(tensor.getIntrusivePtr()->device_type()),
+      to_device_type_id(tensor.device().type()),
       LayoutId(0),
       tensor.dtype().id()};
 }
 
 template<size_t index, size_t offset, class ParameterTypes, class Enable = void> struct get_ith_tensor_arg_ {
-  //static_assert(!std::is_same<ParameterTypes, ParameterTypes>::value, "Index out of bounds");
+  static_assert(!std::is_same<ParameterTypes, ParameterTypes>::value, "Index out of bounds");
 };
 template<size_t index, size_t offset, class Head, class... Tail>
 struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index == 0 && is_tensor_arg<Head>::value>> {
@@ -115,6 +115,19 @@ struct has_name_defined<T, guts::void_t<
 
 // TODO Test has_name_defined
 
+template<class T>
+struct ivalue_to_arg_type {
+  static T call(const IValue& v) {
+    return std::move(v).to<T>();
+  }
+};
+template<class T>
+struct ivalue_to_arg_type<ArrayRef<T>> {
+  static ArrayRef<T> call(const IValue& v) {
+    return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
+  }
+};
+
 template<class ReturnType, class ParamTypes, class FuncType> struct _wrapKernel {};
 template<class ReturnType, class... ParamTypes, class FuncType> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, FuncType> {
   using parameter_types = guts::typelist::typelist<ParamTypes...>;
@@ -126,7 +139,7 @@ template<class ReturnType, class... ParamTypes, class FuncType> struct _wrapKern
         throw std::runtime_error("Wrong number of arguments for operator call");
       }
       return return_type_to_ivalue(
-        (*kernel)(args[indices].to<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>()...)
+        (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...)
       );
     };
   }
@@ -140,7 +153,7 @@ template<class... ParamTypes, class FuncType> struct _wrapKernel<void, guts::typ
       if (args.size() != sizeof...(ParamTypes)) {
         throw std::runtime_error("Wrong number of arguments for operator call");
       }
-      (*kernel)(args[indices].to<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>()...);
+      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
       return IValue();
     };
   }
