@@ -1,8 +1,8 @@
 #include <torch/csrc/cuda/Event.h>
-#include <torch/csrc/cuda/Stream.h>
-
-#include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
+#include <torch/csrc/cuda/Stream.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/THP.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
@@ -92,7 +92,7 @@ static PyObject * THCPEvent_get_cuda_event(THCPEvent *self) {
 
 static PyObject * THCPEvent_get_device(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(self->cuda_event.device_index());
+  return THPDevice_New(self->cuda_event.device());
   END_HANDLE_TH_ERRORS
 }
 
