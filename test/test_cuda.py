@@ -1442,25 +1442,22 @@ class TestCuda(TestCase):
     def test_stream_event_device(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
+        e0 = torch.cuda.Event()
+
+        self.assertEqual(None, e0.device)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
-            t0 = torch.tensor(0, device='cuda:0')
-            e0 = s0.record_event()
+            s0.record_event(e0)
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.Stream()
-            t1 = torch.tensor(1, device='cuda:1')
             e1 = s1.record_event()
 
-        self.assertEqual(type(t0.device), type(s0.device))
-        self.assertEqual(type(t0.device), type(e0.device))
-        self.assertEqual(t0.device, s0.device)
-        self.assertEqual(t0.device, e0.device)
-        self.assertEqual(type(t1.device), type(s1.device))
-        self.assertEqual(type(t1.device), type(e1.device))
-        self.assertEqual(t1.device, s1.device)
-        self.assertEqual(t1.device, e1.device)
+        self.assertEqual(s0.device, torch.device('cuda:0'))
+        self.assertEqual(e0.device, torch.device('cuda:0'))
+        self.assertEqual(s1.device, torch.device('cuda:1'))
+        self.assertEqual(e1.device, torch.device('cuda:1'))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_streams_multi_gpu(self):
