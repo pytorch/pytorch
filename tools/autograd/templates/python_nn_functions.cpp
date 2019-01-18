@@ -16,6 +16,10 @@ using at::Tensor;
 using at::Scalar;
 using namespace torch::autograd::utils;
 
+namespace testing_namedtuple {
+int PyStructSequence_InitType(PyTypeObject *type, PyStructSequence_Desc *desc);
+}
+
 namespace torch { namespace autograd {
 
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)

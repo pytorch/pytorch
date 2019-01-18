@@ -7,7 +7,6 @@
 // and also copied into 'torch' module.
 
 #include <Python.h>
-
 #include "python_torch_functions_dispatch.h"
 
 #include "torch/csrc/autograd/python_variable.h"
@@ -39,6 +38,10 @@ using at::DeviceGuard;
 using at::TensorOptions;
 
 using namespace torch::autograd::utils;
+
+namespace testing_namedtuple {
+int PyStructSequence_InitType(PyTypeObject *type, PyStructSequence_Desc *desc);
+}
 
 namespace torch { namespace autograd {
 

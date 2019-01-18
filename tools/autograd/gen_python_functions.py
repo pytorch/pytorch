@@ -126,7 +126,7 @@ static PyStructSequence_Desc desc${namedtuple_type_index} = {
 static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
-  PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
+  testing_namedtuple::PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
   namedtuple_type_initialized${namedtuple_type_index} = true;
 }
 """)
