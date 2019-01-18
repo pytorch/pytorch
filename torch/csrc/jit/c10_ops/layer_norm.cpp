@@ -30,9 +30,9 @@ RegisterOperators reg({
     "caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon) -> (Tensor, Tensor, Tensor)",
     [](Stack& stack) {
         ArrayRef<IValue> inputs = last(stack, 3);
-        auto input = std::move(inputs[0]);
-        auto axis = std::move(inputs[1]);
-        auto epsilon = std::move(inputs[2]);
+        IValue input = std::move(inputs[0]);
+        const IValue& axis = inputs[1];
+        const IValue& epsilon = inputs[2];
         drop(stack, 3);
 
         if (input.toTensor().requires_grad()) {
