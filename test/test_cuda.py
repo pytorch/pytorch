@@ -1442,35 +1442,26 @@ class TestCuda(TestCase):
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
-
-        with torch.cuda.stream(s1):
-            torch.cuda._sleep(500000000)
-
-        self.assertTrue(s0.query())
-        self.assertFalse(s1.query())
-        s1.synchronize()
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-
-        # make sure context is restored
-        torch.cuda._sleep(500000000)
-        self.assertFalse(s0.query())
-        self.assertTrue(s1.query())
-        s0.synchronize()
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-
-        # same device test
         s2 = torch.cuda.Stream(device=0)
-        with torch.cuda.stream(s2):
-            torch.cuda._sleep(500000000)
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-        self.assertFalse(s2.query())
-        s2.synchronize()
-        self.assertTrue(s0.query())
-        self.assertTrue(s1.query())
-        self.assertTrue(s2.query())
+
+        self.assertEqual(torch.cuda.current_stream(), s0)
+        self.assertEqual(0, torch.cuda.current_device())
+        with torch.cuda.stream(s1):
+            self.assertEqual(torch.cuda.current_stream(), s1)
+            self.assertEqual(1, torch.cuda.current_device())
+            with torch.cuda.stream(s2):
+                self.assertEqual(torch.cuda.current_stream(), s2)
+                self.assertEqual(0, torch.cuda.current_device())
+                with torch.cuda.stream(s0):
+                    self.assertEqual(torch.cuda.current_stream(), s0)
+                    self.assertEqual(0, torch.cuda.current_device())
+                self.assertEqual(torch.cuda.current_stream(), s2)
+                self.assertEqual(0, torch.cuda.current_device())
+            self.assertEqual(torch.cuda.current_stream(), s1)
+            self.assertEqual(1, torch.cuda.current_device())
+
+        self.assertEqual(torch.cuda.current_stream(), s0)
+        self.assertEqual(0, torch.cuda.current_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_streams_multi_gpu(self):
