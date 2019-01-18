@@ -10,11 +10,11 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void flatten_op_cpu_impl(
-    const C10Tensor& input_,
-    const C10Tensor& output_,
+    const at::Tensor& input_,
+    const at::Tensor& output_,
     int axis) {
-  Tensor input(input_);
-  Tensor output(output_);
+  Tensor input{C10Tensor(input_)};
+  Tensor output{C10Tensor(output_)};
   CPUContext context;
   CAFFE_ENFORCE_GE(
       input.sizes().size(), axis, "The rank of the tensor must be >= axis.");

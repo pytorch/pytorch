@@ -9,15 +9,16 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void expand_dims_op_cpu_impl(
-    const C10Tensor& input_,
-    const C10Tensor& output_,
-    const std::vector<int>& dims,
-    caffe2::ops::ExpandDims::State* state) {
-  Tensor input(input_);
-  Tensor output(output_);
+    const at::Tensor& input_,
+    const at::Tensor& output_,
+    ArrayRef<int64_t> dims,
+    intrusive_ptr<Blob> state_) {
+  Tensor input{C10Tensor(input_)};
+  Tensor output{C10Tensor(output_)};
+  caffe2::ops::ExpandDims::State* state = state_->GetMutable<caffe2::ops::ExpandDims::State>();
 
   if (!state->initialized) {
-    state->dims = dims;
+    state->dims = dims.vec();
     auto originalSize = state->dims.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
     std::sort(state->dims.begin(), state->dims.end());
