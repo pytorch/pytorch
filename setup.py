@@ -145,8 +145,6 @@ from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
 from distutils import dir_util
 import setuptools.command.build_ext
-import setuptools.command.develop
-import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
@@ -170,17 +168,27 @@ import tools.setup_helpers.configure
 ################################################################################
 
 VERBOSE_SCRIPT = True
+RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
-emit_build_warning = False
+EMIT_BUILD_WARNING = False
+filtered_args = []
 for i, arg in enumerate(sys.argv):
+    if arg == '--cmake':
+        tools.setup_helpers.configure.RERUN_CMAKE = True
+        continue
+    if arg == 'rebuild' or arg == 'build':
+        arg = 'build'  # rebuild is gone, make it build
+        EMIT_BUILD_WARNING = True
     if arg == "--":
+        filtered_args += sys.argv[i:]
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'rebuild' or arg == 'build':
-        sys.argv[i], arg = 'develop', 'develop'
-        emit_build_warning = True
+    if arg == 'clean':
+        RUN_BUILD_DEPS = False
+    filtered_args.append(arg)
+sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
     def report(*args):
@@ -230,16 +238,9 @@ else:
         pass
 report("Building wheel {}-{}".format(package_name, version))
 
-build_deps_ran = False
-
 
 # all the work we need to do _before_ setup runs
-def build_deps(cmake):
-    global build_deps_ran
-    if build_deps_ran:
-        return
-    build_deps_ran = True
-    tools.setup_helpers.configure.RERUN_CMAKE = bool(cmake)
+def build_deps():
     report('-- Building version ' + version)
     version_path = os.path.join(cwd, 'torch', 'version.py')
     with open(version_path, 'w') as f:
@@ -333,26 +334,6 @@ def build_caffe2():
     if subprocess.call(build_libs_cmd, env=my_env, **kwargs) != 0:
         report("Failed to run '{}'".format(' '.join(build_libs_cmd)))
         sys.exit(1)
-
-
-class develop(setuptools.command.develop.develop):
-    user_options = setuptools.command.develop.develop.user_options + [
-        ('cmake', None, 'Force cmake to rerun.'),
-    ]
-
-    def initialize_options(self):
-        self.cmake = None
-        setuptools.command.develop.develop.initialize_options(self)
-
-    def run(self):
-        build_deps(self.cmake)
-        setuptools.command.develop.develop.run(self)
-
-
-class install(setuptools.command.install.install):
-    def run(self):
-        build_deps(True)
-        setuptools.command.install.install.run(self)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -721,8 +702,6 @@ if USE_ROCM:
 
 cmdclass = {
     'build_ext': build_ext,
-    'develop': develop,
-    'install': install,
     'clean': clean,
 }
 
@@ -733,7 +712,30 @@ entry_points = {
     ]
 }
 
+# post run, warnings, printed at the end to make them more visible
+build_update_message = """
+    It is no longer necessary to use the 'build' or 'rebuild' targets
+
+    To install:
+      $ python setup.py install
+    To develop locally:
+      $ python setup.py develop
+    To force cmake to re-run (off by default):
+      $ python setup.py develop --cmake
+"""
+
+
+def print_box(msg):
+    lines = msg.split('\n')
+    size = max(len(l) + 1 for l in lines)
+    print('-' * (size + 2))
+    for l in lines:
+        print('|{}{}|'.format(l, ' ' * (size - len(l))))
+    print('-' * (size + 2))
+
 if __name__ == '__main__':
+    if RUN_BUILD_DEPS:
+        build_deps()
     setup(
         name=package_name,
         version=version,
@@ -822,27 +824,5 @@ if __name__ == '__main__':
             ]
         },
     )
-
-# post run, warnings, printed at the end to make them more visible
-build_update_message = """
-    It is no longer necessary to use the 'build' or 'rebuild' targets
-
-    To install:
-      $ python setup.py install
-    To develop locally:
-      $ python setup.py develop
-    To force cmake to re-run (off by default):
-      $ python setup.py develop --cmake
-"""
-
-
-def print_box(msg):
-    lines = msg.split('\n')
-    size = max(len(l) + 1 for l in lines)
-    print('-' * (size + 2))
-    for l in lines:
-        print('|{}{}|'.format(l, ' ' * (size - len(l))))
-    print('-' * (size + 2))
-
-if emit_build_warning:
-    print_box(build_update_message)
+    if EMIT_BUILD_WARNING:
+        print_box(build_update_message)
