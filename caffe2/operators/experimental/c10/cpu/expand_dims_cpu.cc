@@ -12,10 +12,9 @@ void expand_dims_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     ArrayRef<int64_t> dims,
-    intrusive_ptr<Blob> state_) {
+    caffe2::ops::ExpandDims::State* state) {
   Tensor input{C10Tensor(input_)};
   Tensor output{C10Tensor(output_)};
-  caffe2::ops::ExpandDims::State* state = state_->GetMutable<caffe2::ops::ExpandDims::State>();
 
   if (!state->initialized) {
     state->dims = dims.vec();

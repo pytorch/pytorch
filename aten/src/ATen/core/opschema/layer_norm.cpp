@@ -4,5 +4,5 @@
 C10_DEFINE_OP_SCHEMA(c10::core::opschema::LayerNorm);
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(c10::core::opschema::LayerNorm::Cache);
+CAFFE_KNOWN_TYPE(c10::core::opschema::LayerNorm::State);
 }

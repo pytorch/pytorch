@@ -19,12 +19,11 @@ void fc_op_cpu_impl(
     const at::Tensor& Y_,
     int axis,
     int axis_w,
-    intrusive_ptr<Blob> state_) {
+    caffe2::ops::FullyConnected::State* state) {
   Tensor X{C10Tensor(X_)};
   Tensor W{C10Tensor(W_)};
   Tensor b{C10Tensor(b_)};
   Tensor Y{C10Tensor(Y_)};
-  caffe2::ops::FullyConnected::State* state = state_->GetMutable<caffe2::ops::FullyConnected::State>();
   CPUContext context;
 
   constexpr bool TransposeWeight = true;

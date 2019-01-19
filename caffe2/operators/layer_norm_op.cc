@@ -187,7 +187,7 @@ to the end.)
 // Register layer norm with c10
 namespace {
 template <class DataType>
-c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
+c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs, c10::KernelState* state) {
   caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
   caffe2::Tensor Y{c10::C10Tensor(inputs[1].toTensor())};
   caffe2::Tensor mean{c10::C10Tensor(inputs[2].toTensor())};
@@ -195,7 +195,7 @@ c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
   int64_t axis = inputs[4].toInt();
   float epsilon = inputs[5].toDouble();
   caffe2::CPUContext context;
-  c10::core::opschema::LayerNorm::Cache* cache = inputs[6].toBlob()->GetMutable<c10::core::opschema::LayerNorm::Cache>();
+  c10::core::opschema::LayerNorm::State* cache = static_cast<c10::core::opschema::LayerNorm::State*>(state);
   if (!cache->scale.has_value()) {
     cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }

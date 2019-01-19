@@ -9,6 +9,6 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::BatchGather);
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::BatchGather,
-    void,
+    NoState,
     C10BatchGather_DontUseThisOpYet)
 }

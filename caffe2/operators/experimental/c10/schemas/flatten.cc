@@ -21,7 +21,7 @@ struct AxisParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::Flatten,
-    void,
+    NoState,
     C10Flatten_DontUseThisOpYet,
     ParameterHelper<AxisParameter>)
 }

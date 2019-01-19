@@ -19,11 +19,10 @@ void batch_matmul_op_cpu_impl(
     int trans_a,
     int trans_b,
     int broadcast,
-    intrusive_ptr<Blob> state_) {
+    caffe2::ops::BatchMatmul::State* state) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
   Tensor Y{C10Tensor(Y_)};
-  caffe2::ops::BatchMatmul::State* state = state_->GetMutable<caffe2::ops::BatchMatmul::State>();
   CPUContext context;
   using Engine = caffe2::DefaultEngine;
 

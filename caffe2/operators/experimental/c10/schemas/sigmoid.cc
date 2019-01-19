@@ -9,6 +9,6 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::Sigmoid);
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::Sigmoid,
-    void,
+    NoState,
     C10Sigmoid_DontUseThisOpYet)
 }

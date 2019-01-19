@@ -13,8 +13,8 @@ public:
   OpKernel(const OpKernel&) = delete;
   OpKernel& operator=(const OpKernel&) = delete;
 
-  IValue call(ArrayRef<IValue> args) const {
-    return (*kernel_)(args);
+  IValue call(ArrayRef<IValue> args, KernelState* state) const {
+    return (*kernel_)(args, state);
   }
 
 private:
