@@ -413,9 +413,6 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
 
   Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
   constant_of_shape->insertBefore(n);
-  //constant_of_shape->t_(
-  //    attr::value,
-  //    scalar_to_tensor(at::Scalar(0.0f)).to(c10::kFloat));
   constant_of_shape->addInput(concated_dims->outputs()[0]);
   n->replaceInput(input_index, constant_of_shape->outputs()[0]);
 
