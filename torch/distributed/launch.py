@@ -75,6 +75,7 @@ Parsing the local_rank argument
 
 ::
 
+    >>> # xdoctest: +SKIP
     >>> import argparse
     >>> parser = argparse.ArgumentParser()
     >>> parser.add_argument("--local_rank", type=int)
@@ -84,6 +85,7 @@ Set your device to local rank using either
 
 ::
 
+    >>> # xdoctest: +SKIP
     >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
 
 or
