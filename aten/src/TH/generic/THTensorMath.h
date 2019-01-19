@@ -196,11 +196,4 @@ TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);
 #endif
 
-#if defined(TH_REAL_IS_BYTE)
-
-TH_API int THTensor_(logicalAnyAll)(THTensor *self);
-TH_API void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim);
-
-#endif /* TH_REAL_IS_BYTE */
-
 #endif

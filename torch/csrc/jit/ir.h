@@ -192,7 +192,7 @@ struct Value {
   TORCH_API Value* copyMetadata(Value* from);
 };
 
-struct Node : public Attributes<Node> {
+struct Node {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend struct Block;
@@ -574,9 +574,162 @@ struct Node : public Attributes<Node> {
 
   void dump() const;
 
+  std::ostream& print(
+      std::ostream& out,
+      size_t level,
+      std::vector<const Node*>* groups) const;
+
   virtual ~Node() = default;
 
+  // Methods for accessing attributes
+  void copyAttributes(const Node& rhs) {
+    values_.clear();
+    for (auto& i : rhs.values_) {
+      values_.push_back(i->clone());
+    }
+  }
+  bool hasAttribute(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
+    return findAttr(name, false) != values_.end();
+  }
+  bool hasAttributeS(const std::string& name) const {
+    return hasAttribute(Symbol::attr(name));
+  }
+  AttributeKind kindOf(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
+    return (*findAttr(name, true))->kind();
+  }
+  AttributeKind kindOfS(const std::string& name) const {
+    return kindOf(Symbol::attr(name));
+  }
+  Node* removeAttribute(Symbol name) {
+    JIT_ASSERT(name.is_attr());
+    values_.erase(findAttr(name, true));
+    return this;
+  }
+  Node* removeAttributeS(const std::string& name) {
+    return removeAttribute(Symbol::attr(name));
+  }
+  bool hasAttributes() const {
+    return values_.size() > 0;
+  }
+  size_t numAttributes() const {
+    return values_.size();
+  }
+  // The names are returned in order, since name actually is the index.
+  std::vector<Symbol> attributeNames() const {
+    std::vector<Symbol> names;
+    for (auto& a : values_)
+      names.push_back(a->name);
+    return names;
+  }
+  std::vector<const char*> attributeNamesS() const {
+    std::vector<const char*> names;
+    for (auto& a : values_)
+      names.push_back(a->name.toUnqualString());
+    return names;
+  }
+
+#define CREATE_ACCESSOR(Kind, method)                              \
+  Node* method##_(Symbol name, Kind##Attr::ConstructorType v) { \
+    return setAttr<Kind##Attr>(                                        \
+        name, std::forward<Kind##Attr::ConstructorType>(v));       \
+  }                                                                \
+  const Kind##Attr::ValueType& method(Symbol name) const {         \
+    return getAttr<Kind##Attr>(name);                                  \
+  }
+
+  CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Floats, fs)
+  CREATE_ACCESSOR(String, s)
+  CREATE_ACCESSOR(Strings, ss)
+  CREATE_ACCESSOR(Int, i)
+  CREATE_ACCESSOR(Ints, is)
+  CREATE_ACCESSOR(Graph, g)
+  CREATE_ACCESSOR(Graphs, gs)
+
+#undef CREATE_ACCESSOR
+
+  // Our Graphs are not very const-correct, so we need to allow returning
+  // non-const references too
+  GraphAttr::ValueType& g(Symbol name) {
+    return getAttr<GraphAttr>(name);
+  }
+
+  // does not use CREATE_ACCESSOR because we need additional asserts
+  Node* t_(Symbol name, TensorAttr::ConstructorType v) {
+    JIT_ASSERT(!v.defined() || !v.is_variable());
+    return setAttr<TensorAttr>(name, std::forward<TensorAttr::ConstructorType>(v));
+  }
+  const TensorAttr::ValueType& t(Symbol name) const {
+    return getAttr<TensorAttr>(name);
+  }
+
+  Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
+    for (auto& t : v) {
+      JIT_ASSERT(!t.defined() || !t.is_variable());
+    }
+    return setAttr<TensorsAttr>(
+        name, std::forward<TensorsAttr::ConstructorType>(v));
+  }
+  const TensorsAttr::ValueType& ts(Symbol name) const {
+    return getAttr<TensorsAttr>(name);
+  }
+
  private:
+  void printAttrValue(std::ostream& out, const Symbol& name) const;
+  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
+
+  template <typename T>
+  Node* setAttr(Symbol name, typename T::ConstructorType v) {
+    JIT_ASSERT(name.is_attr());
+    auto it = findAttr(name, false);
+    auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
+    if (it == values_.end()) {
+      values_.push_back(std::move(nv));
+    } else {
+      *it = std::move(nv);
+    }
+    return this;
+  }
+  template <typename T>
+  typename T::ValueType& getAttr(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
+    auto it = findAttr(name, true);
+    auto* child = dynamic_cast<T*>(it->get());
+    if (child == nullptr) {
+      throw AttributeError(name, true);
+    }
+    return child->value();
+  }
+  using AVPtr = AttributeValue::Ptr;
+  // NB: For determinism, we use a vector rather than a hash map.  This does
+  // mean that lookups are O(n), so you shouldn't use Attributes to store
+  // a big pile of messages.
+  std::vector<AVPtr> values_;
+  std::vector<AVPtr>::iterator findAttr(Symbol name, bool required) {
+    JIT_ASSERT(name.is_attr());
+    auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
+      return v->name == name;
+    });
+    if (required && it == values_.end()) {
+      throw AttributeError(name, false);
+    }
+    JIT_ASSERT(!required || it != values_.end());
+    return it;
+  }
+  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required) const {
+    JIT_ASSERT(name.is_attr());
+    auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
+      return v->name == name;
+    });
+    if (required && it == values_.end()) {
+      throw AttributeError(name, false);
+    }
+    JIT_ASSERT(!required || it != values_.end());
+    return it;
+  }
+
   enum class MoveSide { BEFORE, AFTER };
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
