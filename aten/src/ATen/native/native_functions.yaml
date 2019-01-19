@@ -883,11 +883,11 @@
 
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
 
-- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   matches_jit_signature: True
   variants: function, method
 
-- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -1005,7 +1005,7 @@
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
-- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
@@ -1184,15 +1184,15 @@
 
 - func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
-- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: median_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: median_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
-- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: min_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
@@ -1261,10 +1261,10 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   matches_jit_signature: True
 
-- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   matches_jit_signature: True
