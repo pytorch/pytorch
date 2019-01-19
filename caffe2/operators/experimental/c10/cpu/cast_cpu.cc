@@ -79,55 +79,55 @@ void cast_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<float>)
+    .kernel<&caffe2::cast_op_cpu_impl<float>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<float>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<int32_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<int32_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<int32_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<bool>)
+    .kernel<&caffe2::cast_op_cpu_impl<bool>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<bool>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<uint8_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<uint8_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<uint8_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<int8_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<int8_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<int8_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<uint16_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<uint16_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<uint16_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<int16_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<int16_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<int16_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<int64_t>)
+    .kernel<&caffe2::cast_op_cpu_impl<int64_t>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
         caffe2::TypeMeta::Id<int64_t>()}});
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel(&caffe2::cast_op_cpu_impl<double>)
+    .kernel<&caffe2::cast_op_cpu_impl<double>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),
