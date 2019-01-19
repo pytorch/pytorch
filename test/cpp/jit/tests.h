@@ -272,13 +272,14 @@ void testFusion() {
   testConcat(2);
 }
 
-struct Attr : public Attributes<Attr> {};
 void testAttributes() {
+  Graph g;
   auto one = attr::alpha;
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Attr attr;
+  Node *n = g.create(Symbol::fromQualString("foo::bar"));
+  Node &attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -290,7 +291,8 @@ void testAttributes() {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Attr attr2;
+  Node *n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node &attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
   attr2.f_(one, 5);
