@@ -10512,6 +10512,26 @@ class TestFuser(JitTestCase):
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
 
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fuser_deduplication(self):
+        # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
+        # see the discussion in PR #14957.
+        def f(x, y):
+            return torch.sigmoid(x + y)
+
+        b = torch.randn(5, 5, requires_grad=True)
+        a = torch.randn(5, 5, requires_grad=True)
+        s = self.checkScript(f, (a, b))
+        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+
+        c = s(a, b)
+        ga, gb = torch.autograd.grad(c.sum(), [a, b])
+        graph = backward_graph(s)
+        self.assertAllFused(graph)
+        # check that a, b share storage, i.e. were generated as a single output in the fuser
+        self.assertEqual(ga, gb)
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
