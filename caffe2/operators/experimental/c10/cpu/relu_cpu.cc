@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/relu.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
@@ -10,10 +10,10 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void relu_op_cpu_impl(
-    const C10Tensor& input_,
-    const C10Tensor& output_) {
-  Tensor input(input_);
-  Tensor output(output_);
+    const at::Tensor& input_,
+    const at::Tensor& output_) {
+  Tensor input{C10Tensor(input_)};
+  Tensor output{C10Tensor(output_)};
 
   output.ResizeLike(input);
 

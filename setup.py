@@ -168,6 +168,7 @@ import importlib
 from tools.setup_helpers.configure import *
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
+import tools.setup_helpers.configure
 
 ################################################################################
 # Parameters parsed from environment
@@ -375,8 +376,7 @@ for lib in dep_libs:
         description = 'Rebuild {} external library'.format(lib)
 
         def run(self):
-            global RERUN_CMAKE
-            RERUN_CMAKE = False
+            tools.setup_helpers.configure.RERUN_CMAKE = False
             build_libs([self.lib])
     rebuild_dep.lib = lib
     rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
@@ -557,8 +557,7 @@ class rebuild(distutils.command.build.build):
     ] + distutils.command.build.build.sub_commands
 
     def run(self):
-        global RERUN_CMAKE
-        RERUN_CMAKE = False
+        tools.setup_helpers.configure.RERUN_CMAKE = False
         distutils.command.build.build.run(self)
 
 
@@ -722,8 +721,11 @@ if DEBUG:
         extra_link_args += ['-O0', '-g']
 
 if REL_WITH_DEB_INFO:
-    extra_compile_args += ['-g']
-    extra_link_args += ['-g']
+    if IS_WINDOWS:
+        extra_link_args.append('/DEBUG:FULL')
+    else:
+        extra_compile_args += ['-g']
+        extra_link_args += ['-g']
 
 
 def make_relative_rpath(path):
@@ -841,6 +843,7 @@ if __name__ == '__main__':
                 'lib/*.dylib*',
                 'lib/*.dll',
                 'lib/*.lib',
+                'lib/*.pdb',
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
@@ -856,16 +859,15 @@ if __name__ == '__main__':
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/core/*.h',
-                'lib/include/c10/core/dispatch/*.h',
+                'lib/include/ATen/core/dispatch/*.h',
                 'lib/include/c10/core/impl/*.h',
-                'lib/include/c10/core/opschema/*.h',
+                'lib/include/ATen/core/opschema/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/c10/cuda/*.h',
                 'lib/include/c10/cuda/impl/*.h',
                 'lib/include/c10/hip/*.h',
                 'lib/include/c10/hip/impl/*.h',
-                'lib/include/caffe2/core/*.h',
-                'lib/include/caffe2/proto/*.h',
+                'lib/include/caffe2/**/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

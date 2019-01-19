@@ -84,6 +84,8 @@ class AliasDb {
 
   // Does `n` use or write to any wildcard aliases?
   bool hasWildcard(const Node* n) const;
+  // Returns nullopt if there are no wildcard nodes
+  c10::optional<const Node*> getLastWildcard() const;
 
   // Does `n` write to a value that may alias one of the graph inputs?
   bool writesToInputAlias(Node* n) const;
@@ -113,6 +115,8 @@ class AliasDb {
   bool hasWildcardImpl(const Node* n) const;
   bool writesTo(Node* n, const Value* v) const;
 
+  bool isBeforeSameGraph(const Node* lhs, const Node* rhs) const;
+
   std::shared_ptr<Graph> graph_;
   Symbol latestSymbol_ = Symbol::fromQualString("alias::0");
   std::unordered_map<const Value*, AliasInfo> valueToAlias_;
@@ -120,6 +124,7 @@ class AliasDb {
   std::unordered_map<Symbol, std::unordered_set<Node*>> aliasToWrites_;
   std::unordered_set<const Node*> wildcardNodes_;
   std::unordered_set<Symbol> graphInputAliases_;
+  std::unordered_map<const Graph*, const Node*> subgraphToOwner_;
 };
 
 inline TORCH_API AliasDb AliasAnalysis(std::shared_ptr<Graph> graph) {

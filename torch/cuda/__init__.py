@@ -313,9 +313,9 @@ def stream(stream):
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
-    .. note:: Streams are per-device, and this function changes the "current
-       stream" only for the currently selected device.  It is illegal to select
-       a stream that belongs to a different device.
+    .. note:: Streams are per-device. If the selected stream is not on the
+        current device, this function will also change the current device to
+        match the stream.
     """
     if stream is None:
         yield
@@ -536,6 +536,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
         torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
+    torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
 @staticmethod

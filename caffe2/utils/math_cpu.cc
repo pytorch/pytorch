@@ -680,6 +680,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Erf, vsErf)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Erf, vdErf)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -748,7 +750,6 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, sqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, rsqrt)
-
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
@@ -783,6 +784,16 @@ DELEGATE_TANH_FUNCTION(double)
 DELEGATE_CBRT_FUNCTION(float)
 DELEGATE_CBRT_FUNCTION(double)
 #undef DELEGATE_CBRT_FUNCTION
+
+#define DELEGATE_ERF_FUNCTION(T)                                    \
+    template <>                                                     \
+  C10_EXPORT void Erf<T, CPUContext>(                               \
+      const int N, const T* X, T* Y, CPUContext*) {                 \
+    std::transform(X, X + N, Y, [](const T x) { return erf(x); });  \
+  }
+DELEGATE_ERF_FUNCTION(float)
+DELEGATE_ERF_FUNCTION(double)
+#undef DELEGATE_ERF_FUNCTION
 
 #define DELEGATE_POWX_FUNCTION(T)                                       \
   template <>                                                           \

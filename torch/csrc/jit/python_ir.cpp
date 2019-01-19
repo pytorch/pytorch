@@ -374,12 +374,12 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .NS(addBlock)
 
-#define AS(name) def(#name, &Attributes<Node>::name)
+#define AS(name) def(#name, &Node::name)
       // methods from Attributes
       .AS(copyAttributes)
       .AS(hasAttributes)
 #undef AS
-#define AS(name) def(#name, &Attributes<Node>::name##S)
+#define AS(name) def(#name, &Node::name##S)
       // The default method names take Symbol, but the string conversion for
       // Symbol you to qualify with attr::. This is not very user friendly
       // for attributes, so expose the string variants instead.

@@ -603,9 +603,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
-#if CUDNN_VERSION >= 6000
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
-#endif
     };
     // NOTE: - 1 because ALGO_WINOGRAD is not implemented
     static constexpr int num_algos = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT - 1;
@@ -848,19 +846,9 @@ Tensor cudnn_convolution_forward(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_forward_out(
-        narrowGroup(*output, output_channels_dim,        i, groups),
-        narrowGroup(*input,  input_channels_dim,         i, groups),
-        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
-        padding, stride, dilation, 1, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_forward_out(
       *output, *input, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return *output;
 }
@@ -986,19 +974,9 @@ Tensor cudnn_convolution_backward_input(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_backward_input_out(
-        narrowGroup(*grad_input, input_channels_dim, i, groups),
-        narrowGroup(*grad_output, output_channels_dim, i, groups),
-        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
-        padding, stride, dilation, 1, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return *grad_input;
 }
@@ -1119,19 +1097,9 @@ Tensor cudnn_convolution_backward_weight(
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_backward_weight_out(
-        narrowGroup(*grad_weight, weight_output_channels_dim, i, groups),
-        narrowGroup(*grad_output, output_channels_dim, i, groups),
-        narrowGroup(*input, input_channels_dim, i, groups),
-        padding, stride, dilation, groups, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_backward_weight_out(
       *grad_weight, *grad_output, *input,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return grad_weight_t;
 }

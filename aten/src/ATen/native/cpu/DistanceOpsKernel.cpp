@@ -95,30 +95,27 @@ struct PDist {
   template <typename F>
   static void run_parallel(Tensor& result, const Tensor& self, const scalar_t p) {
     const scalar_t * const self_start = self.data<scalar_t>();
-    int64_t b = self.size(0);
-    int64_t n = self.size(1);
-    int64_t m = self.size(2);
+    const scalar_t * const self_end = self_start + self.numel();
+    int64_t n = self.size(0);
+    int64_t m = self.size(1);
 
     scalar_t * const res_start = result.data<scalar_t>();
-    int64_t combs = n * (n - 1) / 2;
+    int64_t combs = result.numel(); // n * (n - 1) / 2
     const Vec pvec(p);
 
     // We conceptually iterate over tuples of (i, j, k) where i is the first
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    parallel_for(0, combs * b, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t start, int64_t end) {
-      int64_t l = start / combs;
-      int64_t k = start % combs;
+    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t k, int64_t end) {
       float n2 = n - .5;
       // The -1 accounts for floating point truncation issues
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
-      const scalar_t * self_i = self_start + (l * n + i) * m;
-      const scalar_t * self_j = self_start + (l * n + j) * m;
-      const scalar_t * self_end = self_start + (l + 1) * n * m;
-      scalar_t * res = res_start + start;
+      const scalar_t * self_i = self_start + i * m;
+      const scalar_t * self_j = self_start + j * m;
+      scalar_t * res = res_start + k;
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
@@ -130,10 +127,6 @@ struct PDist {
         self_j += m;
         if (self_j == self_end) {
           self_i += m;
-          if (self_i + m == self_end) {
-            self_i += m;
-            self_end += n * m;
-          }
           self_j = self_i + m;
         }
       }
@@ -155,9 +148,8 @@ struct PDist {
     }
   }
 
-  // This does a backward pass down a Vec column of the input
   template <typename F>
-  inline static void backward_down_column(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int count) {
+  inline static void backward_down_column(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
     for (const scalar_t * const self_end = self_i + m * n; self_i != self_end - m; self_i += m, res_i += m) {
 
       const Vec self_vec_i = Vec::loadu(self_i, count);
@@ -165,7 +157,7 @@ struct PDist {
 
       const scalar_t * self_j = self_i + m;
       scalar_t * res_j = res_i + m;
-      for (; self_j != self_end; self_j += m, res_j += m, grad_k += 1, dist_k += 1) {
+      for (; self_j != self_end; self_j += m, res_j += m, grad_k += gs, dist_k += 1) {
         const Vec self_vec_j = Vec::loadu(self_j, count);
         Vec res_vec_j = Vec::loadu(res_j, count);
 
@@ -182,11 +174,9 @@ struct PDist {
 
   template <typename F>
   static void run_backward_parallel(Tensor& result, const Tensor & grad, const Tensor & self, const scalar_t p, const Tensor& dist) {
-    const int64_t b = self.size(0);
-    const int64_t n = self.size(1);
-    const int64_t m = self.size(2);
-    const int64_t combs = dist.size(1);
-    const int64_t remainder = m % Vec::size();
+    const int64_t n = self.size(0);
+    const int64_t m = self.size(1);
+    const int64_t gs = grad.stride(0);
     const Vec pvec(p);
 
     const scalar_t * const grad_start = grad.data<scalar_t>();
@@ -197,39 +187,18 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    int64_t mv = (m + Vec::size() - 1) / Vec::size(); // number of Vecs in a row rounded up
-    at::parallel_for(0, b * mv, internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t start, int64_t end) {
-      const int64_t l = start / mv;
-      const int64_t v = start % mv;
+    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t l, int64_t end) {
+      const scalar_t * self_l = self_start + l * Vec::size();
+      scalar_t * res_l = res_start + l * Vec::size();
 
-      const scalar_t * self_l = self_start + l * n * m;
-      const scalar_t * self_v = self_l + v * Vec::size();
-
-      const scalar_t * dist_l = dist_start + l * combs;
-      const scalar_t * grad_l = grad_start + l * combs;
-
-      scalar_t * res_l = res_start + l * n * m;
-      scalar_t * res_v = res_l + v * Vec::size();
-
-      while (start != end) {
-        backward_down_column<F>(self_v, res_v, grad_l, dist_l, pvec, n, m, std::min(int(m - (self_v - self_l)), Vec::size()));
-
-        start += 1;
-        self_v += Vec::size();
-        res_v += Vec::size();
-        if (self_v == self_l + mv * Vec::size()) {
-          // Reached the end of the row
-          self_l += n * m;
-          self_v = self_l;
-
-          res_l += n * m;
-          res_v = res_l;
-
-          dist_l += combs;
-          grad_l += combs;
-        }
+      for (const scalar_t * const res_end = res_start + end * Vec::size(); res_l != res_end; self_l += Vec::size(), res_l += Vec::size()) {
+        backward_down_column<F>(self_l, res_l, grad_start, dist_start, pvec, n, m, gs);
       }
     });
+    const int64_t remainder = m % Vec::size();
+    if (remainder) {
+      backward_down_column<F>(self_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, pvec, n, m, gs, remainder);
+    }
   }
 
   // Assumes self is nonempty, contiguous, and 2D and dist is also contiguous
@@ -251,7 +220,7 @@ struct PDist {
 
 };
 
-static void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
+void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });

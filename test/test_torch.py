@@ -378,6 +378,46 @@ class _TestTorchMixin(object):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
+    def test_logical_any(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
+
+            self.assertEqual(
+                torch.tensor(0, dtype=torch.uint8, device=device),
+                x.any())
+
+            self.assertEqual(
+                torch.zeros([1, 3, 400], dtype=torch.uint8, device=device),
+                x.any(0, keepdim=True))
+
+            self.assertEqual(
+                torch.zeros([2, 1, 400], dtype=torch.uint8, device=device),
+                x.any(1, keepdim=True))
+
+            self.assertEqual(
+                torch.zeros([2, 3, 1], dtype=torch.uint8, device=device),
+                x.any(2, keepdim=True))
+
+            # set the last element to 0
+            x[-1][-1][-1] = 1
+
+            self.assertEqual(
+                torch.tensor(1, dtype=torch.uint8, device=device),
+                x.any())
+
+            y = torch.zeros([1, 3, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(0, keepdim=True))
+
+            y = torch.zeros([2, 1, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(1, keepdim=True))
+
+            y = torch.zeros([2, 3, 1], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(2, keepdim=True))
+
     def test_logical_all(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1169,18 +1209,27 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     def test_pdist_norm(self):
+        def test_pdist_single(shape, device, p, dtype, trans):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            if trans:
+                x.transpose_(-2, -1)
+            actual = torch.pdist(x, p=p)
+            expected = brute_pdist(x, p=p)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(torch.allclose(expected, actual))
+
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1), (2, 3, 4)]:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
-                        x = torch.randn(shape, device=device)
-                        if trans:
-                            x.transpose_(-2, -1)
-                        actual = torch.pdist(x, p=p)
-                        expected = brute_pdist(x, p=p)
-                        self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        for dtype in [torch.float32, torch.float64]:
+                            test_pdist_single(shape, device, p, dtype, trans)
+
+            # do a simplified comparison with big inputs, see:
+            # https://github.com/pytorch/pytorch/issues/15511
+            for dtype in [torch.float32, torch.float64]:
+                test_pdist_single((1000, 2), device, 2, dtype, False)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
