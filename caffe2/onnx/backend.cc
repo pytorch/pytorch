@@ -303,6 +303,7 @@ Caffe2Backend::get_renamed_operators() const {
       {"Unsqueeze", "ExpandDims"},
       {"Tile", "NumpyTile"},
       {"DynamicSlice", "Slice"},
+      {"ConstantOfShape", "ConstantFill"},
       {"RandomNormal", "GaussianFill"}};
   return kRenamedOperators;
 }
@@ -340,6 +341,7 @@ Caffe2Backend::get_special_operators() const {
               {"ArgMin", &Caffe2Backend::CreateArgMaxMin},
               {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
+              {"ConstantOfShape", &Caffe2Backend::CreateConstantOfShape},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
               {"AveragePool", &Caffe2Backend::CreatePadPool},
               {"GlobalAveragePool", &Caffe2Backend::CreatePadPool},
@@ -455,6 +457,20 @@ Caffe2Ops Caffe2Backend::CreateConstant(
   auto* c2_op = ret.ops.Add();
   const auto* value = onnx_node->attributes.get<const TensorProto*>("value");
   BuildTensorFillingOp(c2_op, *value, onnx_node->node.output(0));
+
+  return ret;
+}
+
+Caffe2Ops Caffe2Backend::CreateConstantOfShape(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  CAFFE_ENFORCE_EQ(onnx_node->node.input_size(), 1);
+  CAFFE_ENFORCE_EQ(onnx_node->node.output_size(), 1);
+
+  Caffe2Ops ret;
+  auto* c2_op = ret.ops.Add();
+  const auto* value = onnx_node->attributes.get<const TensorProto*>("value");
+  BuildTensorFillingOp(c2_op, *value, onnx_node->node.output(0), onnx_node->node.input(0));
 
   return ret;
 }
@@ -1673,8 +1689,9 @@ void ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(caffe2::OperatorDe
 void Caffe2Backend::BuildTensorFillingOp(
     caffe2::OperatorDef* c2_op,
     const TensorProto& onnx_tensor,
-    const std::string& name) {
-  auto fill_name = name.empty() ? onnx_tensor.name() : name;
+    const std::string& output_name,
+    const std::string& shape_name) {
+  auto fill_name = output_name.empty() ? onnx_tensor.name() : output_name;
   CAFFE_ENFORCE(!fill_name.empty());
 
   if (onnx_tensor.has_segment()) {
@@ -1682,53 +1699,118 @@ void Caffe2Backend::BuildTensorFillingOp(
   }
 
   auto* c2_values = c2_op->add_arg();
-  c2_values->set_name("values");
-
-  if (onnx_tensor.data_type() == TensorProto::FLOAT) {
-    c2_op->set_type("GivenTensorFill");
-    auto* floats = c2_values->mutable_floats();
-    if (!TryConvertingTensorRawValues<float>(onnx_tensor, floats)) {
-      floats->CopyFrom(onnx_tensor.float_data());
+  // if shape_name is empty, we generate GivenTensorFill
+  // otherwise, we generate ConstantFill, which accept shape as input
+  if (shape_name.empty()) {
+    // GivenTensor*Fill uses values
+    c2_values->set_name("values");
+    if (onnx_tensor.data_type() == TensorProto::FLOAT) {
+      c2_op->set_type("GivenTensorFill");
+      auto* floats = c2_values->mutable_floats();
+      if (!TryConvertingTensorRawValues<float>(onnx_tensor, floats)) {
+        floats->CopyFrom(onnx_tensor.float_data());
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
+      c2_op->set_type("GivenTensorDoubleFill");
+      ::google::protobuf::RepeatedField<double> tmp;
+      const ::google::protobuf::RepeatedField<double>* src = &tmp;
+      if (!TryConvertingTensorRawValues<double>(onnx_tensor, &tmp)) {
+        src = &onnx_tensor.double_data();
+      }
+      for (const auto i : *src) {
+        c2_values->add_floats(i);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT64) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint8>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT8) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::UINT16) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::uint16>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT16) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int16>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::INT32) {
+      ConvertIntegralValueToCaffe2<::google::protobuf::int32>(c2_op, c2_values, onnx_tensor);
+    } else if (onnx_tensor.data_type() == TensorProto::STRING) {
+      c2_op->set_type("GivenTensorStringFill");
+      auto* strings = c2_values->mutable_strings();
+      strings->CopyFrom(onnx_tensor.string_data());
+    } else {
+      CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
     }
-  } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
-    c2_op->set_type("GivenTensorDoubleFill");
-    ::google::protobuf::RepeatedField<double> tmp;
-    const ::google::protobuf::RepeatedField<double>* src = &tmp;
-    if (!TryConvertingTensorRawValues<double>(onnx_tensor, &tmp)) {
-      src = &onnx_tensor.double_data();
+    auto* c2_shape = c2_op->add_arg();
+    c2_shape->set_name("shape");
+    for (const auto d : onnx_tensor.dims()) {
+      c2_shape->add_ints(d);
     }
-    for (const auto i : *src) {
-      c2_values->add_floats(i);
-    }
-  } else if (onnx_tensor.data_type() == TensorProto::INT64) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT8) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::UINT16) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::uint16>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT16) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int16>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::INT32) {
-    ConvertIntegralValueToCaffe2<::google::protobuf::int32>(c2_op, c2_values, onnx_tensor);
-  } else if (onnx_tensor.data_type() == TensorProto::STRING) {
-    c2_op->set_type("GivenTensorStringFill");
-    auto* strings = c2_values->mutable_strings();
-    strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
+    int value_size = 1;
+    for (const auto d : onnx_tensor.dims()) {
+      value_size *= d;
+    }
+    CAFFE_ENFORCE(value_size == 1);
+    auto c2_input_as_shape = c2_op->add_arg();
+    c2_input_as_shape->set_name("input_as_shape");
+    c2_input_as_shape->set_i(1);
+    c2_values->set_name("value");
+    auto* c2_dtype = c2_op->add_arg();
+    c2_dtype->set_name("dtype");
+    if (onnx_tensor.data_type() == TensorProto::FLOAT) {
+      c2_dtype->set_i(caffe2::TensorProto::FLOAT);
+      if (onnx_tensor.float_data_size() > 0) {
+        c2_values->set_f(onnx_tensor.float_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(float));
+        float f;
+        memcpy(&f, &onnx_tensor.raw_data(), sizeof(float));
+        c2_values->set_f(f);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE){
+      c2_dtype->set_i(caffe2::TensorProto::DOUBLE);
+      if (onnx_tensor.double_data_size() > 0) {
+        c2_values->set_f(static_cast<float>(onnx_tensor.double_data(0)));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(double));
+        double d;
+        memcpy(&d, &onnx_tensor.raw_data(), sizeof(double));
+        c2_values->set_f(static_cast<float>(d));
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT64){
+      c2_dtype->set_i(caffe2::TensorProto::INT64);
+      if (onnx_tensor.int64_data_size() > 0) {
+        c2_values->set_i(onnx_tensor.int64_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int64_t));
+        int64_t i;
+        memcpy(&i, &onnx_tensor.raw_data(), sizeof(int64_t));
+        c2_values->set_i(i);
+      }
+    } else if (onnx_tensor.data_type() == TensorProto::INT32){
+      c2_dtype->set_i(caffe2::TensorProto::INT32);
+      if (onnx_tensor.int32_data_size() > 0) {
+        c2_values->set_i(onnx_tensor.int32_data(0));
+      } else {
+        CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int32_t));
+        int32_t i;
+        memcpy(&i, &onnx_tensor.raw_data(), sizeof(int32_t));
+        c2_values->set_i(i);
+      }
+    } else {
+      // TODO: to support more data type
+      std::stringstream oss;
+      oss << "Unsupported dtype: " << onnx_tensor.data_type();
+      CAFFE_THROW(oss.str());
+    }
+    // ConstantFill uses value
+    c2_op->set_type("ConstantFill");
+    c2_op->add_input(shape_name);
   }
 
-  auto* c2_shape = c2_op->add_arg();
-  c2_shape->set_name("shape");
-  for (const auto d : onnx_tensor.dims()) {
-    c2_shape->add_ints(d);
-  }
   c2_op->add_output(fill_name);
 }
 
