@@ -134,6 +134,20 @@ static void and_kernel_impl(TensorIterator& iter) {
     /*ident=*/true);
 }
 
+static void or_kernel_impl(TensorIterator& iter) {
+  binary_kernel_reduce_vec(
+    iter,
+    [=](uint8_t a, uint8_t b) -> uint8_t { return a || b; },
+    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
+      Vec256<uint8_t> c = Vec256<uint8_t>();
+      for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
+        c[i] = a[i] || b[i];
+      }
+      return c;
+    },
+    /*ident=*/false);
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
@@ -142,5 +156,6 @@ REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
+REGISTER_DISPATCH(or_stub, &or_kernel_impl);
 
 }}  // namespace at::native
