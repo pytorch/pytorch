@@ -34,7 +34,7 @@ public:
    * @param kernel The concrete function implementation to register
    * @param dispatch_key  The dispatch key to register the function to
    */
-  KernelRegistrar(KernelFunction kernel, typename Schema::dispatch::dispatch_key_type dispatch_key)
+  KernelRegistrar(KernelFunction* kernel, typename Schema::dispatch::dispatch_key_type dispatch_key)
   : dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
     Dispatcher<OpSchemaDef>::registerKernel(kernel, dispatch_key_);
   }
@@ -88,7 +88,7 @@ private:
   static constexpr uint64_t KERNEL_PRESENT = 0x01 << 0;
   static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 1;
 
-  c10::optional<KernelFunction> kernel_;
+  c10::optional<KernelFunction*> kernel_;
   c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
 
  public:
@@ -96,7 +96,7 @@ private:
       : KernelRegistrationBuilder(c10::nullopt, c10::nullopt) {}
 
   KernelRegistrationBuilder(
-      c10::optional<KernelFunction> kernel,
+      c10::optional<KernelFunction*> kernel,
       c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key)
       : kernel_(std::move(kernel)), dispatch_key_(std::move(dispatch_key)) {}
 
@@ -116,9 +116,10 @@ private:
    * @param kernel concrete function implementation to be registered
    * @return "this" for method chaining
    */
-  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel(KernelFunction kernel_func) && {
+  template<KernelFunction* kernel_func>
+  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
     static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT>(std::move(kernel_func), std::move(dispatch_key_));
+    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT>(kernel_func, std::move(dispatch_key_));
   }
 
   /**
@@ -126,8 +127,9 @@ private:
    * @param kernel concrete function implementation to be registered
    * @return "this" for method chaining
    */
-  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel(typename Schema::signature::func_type* kernel_func) && {
-    return std::move(*this).kernel(Schema::signature::wrap_kernel(kernel_func));
+  template<typename Schema::signature::func_type* kernel_func>
+  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+    return std::move(*this).template kernel<&Schema::signature::template wrap_kernel<kernel_func>>();
   }
 
   /**

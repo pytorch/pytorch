@@ -60,7 +60,7 @@ void sparse_lengths_sum_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<float, int32_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int32_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
@@ -73,7 +73,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int32_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int32_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{
             DeviceTypeId::CPU,
@@ -87,7 +87,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<float, int64_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int64_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
@@ -100,7 +100,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int64_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int64_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{
             DeviceTypeId::CPU,
