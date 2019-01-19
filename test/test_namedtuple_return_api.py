@@ -5,8 +5,7 @@ import unittest
 
 
 path = os.path.dirname(os.path.realpath(__file__))
-aten_native_yaml = os.path.join(path,
-    '../aten/src/ATen/native/native_functions.yaml')
+aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 whitelist = [
     'max', 'max_out', 'min', 'min_out', 'median', 'median_out',
     'mode', 'mode_out', 'kthvalue', 'kthvalue_out', 'svd', 'svd_out',
@@ -30,7 +29,8 @@ class TestNamedTupleAPI(unittest.TestCase):
             ret = ret[1:-1].split(',')
             for r in ret:
                 r = r.strip()
-                self.assertEqual(len(r.split()), 1, 'only whitelisted operators are allowedto have named return type, got ' + name)
+                self.assertEqual(len(r.split()), 1,
+                                 'only whitelisted operators are allowedto have named return type, got ' + name)
         file.close()
 
 
