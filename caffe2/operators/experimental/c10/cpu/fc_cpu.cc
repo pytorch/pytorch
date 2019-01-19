@@ -13,17 +13,18 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void fc_op_cpu_impl(
-    const C10Tensor& X_,
-    const C10Tensor& W_,
-    const C10Tensor& b_,
-    const C10Tensor& Y_,
+    const at::Tensor& X_,
+    const at::Tensor& W_,
+    const at::Tensor& b_,
+    const at::Tensor& Y_,
     int axis,
     int axis_w,
-    caffe2::ops::FullyConnected::Cache* cache) {
-  Tensor X(X_);
-  Tensor W(W_);
-  Tensor b(b_);
-  Tensor Y(Y_);
+    intrusive_ptr<Blob> state_) {
+  Tensor X{C10Tensor(X_)};
+  Tensor W{C10Tensor(W_)};
+  Tensor b{C10Tensor(b_)};
+  Tensor Y{C10Tensor(Y_)};
+  caffe2::ops::FullyConnected::State* state = state_->GetMutable<caffe2::ops::FullyConnected::State>();
   CPUContext context;
 
   constexpr bool TransposeWeight = true;
@@ -62,12 +63,12 @@ void fc_op_cpu_impl(
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
   CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
-  cache->Y_shape_cache_ = X.sizes().vec();
+  state->Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
-  DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
-  cache->Y_shape_cache_.resize(canonical_axis + 1);
-  cache->Y_shape_cache_[canonical_axis] = N;
-  Y.Resize(cache->Y_shape_cache_);
+  DCHECK_LE(canonical_axis + 1, state->Y_shape_cache_.size());
+  state->Y_shape_cache_.resize(canonical_axis + 1);
+  state->Y_shape_cache_[canonical_axis] = N;
+  Y.Resize(state->Y_shape_cache_);
   CAFFE_ENFORCE(M * N == Y.numel(), dimErrorString());
 
   if (X.numel() == 0) {
@@ -97,7 +98,7 @@ void fc_op_cpu_impl(
       static_cast<Context*>(&context),
       math_type);
   // Add bias term
-  Tensor bias_multiplier(cache->bias_multiplier_);
+  Tensor bias_multiplier(state->bias_multiplier_);
   ReinitializeTensor(&bias_multiplier, {M}, at::dtype<DataType>().device(CPU));
   caffe2::math::Set<DataType, Context>(
       M,
