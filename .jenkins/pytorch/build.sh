@@ -191,9 +191,25 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
     exit 1
   fi
 
+  # Install bazels3cache for cloud cache
+  sudo apt-get -qq install npm
+  npm config set strict-ssl false
+  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  sudo apt-get install -qq nodejs
+  sudo npm install -g bazels3cache
+  BAZELS3CACHE="$(which bazels3cache)"
+  if [ -z "${BAZELS3CACHE}" ]; then
+    echo "Unable to find bazels3cache..."
+    exit 1
+  fi
+
+  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   export CC=/usr/bin/gcc CXX=/usr/bin/g++
   pushd xla
+  # Use cloud cache to build when available.
+  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
+
   python setup.py install
   popd
 fi
