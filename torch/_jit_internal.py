@@ -9,20 +9,20 @@ import inspect
 from torch._six import builtins
 
 # Tracks standalone weak script functions
-_compiled_weak_fns = weakref.WeakKeyDictionary()
+compiled_weak_fns = weakref.WeakKeyDictionary()
 
 # Tracks which methods should be converted to strong methods
-_weak_script_methods = weakref.WeakKeyDictionary()
+weak_script_methods = weakref.WeakKeyDictionary()
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
-_weak_modules = weakref.WeakKeyDictionary()
+weak_modules = weakref.WeakKeyDictionary()
 
 # Types that have been declared as weak modules
-_weak_types = weakref.WeakKeyDictionary()
+weak_types = weakref.WeakKeyDictionary()
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-_boolean_dispatched = weakref.WeakKeyDictionary()
+boolean_dispatched = weakref.WeakKeyDictionary()
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -84,7 +84,7 @@ def weak_script(fn, _frames_up=0):
     inlined in the graph. When not used in a script function, the weak script
     annotation has no effect.
     """
-    _compiled_weak_fns[fn] = {
+    compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
         "rcb": createResolutionCallback(_frames_up + 1)
@@ -93,14 +93,14 @@ def weak_script(fn, _frames_up=0):
 
 
 def weak_module(cls):
-    _weak_types[cls] = {
+    weak_types[cls] = {
         "method_stubs": None
     }
     return cls
 
 
 def weak_script_method(fn):
-    _weak_script_methods[fn] = {
+    weak_script_methods[fn] = {
         "rcb": createResolutionCallback(frames_up=2),
         "original_method": fn
     }
@@ -113,7 +113,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:
+    if compiled_weak_fns.get(if_true) is None or compiled_weak_fns.get(if_false) is None:
         raise RuntimeError("both functions must be weak script")
 
     def fn(*args, **kwargs):
@@ -141,7 +141,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
 
-    _boolean_dispatched[fn] = {
+    boolean_dispatched[fn] = {
         "if_true": if_true,
         "if_false": if_false,
         "index": arg_index,

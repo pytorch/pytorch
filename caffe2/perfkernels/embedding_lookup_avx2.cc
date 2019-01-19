@@ -5,7 +5,7 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
-#include <ATen/core/Half.h>
+#include <c10/util/Half.h>
 #include <c10/util/Logging.h>
 #include <immintrin.h>
 #include <cassert>

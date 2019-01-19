@@ -25,8 +25,8 @@ class LocalResponseNorm(Module):
         k: additive factor. Default: 1
 
     Shape:
-        - Input: :math:`(N, C, ...)`
-        - Output: :math:`(N, C, ...)` (same shape as input)
+        - Input: :math:`(N, C, *)`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -188,8 +188,8 @@ class GroupNorm(Module):
             and zeros (for biases). Default: ``True``.
 
     Shape:
-        - Input: :math:`(N, num\_channels, *)`
-        - Output: :math:`(N, num\_channels, *)` (same shape as input)
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
