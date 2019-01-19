@@ -785,11 +785,11 @@ DELEGATE_CBRT_FUNCTION(float)
 DELEGATE_CBRT_FUNCTION(double)
 #undef DELEGATE_CBRT_FUNCTION
 
-#define DELEGATE_ERF_FUNCTION(T)                                    \
-    template <>                                                     \
-  C10_EXPORT void Erf<T, CPUContext>(                               \
-      const int N, const T* X, T* Y, CPUContext*) {                 \
-    std::transform(X, X + N, Y, [](const T x) { return erf(x); });  \
+#define DELEGATE_ERF_FUNCTION(T)                                   \
+  template <>                                                      \
+  C10_EXPORT void Erf<T, CPUContext>(                              \
+      const int N, const T* X, T* Y, CPUContext*) {                \
+    std::transform(X, X + N, Y, [](const T x) { return erf(x); }); \
   }
 DELEGATE_ERF_FUNCTION(float)
 DELEGATE_ERF_FUNCTION(double)
@@ -4140,51 +4140,6 @@ CAFFE2_SPECIALIZED_TRANSPOSE(int64_t)
 CAFFE2_SPECIALIZED_TRANSPOSE(std::uint8_t)
 CAFFE2_SPECIALIZED_TRANSPOSE(std::uint16_t)
 #undef CAFFE2_SPECIALIZED_TRANSPOSE
-
-#define CAFFE2_SPECIALIZED_AFFINE_CHANNEL(T)                \
-  template <>                                               \
-  void AffineChannel<T, CPUContext, StorageOrder::NCHW>(    \
-      const int N,                                          \
-      const int C,                                          \
-      const int HxW,                                        \
-      const T* X,                                           \
-      const T* scale,                                       \
-      const T* bias,                                        \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    ConstEigenVectorArrayMap<T> scale_arr(scale, C);        \
-    ConstEigenVectorArrayMap<T> bias_arr(bias, C);          \
-    const int stride = C * HxW;                             \
-    const T* X_ptr = X;                                     \
-    T* Y_ptr = Y;                                           \
-    for (int i = 0; i < N; ++i) {                           \
-      EigenArrayMap<T>(Y_ptr, HxW, C) =                     \
-          (ConstEigenArrayMap<T>(X_ptr, HxW, C).rowwise() * \
-           scale_arr.transpose())                           \
-              .rowwise() +                                  \
-          bias_arr.transpose();                             \
-      X_ptr += stride;                                      \
-      Y_ptr += stride;                                      \
-    }                                                       \
-  }                                                         \
-  template <>                                               \
-  void AffineChannel<T, CPUContext, StorageOrder::NHWC>(    \
-      const int N,                                          \
-      const int C,                                          \
-      const int HxW,                                        \
-      const T* X,                                           \
-      const T* scale,                                       \
-      const T* bias,                                        \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    EigenArrayMap<T>(Y, C, N * HxW) =                       \
-        (ConstEigenArrayMap<T>(X, C, N * HxW).colwise() *   \
-         ConstEigenVectorArrayMap<T>(scale, C))             \
-            .colwise() +                                    \
-        ConstEigenVectorArrayMap<T>(bias, C);               \
-  }
-CAFFE2_SPECIALIZED_AFFINE_CHANNEL(float)
-#undef CAFFE2_SPECIALIZED_AFFINE_CHANNEL
 
 #define CAFFE2_SPECIALIZED_NCHW2NHWC(T)                       \
   template <>                                                 \
