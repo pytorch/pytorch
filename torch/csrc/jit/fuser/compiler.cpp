@@ -248,15 +248,15 @@ void processGradSumToSize(KernelSpec& spec) {
   // _grad_sum_to_sizes but of the same kernel output.
   std::unordered_map<const Value*, int64_t> reduced_output_indices;
   int64_t newo = 0;
-  for (size_t o = 0; o < outputGradSumToSizes.size(); o++) {
+  for (auto osize : outputGradSumToSizes) {
     auto it = reduced_output_indices.find(graph->outputs()[newo]);
     if (it == reduced_output_indices.end()) {
       reduced_output_indices.emplace(graph->outputs()[newo], newo);
-      outputMapAndSizes.emplace_back(newo, outputGradSumToSizes[o]);
+      outputMapAndSizes.emplace_back(newo, osize);
       newo++;
     } else {
       graph->eraseOutput(newo);
-      outputMapAndSizes.emplace_back(it->second, outputGradSumToSizes[o]);
+      outputMapAndSizes.emplace_back(it->second, osize);
     }
   }
 }
