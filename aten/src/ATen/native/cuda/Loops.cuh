@@ -24,7 +24,7 @@
 
 #ifdef __HIP_PLATFORM_HCC__
 static constexpr int launch_size_1d = 1024;
-static constexpr int launch_size_nd = 256;
+static constexpr int launch_size_nd = 128;
 static constexpr int launch_bounds_2 = 16;
 #else
 static constexpr int launch_size_1d = 512;
