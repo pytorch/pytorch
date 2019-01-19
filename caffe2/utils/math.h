@@ -15,6 +15,7 @@ extern "C" {
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
+#include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
@@ -662,17 +663,6 @@ CAFFE2_API void CopyMatrix(
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
 
-template <typename T, class Context, StorageOrder kOrder>
-CAFFE2_API void AffineChannel(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    const T* scale,
-    const T* bias,
-    T* Y,
-    Context* context);
-
 template <typename T, class Context>
 CAFFE2_API void NCHW2NHWC(
     const int N,
@@ -691,32 +681,6 @@ CAFFE2_API void NHWC2NCHW(
     T* Y,
     Context* context);
 
-// Calculates ceil(a / b). User must be careful to ensure that there
-// is no overflow or underflow in the calculation.
-template <typename T>
-constexpr T divUp(T a, T b) {
-  return (a + b - (T)1) / b;
-}
-
-// Rounds a up to the next highest multiple of b. User must be careful
-// to ensure that there is no overflow or underflow in the calculation
-// of divUp.
-template <typename T>
-constexpr T roundUp(T a, T b) {
-  return divUp<T>(a, b) * b;
-}
-
-// Returns log2(n) for a positive integer type
-template <typename T>
-constexpr int integerLog2(T n, int p = 0) {
-  return (n <= 1) ? p : integerLog2(n / 2, p + 1);
-}
-
-// Returns the next highest power-of-2 for an integer type
-template <typename T>
-constexpr T integerNextHighestPowerOf2(T v) {
-  return (integerIsPowerOf2(v) ? (T)2 * v : ((T)1 << (integerLog2(v) + 1)));
-}
 
 } // namespace math
 } // namespace caffe2
