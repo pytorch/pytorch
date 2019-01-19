@@ -82,7 +82,13 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
   if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
     throw python_error();
   }
-  at::cuda::setCurrentCUDAStream(at::cuda::CUDAStream::unpack(bits));
+  auto stream = at::cuda::CUDAStream::unpack(bits);
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  if (device != stream.device_index()) {
+    THCPModule_setDevice(stream.device_index());
+  }
+  at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
