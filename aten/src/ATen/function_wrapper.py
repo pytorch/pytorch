@@ -427,6 +427,7 @@ AtFormal = TypedDict('AtFormal', {
 
 ReturnType = TypedDict('ReturnType', {
     'name': str,
+    'field_name': str,
     'type': str,
     'dynamic_type': str,
 }, total=False)
@@ -465,6 +466,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
+    'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
@@ -973,6 +975,7 @@ def create_generic(top_env, declarations):
 
         return_types = []  # List[ReturnType]
         for t_raw in ret:
+            field_name = None
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
@@ -982,6 +985,8 @@ def create_generic(top_env, declarations):
             else:
                 t = t_raw['type']
                 name = t_raw['name']
+                if 'field_name' in t_raw:
+                    field_name = t_raw['field_name']
 
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
@@ -996,6 +1001,8 @@ def create_generic(top_env, declarations):
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name
+            if field_name is not None:
+                rtype['field_name'] = field_name
             return_types.append(rtype)
 
         return return_types
