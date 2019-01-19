@@ -411,18 +411,14 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
-  Node* shape_for_constantofshape = graph->create(onnx::Shape, 1);
-  shape_for_constantofshape->insertBefore(n);
-  shape_for_constantofshape->addInput(concated_dims->outputs()[0]);
-
   Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
   constant_of_shape->insertBefore(n);
   constant_of_shape->t_(
       attr::value,
-      scalar_to_tensor(at::Scalar(0.0f)));
-  constant_of_shape->addInput(shape_for_constantofshape->outputs()[0]);
-
+      scalar_to_tensor(at::Scalar(0.0f)).to(c10::kFloat));
+  constant_of_shape->addInput(concated_dims->outputs()[0]);
   n->replaceInput(input_index, constant_of_shape->outputs()[0]);
+
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
   }
