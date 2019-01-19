@@ -883,11 +883,11 @@
 
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
 
-- func: gesv(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
+- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function, method
 
-- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -1008,7 +1008,7 @@
 - func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
 
