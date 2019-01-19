@@ -341,14 +341,18 @@ bool runFusion(const int64_t key, Stack& stack) {
   JIT_ASSERT(maybe_kernel);
 
   // Launches fusion
-  std::vector<at::Tensor> outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, outputs);
+  std::vector<at::Tensor> raw_outputs;
+  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
 
-  for (size_t i = 0; i < outputs.size(); i++) {
-    if (spec.outputGradSumToSizes()[i] != -1) {
-      outputs[i] = at::sum_to(std::move(outputs[i]), all_inputs[spec.outputGradSumToSizes()[i]].toIntList()->elements());
+  auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
+    if (omap.needsSumToSize()) {
+      return at::sum_to(
+          raw_outputs[omap.offset()],
+          all_inputs[omap.sizeInput()].toIntList()->elements());
+    } else {
+      return raw_outputs[omap.offset()];
     }
-  }
+  });
 
   // Updates stack
   drop(stack, spec.nInputs());

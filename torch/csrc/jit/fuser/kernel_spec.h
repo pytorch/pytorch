@@ -41,6 +41,24 @@ struct TORCH_API PartitionInfo {
   int64_t dim_;
 };
 
+struct TORCH_API OutputMapAndSize {
+  OutputMapAndSize(const int64_t _offset, const int64_t _sizeInput)
+      : offset_{_offset}, sizeInput_{_sizeInput} {};
+
+  int64_t offset() const {
+    return offset_;
+  }
+  int64_t sizeInput() const {
+    return sizeInput_;
+  }
+  bool needsSumToSize() const {
+    return sizeInput_ != -1;
+  }
+ private:
+  int64_t offset_;
+  int64_t sizeInput_;
+};
+
 // "Kernel Specification." - Contains device-independent fusion information.
 // Each kernel specification contains a map of instantiated generated functions
 // that implement some or most of its functionality. Multiple generated
@@ -63,7 +81,7 @@ struct TORCH_API KernelSpec {
         nInputs_{_graph->inputs().size()},
         inputBroadcastGroups_{},
         inputChunks_{},
-        outputGradSumToSizes_{},
+        outputMapAndSizes_{},
         has_random_{false},
         kernels_{} {
     for (const auto& n : graph_->nodes()) {
@@ -102,8 +120,8 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
-  std::vector<int64_t>& outputGradSumToSizes() {
-    return outputGradSumToSizes_;
+  std::vector<OutputMapAndSize>& outputMapAndSizes() {
+    return outputMapAndSizes_;
   }
 
   bool hasRandom() const {
@@ -132,7 +150,7 @@ struct TORCH_API KernelSpec {
   uint64_t nInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
-  std::vector<int64_t> outputGradSumToSizes_;
+  std::vector<OutputMapAndSize> outputMapAndSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::

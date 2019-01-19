@@ -169,9 +169,9 @@ void processGradSumToSize(KernelSpec& spec) {
   auto graph = spec.graph();
 
   // keep track of one sumToSize hitting each output
-  auto& outputGradSumToSizes = spec.outputGradSumToSizes();
-  JIT_ASSERT(outputGradSumToSizes.empty());
-  outputGradSumToSizes.resize(graph->outputs().size(), -1);
+  auto& outputMapAndSizes = spec.outputMapAndSizes();
+  JIT_ASSERT(outputMapAndSizes.empty());
+  std::vector<int64_t> outputGradSumToSizes(graph->outputs().size(), -1);
 
   static OperatorSet commutes_with_SumToSize{{
       "aten::mul(Tensor self, Tensor other) -> Tensor",
@@ -240,6 +240,23 @@ void processGradSumToSize(KernelSpec& spec) {
       // will be inserted below
       node->output()->replaceAllUsesWith(node->inputs()[0]);
       it.destroyCurrent();
+    }
+  }
+  // By removing the _grad_sum_to_size notes, we might end up with
+  // duplicate outputs, e.g. when having the autodiff backwards of
+  // x + y + z of something with x, y, z, those will have different
+  // _grad_sum_to_sizes but of the same kernel output.
+  std::unordered_map<const Value*, int64_t> reduced_output_indices;
+  int64_t newo = 0;
+  for (size_t o = 0; o < outputGradSumToSizes.size(); o++) {
+    auto it = reduced_output_indices.find(graph->outputs()[newo]);
+    if (it == reduced_output_indices.end()) {
+      reduced_output_indices.emplace(graph->outputs()[newo], newo);
+      outputMapAndSizes.emplace_back(newo, outputGradSumToSizes[o]);
+      newo++;
+    } else {
+      graph->eraseOutput(newo);
+      outputMapAndSizes.emplace_back(it->second, outputGradSumToSizes[o]);
     }
   }
 }
