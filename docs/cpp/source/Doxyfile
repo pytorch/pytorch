@@ -31,7 +31,6 @@ STRIP_FROM_PATH        = ../../..
 # What folders / files Doxygen should process.
 INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
-                         ../../../aten/src/ATen/core/Half.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
@@ -45,8 +44,9 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../build/aten/src/ATen/Functions.h \
-                         ../../../c10/Device.h \
-                         ../../../c10/DeviceType.h \
+                         ../../../c10/core/Device.h \
+                         ../../../c10/core/DeviceType.h \
+                         ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/Exception.h \
                          ../../../c10/util/Optional.h \

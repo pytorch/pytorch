@@ -35,8 +35,14 @@ test_paths=(
     "$top_dir/test/onnx"
 )
 
+args=()
+args+=("-v")
 if [[ $PARALLEL == 1 ]]; then
-    pytest -n 3 "${test_paths[@]}"
-else
-    pytest "${test_paths[@]}"
+  args+=("-n")
+  args+=("3")
 fi
+
+pytest "${args[@]}" \
+  -k \
+  'not (TestOperators and test_full_like) and not (TestOperators and test_zeros_like) and not (TestOperators and test_ones_like) and not (TestModels and test_super_resolution) and not (TestModels and test_vgg16) and not (TestModels and test_vgg16_bn) and not (TestModels and test_vgg19) and not (TestModels and test_vgg19_bn)' \
+  "${test_paths[@]}"

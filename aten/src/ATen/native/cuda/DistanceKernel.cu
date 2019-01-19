@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Exceptions.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
@@ -78,20 +79,19 @@ struct dists {
 };
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p) {
-  const int l = blockIdx.x;
-  const int k = blockIdx.y;
-  const int stride = blockDim.y;
+__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
+                                              const double n2, const double n2_squared_minus_1) {
+  const int k = blockIdx.x;
+  const int stride = blockDim.x;
 
-  float n2 = n - .5;
   // The -1 accounts for floating point truncation issues
-  int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
+  int64_t i = static_cast<int64_t>((n2 - device_sqrt<double>(n2_squared_minus_1 - 2 * k)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
-  const scalar_t * const start = self + (l * n + i) * m;
+  const scalar_t * const start = self + i * m;
   const scalar_t * const end = start + m;
-  const scalar_t * a = start + threadIdx.y;
-  const scalar_t * b = self + (l * n + j) * m + threadIdx.y;
+  const scalar_t * a = start + threadIdx.x;
+  const scalar_t * b = self + j * m + threadIdx.x;
   scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
@@ -106,53 +106,50 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   // This shared memory is significantly larger than necessary, but the
   // assumption is that it's not a bottleneck, and this is simple
   __shared__ scalar_t shared[forward_threads];
-  int lane = threadIdx.y % warpSize;
-  int warp_id = threadIdx.y / warpSize;
+  int lane = threadIdx.x % warpSize;
+  int warp_id = threadIdx.x / warpSize;
   if (lane == 0) {
     shared[warp_id] = agg;
   }
   __syncthreads();
-  agg = (threadIdx.y < blockDim.y / warpSize) ? shared[lane] : 0.0;
+  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
   if (warp_id == 0) {
     // Only reduce theads with nonzero data
-    for (int offset = blockDim.y / warpSize / 2; offset > 0; offset /= 2) {
+    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
       F::agg(agg, WARP_SHFL_DOWN(agg, offset));
     }
   }
-  if (threadIdx.y == 0) {
-    const int64_t combs = n * (n - 1) / 2;
-    result[l * combs + k] = F::finish(agg, p);
+  if (threadIdx.x == 0) {
+    result[k] = F::finish(agg, p);
   }
 }
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, const int64_t n, const int64_t m, const scalar_t p) {
-  const int l = blockIdx.x;
-  const int k = blockIdx.z * blockDim.z + threadIdx.z;
-  const int init = blockIdx.y * blockDim.y + threadIdx.y;
-  const int stride = blockDim.y * gridDim.y;
-  const int combs = n * (n - 1) / 2;
+__global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, int64_t gs, const int64_t n, const int64_t m, const int64_t combs, const scalar_t p,
+                                                       const double n2, const double n2_squared_minus_1) {
+  const int k = blockIdx.y * blockDim.y + threadIdx.y;
+  const int init = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
   if (k >= combs) {
     return;
   }
 
-  float n2 = n - .5;
   // The -1 accounts for floating point truncation issues
   int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
   int64_t ib = j - i - 1;
   int64_t jb = n - 2 - i;
 
-  const scalar_t grad_k = grad[l * combs + k];
-  const scalar_t dist_k = dist[l * combs + k];
+  const scalar_t grad_k = grad[k * gs];
+  const scalar_t dist_k = dist[k];
 
-  const scalar_t * const start = self + (l * n + i) * m;
+  const scalar_t * const start = self + i * m;
   const scalar_t * const end = start + m;
   const scalar_t * self_i = start + init;
-  const scalar_t * self_j = self + (l * n + j) * m + init;
-  scalar_t * buff_i = buffer + ((l * (n - 1) + ib) * n + i) * m + init;
-  scalar_t * buff_j = buffer + ((l * (n - 1) + jb) * n + j) * m + init;
+  const scalar_t * self_j = self + j * m + init;
+  scalar_t * buff_i = buffer + (ib * n + i) * m + init;
+  scalar_t * buff_j = buffer + (jb * n + j) * m + init;
   for (; self_i < end; self_i += stride, self_j += stride, buff_i += stride, buff_j += stride) {
     const scalar_t res = F::backward(*self_i - *self_j, grad_k, dist_k, p);
     *buff_i = res;
@@ -161,25 +158,29 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
-  int64_t b = self.size(0);
-  int64_t n = self.size(1);
-  int64_t m = self.size(2);
-  const dim3 grid(b, result.size(1));
-  const dim3 block(1, forward_threads);
+  const dim3 grid(result.numel());
+  const dim3 block(forward_threads);
+  int64_t n = self.size(0);
+  int64_t m = self.size(1);
+  // https://github.com/pytorch/pytorch/issues/15511 demonstrated we need to do
+  // some math in fp64 -- this is just minimizing the amount of fp64 math we do on the device.
+  const double n2 = n - .5;
+  const double n2_squared_minus_1 = n2 * n2 - 1;
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda", [&] {
     if (p == 0.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     } else if (p == 1.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     } else if (p == 2.0) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     } else if (std::isinf(p)) {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     } else {
-      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
+      pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     }
   });
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
@@ -188,32 +189,39 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
     return;
   }
 
-  const int64_t b = self.size(0);
-  const int64_t n = self.size(1);
-  const int64_t m = self.size(2);
-  const int block_y = 64;
-  const int block_z = 4;
-  const int grid_y = (m + block_y * 8 - 1) / (block_y * 8);
-  const int grid_z = (dist.numel() + block_z - 1) / block_z;
-  const dim3 grid(b, grid_y, grid_z);
-  const dim3 block(1, block_y, block_z);
+  const int64_t n = result.size(0);
+  int64_t m = self.size(1);
+  const int block_x = 64;
+  // NB: be careful with changing block_y; as it's currently written, grid_y is limited to be 2^16.
+  // From binary search, block_y of 16 gives us max pdist dim0 of 1449,
+  //                     block_y of  4 gives us max pdist dim0 of  725.
+  const int block_y = 16;
+  const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
+  const int grid_y = (dist.numel() + block_y - 1) / block_y;
+  const dim3 grid(grid_x, grid_y);
+  const dim3 block(block_x, block_y);
+  // https://github.com/pytorch/pytorch/issues/15511 demonstrated we need to do
+  // some math in fp64 -- this is just minimizing the amount of fp64 math we do on the device.
+  const double n2 = n - .5;
+  const double n2_squared_minus_1 = n2 * n2 - 1;
 
-  Tensor buffer = at::empty({b, n - 1, n, m}, result.options());
+  Tensor buffer = at::empty({n - 1, result.size(0), result.size(1)}, result.options());
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda_backward", [&] {
     if (p == 1.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     } else if (p < 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     } else if (p == 2.0) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     } else if (std::isinf(p)) {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     } else {
-      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), n, m, p);
+      pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     }
   });
+  AT_CUDA_CHECK(cudaGetLastError());
 
-  at::sum_out(result, buffer, 1);
+  at::sum_out(result, buffer, 0);
 }
 
 } // anonymous namespace

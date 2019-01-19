@@ -332,7 +332,7 @@ int TensorIterator::num_reduce_dims() const {
   return count;
 }
 static loop2d_t loop_wrapper(const loop_t& loop) {
-  return [loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+  return [&loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
     auto data = PtrVector(base, base + ntensor);
     const int64_t* outer_strides = &strides[ntensor];
 
@@ -593,6 +593,7 @@ std::unique_ptr<TensorIterator> TensorIterator::split(int dim) {
   auto copy_size = shape_[dim] / 2;
   auto this_size = shape_[dim] - copy_size;
   copy->narrow(dim, 0, copy_size);
+  copy->final_output_ &= !overlaps;
   this->narrow(dim, copy_size, this_size);
   this->accumulate_ |= overlaps;
 

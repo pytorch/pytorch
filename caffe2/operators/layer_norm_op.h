@@ -132,11 +132,11 @@ class LayerNormGradientOp final : public Operator<Context> {
     const int N = X.size_from_dim(canonical_axis);
 
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    ds_.Resize(M);
-    db_.Resize(M);
-    dY_scale_.Resize(M);
-    X_scale_.Resize(M);
-    bias_.Resize(M);
+    ReinitializeTensor(&ds_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&db_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&dY_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&X_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&bias_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* mean_data = mean.template data<T>();
@@ -200,11 +200,11 @@ class LayerNormGradientOp final : public Operator<Context> {
 
   const int axis_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
-  Tensor dY_scale_{Context::GetDeviceType()};
-  Tensor X_scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
+  Tensor dY_scale_;
+  Tensor X_scale_;
+  Tensor bias_;
 };
 
 } // namespace caffe2

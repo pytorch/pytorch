@@ -298,7 +298,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             pads_.data(),
             X_data,
             col_buffer_data,
-            &context_);
+            &context_,
+            group_);
       }
       // Weight term
       for (int group_id = 0; group_id < group_; ++group_id) {
@@ -520,9 +521,18 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   col_buffer_shape.push_back(C / group_ * kernel_dims_size);
   col_buffer_shape.insert(
       col_buffer_shape.end(), output_dims.begin(), output_dims.end());
-  col_buffer_.Resize(col_buffer_shape);
+  vector<int64_t> col_buffer_shape_64;
+  std::copy(
+      col_buffer_shape.cbegin(),
+      col_buffer_shape.cend(),
+      std::back_inserter(col_buffer_shape_64));
+  ReinitializeTensor(
+      &col_buffer_,
+      col_buffer_shape_64,
+      at::dtype<T>().device(Context::GetDeviceType()));
 
   if (kernel_.size() != 2) {
+    // TODO: SetDeviceTensor accept vector<int64_t>
     SetDeviceTensor(img_shape, &img_shape_device_);
     SetDeviceTensor(col_buffer_shape, &col_buffer_shape_device_);
   }
@@ -541,15 +551,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dbias_data = nullptr;
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
-    if (bias_multiplier_.numel() != output_image_size) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
-          &context_);
-    }
+    // Removed the check for whether bias_multiplier_ has correct size or not
+    ReinitializeTensor(
+        &bias_multiplier_,
+        vector<int64_t>(1, output_image_size),
+        at::dtype<T>().device(Context::GetDeviceType()));
+    math::Set<T, Context>(
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
     dbias_data = dbias->template mutable_data<T>();
     math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
@@ -579,7 +590,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       } else {
         math::Im2ColNd<T, Context, StorageOrder::NCHW>(
             kernel_.size(),
-            C * input_image_size,
+            input_offset,
             col_buffer_size,
             img_shape.data(),
             col_buffer_shape.data(),
@@ -664,7 +675,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         } else {
           math::Col2ImNd<T, Context, StorageOrder::NCHW>(
               kernel_.size(),
-              C * input_image_size,
+              input_offset,
               col_buffer_size,
               img_shape.data(),
               col_buffer_shape.data(),
@@ -725,7 +736,15 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   vector<int> col_buffer_shape(output_dims.size() + 1);
   std::copy(output_dims.cbegin(), output_dims.cend(), col_buffer_shape.begin());
   col_buffer_shape.back() = C * kernel_dims_size;
-  col_buffer_.Resize(col_buffer_shape);
+  vector<int64_t> col_buffer_shape_64;
+  std::copy(
+      col_buffer_shape.cbegin(),
+      col_buffer_shape.cend(),
+      std::back_inserter(col_buffer_shape_64));
+  ReinitializeTensor(
+      &col_buffer_,
+      col_buffer_shape_64,
+      at::dtype<T>().device(Context::GetDeviceType()));
 
   if (kernel_.size() != 2) {
     SetDeviceTensor(img_shape, &img_shape_device_);
@@ -747,15 +766,16 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
     dbias_data = dbias->template mutable_data<T>();
     math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
-    if (bias_multiplier_.numel() != output_image_size) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
-          &context_);
-    }
+    // Removed the check for whether bias_multiplier_ has correct size or not
+    ReinitializeTensor(
+        &bias_multiplier_,
+        vector<int64_t>(1, output_image_size),
+        at::dtype<T>().device(Context::GetDeviceType()));
+    math::Set<T, Context>(
+        output_image_size,
+        static_cast<T>(1),
+        bias_multiplier_.template mutable_data<T>(),
+        &context_);
   }
 
   for (int image_id = 0; image_id < N; ++image_id) {
@@ -793,7 +813,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           pads_.data(),
           Xdata,
           col_buffer_data,
-          &context_);
+          &context_,
+          group_);
     }
     // Gradient with respect to filter.
     for (int group_id = 0; group_id < group_; ++group_id) {
@@ -886,7 +907,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             pads_.data(),
             col_buffer_data,
             dXdata,
-            &context_);
+            &context_,
+            group_);
       }
       dXdata += input_offset;
     } // for each image

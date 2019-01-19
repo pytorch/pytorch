@@ -17,8 +17,6 @@ import shutil
 import sys
 import common_utils as common
 
-from test_pytorch_common import skipIfCI
-
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -178,6 +176,14 @@ class TestOperators(TestCase):
     def test_chunk(self):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)
+
+    def test_split(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, 2, 1), x)
+
+    def test_split_with_sizes(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, [2, 1, 3], 1), x)
 
     def test_concat2(self):
         x = torch.randn(2, 3)
@@ -503,6 +509,10 @@ class TestOperators(TestCase):
     def test_reducemin(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.min(x), x)
+
+    def test_erf(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: x.erf(), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

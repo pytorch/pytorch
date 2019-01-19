@@ -193,8 +193,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival->toTensor());
-    tensor = GetSizedTensorWithOptions(tensor, dims, options);
+    Tensor tensor = GetSizedTensorWithOptions(
+        caffe2::Tensor(ival->toTensor()), dims, options);
+    // assign it back in case it changed
     auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
     *ival = IValue(at_tensor);
 
