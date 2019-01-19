@@ -78,9 +78,11 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
         u = urlopen(url)
         meta = u.info()
         if hasattr(meta, 'getheaders'):
-            file_size = int(meta.getheaders("Content-Length")[0])
+            content_length = meta.getheaders("Content-Length")
         else:
-            file_size = int(meta.get_all("Content-Length")[0])
+            content_length = meta.get_all("Content-Length")
+        if content_length is not None and len(content_length) > 0:
+            file_size = int(content_length[0])
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
