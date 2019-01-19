@@ -12,11 +12,6 @@ namespace ops {
 struct FullyConnected final {
   static constexpr const char* name = "FC";
 
-  struct State final : public c10::KernelState {
-    vector<int64_t> Y_shape_cache_;
-    at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
-  };
-
   using Signature = void(
       const at::Tensor& X,
       const at::Tensor& W,

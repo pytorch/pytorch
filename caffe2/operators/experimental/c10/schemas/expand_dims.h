@@ -11,11 +11,6 @@ namespace caffe2 {
 namespace ops {
 
 struct ExpandDims final {
-  struct State final : public c10::KernelState {
-    std::vector<int64_t> dims;
-    bool initialized = false;
-  };
-
   static constexpr const char* name = "expand_dims";
 
   using Signature = void(

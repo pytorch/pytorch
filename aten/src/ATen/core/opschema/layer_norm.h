@@ -15,11 +15,6 @@ namespace opschema {
 struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
-  struct State final : public KernelState {
-      at::optional<at::Tensor> scale = at::nullopt;
-      at::optional<at::Tensor> bias = at::nullopt;
-  };
-
   using Signature = void(
       const at::Tensor& input,
       const at::Tensor& output,

@@ -10,10 +10,6 @@ namespace caffe2 {
 namespace ops {
 
 struct BatchMatmul final {
-  struct State final : public c10::KernelState {
-    std::shared_ptr<at::Tensor> scratch;
-  };
-
   static constexpr const char* name = "batch_matmul";
 
   using Signature = void(

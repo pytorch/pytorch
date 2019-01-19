@@ -28,13 +28,9 @@ using extract_type_t = typename ParameterDef::type;
  * TODO: Figure out a better way to handle output parameters
  */
 
-// TODO This wrapper shouldn't have to handle state since it's only calling into c10
-class NoState final : public c10::KernelState {};
-
 template <
     class OpSchemaDef,
     class Context,
-    class State,
     bool use_array_input,
     class ParameterDefTuple>
 class C10OperatorWrapper final : public Operator<Context> {
@@ -54,7 +50,6 @@ class C10OperatorWrapper final : public Operator<Context> {
   C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         kernel_(at::nullopt),
-        state_(),
         parameters_(parse_parameters_(
             operator_def,
             c10::guts::make_index_sequence<num_parameters()>())) {}
@@ -140,7 +135,7 @@ class C10OperatorWrapper final : public Operator<Context> {
       // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
       kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(args);
     }
-    kernel_->call(args, &state_);
+    kernel_->call(args);
   }
 
   std::vector<at::Tensor> array_inputs_() {
@@ -153,7 +148,6 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   c10::optional<OpKernel> kernel_;
-  State state_; // TODO remove this, move state to OpKernel.
 
   ParameterTuple parameters_;
 };
@@ -175,40 +169,38 @@ C10_DECLARE_REGISTRY(
 
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, State, Name) \
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, Name)        \
   C10_REGISTER_CLASS(                                                       \
       C10OperatorRegistry,                                                  \
       Name,                                                                 \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, State, false, std::tuple<>>)
+      C10OperatorWrapper<OpSchemaDef, CPUContext, false, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
-    OpSchemaDef, State, Name, ...)                                 \
+    OpSchemaDef, Name, ...)                                        \
   C10_REGISTER_CLASS(                                              \
       C10OperatorRegistry,                                         \
       Name,                                                        \
       C10OperatorWrapper<                                          \
           OpSchemaDef,                                             \
           CPUContext,                                              \
-          State,                                                   \
           false,                                                   \
           std::tuple<__VA_ARGS__>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
-    OpSchemaDef, State, Name)                                       \
+    OpSchemaDef, Name)                                              \
   C10_REGISTER_CLASS(                                               \
       C10OperatorRegistry,                                          \
       Name,                                                         \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, State, true, std::tuple<>>)
+      C10OperatorWrapper<OpSchemaDef, CPUContext, true, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
-    OpSchemaDef, State, Name, ...)                                                 \
+    OpSchemaDef, Name, ...)                                                        \
   C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \
           OpSchemaDef,                                                             \
           CPUContext,                                                              \
-          State,                                                                   \
           true,                                                                    \
           std::tuple<__VA_ARGS__>>)
 

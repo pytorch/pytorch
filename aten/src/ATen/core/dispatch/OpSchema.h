@@ -101,18 +101,6 @@ struct has_signature_defined<T, guts::void_t<
 
 // TODO Test has_signature_defined
 
-// TODO get rid of state_or_void when state is not in the schema anymore
-template<class T, typename = void>
-struct state_or_void {
-  using type = void;
-};
-template<class T>
-struct state_or_void<T, guts::void_t<
-  typename T::State
->> {
-  using type = typename T::State;
-};
-
 template<class T, typename = void>
 struct has_parameter_names_defined : std::false_type {};
 template<class T>
@@ -196,10 +184,13 @@ template<class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKern
   }
 };
 
-template<class FuncType, class AddedParameter> struct add_parameter final {};
+template<class FuncType, class AddedParameter, class Enable = void> struct add_ptr_parameter_if_not_void final {};
 template<class Return, class... Parameters, class AddedParameter>
-struct add_parameter<Return(Parameters...), AddedParameter> final {
-  using type = Return(Parameters..., AddedParameter);
+struct add_ptr_parameter_if_not_void<Return(Parameters...), AddedParameter, guts::enable_if_t<!std::is_same<void, AddedParameter>::value>> final {
+  using type = Return(Parameters..., AddedParameter*);
+};
+template<class FuncType> struct add_ptr_parameter_if_not_void<FuncType, void, void> final {
+  using type = FuncType;
 };
 
 /**
@@ -216,12 +207,7 @@ public:
   /**
    * The function type OpSchemaDef::Signature
    */
-  //TODO Simplify this once state is not part of the schema anymore
-  using func_type = guts::conditional_t<
-    std::is_same<void, typename state_or_void<OpSchemaDef>::type>::value,
-    typename signature_traits::func_type,
-    typename add_parameter<typename signature_traits::func_type, typename state_or_void<OpSchemaDef>::type*>::type
-  >;
+  using func_type = typename signature_traits::func_type;
   /**
    * The return type of the function OpSchemaDef::Signature
    */
@@ -242,12 +228,12 @@ public:
 
   static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
 
-  template<func_type* kernel>
+  template<class StateTypeOrVoid> using func_type_with_state = typename add_ptr_parameter_if_not_void<func_type, StateTypeOrVoid>::type;
+
+  template<class StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>* kernel>
   static IValue wrap_kernel(ArrayRef<IValue> args, KernelState* state) {
-    // TODO Support kernel state when a non-IValue (i.e. C function) kernel is registered
     constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
-    using state_type = typename state_or_void<OpSchemaDef>::type;
-    return details::_wrapKernel<return_type, parameter_types, state_type, func_type, kernel>::call(args, state, guts::make_index_sequence<num_parameters>());
+    return details::_wrapKernel<return_type, parameter_types, StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>, kernel>::call(args, state, guts::make_index_sequence<num_parameters>());
   }
 
 private:

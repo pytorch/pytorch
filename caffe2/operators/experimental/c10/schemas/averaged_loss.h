@@ -11,10 +11,6 @@ namespace caffe2 {
 namespace ops {
 
 struct AveragedLoss final {
-  struct State final : public c10::KernelState {
-    at::Tensor scratch = at::Tensor(C10Tensor(empty({}, CPU)));
-  };
-
   static constexpr const char* name = "averaged_loss";
 
   using Signature = void(

@@ -43,7 +43,6 @@ RegisterOperators reg({
         Tensor c10_output_mean(at::empty({0}));
         Tensor c10_output_stdev(at::empty({0}));
 
-        c10::core::opschema::LayerNorm::State state;
         // TODO remove std::array for args here, instead pass through inputs directly as ArrayRef
         std::array<c10::IValue, 7> args{
           IValue(torch::autograd::Variable(std::move(input).toTensor()).data()),
@@ -53,7 +52,7 @@ RegisterOperators reg({
           axis,
           epsilon
         };
-        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(args).call(args, &state);
+        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(args).call(args);
         push(stack, Tuple::create({
           torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
           torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),

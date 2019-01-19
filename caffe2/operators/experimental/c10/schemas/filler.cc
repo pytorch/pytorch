@@ -135,7 +135,6 @@ struct ValuesParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::ConstantFill,
-    NoState,
     C10ConstantFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -144,7 +143,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValueParameter)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::UniformFill,
-    NoState,
     C10UniformFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -154,7 +152,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<float>,
-    NoState,
     C10GivenTensorFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -162,7 +159,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValuesParameter<float>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<int>,
-    NoState,
     C10GivenTensorIntFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -170,7 +166,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValuesParameter<int>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<int64_t>,
-    NoState,
     C10GivenTensorInt64Fill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
