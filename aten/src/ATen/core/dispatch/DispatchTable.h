@@ -106,35 +106,27 @@ class DispatchTable final {
   }
 
   /**
-   * Perform a dynamic dispatch on this table.
+   * Perform a dynamic dispatch on this table and find the kernel to call
+   * for the given arguments.
    *
-   * @tparam Args Perfect forwarding template arguments to the dispatch
    * @param args Arguments to invoke the function with
-   * @return Returned value of the operator
+   * @return Kernel function pointing to the right kernel for the given arguments
    */
-  IValue call(ArrayRef<IValue> args) const {
-    // TODO Better error message, but need to take care that reference arguments
-    // match non-reference arguments and so on.
-    //      static_assert(std::is_same<typename Schema::return_type (Args...),
-    //      typename Schema::func_type>::value, "Argument types don't match
-    //      operator signature");
-    KernelFunction* kernel_func = lookupKernelFunc_(args);
-    return (*kernel_func)(args);
-  }
+   KernelFunction* lookup(ArrayRef<IValue> args) const {
+     auto dispatch_key = Schema::dispatch::dispatch_key(args);
+     KernelFunction* found = kernels_.lookup(dispatch_key);
+     if (found == nullptr) {
+       // TODO Better error message - include op name and dispatch key (i.e.
+       // argument types)
+       throw std::logic_error(
+           std::string() + "Didn't find kernel to dispatch to for operator '" +
+           Schema::metadata::name() + "'");
+     }
+     return found;
+   }
 
  private:
-  KernelFunction* lookupKernelFunc_(ArrayRef<IValue> args) const {
-    auto dispatch_key = Schema::dispatch::dispatch_key(args);
-    KernelFunction* found = kernels_.lookup(dispatch_key);
-    if (found == nullptr) {
-      // TODO Better error message - include op name and dispatch key (i.e.
-      // argument types)
-      throw std::logic_error(
-          std::string() + "Didn't find kernel to dispatch to for operator '" +
-          Schema::metadata::name() + "'");
-    }
-    return found;
-  }
+
 
   details::ThreadsafeOperatorTable_<
       typename Schema::dispatch::dispatch_key_type>

@@ -4,6 +4,24 @@
 
 namespace c10 {
 
+class OpKernel final {
+public:
+  explicit constexpr OpKernel(KernelFunction* kernel): kernel_(kernel) {}
+
+  OpKernel(OpKernel&&) = default;
+  OpKernel& operator=(OpKernel&&) = default;
+  OpKernel(const OpKernel&) = delete;
+  OpKernel& operator=(const OpKernel&) = delete;
+
+  IValue call(ArrayRef<IValue> args) const {
+    return (*kernel_)(args);
+  }
+
+private:
+  // TODO Store kernel state
+  KernelFunction* kernel_;
+};
+
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
  */
@@ -33,12 +51,13 @@ public:
   }
 
   /**
-   * Perform a dynamic dispatch to some operator
+   * Perform a dynamic dispatch and get the kernel for an operator
    */
-  static IValue call(ArrayRef<IValue> args) {
+  static OpKernel lookup(ArrayRef<IValue> args) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return dispatch_table_for_this_op.call(args);
+    return OpKernel(dispatch_table_for_this_op.lookup(args));
   }
+
 };
 
 } // namespace c10
