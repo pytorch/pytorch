@@ -107,6 +107,7 @@ class BatchDataBuffer {
     if (stop_){
       // When stop_ is true, it means this current thread needs to be tore down.
       // Return without any further processing.
+      lock.unlock();
       return;
     }
 
@@ -172,6 +173,7 @@ class BatchDataBuffer {
       // When stop_ is true, it means this current thread needs to be tore down,
       // the batch buffer will be discarded, so no need to enqueue any new
       // exceptions.
+      lock.unlock();
       return;
     }
 
