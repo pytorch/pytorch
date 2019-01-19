@@ -91,6 +91,10 @@ class CAFFE2_API OnnxExporter {
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
+  ConvertedResult CreateMergeDimNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
   ConvertedResult CreateLrnNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
