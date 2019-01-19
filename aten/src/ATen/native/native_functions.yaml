@@ -3652,13 +3652,15 @@
     CPU: fractional_max_pool2d_backward_cpu
     CUDA: fractional_max_pool2d_backward_cuda
 
-- func: fractional_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
     CUDA: fractional_max_pool3d_out_cuda
 
-- func: fractional_max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_cpu
@@ -3676,7 +3678,8 @@
     CPU: fractional_max_pool3d_backward_cpu
     CUDA: fractional_max_pool3d_backward_cuda
 
-- func: max_pool2d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: max_pool2d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
