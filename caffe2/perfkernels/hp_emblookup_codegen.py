@@ -335,7 +335,7 @@ code.append("//// BY {}".format(sys.argv[0]))
 code.append("//// DO NOT MODIFY!!!")
 code.append("//// --------------------------\n")
 
-code.append("#include <ATen/core/Half.h>")
+code.append("#include <c10/util/Half.h>")
 code.append("#include <c10/util/Logging.h>")
 code.append("#include <immintrin.h>")
 code.append("#include <cassert>\n")
