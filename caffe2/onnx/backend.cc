@@ -470,7 +470,16 @@ Caffe2Ops Caffe2Backend::CreateConstantOfShape(
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
   const auto* value = onnx_node->attributes.get<const TensorProto*>("value");
-  BuildTensorFillingOp(c2_op, *value, onnx_node->node.output(0), onnx_node->node.input(0));
+  if (value) {
+    BuildTensorFillingOp(c2_op, *value, onnx_node->node.output(0), onnx_node->node.input(0));
+  } else {
+    c2_op->set_type("ConstantFill");
+    c2_op->add_input(onnx_node->node.input(0));
+    c2_op->add_output(onnx_node->node.output(0));
+    auto c2_input_as_shape = c2_op->add_arg();
+    c2_input_as_shape->set_name("input_as_shape");
+    c2_input_as_shape->set_i(1);
+  }
 
   return ret;
 }
