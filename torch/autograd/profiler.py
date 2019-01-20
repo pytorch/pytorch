@@ -147,7 +147,7 @@ class profile(object):
         ...     y = x ** 2
         ...     y.backward()
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof)
+        ... print(prof)  # xdoctest: +IGNORE_WANT
         -------------------------------------  ---------------  ---------------
         Name                                          CPU time        CUDA time
         -------------------------------------  ---------------  ---------------
@@ -245,6 +245,8 @@ class emit_nvtx(object):
             Default: ``True``.
 
     Example:
+        >>> model = nn.Linear(8, 16)
+        >>> x = torch.rand(8)
         >>> with torch.cuda.profiler.profile():
         ...     model(x) # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():

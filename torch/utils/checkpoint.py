@@ -182,7 +182,9 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
 
     Example:
-        >>> model = nn.Sequential(...)
+        >>> input_var = torch.rand(5, requires_grad=True)
+        >>> model = nn.Sequential(*([nn.Linear(5, 5)] * 7 + [nn.Linear(5, 3)]))
+        >>> chunks = 2
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
     # Hack to mix *args with **kwargs in a python 2.7-compliant way

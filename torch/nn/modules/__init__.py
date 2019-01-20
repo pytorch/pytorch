@@ -1,3 +1,6 @@
+"""
+mkinit ~/code/pytorch/torch/nn/modules/__init__.py --nomod --relative --dry
+"""
 from .module import Module
 from .linear import Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \

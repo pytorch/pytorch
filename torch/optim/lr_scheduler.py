@@ -66,13 +66,16 @@ class LambdaLR(_LRScheduler):
 
     Example:
         >>> # Assuming optimizer has two groups.
+        >>> model = nn.Linear(8, 16)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> lambda1 = lambda epoch: epoch // 30
-        >>> lambda2 = lambda epoch: 0.95 ** epoch
-        >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
+        >>> #lambda2 = lambda epoch: 0.95 ** epoch
+        >>> #scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
+        >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1])
         >>> for epoch in range(100):
         >>>     scheduler.step()
-        >>>     train(...)
-        >>>     validate(...)
+        >>>     #train(...)
+        >>>     #validate(...)
     """
 
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
@@ -142,11 +145,13 @@ class StepLR(_LRScheduler):
         >>> # lr = 0.005    if 30 <= epoch < 60
         >>> # lr = 0.0005   if 60 <= epoch < 90
         >>> # ...
+        >>> model = nn.Linear(8, 16)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
         >>> for epoch in range(100):
         >>>     scheduler.step()
-        >>>     train(...)
-        >>>     validate(...)
+        >>>     #train(...)
+        >>>     #validate(...)
     """
 
     def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
@@ -179,11 +184,13 @@ class MultiStepLR(_LRScheduler):
         >>> # lr = 0.05     if epoch < 30
         >>> # lr = 0.005    if 30 <= epoch < 80
         >>> # lr = 0.0005   if epoch >= 80
+        >>> model = nn.Linear(8, 16)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
         >>> for epoch in range(100):
         >>>     scheduler.step()
-        >>>     train(...)
-        >>>     validate(...)
+        >>>     #train(...)
+        >>>     #validate(...)
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
@@ -305,11 +312,13 @@ class ReduceLROnPlateau(object):
             ignored. Default: 1e-8.
 
     Example:
+        >>> model = nn.Linear(8, 16)
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
-        >>>     train(...)
-        >>>     val_loss = validate(...)
+        >>>     #train(...)
+        >>>     val_loss = (epoch * 10) % 5
+        >>>     #val_loss = validate(...)
         >>>     # Note that step should be called after validate()
         >>>     scheduler.step(val_loss)
     """
