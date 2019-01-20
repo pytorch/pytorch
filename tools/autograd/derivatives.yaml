@@ -1369,6 +1369,12 @@
   save_var: not_implemented("cudnn_batch_norm_backward save_var")
   input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
 
+# nnpack
+
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor bias, IntList padding)
+  input: _nnpack_spatial_convolution_backward_input(input, grad, weight, padding)
+  weight: _nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, padding)
+  bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)

@@ -2,6 +2,7 @@
 #include "caffe2/utils/eigen_utils.h"
 #include <ATen/core/opschema/layer_norm.h>
 #include <ATen/core/dispatch/KernelRegistration.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -186,24 +187,20 @@ to the end.)
 // Register layer norm with c10
 namespace {
 template <class DataType>
-void layer_norm_c10(
-    const c10::C10Tensor& X_,
-    const c10::C10Tensor& Y_,
-    const c10::C10Tensor& mean_,
-    const c10::C10Tensor& sig_,
-    int axis,
-    float epsilon,
-    c10::core::opschema::LayerNorm::Cache* cache) {
-  caffe2::Tensor X(X_);
-  caffe2::Tensor Y(Y_);
-  caffe2::Tensor mean(mean_);
-  caffe2::Tensor sig(sig_);
+c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
+  caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
+  caffe2::Tensor Y{c10::C10Tensor(inputs[1].toTensor())};
+  caffe2::Tensor mean{c10::C10Tensor(inputs[2].toTensor())};
+  caffe2::Tensor sig{c10::C10Tensor(inputs[3].toTensor())};
+  int64_t axis = inputs[4].toInt();
+  float epsilon = inputs[5].toDouble();
   caffe2::CPUContext context;
+  c10::core::opschema::LayerNorm::Cache* cache = inputs[6].toBlob()->GetMutable<c10::core::opschema::LayerNorm::Cache>();
   if (!cache->scale.has_value()) {
-    cache->scale = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
+    cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }
   if (!cache->bias.has_value()) {
-    cache->bias = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
+    cache->bias = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }
   caffe2::Tensor scale(*cache->scale);
   caffe2::Tensor bias(*cache->bias);
@@ -217,6 +214,7 @@ void layer_norm_c10(
   caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
     X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
   );
+  return c10::IValue();
 }
 }
 namespace c10 {
