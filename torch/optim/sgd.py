@@ -18,8 +18,12 @@ class SGD(Optimizer):
         nesterov (bool, optional): enables Nesterov momentum (default: False)
 
     Example:
+        >>> model = nn.Linear(8, 16)
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
+        >>> loss_fn = nn.MSELoss()
+        >>> input = torch.rand(1, 8)
+        >>> target = torch.rand(1, 16)
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
 

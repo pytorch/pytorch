@@ -96,8 +96,9 @@ def load(f, map_location=None):
             A ``ScriptModule`` object.
 
         Example:
+            >>> # xdoctest: +SKIP
             >>> torch.jit.load('scriptmodule.pt')
-            # Load ScriptModule from io.BytesIO object
+            >>> # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
             ...     buffer = io.BytesIO(f.read())
             >>> # Load all tensors to the original device
@@ -154,6 +155,7 @@ def save(m, f):
             Please use something like io.BytesIO instead.
 
         Example:
+            >>> # xdoctest: +SKIP
             >>> m = torch.jit.ScriptModule()
             >>> # Save to file
             >>> torch.jit.save(m, 'scriptmodule.pt')

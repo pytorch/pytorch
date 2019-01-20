@@ -413,16 +413,16 @@ def CppExtension(name, sources, *args, **kwargs):
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
-                name='extension',
-                ext_modules=[
-                    CppExtension(
-                        name='extension',
-                        sources=['extension.cpp'],
-                        extra_compile_args=['-g']),
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        >>>     name='extension',
+        >>>     ext_modules=[
+        >>>         CppExtension(
+        >>>             name='extension',
+        >>>             sources=['extension.cpp'],
+        >>>             extra_compile_args=['-g']),
+        >>>     ],
+        >>>     cmdclass={
+        >>>         'build_ext': BuildExtension
+        >>>     })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -462,17 +462,17 @@ def CUDAExtension(name, sources, *args, **kwargs):
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
-                name='cuda_extension',
-                ext_modules=[
-                    CUDAExtension(
-                            name='cuda_extension',
-                            sources=['extension.cpp', 'extension_kernel.cu'],
-                            extra_compile_args={'cxx': ['-g'],
-                                                'nvcc': ['-O2']})
-                ],
-                cmdclass={
-                    'build_ext': BuildExtension
-                })
+        >>>     name='cuda_extension',
+        >>>     ext_modules=[
+        >>>         CUDAExtension(
+        >>>                 name='cuda_extension',
+        >>>                 sources=['extension.cpp', 'extension_kernel.cu'],
+        >>>                 extra_compile_args={'cxx': ['-g'],
+        >>>                                     'nvcc': ['-O2']})
+        >>>     ],
+        >>>     cmdclass={
+        >>>         'build_ext': BuildExtension
+        >>>     })
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -627,12 +627,13 @@ def load(name,
         effect).
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load
         >>> module = load(
-                name='extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_cflags=['-O2'],
-                verbose=True)
+        >>>     name='extension',
+        >>>     sources=['extension.cpp', 'extension_kernel.cu'],
+        >>>     extra_cflags=['-O2'],
+        >>>     verbose=True)
     '''
     return _jit_compile(
         name,
@@ -707,15 +708,16 @@ def load_inline(name,
             and libraries to be included.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torch.utils.cpp_extension import load_inline
-        >>> source = \'\'\'
-        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
-          return x.sin() + y.sin();
-        }
-        \'\'\'
+        >>> source = """
+        >>>     at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+        >>>       return x.sin() + y.sin();
+        >>>     }
+        >>>     """
         >>> module = load_inline(name='inline_extension',
-                                 cpp_sources=[source],
-                                 functions=['sin_add'])
+        >>>                      cpp_sources=[source],
+        >>>                      functions=['sin_add'])
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
 

@@ -15,7 +15,7 @@ class Weibull(TransformedDistribution):
 
         >>> m = Weibull(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Weibull distribution with scale=1, concentration=1
-        tensor([ 0.4784])
+        tensor([...])
 
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
