@@ -1251,7 +1251,8 @@ class CTCLoss(_Loss):
 
     @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
-        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction, zero_infinity)
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
+                          self.zero_infinity)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
