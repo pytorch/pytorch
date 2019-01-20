@@ -16,6 +16,7 @@ extern "C" {
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math/elementwise.h"
+#include "caffe2/utils/math/reduce.h"
 #include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
@@ -252,18 +253,6 @@ CAFFE2_API void Broadcast(
     const T alpha,
     const T* X,
     T* Y,
-    Context* context);
-
-// Computes mean and variance over axes.
-template <typename T, class Context>
-CAFFE2_API void Moments(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* mean,
-    T* variance,
     Context* context);
 
 // Computes inv_std from variance.

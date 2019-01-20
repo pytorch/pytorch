@@ -64,6 +64,9 @@ CAFFE2_API int GetIndexFromDims(const int n, const int* dims, const int* index);
 // Checks if the input permutation is an identity permutation;
 CAFFE2_API bool IsIdentityPermutation(const int n, const int* perm);
 
+CAFFE2_API bool
+CheckReduceDims(const int ndim, const int* X_dims, const int* Y_dims);
+
 CAFFE2_API bool IsRowwiseReduce(
     const int ndim,
     const int* X_dims,
@@ -128,6 +131,9 @@ CAFFE2_API void ComputeTransposeAxesForReduceOp(
     const int num_reduce_axes,
     const int* reduce_axes,
     int* transpose_axes);
+
+CAFFE2_API void
+ComputeTransposeAxesForReduceOp(const int ndim, const int* dims, int* axes);
 
 CAFFE2_API void ComputeTransposedStrides(
     const int ndim,
