@@ -29,7 +29,7 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function
 
-- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic) -> (Tensor, Tensor)
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
 
@@ -565,17 +565,17 @@
 
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
 
-- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean, bool zero_infinity=false) -> Tensor
 
 # convenience function that converts to intlists for you
-- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean, bool zero_infinity=false) -> Tensor
 
-- func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
+- func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
     CPU:  ctc_loss_cpu
     CUDA: ctc_loss_gpu
 
-- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int64_t blank) -> Tensor
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int64_t blank, bool zero_infinity) -> Tensor
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
