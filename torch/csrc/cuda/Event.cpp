@@ -1,8 +1,9 @@
 #include <torch/csrc/cuda/Event.h>
-#include <torch/csrc/cuda/Stream.h>
-
-#include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
+#include <torch/csrc/cuda/Stream.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/THP.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
@@ -43,27 +44,23 @@ static PyObject * THCPEvent_pynew(
 }
 
 static PyObject * THCPEvent_from_ipc_handle(
-    PyTypeObject *type, PyObject *args) {
+    PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
-  long long device_index = -1;
-  const char *handle_bytes = nullptr;
-  int handle_size = 0;
 
-  // cannot use bool 'p' and bytearray 'Y' as they are not available in Python 2
-  if (!PyArg_ParseTuple(
-      args, "Ls#", &device_index, &handle_bytes, &handle_size)) {
-    return nullptr;
-  }
+  static torch::PythonArgParser parser({
+    "from_ipc_handle(Device device, std::string ipc_handle)",
+  });
+  torch::ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
 
-  AT_CHECK(handle_size == sizeof(cudaIpcEventHandle_t),
+  at::Device device = r.device(0);
+  std::string handle_string = r.string(1);
+
+  AT_CHECK(handle_string.size() == sizeof(cudaIpcEventHandle_t),
     "cudaIpcEventHandle_t expects byte-like object of size ",
-    sizeof(cudaIpcEventHandle_t), ", but got ", handle_size);
-  AT_CHECK(device_index >= 0, "Reconstructing event from handle requires "
-    "a non-negtive device index, but got ", device_index)
-
-  // no need to release the handle byte array as it is automatically managed
-  // by the corresponding THCPEvent python object.
-  // see https://docs.python.org/3/c-api/arg.html#strings-and-buffers
+    sizeof(cudaIpcEventHandle_t), ", but got ", handle_string.size());
+  AT_CHECK(device.type() == at::kCUDA, "Event can only be created on "
+    "CUDA devices, but got device type ", device.type())
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
@@ -72,8 +69,8 @@ static PyObject * THCPEvent_from_ipc_handle(
   THCPEvent* self = (THCPEvent *)ptr.get();
 
   cudaIpcEventHandle_t handle;
-  std::memcpy(&handle, handle_bytes, handle_size);
-  new (&self->cuda_event) at::cuda::CUDAEvent(device_index, &handle);
+  std::memcpy(&handle, handle_string.c_str(), handle_string.size());
+  new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
 
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -92,7 +89,11 @@ static PyObject * THCPEvent_get_cuda_event(THCPEvent *self) {
 
 static PyObject * THCPEvent_get_device(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(self->cuda_event.device_index());
+  at::optional<at::Device> device = self->cuda_event.device();
+  if (!device) {
+    Py_RETURN_NONE;
+  }
+  return THPDevice_New(device.value());
   END_HANDLE_TH_ERRORS
 }
 
@@ -145,7 +146,7 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 
 static PyMethodDef THCPEvent_methods[] = {
   {(char*)"from_ipc_handle", (PyCFunction)THCPEvent_from_ipc_handle,
-    METH_CLASS | METH_VARARGS, nullptr},
+    METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"record", (PyCFunction)THCPEvent_record, METH_O, nullptr},
   {(char*)"wait", (PyCFunction)THCPEvent_wait, METH_O, nullptr},
   {(char*)"query", (PyCFunction)THCPEvent_query, METH_NOARGS, nullptr},
