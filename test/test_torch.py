@@ -1209,7 +1209,7 @@ class _TestTorchMixin(object):
             self.assertTrue(torch.allclose(expected, actual))
 
         for device in torch.testing.get_all_device_types():
-            for shape in [(4, 5), (3, 2), (2, 1)]:
+            for shape in [(3, 4, 5), (17, 19), (4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
                         for dtype in [torch.float32, torch.float64]:
@@ -1218,7 +1218,9 @@ class _TestTorchMixin(object):
             # do a simplified comparison with big inputs, see:
             # https://github.com/pytorch/pytorch/issues/15511
             for dtype in [torch.float32, torch.float64]:
-                test_pdist_single((1000, 2), device, 2, dtype, False)
+                test_pdist_single((1000, 4, 2), device, 2, dtype, False)
+                test_pdist_single((2, 1000, 2), device, 2, dtype, False)
+                test_pdist_single((2, 4, 1000), device, 2, dtype, False)
 
     def test_cdist_empty(self):
         for device in torch.testing.get_all_device_types():
