@@ -1583,17 +1583,20 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    @staticmethod
     def _stream_synchronize(spin_time=50000000):
         s = torch.cuda.current_stream()
         torch.cuda._sleep(spin_time)
         s.synchronize()
 
+    @staticmethod
     def _event_synchronize(spin_time=50000000):
         s = torch.cuda.current_stream()
         torch.cuda._sleep(spin_time)
         e = s.record_event()
         e.synchronize()
 
+    @staticmethod
     def _event_wait(spin_time=50000000):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
@@ -1605,6 +1608,7 @@ class TestCuda(TestCase):
             torch.cuda._sleep(10)
         s1.synchronize()
 
+    @staticmethod
     def _test_stream_event_nogil(sync_func, p2c, c2p):
         with torch.cuda.device('cuda:1'):
             c2p.put(0)
