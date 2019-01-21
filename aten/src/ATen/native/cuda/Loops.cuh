@@ -60,7 +60,7 @@ static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
-template<int nt, int nt_2, int vt, typename func_t>
+template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, const func_t& f) {
   if (N == 0) {
     return;
