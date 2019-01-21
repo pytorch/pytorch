@@ -85,13 +85,13 @@ def rebuild_tensor(cls, storage, metadata):
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_py_id, storage_handle, storage_size_bytes, storage_offset_bytes,
+                        storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
                         requires_grad):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
     else:
-        storage = storage_from_cache(storage_cls, (storage_py_id, storage_handle, storage_offset_bytes))
+        storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes, storage_size_bytes))
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -99,7 +99,9 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 storage_handle,
                 storage_size_bytes,
                 storage_offset_bytes)
-            shared_cache[(storage_py_id, storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+            shared_cache[(storage_handle, storage_offset_bytes, storage_size_bytes)] = StorageWeakRef(storage)
+        else:
+            print("Hit cache", storage)
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:
         t = torch.nn.parameter.Parameter(t)
@@ -218,6 +220,7 @@ def reduce_tensor(tensor):
         (device, handle, storage_size_bytes, storage_offset_bytes) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
 
+        print('Sending', tensor, id(storage), handle, storage_offset_bytes, storage_size_bytes)
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (rebuild_cuda_tensor,
@@ -227,7 +230,6 @@ def reduce_tensor(tensor):
                  tensor_offset,  # tensor offset in its storage
                  type(storage),
                  device,
-                 id(storage),
                  handle,  # identifier which CUDA allocation is the storage in.
                  storage_size_bytes,  # size(in bytes) of the storage
                  storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
