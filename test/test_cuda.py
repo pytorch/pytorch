@@ -1436,8 +1436,8 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s0 = torch.cuda.current_stream()
-            s1 = torch.cuda.current_stream(device=1)
-            s2 = torch.cuda.current_stream(device=0)
+            s1 = torch.cuda.current_stream(1)
+            s2 = torch.cuda.current_stream(d0)
 
         self.assertEqual(d1, s0.device)
         self.assertEqual(d1, s1.device)
@@ -1461,7 +1461,7 @@ class TestCuda(TestCase):
             s1 = torch.cuda.default_stream()
 
         s2 = torch.cuda.default_stream(device=0)
-        s3 = torch.cuda.default_stream(device=1)
+        s3 = torch.cuda.default_stream(d1)
 
         self.assertEqual(d0, s0.device)
         self.assertEqual(d1, s1.device)

@@ -69,20 +69,22 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 PyObject * THCPModule_getCurrentStream_wrap(
     PyObject *self, PyObject *device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyLong_Check(device_index), "invalid device index");
-  long index = PyLong_AsLong(device_index);
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
+  int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromUnsignedLongLong(
-    at::cuda::getCurrentCUDAStream(index).pack());
+    at::cuda::getCurrentCUDAStream(device).pack());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_getDefaultStream_wrap(
     PyObject *self, PyObject *device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyLong_Check(device_index), "invalid device index");
-  long index = PyLong_AsLong(device_index);
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
+  int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromUnsignedLongLong(
-    at::cuda::getDefaultCUDAStream(index).pack());
+    at::cuda::getDefaultCUDAStream(device).pack());
   END_HANDLE_TH_ERRORS
 }
 
