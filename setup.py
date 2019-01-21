@@ -145,6 +145,7 @@ from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
 from distutils import dir_util
 import setuptools.command.build_ext
+import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
@@ -466,6 +467,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 f.write(new_contents)
 
 
+class install(setuptools.command.install.install):
+    def run(self):
+        setuptools.command.install.install.run(self)
+
+
 class clean(distutils.command.clean.clean):
     def run(self):
         import glob
@@ -703,6 +709,7 @@ if USE_ROCM:
 cmdclass = {
     'build_ext': build_ext,
     'clean': clean,
+    'install': install,
 }
 
 entry_points = {
