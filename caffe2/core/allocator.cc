@@ -29,7 +29,7 @@ void memset_junk(void* data, size_t num) {
   int32_t int64_count = num / sizeof(kJunkPattern64);
   int32_t remaining_bytes = num % sizeof(kJunkPattern64);
   int64_t* data_i64 = reinterpret_cast<int64_t*>(data);
-  for (int i = 0; i < int64_count; i++) {
+  for (int32_t i = 0; i < int64_count; i++) {
     data_i64[i] = kJunkPattern64;
   }
   if (remaining_bytes > 0) {
