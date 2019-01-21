@@ -34,11 +34,5 @@ matrix:
         script: cd docs/cpp/source && ./check-doxygen.sh
       - env: CLANG_TIDY
         python: "3.6"
-        addons:
-          apt:
-            sources:
-              - ubuntu-toolchain-r-test
-              - llvm-toolchain-trusty
-            packages: clang-tidy
         script: tools/run-clang-tidy-in-ci.sh
 

@@ -7,6 +7,7 @@ import unittest
 
 from hypothesis import given, assume
 import numpy as np
+import operator
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -16,158 +17,74 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 # TODO(jiayq): make them hypothesis tests for better coverage.
 class TestElementwiseBroadcast(serial.SerializedTestCase):
-    @given(**hu.gcs)
-    def test_broadcast_Add(self, gc, dc):
+
+    def __generate_test_cases(self):
+        """
+        generates a set of test cases
+
+        For each iteration, generates X, Y, args, X_out, Y_out
+        where
+          X, Y         are test input tensors
+          args         is a dictionary of arguments to be passed to
+                       core.CreateOperator()
+          X_out, Y_out are reshaped versions of X and Y
+                       which can be used to calculate the expected
+                       result with the operator to be tested
+        """
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(4, 5).astype(np.float32)
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X + Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        args = {"broadcast": 1}
+        yield X, Y, args, X, Y
 
         # broadcasting intermediate dimensions
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(3, 4).astype(np.float32)
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X + Y[:, :, np.newaxis])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        args = {"broadcast": 1, "axis": 1}
+        yield X, Y, args, X, Y[:, :, np.newaxis]
 
         # broadcasting the first dimension
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(2).astype(np.float32)
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1, axis=0)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(
-            out, X + Y[:, np.newaxis, np.newaxis, np.newaxis])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        args = {"broadcast": 1, "axis": 0}
+        yield X, Y, args, X, Y[:, np.newaxis, np.newaxis, np.newaxis]
 
         # broadcasting with single elem dimensions at both ends
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
         Y = np.random.rand(1, 4, 1).astype(np.float32)
-        op = core.CreateOperator("Add", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X + Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        args = {"broadcast": 1, "axis": 1}
+        yield X, Y, args, X, Y
+
+    def __test_binary_op(self, gc, dc, caffe2_op, op_function):
+        """
+        Args:
+            caffe2_op: A string. Name of the caffe operator to test.
+            op_function: an actual python operator (e.g. operator.add)
+        path_prefix: A string. Optional param used to construct db name or path
+            where checkpoint files are are stored.
+        """
+
+        for X, Y, op_args, X_out, Y_out in self.__generate_test_cases():
+            op = core.CreateOperator(caffe2_op, ["X", "Y"], "out", **op_args)
+            workspace.FeedBlob("X", X)
+            workspace.FeedBlob("Y", Y)
+            workspace.RunOperatorOnce(op)
+            out = workspace.FetchBlob("out")
+            np.testing.assert_array_almost_equal(out, op_function(X_out, Y_out))
+            self.assertDeviceChecks(dc, op, [X, Y], [0])
+            self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+    @given(**hu.gcs)
+    def test_broadcast_Add(self, gc, dc):
+        self.__test_binary_op(gc, dc, "Add", operator.add)
 
     @given(**hu.gcs)
     def test_broadcast_Mul(self, gc, dc):
-        # Set broadcast and no axis, i.e. broadcasting last dimensions.
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(4, 5).astype(np.float32)
-        op = core.CreateOperator("Mul", ["X", "Y"], "out", broadcast=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X * Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-
-        # broadcasting intermediate dimensions
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(3, 4).astype(np.float32)
-        op = core.CreateOperator("Mul", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X * Y[:, :, np.newaxis])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
-        # broadcasting the first dimension
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(2).astype(np.float32)
-        op = core.CreateOperator("Mul", ["X", "Y"], "out", broadcast=1, axis=0)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(
-            out, X * Y[:, np.newaxis, np.newaxis, np.newaxis])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
-        # broadcasting with single elem dimensions at both ends
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(1, 4, 1).astype(np.float32)
-        op = core.CreateOperator("Mul", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X * Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        self.__test_binary_op(gc, dc, "Mul", operator.mul)
 
     @given(**hu.gcs)
     def test_broadcast_Sub(self, gc, dc):
-        # Set broadcast and no axis, i.e. broadcasting last dimensions.
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(4, 5).astype(np.float32)
-        op = core.CreateOperator("Sub", ["X", "Y"], "out", broadcast=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X - Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-
-        # broadcasting intermediate dimensions
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(3, 4).astype(np.float32)
-        op = core.CreateOperator("Sub", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X - Y[:, :, np.newaxis])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
-        # broadcasting the first dimension
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(2).astype(np.float32)
-        op = core.CreateOperator("Sub", ["X", "Y"], "out", broadcast=1, axis=0)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(
-            out, X - Y[:, np.newaxis, np.newaxis, np.newaxis])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
-        # broadcasting with single elem dimensions at both ends
-        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
-        Y = np.random.rand(1, 4, 1).astype(np.float32)
-        op = core.CreateOperator("Sub", ["X", "Y"], "out", broadcast=1, axis=1)
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("Y", Y)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        np.testing.assert_array_almost_equal(out, X - Y)
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+        self.__test_binary_op(gc, dc, "Sub", operator.sub)
 
     @serial.given(**hu.gcs)
     def test_broadcast_powt(self, gc, dc):

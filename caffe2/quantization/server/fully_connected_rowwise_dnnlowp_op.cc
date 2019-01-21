@@ -14,12 +14,12 @@ FullyConnectedRowWiseDNNLowPOp<T>::FullyConnectedRowWiseDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
-      axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-      axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+      axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+      axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
       b_quantized_(make_shared<vector<int32_t>>()),
       column_offsets_(make_shared<vector<int32_t>>()),
       is_weight_constant_(
-          OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
+          this->template GetSingleArgument<bool>("constant_weight", true)) {
   using namespace dnnlowp;
   LOG(INFO) << "Using Rowwise Quantization!";
   if (!is_weight_constant_) {
@@ -232,9 +232,8 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
     VLOG(3) << "@PERF this=" << this
-            << " output=" << OperatorBase::debug_def().output(0) << " " << M
-            << "x" << N << "x" << K << ": " << dt * 1e3 << " ms " << gops
-            << " gops";
+            << " output=" << this->debug_def().output(0) << " " << M << "x" << N
+            << "x" << K << ": " << dt * 1e3 << " ms " << gops << " gops";
   }
 
   return true;

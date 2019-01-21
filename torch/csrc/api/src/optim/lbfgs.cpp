@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/serialize/archive.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -25,6 +26,7 @@ Tensor LBFGS::gather_flat_grad() {
 }
 
 void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
+  NoGradGuard guard;
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
     int64_t numel = parameter.numel();

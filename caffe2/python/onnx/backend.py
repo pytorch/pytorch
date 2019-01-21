@@ -644,7 +644,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):

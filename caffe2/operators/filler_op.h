@@ -55,15 +55,31 @@ class FillerOp : public Operator<Context> {
     if (InputSize()) {
       auto shape = vector<int64_t>{};
       if (input_as_shape_) {
-        // Shape input must be in CPU context
-        auto& input = this->template Input<Tensor>(0, CPU);
-        CAFFE_ENFORCE_EQ(
-            input.dim(),
-            1,
-            "When input_as_shape is true, the input must be a 1D tensor of "
-            "data type int64_t");
-        auto* shape_data = input.template data<int64_t>();
-        shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        if (this->InputIsTensorType(0, CPU)) {
+          // originally, shape input must be in CPU context
+          auto& input = this->template Input<Tensor>(0, CPU);
+          CAFFE_ENFORCE_EQ(
+              input.dim(),
+              1,
+              "When input_as_shape is true, the input must be a 1D tensor of "
+              "data type int64_t");
+          CAFFE_ENFORCE(input.numel() > 0);
+          auto* shape_data = input.template data<int64_t>();
+          shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        } else {
+          // in ONNX case, we allow shape to be in CUDA context
+          auto& input = Input(0);
+          CAFFE_ENFORCE_EQ(
+              input.dim(),
+              1,
+              "When input_as_shape is true, the input must be a 1D tensor of "
+              "data type int64_t");
+          CAFFE_ENFORCE(input.numel() > 0);
+          auto* shape_data = input.template data<int64_t>();
+          std::unique_ptr<int64_t[]> shape_data_copy = caffe2::make_unique<int64_t[]>(input.dim32(0));
+          context_.template CopyToCPU<int64_t>(input.dim32(0), shape_data, shape_data_copy.get());
+          shape.insert(shape.end(), shape_data_copy.get(), shape_data_copy.get() + input.dim32(0));
+        }
       } else {
         auto& input = Input(0);
         shape.insert(shape.end(), input.sizes().begin(), input.sizes().end());

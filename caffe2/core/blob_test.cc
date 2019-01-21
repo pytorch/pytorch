@@ -587,6 +587,11 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.numel(), large_number * 100);
 }
 
+TEST(TensorTest, UndefinedTensor) {
+  Tensor x;
+  EXPECT_FALSE(x.defined());
+}
+
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
   int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;

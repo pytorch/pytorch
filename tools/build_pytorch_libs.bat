@@ -20,7 +20,7 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
-set LINK_FLAGS=/DEBUG:FULL
+set LINK_FLAGS=
 : End cmake variables
 
 if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
@@ -91,9 +91,11 @@ goto :process_args
 set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
+  set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 )
 IF "%REL_WITH_DEB_INFO%"=="1" (
   set BUILD_TYPE=RelWithDebInfo
+  set LINK_FLAGS=%LINK_FLAGS% /DEBUG:FULL
 )
 
 :: sccache will fail if all cores are used for compiling
@@ -247,7 +249,7 @@ goto:eof
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DUSE_ROCM=%USE_ROCM%
+                  -DUSE_ROCM=%USE_ROCM% %EXTRA_CAFFE2_CMAKE_FLAGS%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
 
