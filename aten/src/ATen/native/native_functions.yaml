@@ -2079,6 +2079,9 @@
 
 - func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CPU: _unique_dim_cpu
+    CUDA: _unique_dim_cuda
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
