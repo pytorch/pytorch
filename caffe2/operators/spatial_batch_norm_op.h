@@ -102,25 +102,30 @@ class SpatialBNOp : public Operator<Context> {
       CAFFE_ENFORCE(
           IsInputOutputAlias(4, 2), "Input 4 and Output 2 should be alias.");
 
-      Tensor* running_mean, *running_var;
+      Tensor* running_mean = nullptr;
+      Tensor* running_var = nullptr;
       const auto& mean = Input(EST_MEAN);
       const auto& var = Input(EST_VAR);
       if (mean.numel() != C) {
-       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
-       C10_LOG_EVERY_MS(WARNING, 1000) << "[Depreacated] Running mean is not initialized in SpatialBatchNorm Op";
-       math::Set<T, Context>(C, T(0), running_mean->template mutable_data<T>(), &context_);
+        running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "[Depreacated] Running mean is not initialized in "
+               "SpatialBatchNorm Op";
+        math::Set<T, Context>(
+            C, T(0), running_mean->template mutable_data<T>(), &context_);
       } else {
-       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
+        running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
       }
       if (var.numel() != C) {
         running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
         math::Set<T, Context>(
             C, T(0), running_var->template mutable_data<T>(), &context_);
-        C10_LOG_EVERY_MS(WARNING, 1000) << "[Deprecated] Running variance is not initialized in SpatialBatchNorm Op";
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "[Deprecated] Running variance is not initialized in "
+               "SpatialBatchNorm Op";
       } else {
         running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
       }
-
 
       T* running_mean_data = running_mean->template mutable_data<T>();
       T* running_var_data = running_var->template mutable_data<T>();
@@ -144,25 +149,23 @@ class SpatialBNOp : public Operator<Context> {
             saved_rstd_data);
       } else {
         if (order_ == StorageOrder::NCHW) {
-          const std::array<int, 3> dims = {N, C, HxW};
-          const std::array<int, 3> axes = {0, 2};
+          const std::array<int, 3> X_dims_arr = {N, C, HxW};
+          const std::array<int, 3> Y_dims_arr = {1, C, 1};
           math::Moments<T, Context>(
               3,
-              dims.data(),
-              2,
-              axes.data(),
+              X_dims_arr.data(),
+              Y_dims_arr.data(),
               X_data,
               saved_mean_data,
               saved_rstd_data,
               &context_);
         } else {
-          const std::array<int, 2> dims = {N * HxW, C};
-          const int axis = 0;
+          const std::array<int, 2> X_dims_arr = {N * HxW, C};
+          const std::array<int, 2> Y_dims_arr = {1, C};
           math::Moments<T, Context>(
               2,
-              dims.data(),
-              1,
-              &axis,
+              X_dims_arr.data(),
+              Y_dims_arr.data(),
               X_data,
               saved_mean_data,
               saved_rstd_data,
@@ -328,8 +331,8 @@ class SpatialBNGradientOp : public Operator<Context> {
       const auto& dscale_sum = Input(AGGREGATE_SCALE_GRAD);
       const auto& dbias_sum = Input(AGGREGATE_BIAS_GRAD);
       // Note: previously there was alias check to decide whether to call
-      // ResizeLike or not, since we only call Resize when the size does not match
-      // the size of cached Tensor, this check is not necessary
+      // ResizeLike or not, since we only call Resize when the size does not
+      // match the size of cached Tensor, this check is not necessary
       dscale_sizes = dscale_sum.sizes();
       dbias_sizes = dbias_sum.sizes();
     }

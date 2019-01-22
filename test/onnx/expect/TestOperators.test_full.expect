@@ -92,21 +92,14 @@ graph {
   node {
     input: "9"
     output: "10"
-    op_type: "ConstantFill"
-    attribute {
-      name: "dtype"
-      i: 1
-      type: INT
-    }
-    attribute {
-      name: "input_as_shape"
-      i: 1
-      type: INT
-    }
+    op_type: "ConstantOfShape"
     attribute {
       name: "value"
-      f: 2
-      type: FLOAT
+      t {
+        data_type: 1
+        raw_data: "\000\000\000@"
+      }
+      type: TENSOR
     }
   }
   name: "torch-jit-export"
