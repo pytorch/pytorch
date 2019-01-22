@@ -143,19 +143,15 @@
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
+from distutils import dir_util
 import setuptools.command.build_ext
 import setuptools.command.install
-import setuptools.command.develop
-import setuptools.command.build_py
-import distutils.unixccompiler
-import distutils.command.build
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
 import platform
 import subprocess
 import shutil
-import multiprocessing
 import sys
 import os
 import json
@@ -166,8 +162,6 @@ import importlib
 # building torch, you should do it in tools/setup_helpers/configure.py.
 # Please don't add it here unless it's only used in PyTorch.
 from tools.setup_helpers.configure import *
-from tools.setup_helpers.generate_code import generate_code
-from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 import tools.setup_helpers.configure
 
 ################################################################################
@@ -175,13 +169,27 @@ import tools.setup_helpers.configure
 ################################################################################
 
 VERBOSE_SCRIPT = True
+RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
-for arg in sys.argv:
+EMIT_BUILD_WARNING = False
+filtered_args = []
+for i, arg in enumerate(sys.argv):
+    if arg == '--cmake':
+        tools.setup_helpers.configure.RERUN_CMAKE = True
+        continue
+    if arg == 'rebuild' or arg == 'build':
+        arg = 'build'  # rebuild is gone, make it build
+        EMIT_BUILD_WARNING = True
     if arg == "--":
+        filtered_args += sys.argv[i:]
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
+    if arg == 'clean':
+        RUN_BUILD_DEPS = False
+    filtered_args.append(arg)
+sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
     def report(*args):
@@ -212,20 +220,6 @@ else:
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
-class PytorchCommand(setuptools.Command):
-    """
-    Base Pytorch command to avoid implementing initialize/finalize_options in
-    every subclass
-    """
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
-
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
@@ -246,26 +240,57 @@ else:
 report("Building wheel {}-{}".format(package_name, version))
 
 
-class create_version_file(PytorchCommand):
-    def run(self):
-        global version, cwd
-        report('-- Building version ' + version)
-        version_path = os.path.join(cwd, 'torch', 'version.py')
-        with open(version_path, 'w') as f:
-            f.write("__version__ = '{}'\n".format(version))
-            # NB: This is not 100% accurate, because you could have built the
-            # library code with DEBUG, but csrc without DEBUG (in which case
-            # this would claim to be a release build when it's not.)
-            f.write("debug = {}\n".format(repr(DEBUG)))
-            f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+# all the work we need to do _before_ setup runs
+def build_deps():
+    report('-- Building version ' + version)
+    version_path = os.path.join(cwd, 'torch', 'version.py')
+    with open(version_path, 'w') as f:
+        f.write("__version__ = '{}'\n".format(version))
+        # NB: This is not 100% accurate, because you could have built the
+        # library code with DEBUG, but csrc without DEBUG (in which case
+        # this would claim to be a release build when it's not.)
+        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
 
+    def check_file(f):
+        if not os.path.exists(f):
+            report("Could not find {}".format(f))
+            report("Did you run 'git submodule update --init --recursive'?")
+            sys.exit(1)
+
+    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+
+    check_pydep('yaml', 'pyyaml')
+    check_pydep('typing', 'typing')
+
+    build_caffe2()
+
+    # Use copies instead of symbolic files.
+    # Windows has very poor support for them.
+    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    for sym_file, orig_file in zip(sym_files, orig_files):
+        same = False
+        if os.path.exists(sym_file):
+            if filecmp.cmp(sym_file, orig_file):
+                same = True
+            else:
+                os.remove(sym_file)
+        if not same:
+            shutil.copyfile(orig_file, sym_file)
+
+    dir_util.copy_tree('torch/lib/tmp_install/share', 'torch/share')
+    dir_util.copy_tree('third_party/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
 
 ################################################################################
 # Building dependent libraries
 ################################################################################
-
-# All libraries that torch could depend on
-dep_libs = ['caffe2']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -281,9 +306,7 @@ def check_pydep(importname, module):
 
 
 # Calls build_pytorch_libs.sh/bat with the correct env variables
-def build_libs(libs):
-    for lib in libs:
-        assert lib in dep_libs, 'invalid lib: {}'.format(lib)
+def build_caffe2():
     if IS_WINDOWS:
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
@@ -309,141 +332,12 @@ def build_libs(libs):
 
     kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
 
-    if subprocess.call(build_libs_cmd + libs, env=my_env, **kwargs) != 0:
-        report("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
+    if subprocess.call(build_libs_cmd, env=my_env, **kwargs) != 0:
+        report("Failed to run '{}'".format(' '.join(build_libs_cmd)))
         sys.exit(1)
 
 
-# Build all dependent libraries
-class build_deps(PytorchCommand):
-    def run(self):
-        report('setup.py::build_deps::run()')
-        # Check if you remembered to check out submodules
-
-        def check_file(f):
-            if not os.path.exists(f):
-                report("Could not find {}".format(f))
-                report("Did you run 'git submodule update --init --recursive'?")
-                sys.exit(1)
-
-        check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-
-        check_pydep('yaml', 'pyyaml')
-        check_pydep('typing', 'typing')
-
-        libs = []
-        libs += ['caffe2']
-        build_libs(libs)
-
-        # Use copies instead of symbolic files.
-        # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
-        for sym_file, orig_file in zip(sym_files, orig_files):
-            same = False
-            if os.path.exists(sym_file):
-                if filecmp.cmp(sym_file, orig_file):
-                    same = True
-                else:
-                    os.remove(sym_file)
-            if not same:
-                shutil.copyfile(orig_file, sym_file)
-
-        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
-        self.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
-
-
-build_dep_cmds = {}
-rebuild_dep_cmds = {}
-
-for lib in dep_libs:
-    # wrap in function to capture lib
-    class build_dep(build_deps):
-        description = 'Build {} external library'.format(lib)
-
-        def run(self):
-            build_libs([self.lib])
-    build_dep.lib = lib
-    build_dep_cmds['build_' + lib.lower()] = build_dep
-
-    class rebuild_dep(build_deps):
-        description = 'Rebuild {} external library'.format(lib)
-
-        def run(self):
-            tools.setup_helpers.configure.RERUN_CMAKE = False
-            build_libs([self.lib])
-    rebuild_dep.lib = lib
-    rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
-
-
-class build_module(PytorchCommand):
-    def run(self):
-        report('setup.py::build_module::run()')
-        self.run_command('build_py')
-        self.run_command('build_ext')
-
-
-class build_py(setuptools.command.build_py.build_py):
-
-    def run(self):
-        report('setup.py::build_py::run()')
-        self.run_command('create_version_file')
-        setuptools.command.build_py.build_py.run(self)
-
-
-class develop(setuptools.command.develop.develop):
-
-    def run(self):
-        report('setup.py::develop::run()')
-        self.run_command('create_version_file')
-        setuptools.command.develop.develop.run(self)
-        self.create_compile_commands()
-
-    def create_compile_commands(self):
-        def load(filename):
-            with open(filename) as f:
-                return json.load(f)
-        ninja_files = glob.glob('build/*compile_commands.json')
-        cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
-        all_commands = [entry
-                        for f in ninja_files + cmake_files
-                        for entry in load(f)]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command['command'].startswith("gcc "):
-                command['command'] = "g++ " + command['command'][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ''
-        if os.path.exists('compile_commands.json'):
-            with open('compile_commands.json', 'r') as f:
-                contents = f.read()
-        if contents != new_contents:
-            with open('compile_commands.json', 'w') as f:
-                f.write(new_contents)
-
-        if not USE_NINJA:
-            report("WARNING: 'develop' is not building C++ code incrementally")
-            report("because ninja is not installed. Run this to enable it:")
-            report(" > pip install ninja")
-
-
-build_ext_parent = ninja_build_ext if USE_NINJA \
-    else setuptools.command.build_ext.build_ext
-
-
-class build_ext(build_ext_parent):
-
+class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
         # report build options
         if USE_NUMPY:
@@ -502,6 +396,7 @@ class build_ext(build_ext_parent):
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
+        self.create_compile_commands()
         # The caffe2 extensions are created in
         # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
         # and need to be copied to build/lib.linux.... , which will be a
@@ -544,30 +439,36 @@ class build_ext(build_ext_parent):
         report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
 
+    def create_compile_commands(self):
+        def load(filename):
+            with open(filename) as f:
+                return json.load(f)
+        ninja_files = glob.glob('build/*compile_commands.json')
+        cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
+        all_commands = [entry
+                        for f in ninja_files + cmake_files
+                        for entry in load(f)]
 
-class build(distutils.command.build.build):
-    sub_commands = [
-        ('build_deps', lambda self: True),
-    ] + distutils.command.build.build.sub_commands
+        # cquery does not like c++ compiles that start with gcc.
+        # It forgets to include the c++ header directories.
+        # We can work around this by replacing the gcc calls that python
+        # setup.py generates with g++ calls instead
+        for command in all_commands:
+            if command['command'].startswith("gcc "):
+                command['command'] = "g++ " + command['command'][4:]
 
-
-class rebuild(distutils.command.build.build):
-    sub_commands = [
-        ('build_deps', lambda self: True),
-    ] + distutils.command.build.build.sub_commands
-
-    def run(self):
-        tools.setup_helpers.configure.RERUN_CMAKE = False
-        distutils.command.build.build.run(self)
+        new_contents = json.dumps(all_commands, indent=2)
+        contents = ''
+        if os.path.exists('compile_commands.json'):
+            with open('compile_commands.json', 'r') as f:
+                contents = f.read()
+        if contents != new_contents:
+            with open('compile_commands.json', 'w') as f:
+                f.write(new_contents)
 
 
 class install(setuptools.command.install.install):
-
     def run(self):
-        report('setup.py::run()')
-        if not self.skip_build:
-            self.run_command('build_deps')
-
         setuptools.command.install.install.run(self)
 
 
@@ -806,19 +707,10 @@ if USE_ROCM:
     )
 
 cmdclass = {
-    'create_version_file': create_version_file,
-    'build': build,
-    'build_py': build_py,
     'build_ext': build_ext,
-    'build_deps': build_deps,
-    'build_module': build_module,
-    'rebuild': rebuild,
-    'develop': develop,
-    'install': install,
     'clean': clean,
+    'install': install,
 }
-cmdclass.update(build_dep_cmds)
-cmdclass.update(rebuild_dep_cmds)
 
 entry_points = {
     'console_scripts': [
@@ -827,7 +719,30 @@ entry_points = {
     ]
 }
 
+# post run, warnings, printed at the end to make them more visible
+build_update_message = """
+    It is no longer necessary to use the 'build' or 'rebuild' targets
+
+    To install:
+      $ python setup.py install
+    To develop locally:
+      $ python setup.py develop
+    To force cmake to re-run (off by default):
+      $ python setup.py develop --cmake
+"""
+
+
+def print_box(msg):
+    lines = msg.split('\n')
+    size = max(len(l) + 1 for l in lines)
+    print('-' * (size + 2))
+    for l in lines:
+        print('|{}{}|'.format(l, ' ' * (size - len(l))))
+    print('-' * (size + 2))
+
 if __name__ == '__main__':
+    if RUN_BUILD_DEPS:
+        build_deps()
     setup(
         name=package_name,
         version=version,
@@ -916,3 +831,5 @@ if __name__ == '__main__':
             ]
         },
     )
+    if EMIT_BUILD_WARNING:
+        print_box(build_update_message)
