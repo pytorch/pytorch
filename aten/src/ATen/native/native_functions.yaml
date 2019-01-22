@@ -1455,17 +1455,21 @@
     CUDA: batch_norm_update_stats_cuda
 
 - func: _nnpack_available() -> bool
+  matches_jit_signature: True
 
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor
+  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int[2] padding) -> Tensor
+  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_weight(Tensor input, int[] weightsize, Tensor grad_output, int[2] padding) -> Tensor
+  matches_jit_signature: True
   variants: function
 
 - func: ones(int[] size, TensorOptions options=[]) -> Tensor
