@@ -123,7 +123,7 @@ static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T..
 //
 // e.g.
 //   Tensor op(Tensor self, Tensor other, Scalar alpha) {
-//     std::tie(self, other, alpha) = promoteOperands(self, other, alpha)
+//     std::tie(self, other, alpha) = castOperandsToResultType(self, other, alpha)
 //     ...
 //   }
 //
@@ -138,7 +138,7 @@ static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T..
 //   - name: op(Tensor self, Scalar alpha)
 //     self: op_backward(grad, Scalar alpha).to(self.type())
 template<typename... T>
-static inline std::tuple<T...> promoteOperands(T... args) {
+static inline std::tuple<T...> castOperandsToResultType(T... args) {
   return castOperands<T...>(c10::nullopt, std::forward<T>(args)...);
 }
 
