@@ -18,14 +18,6 @@
 #     that you set ANDROID_NDK to the location of ndk.
 # (3) The toolchain and the build target platform can be specified with the
 #     cmake arguments below. For more details, check out android-cmake's doc.
-# (4) By default this build on armeabi-v7a. You would want to put the various
-#     builds in different directories, e.g. to build for x86, a good way is:
-#         ANDROID_NDK=~/Android/Sdk/ndk-bundle/ BUILD_ROOT=$(pwd)/build_android_x86 ./scripts/build_android.sh -DANDROID_ABI=x86
-# (5) You will need the libraries in build_android*/libs for each target abi
-#     and the (target independent) header files, e.g. from
-#     build/lib.*/torch/lib/include after you run ./setup.py build
-#     (namely ATen, caffe2, c10, google) to build things on android.
-#     You might also need Eigen headers.
 
 set -e
 
@@ -69,7 +61,6 @@ CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/b
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
 
 # Don't build artifacts we don't need
-CMAKE_ARGS+=("-DUSE_AVX=OFF")
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
@@ -98,7 +89,7 @@ CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
-echo cmake "$CAFFE2_ROOT" \
+cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=../install \
     -DCMAKE_BUILD_TYPE=Release \
     "${CMAKE_ARGS[@]}"
@@ -111,4 +102,5 @@ if [ -z "$MAX_JOBS" ]; then
     MAX_JOBS=$(nproc)
   fi
 fi
-echo cmake --build . -- "-j${MAX_JOBS}"
+cmake --build . -- "-j${MAX_JOBS}"
+cmake --build . -- "-j${MAX_JOBS}" install

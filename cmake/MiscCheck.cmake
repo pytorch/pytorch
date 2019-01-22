@@ -154,7 +154,6 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
-if (USE_AVX)
 cmake_push_check_state(RESET)
 if (MSVC)
   set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
@@ -177,7 +176,6 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   set(CAFFE2_PERF_WITH_AVX2 1)
 endif()
 cmake_pop_check_state()
-endif()
 
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
