@@ -430,7 +430,18 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return CUDACachingAllocator::get()->allocate(nbytes);
+        auto r = c10::cuda::CUDACachingAllocator::get()->allocate(nbytes);
+        if (FLAGS_caffe2_gpu_memory_tracking) {
+          auto b = r.compare_exchange_deleter(
+            &c10::cuda::CUDACachingAllocator::raw_delete,
+            [](void* ptr) { // stateless!
+              g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
+              c10::cuda::CUDACachingAllocator::raw_delete(ptr);
+            }
+          );
+          AT_ASSERT(b);
+        }
+        return r;
     }
     return {nullptr, nullptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
   }
@@ -483,10 +494,9 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         break;
       }
       case CudaMemoryPoolType::THC: {
-        CUDA_ENFORCE(g_thc_allocator->Free(ptr));
-        if (FLAGS_caffe2_gpu_memory_tracking) {
-          g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
-        }
+        // This case is impossible because we don't use this
+        // deleter in this case.
+        AT_ASSERT(0);
         break;
       }
     }
