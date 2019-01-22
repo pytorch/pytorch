@@ -37,7 +37,7 @@ namespace c10 {
 /// This is intended to be trivially copyable, so it should be passed by
 /// value.
 template <typename T>
-class ArrayRef final {
+class C10_API ArrayRef final {
  public:
   using iterator = const T*;
   using const_iterator = const T*;
