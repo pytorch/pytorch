@@ -13,6 +13,7 @@ from operator import mul
 from collections import OrderedDict
 import hashlib
 import os
+import threading
 
 import torch
 from torch._six import inf, nan
@@ -537,7 +538,8 @@ class TestNN(NNTestCase):
     def _zero_grad_parameters(self, module):
         for p in module.parameters():
             if p.grad is not None:
-                p.grad.data.zero_()
+                with torch.no_grad():
+                    p.grad.zero_()
                 p.grad.detach_()
 
     def _get_parameters(self, module):
@@ -2138,64 +2140,90 @@ class TestNN(NNTestCase):
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
-    def _test_gumbel_softmax_st(self, cuda, dtype=torch.float):
-        th = torch.cuda if cuda else torch
-        """
-        Things we might want to check:
-        - if we make various draws, do we get different one-hot values?
-        - is the proportion approximately in line with the softmax values?
-        - with hard, is it one-hot?
-        - with hard, is there still a gradient?
-        """
-        num_draws = 100
-        K = 3
-        logits = torch.tensor([[0.2, 0.8, 0.1]])
-        if dtype != torch.half:
-            logits = logits.to(dtype)
-        logits_softmax = torch.nn.functional.softmax(logits, 1)
-        y_draws = torch.zeros(num_draws, K)
-        preds = torch.zeros(num_draws)
-
+    def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
+        logits = torch.randn(shape, dtype=torch.float)
+        logits = logits.to(dtype)
         if cuda:
             logits = logits.cuda()
-            y_draws = y_draws.cuda()
-            preds = preds.cuda()
 
-        exceed_limits = 0
+        y_draw = F.gumbel_softmax(logits, hard=True, dim=dim)
+
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Shape unchanged
+        self.assertTrue(y_draw.shape == logits.shape)
+        # One choice per draw
+        self.assertEqual(y_draw.sum(), count_expected, prec=torch.finfo(y_draw.dtype).eps)
+
+    def _test_gumbel_softmax_straight_through(self, cuda, dtype):
+        num_draws = 100
+
+        logits = torch.tensor([[0.2, 0.8, 0.1]])
+        logits = logits.reshape([1, 3])
+        logits = logits.to(dtype).requires_grad_()
+        if cuda:
+            logits = logits.cuda()
+        probs = logits.softmax(dim=-1)
+
+        counts = torch.zeros_like(logits)
         for draw in range(num_draws):
-            logits_var = logits.detach().requires_grad_()
-            y_draw = torch.nn.functional.gumbel_softmax(
-                logits_var,
-                hard=True)
-            assert y_draw.size() == logits.size()
-            # check we have a gradient
-            assert y_draw.requires_grad
-            err = y_draw - logits.new_tensor([[0, 0.5, 0.3]])
-            loss = (err * err).sum()
-            loss.backward()
-            if logits_var.grad.std() < 0.01 or logits_var.grad.std() > 1.0:
-                exceed_limits += 1
-            y_draws[draw] = y_draw.data
-            _, pred = y_draw.max(1)
-            preds[draw] = pred.data[0]
-        assert exceed_limits / num_draws < 0.05
-        # check it's approximately one-hot
-        num_ones = (y_draws == 1).int().sum()
-        num_zeros = (y_draws == 0).int().sum()
-        assert num_ones + num_zeros == num_draws * K
-        assert num_ones == num_draws
-        # check output classes approx in line with logits
-        num_class_one = (preds == 1).int().sum()
-        assert num_class_one < num_draws
-        assert num_class_one > num_draws / 3
+            y_draw = F.gumbel_softmax(logits, hard=True)
+            counts = counts + y_draw
 
-    def test_gumbel_softmax_st(self):
-        self._test_gumbel_softmax_st(False)
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Each experiment should result in 1 draw.
+        self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
+
+        # check results is asymptotically as expected.
+        expected = probs * num_draws
+        # ~z is approximately N(0,1) for unbiased count
+        z = (counts - expected) / (expected * (1 - probs)).sqrt()
+        # A (lazy) approximate 99% two-sided test:
+        # occurs with prob alpha~>=0.01 if unbiased
+        self.assertLess(z.abs().max().item(), 2.58)
+
+    def _test_gumbel_softmax_grad(self, cuda, dtype):
+        # "hard" and "not hard" should propagate same gradient.
+        device = torch.device("cuda") if cuda else torch.device("cpu")
+        logits_soft = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
+        logits_hard = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
+
+        seed = torch.random.get_rng_state()
+        y_soft = F.gumbel_softmax(logits_soft, hard=False)
+        torch.random.set_rng_state(seed)
+        y_hard = F.gumbel_softmax(logits_hard, hard=True)
+
+        y_soft.sum().backward()
+        y_hard.sum().backward()
+
+        # 2eps = 1x addition + 1x subtraction.
+        tol = 2 * torch.finfo(dtype).eps
+        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
+
+    @repeat_test_for_types(NO_HALF_TENSORTYPES)
+    def test_gumbel_softmax(self, dtype=torch.float):
+        """
+        NO_HALF_TENSORTYPES because many half-ops doesnt work on cpu.
+        """
+        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=0, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=-1, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4], dim=1, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
+        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
+        self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
+        self._test_gumbel_softmax_grad(cuda=False, dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_gumbel_softmax_st_cuda(self, dtype=torch.float):
-        self._test_gumbel_softmax_st(True, dtype=dtype)
+    def test_gumbel_softmax_cuda(self, dtype=torch.float):
+        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=0, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=-1, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4], dim=1, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
+        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
+        self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
+        self._test_gumbel_softmax_grad(cuda=True, dtype=dtype)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
         # check a known test example
@@ -3836,6 +3864,55 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
+    def test_cudnn_multiple_threads_same_device(self):
+        # This function is intended to test the lazy creation and reuse of per-thread
+        # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
+        # Failure here likely indicates something wrong with that logic.
+        weight = torch.ones((1, 1, 2, 2), device='cuda')
+
+        results = {}
+
+        num_threads = 2
+        trials = 2
+        test_iters = 100
+
+        with torch.backends.cudnn.flags(enabled=True):
+            def _worker(t, input):
+                my_stream = torch.cuda.Stream()
+                results[t] = input
+                with torch.cuda.stream(my_stream):
+                    for i in range(test_iters):
+                        # If all threads are sharing the same cudnn handle,
+                        # the following sequence may occur:
+                        # thread 0 calls setCuDNNStreamToCurrent()
+                        # thread 1 calls setCuDNNStreamToCurrent()
+                        # thread 0 launches its raw convolution, which it thinks is in
+                        #          its own stream, but is actually in thread 1's stream.
+                        # thread 0 enqueues its div_, which IS is its own stream,
+                        #          but now races with its convolution.
+                        results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
+                        results[t].div_(4.0)
+                torch.cuda.current_stream().wait_stream(my_stream)
+
+            for trial in range(trials):
+                for t in range(num_threads):
+                    results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
+
+                threads = [threading.Thread(target=_worker,
+                                            args=(t, results[t])) for t in range(num_threads)]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                for t in range(num_threads):
+                    self.assertEqual(results[t].sum().item(),
+                                     (2048 - test_iters) * (2048 - test_iters))
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
     @skipIfRocm
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
@@ -4285,7 +4362,10 @@ class TestNN(NNTestCase):
         self.assertTrue(packed_enforce_sorted.sorted_indices is None)
         self.assertTrue(packed_enforce_sorted.unsorted_indices is None)
 
-        with self.assertRaisesRegex(RuntimeError, 'has to be sorted in decreasing order'):
+        with self.assertRaisesRegex(RuntimeError, 'must be sorted in decreasing order'):
+            rnn_utils.pack_sequence([b, c, a], enforce_sorted=True)
+
+        with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             rnn_utils.pack_sequence([b, c, a], enforce_sorted=True)
 
         # more dimensions
@@ -4378,6 +4458,10 @@ class TestNN(NNTestCase):
                 self.assertEqual(padded.grad.data[:l, i], grad_output[:l, i])
                 if l < 10:
                     self.assertEqual(padded.grad.data[l:, i].abs().sum(), 0)
+
+        # test error message
+        with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
 
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
@@ -4519,7 +4603,8 @@ class TestNN(NNTestCase):
             # Weights will no longer view onto the same chunk of memory
             weight = all_vars[4]
             weight_data = weight.data.clone()
-            weight.data.set_(weight_data)
+            with torch.no_grad():
+                weight.set_(weight_data)
 
             for i in range(2):
                 with warnings.catch_warnings(record=True) as w:
@@ -4528,6 +4613,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(len(w), 1)
                     self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
                     first_warn = False
+                    warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
                 grads_noncontig = [v.grad.data.clone() for v in all_vars]
                 for v in all_vars:
@@ -4925,6 +5011,28 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_RNN_cudnn_weight_norm(self):
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+        seq_length = 7
+        batch = 6
+        m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
+        input = torch.randn(seq_length, batch, input_size).cuda()
+        expected_output = m(input)
+        # add weight normalization
+        name = 'weight_hh_l0'
+        m = torch.nn.utils.weight_norm(m, name=name)
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
+        self.assertEqual(m(input), expected_output)
+
+        # remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m, name=name)
+        self.assertEqual(m(input), expected_output)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
@@ -5489,10 +5597,10 @@ class TestNN(NNTestCase):
 
     @skipIfRocm
     def test_pdist(self):
-        for device, trans, shape in itertools.product(device_(), [False, True], [(4, 5), (2, 3, 4)]):
-            inp = torch.randn(shape, dtype=torch.double, device=device, requires_grad=True)
+        for device, trans in itertools.product(device_(), [False, True]):
+            inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
             if trans:
-                inp = inp.transpose(-2, -1)
+                inp = inp.transpose(0, 1)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
@@ -5504,11 +5612,13 @@ class TestNN(NNTestCase):
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
+    @skipIfRocm
     def test_pdist_empty_row(self):
         for device in device_():
             inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
             self.assertTrue(gradcheck(F.pdist, (inp,)))
 
+    @skipIfRocm
     def test_pdist_empty_col(self):
         for device in device_():
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
@@ -5519,6 +5629,7 @@ class TestNN(NNTestCase):
         inp = torch.randn(4, 5, requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
 
+    @skipIfRocm
     @unittest.expectedFailure
     def test_pdist_cuda_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, device='cuda', requires_grad=True)
@@ -6516,6 +6627,12 @@ class TestNN(NNTestCase):
         dummy_out = func(*inputs)
         grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
 
+        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
+        # to imprecision issues
+        if dtype == torch.float:
+            g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
+            return g.requires_grad
+
         return gradgradcheck(func, inputs, (grad_y,))
 
     def test_conv_double_backward(self):
@@ -6524,20 +6641,22 @@ class TestNN(NNTestCase):
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
                 for no_weight in (True, False):
-                    result = self.run_conv_double_back_test(kern, stride,
-                                                            padding, chan_in, chan_out,
-                                                            batch_size, inp_size, dilation,
-                                                            no_weight)
-                    self.assertTrue(result,
-                                    "Conv double backward test failed with parameters:" +
-                                    "\nkern: " + str(kern) +
-                                    "\nstride: " + str(stride) +
-                                    "\npadding: " + str(padding) +
-                                    "\nchan_in: " + str(chan_in) +
-                                    "\nchan_out: " + str(chan_out) +
-                                    "\nbatch_size: " + str(batch_size) +
-                                    "\ninp_size: " + str(inp_size) +
-                                    "\ndilation: " + str(dilation))
+                    for dtype in (torch.float, torch.double):
+                        result = self.run_conv_double_back_test(kern, stride,
+                                                                padding, chan_in, chan_out,
+                                                                batch_size, inp_size, dilation,
+                                                                no_weight, dtype=dtype)
+                        self.assertTrue(result,
+                                        "Conv double backward test failed with parameters:" +
+                                        "\nkern: " + str(kern) +
+                                        "\nstride: " + str(stride) +
+                                        "\npadding: " + str(padding) +
+                                        "\nchan_in: " + str(chan_in) +
+                                        "\nchan_out: " + str(chan_out) +
+                                        "\nbatch_size: " + str(batch_size) +
+                                        "\ninp_size: " + str(inp_size) +
+                                        "\ndilation: " + str(dilation) +
+                                        "\ndtype: " + str(dtype))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -6682,6 +6801,34 @@ class TestNN(NNTestCase):
 
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
+
+    @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
+    def test_nnpack_conv(self):
+        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
+            for batch, padding, chan_in, chan_out in \
+                    product([1, 2], [0, 1, 2], [2], [3]):
+
+                for has_bias in [True, False]:
+                    input_shape = [batch, chan_in]
+                    weight_shape = [chan_out, chan_in]
+                    for _ in range(2):
+                        input_shape.append(inp_size)
+                        weight_shape.append(kern)
+
+                    input = torch.randn(input_shape, requires_grad=True, dtype=torch.float)
+                    weight = torch.randn(weight_shape, requires_grad=True, dtype=torch.float)
+                    if has_bias:
+                        bias = torch.randn([chan_out], requires_grad=True, dtype=torch.float)
+                    output = torch._nnpack_spatial_convolution(input, weight, padding=padding, bias=bias)
+                    output_expected = torch.nn.functional.conv2d(input, weight, padding=padding, bias=bias)
+                    self.assertAlmostEqual(output, output_expected, delta=3e-4)
+
+                    gradient_o = torch.randn(output.shape, dtype=torch.float)
+
+                    grads = torch.autograd.grad(output, [input, weight], gradient_o)
+                    grads_expected = torch.autograd.grad(output_expected, [input, weight], gradient_o)
+                    for gr, gr_expected in zip(grads, grads_expected):
+                        self.assertAlmostEqual(gr, gr_expected, delta=3e-4)
 
     def test_fold_invalid_arg(self):
         # input wrong dimension

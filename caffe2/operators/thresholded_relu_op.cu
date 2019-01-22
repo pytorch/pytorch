@@ -22,9 +22,9 @@ ThresholdedReluGradientKernel(const int N, const T* Y, const T* dY, T* dX) {
 template <>
 bool ThresholdedReluOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   CAFFE_ENFORCE_GT(X.size(), 0);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   ThresholdedReluKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -38,10 +38,10 @@ template <>
 bool ThresholdedReluGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   ThresholdedReluGradientKernel<<<
       CAFFE_GET_BLOCKS(Y.size()),
       CAFFE_CUDA_NUM_THREADS,

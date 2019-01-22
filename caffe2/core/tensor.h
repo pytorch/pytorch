@@ -4,10 +4,11 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -22,12 +23,37 @@ using at::UndefinedTensorImpl;
  * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
+ private:
+  enum Unsafe { IDoWantAliasing };
+  Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
+
  protected:
   using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
   TensorImplPtr impl_;
 
  public:
   Tensor() : impl_() {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
+      : impl_(std::move(tensor_impl)) {
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
+    }
+  }
+
+  // caffe2::Tensor is explicitly marked as moveable-only because before
+  // the refactoring the class used to be a value type and a lot of user code
+  // is written this way. With PyTorch unification, caffe2::Tensor actually
+  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
+  // accidental mistakes when changing legacy code we keep caffe2::Tensor
+  // to have movable semantics.
+  //
+  // If you need to get a pointer to the same Tensor instance (not to be
+  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
+  // the same behavior as `at::Tensor a = b`.
+  Tensor(const Tensor&) = delete;
+  Tensor& operator=(const Tensor&) = delete;
+  Tensor(Tensor&&) = default;
+  Tensor& operator=(Tensor&&) = default;
 
   operator bool() const {
     return impl_.defined();
@@ -35,6 +61,10 @@ class CAFFE2_API Tensor final {
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  Tensor UnsafeSharedInstance() const {
+    return Tensor(*this, IDoWantAliasing);
   }
 
   /**
@@ -76,6 +106,7 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -88,6 +119,21 @@ class CAFFE2_API Tensor final {
   Tensor(const Tensor& src, DeviceType type)
       : Tensor(type) {
     CopyFrom(src);
+  }
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
+
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
   }
 
   Tensor Clone() const {
@@ -327,6 +373,10 @@ class CAFFE2_API Tensor final {
     return impl_;
   }
 
+  bool defined() const {
+    return impl_;
+  }
+
   /**
    * Returns a const raw void* pointer of the underlying storage. mutable_data()
    * or raw_mutable_data() must have been called prior to this function call.
@@ -526,6 +576,11 @@ class CAFFE2_API Tensor final {
   }
 };
 
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
 CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(

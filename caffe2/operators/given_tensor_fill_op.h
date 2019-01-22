@@ -60,7 +60,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   void ExtractValues() {
     auto source_values =
         this->template GetRepeatedArgument<Type>("values");
-    values_.Resize(source_values.size());
+    ReinitializeTensor(&values_, {static_cast<int64_t>(source_values.size())}, at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
@@ -83,6 +83,6 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   }
 
   bool (GivenTensorFillOp::*body_)(Tensor* output);
-  Tensor values_{CPU};
+  Tensor values_;
 };
 } // namespace caffe2

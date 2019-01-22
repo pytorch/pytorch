@@ -5,9 +5,9 @@
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>
 #include <c10/hip/HIPMacros.h>
-#include <c10/DeviceType.h>
-#include <c10/impl/InlineDeviceGuard.h>
-#include <c10/impl/InlineStreamGuard.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
@@ -66,6 +66,11 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     auto old_stream = getCurrentHIPStream(s.device().index());
     setCurrentHIPStream(cs);
     return old_stream.unwrap();
+  }
+  DeviceIndex deviceCount() const override {
+    int deviceCnt;
+    C10_HIP_CHECK(hipGetDeviceCount(&deviceCnt));
+    return deviceCnt;
   }
 };
 

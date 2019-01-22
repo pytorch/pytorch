@@ -152,8 +152,15 @@ only simple, universal types, as well as a handful of fundamental Tensor structu
 (e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
 bound to ATen (in practice, C++ and Python.)
 
-Return also supports specifying (optional) return argument names; these are useful for writing
-derivatives in terms of return arguments in `tools/autograd/derivatives.yaml`.
+Return also supports specifying (optional) return argument names. These serve
+two functions:
+
+- They let you easily write derivatives in terms of return arguments in
+  `tools/autograd/derivatives.yaml`
+
+- They correspond to the named field the output can be referred to from
+  Python.  (This means that changing a return argument name is
+  BC-breaking, be careful!)
 
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 
@@ -217,6 +224,19 @@ that case, code generation of the device guard can be disabled by adding
 **Note.** We are considering eliminating automatic generation of DeviceGuard,
 in which case this field would go away.  If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
+
+### `matches_jit_signature`
+
+```
+matches_jit_signature: True
+```
+
+This will verify that the func syntax follows the JIT signature schema. This
+is a temporary attribute and doesn't need to be set by developers outside the
+core team. Remove it if you trigger asserts and add @cpuhrsch to your PR. It
+serves as a means of tracking an ongoing schema unification with the goal of
+aligning func syntax with other components of PyTorch in order to reduce
+overall complexity and match coverage of different function descriptions.
 
 ## Writing an implementation in C++
 

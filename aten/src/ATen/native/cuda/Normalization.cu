@@ -46,15 +46,15 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
 }
 
 // accepting input(self) here to determine template data types, since running_mean/running_var are optional
-std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
+std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
                                                         const Tensor& running_var, double momentum, double epsilon, int64_t count) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm_update_stats", [&] {
       int world_size = mean.size(1);
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_update_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, static_cast<int32_t>(count));
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, static_cast<int32_t>(count));
       } else {
-        return batch_norm_update_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, count);
+        return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int64_t>(mean, invstd, running_mean, running_var, momentum, epsilon, count);
       }
     });
 }
@@ -77,6 +77,17 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
         return batch_norm_backward_elemt_cuda_template<scalar_t, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
       } else {
         return batch_norm_backward_elemt_cuda_template<scalar_t, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+      }
+    });
+}
+
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
+        const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm_backward", [&] {
+      if (cuda::detail::canUse32BitIndexMath(self)) {
+        return batch_norm_update_stats_cuda_template<scalar_t, int32_t>(self, running_mean, running_var, momentum);
+      } else {
+        return batch_norm_update_stats_cuda_template<scalar_t, int64_t>(self, running_mean, running_var, momentum);
       }
     });
 }

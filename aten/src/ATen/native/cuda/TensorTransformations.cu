@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <cstddef>
 #include <vector>
@@ -11,12 +12,12 @@
 namespace at {
 namespace native {
 
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
