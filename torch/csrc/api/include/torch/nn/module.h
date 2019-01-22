@@ -1,11 +1,11 @@
 #pragma once
 
 #include <torch/nn/pimpl.h>
-#include <torch/ordered_dict.h>
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/OrderedDict.h>
 
 #include <functional>
 #include <iosfwd>

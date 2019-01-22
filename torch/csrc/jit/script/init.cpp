@@ -17,7 +17,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/parser.h>
 
-#include <torch/csrc/api/include/torch/ordered_dict.h>
+#include <c10/util/OrderedDict.h>
 
 #include <ATen/ATen.h>
 
@@ -654,7 +654,7 @@ void initJitScriptBindings(PyObject* module) {
           "_method_names",
           [](Module& self) {
             using Item =
-                torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
+                c10::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
             return fmap(self.get_methods(), [](const Item& item) {
               return (*item)->name();
             });

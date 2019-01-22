@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
+namespace c10 {
 /// An ordered dictionary implementation, akin to Python's `OrderedDict`.
 template <typename Key, typename Value>
 class OrderedDict {
@@ -473,4 +473,4 @@ void OrderedDict<Key, Value>::reserve(size_t requested_capacity) {
   items_.reserve(requested_capacity);
 }
 
-} // namespace torch
+} // namespace c10

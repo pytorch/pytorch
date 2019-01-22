@@ -1,10 +1,9 @@
 #include <torch/python/init.h>
 #include <torch/python.h>
-
 #include <torch/nn/module.h>
-#include <torch/ordered_dict.h>
-
 #include <torch/csrc/utils/pybind.h>
+
+#include <c10/util/OrderedDict.h>
 
 #include <string>
 #include <vector>
@@ -15,9 +14,9 @@ namespace pybind11 {
 namespace detail {
 #define ITEM_TYPE_CASTER(T, Name)                                             \
   template <>                                                                 \
-  struct type_caster<typename torch::OrderedDict<std::string, T>::Item> {     \
+  struct type_caster<typename c10::OrderedDict<std::string, T>::Item> {       \
    public:                                                                    \
-    using Item = typename torch::OrderedDict<std::string, T>::Item;           \
+    using Item = typename c10::OrderedDict<std::string, T>::Item;             \
     using PairCaster = make_caster<std::pair<std::string, T>>;                \
     PYBIND11_TYPE_CASTER(Item, _("Ordered" #Name "DictItem"));                \
     bool load(handle src, bool convert) {                                     \

@@ -793,7 +793,6 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/transforms/*.h',
                 'lib/include/torch/csrc/api/include/torch/detail/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'lib/include/torch/csrc/api/include/torch/nn/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',

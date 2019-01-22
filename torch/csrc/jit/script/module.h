@@ -10,11 +10,11 @@
 #include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/OrderedDict.h>
 
 #include <functional>
 #include <memory>
@@ -451,14 +451,14 @@ struct Module {
     return modules[name].module;
   }
 
-  const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const c10::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::OrderedDict<std::string, NamedParameter>& get_parameters()
+  const c10::OrderedDict<std::string, NamedParameter>& get_parameters()
       const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
+  const c10::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
       const {
     return methods;
   }
@@ -570,9 +570,9 @@ struct Module {
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  torch::OrderedDict<std::string, NamedModule> modules;
-  torch::OrderedDict<std::string, NamedParameter> parameters;
-  torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  c10::OrderedDict<std::string, NamedModule> modules;
+  c10::OrderedDict<std::string, NamedParameter> parameters;
+  c10::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 
