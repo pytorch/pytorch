@@ -2036,8 +2036,9 @@
     CPU: roll_cpu
     CUDA: roll_cuda
 
-# default int[] value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
-- func: rot90(Tensor self, int k=1, int[] dims={0,1}) -> Tensor
+# default int[] value [0,1] should not add space after comma, since native_parse.py uses ', ' to split args
+- func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor

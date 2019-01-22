@@ -45,8 +45,8 @@ def parse_default(s):
     # See [temp translations]
     elif s == '[]':
         return '{}'
-    elif re.match(r'{.*}', s):
-        return s
+    elif re.match(r'\[.*\]', s):
+        return "{" + s[1:-1] + "}"
     elif s == 'None':
         return 'c10::nullopt'
     # The JIT signature schema uses Mean, but in particular C++ needs
@@ -108,9 +108,9 @@ def parse_arguments(args, func_decl, func_name, func_return):
         if '=' in name:
             ns = name.split('=', 1)
             # This enables Tensor? x=None and translates to legacy
-            # "Tensor? x=[]". See [temp translations].
+            # "Tensor? x={}". See [temp translations].
             if t == 'Tensor?' and ns[1] == 'None':
-                ns[1] = "[]"
+                ns[1] = "[]"  # Will translate to {} via parse_default
             # This enables "Generator? x = None and translates to legacy
             # "Generator* x = nullptr". See [temp translations].
             if t == 'Generator*' and ns[1] == 'None':
