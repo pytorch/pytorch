@@ -615,15 +615,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         declaration['namedtuple_type_index'] = next_index
         declaration['namedtuple_fields'] = ''
         for x in returns:
+            # See Note [field_name versus name]
             if 'field_name' not in x:
-                # TODO: When building on Windows, `PyStructSequence_UnnamedField` could not be
+                # When building on Windows, `PyStructSequence_UnnamedField` could not be
                 # resolved by the linker for some reason, which cause error in building:
                 #
                 # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
                 # PyStructSequence_UnnamedField
                 #
-                # To resolve this issue, we temporarily disable unnamed field
-                # declaration['namedtuple_fields'] += '{PyStructSequence_UnnamedField, ""}, '
+                # Thus, at this point in time, we do not support unnamed
+                # fields in namedtuple; you must either name all fields,
+                # or none of them.
                 raise ValueError("Unnamed field is not supported by codegen")
             else:
                 declaration['namedtuple_fields'] += '{"' + x['field_name'] + '", ""}, '

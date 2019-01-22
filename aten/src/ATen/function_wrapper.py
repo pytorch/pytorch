@@ -425,8 +425,26 @@ AtFormal = TypedDict('AtFormal', {
     'size': int,
 }, total=False)
 
+# Note [field_name versus name]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# What is the difference between "field_name" and "name"?
+#
+# Return values of ATen operators always have a name: if it is not
+# explicitly assigned a name inside native_functions.yaml like func:
+# myop() -> (Tensor indices, Tensor value), then the codegen will
+# automatically assign it a name like result0, or name might be
+# specified inside Declarations.cwrap.  We don't want these assigned
+# names to become part of the public API when we return a namedtuple for
+# any such multiple-return function.
+#
+# Thus field_name is like name, but it is defined only when there is a
+# name specified in native_functions.yaml. If field_name is defined,
+# then the codegen would generate code to return namedtuple. Otherwise,
+# it would just return tuple.
+
 ReturnType = TypedDict('ReturnType', {
     'name': str,
+    # See Note [field_name versus name]
     'field_name': str,
     'type': str,
     'dynamic_type': str,
@@ -466,6 +484,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
+    # See Note [field_name versus name]
     'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
@@ -975,6 +994,7 @@ def create_generic(top_env, declarations):
 
         return_types = []  # List[ReturnType]
         for t_raw in ret:
+            # See Note [field_name versus name]
             field_name = None
             if isinstance(t_raw, string_type):
                 t = t_raw
