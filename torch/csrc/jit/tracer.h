@@ -49,7 +49,7 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value);
+TORCH_API void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value);
 
 inline void delValueTrace(const Variable& var) {
   AT_ASSERT(var.defined());
@@ -101,7 +101,7 @@ inline Value* getValueTrace(const Variable& var) {
   return it->second;
 }
 
-Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut);
+TORCH_API Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut);
 
 // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
 // One might merge getValueTrace and getNestedValueTrace after checking that
