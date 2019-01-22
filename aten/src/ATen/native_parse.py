@@ -150,11 +150,13 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
         arguments.append(argument_dict)
     if inplace:
         found_self = False
-        for argument in arguments:
+        for arg_idx, argument in enumerate(arguments):
             if argument['name'] == "self" and inplace:
                 assert argument['annotation'] and argument['annotation'].endswith("!"), \
                     "Inplace function \"{}\" needs to annotate Tensor argument named self as mutable.".format(func_decl['func'])
                 found_self = True
+                print("func_return[" + str(arg_idx) + "]")
+                print(func_return[arg_idx])
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
     return arguments
 
@@ -224,17 +226,9 @@ def run(paths):
                     func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
                 else:
                     raise Exception('Expected return declaration')
-                # print("func_decl")
-                # print(func_decl)
                 fn_name, arguments = func_decl.split('(', 1)
-                # print("fn_name")
-                # print(fn_name)
-                # print("arguments")
-                # print(arguments)
                 assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
                 arguments = arguments[:-1]  # Expect closing )
-                # print("arguments1")
-                # print(arguments)
                 declaration['name'] = func.get('name', fn_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
