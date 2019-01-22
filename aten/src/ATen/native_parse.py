@@ -148,13 +148,21 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
 
         argument_dict['annotation'] = annotation
         arguments.append(argument_dict)
-    if inplace:
+
+    # Explicit check for void is a hack and should disappear after a more
+    # functionally complete implementation of Tensor aliases.
+    if inplace and len(func_return) > 0 and func_return[0]['type'] != "void":
+        print("ASF")
         found_self = False
         for arg_idx, argument in enumerate(arguments):
             if argument['name'] == "self" and inplace:
                 assert argument['annotation'] and argument['annotation'].endswith("!"), \
                     "Inplace function \"{}\" needs to annotate Tensor argument named self as mutable.".format(func_decl['func'])
                 found_self = True
+                assert argument['annotation'] == func_return[arg_idx]['annotation'], \
+                        "Inplace function annotations of function {} need to match between input and correponding output.".format(func_decl['func'])
+                assert argument['name'] == func_return[arg_idx]['name']
+                assert argument['type'] == func_return[arg_idx]['type']
                 print("func_return[" + str(arg_idx) + "]")
                 print(func_return[arg_idx])
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
@@ -184,6 +192,7 @@ def parse_return_arguments(return_decl, inplace, func_decl):
         else:
             t, name = type_and_maybe_name
             field_name = name
+            t, annotation = get_annotation(t)
 
         typ = sanitize_type(t)
         argument_dict = {'type': typ, 'name': name}
@@ -191,6 +200,7 @@ def parse_return_arguments(return_decl, inplace, func_decl):
             argument_dict['field_name'] = field_name
         argument_dict['output'] = True
         argument_dict['type'] = temp_type_translations(argument_dict['type'])
+        argument_dict['annotation'] = annotation
 
         arguments.append(argument_dict)
     return arguments
