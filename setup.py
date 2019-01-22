@@ -745,6 +745,7 @@ if __name__ == '__main__':
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
+        zip_safe=False,
         package_data={
             'torch': [
                 'lib/*.so*',
