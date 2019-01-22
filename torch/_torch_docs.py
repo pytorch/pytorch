@@ -2220,9 +2220,6 @@ add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the  of the given :attr:`input` tensor
-along a given dimension.
-
 Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
 smallest element of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each element found.
