@@ -68,7 +68,7 @@ class UniqueVoidPtr {
   }
 
   C10_NODISCARD bool compare_exchange_deleter(DeleterFnPtr expected_deleter, DeleterFnPtr new_deleter) {
-    if (get_deleter() == expected_deleter) return false;
+    if (get_deleter() != expected_deleter) return false;
     ctx_ = std::unique_ptr<void, DeleterFnPtr>(ctx_.release(), new_deleter);
     return true;
   }
