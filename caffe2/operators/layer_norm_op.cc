@@ -219,7 +219,7 @@ c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
 }
 namespace c10 {
 C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
-    .kernel(&layer_norm_c10<float>)
+    .kernel<&layer_norm_c10<float>>()
     .dispatchKey(c10::DispatchKey<1>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),

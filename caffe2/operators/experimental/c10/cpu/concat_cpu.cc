@@ -108,6 +108,6 @@ void concat_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Concat)
-    .kernel(&caffe2::concat_op_cpu_impl<float, CPUContext>)
+    .kernel<&caffe2::concat_op_cpu_impl<float, CPUContext>>()
     .dispatchKey(c10::DeviceTypeId::CPU);
 } // namespace c10

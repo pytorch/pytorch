@@ -21,8 +21,8 @@ template <class Key>
 class ThreadsafeOperatorTable_ final {
  public:
   template <class Key_>
-  void emplace(Key_&& key, KernelFunction value) {
-    bool res = map_.write([&](ska::flat_hash_map<Key, KernelFunction>& map) -> bool {
+  void emplace(Key_&& key, KernelFunction* value) {
+    bool res = map_.write([&](ska::flat_hash_map<Key, KernelFunction*>& map) -> bool {
       auto result = map.emplace(std::forward<Key>(key), std::move(value));
       return result.second;
     });
@@ -35,7 +35,7 @@ class ThreadsafeOperatorTable_ final {
 
   void erase(const Key& key) {
     auto num_removed =
-        map_.write([&](ska::flat_hash_map<Key, KernelFunction>& map) -> size_t {
+        map_.write([&](ska::flat_hash_map<Key, KernelFunction*>& map) -> size_t {
           return map.erase(key);
         });
     assert(num_removed <= 1); // This is not a multi-map
@@ -45,11 +45,11 @@ class ThreadsafeOperatorTable_ final {
     }
   }
 
-  const KernelFunction* lookup(const Key& key) const {
-    return map_.read([&](const ska::flat_hash_map<Key, KernelFunction>& map) -> const KernelFunction* {
+  KernelFunction* lookup(const Key& key) const {
+    return map_.read([&](const ska::flat_hash_map<Key, KernelFunction*>& map) -> KernelFunction* {
       auto found = map.find(key);
       if (found != map.end()) {
-        return &found->second;
+        return found->second;
       } else {
         return nullptr;
       }
@@ -57,7 +57,7 @@ class ThreadsafeOperatorTable_ final {
   }
 
  private:
-  LeftRight<ska::flat_hash_map<Key, KernelFunction>> map_;
+  LeftRight<ska::flat_hash_map<Key, KernelFunction*>> map_;
 };
 } // namespace details
 
@@ -87,9 +87,9 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected
    */
   void registerKernel(
-      KernelFunction func,
+      KernelFunction* func,
       typename Schema::dispatch::dispatch_key_type dispatch_key) {
-    kernels_.emplace(std::move(dispatch_key), std::move(func));
+    kernels_.emplace(std::move(dispatch_key), func);
   }
 
   /**
@@ -118,14 +118,14 @@ class DispatchTable final {
     //      static_assert(std::is_same<typename Schema::return_type (Args...),
     //      typename Schema::func_type>::value, "Argument types don't match
     //      operator signature");
-    const auto& kernel_func = lookupKernelFunc_(args);
-    return kernel_func(args);
+    KernelFunction* kernel_func = lookupKernelFunc_(args);
+    return (*kernel_func)(args);
   }
 
  private:
-  const KernelFunction& lookupKernelFunc_(ArrayRef<IValue> args) const {
+  KernelFunction* lookupKernelFunc_(ArrayRef<IValue> args) const {
     auto dispatch_key = Schema::dispatch::dispatch_key(args);
-    const KernelFunction* found = kernels_.lookup(dispatch_key);
+    KernelFunction* found = kernels_.lookup(dispatch_key);
     if (found == nullptr) {
       // TODO Better error message - include op name and dispatch key (i.e.
       // argument types)
@@ -133,7 +133,7 @@ class DispatchTable final {
           std::string() + "Didn't find kernel to dispatch to for operator '" +
           Schema::metadata::name() + "'");
     }
-    return *found;
+    return found;
   }
 
   details::ThreadsafeOperatorTable_<
