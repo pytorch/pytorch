@@ -1,9 +1,8 @@
 #include "caffe2/operators/experimental/c10/schemas/sparse_lengths_sum.h"
-#include <c10/core/dispatch/OpSchemaRegistration.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 #include "caffe2/core/operator_c10wrapper.h"
 
 using caffe2::CPUContext;
-using caffe2::Tensor;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::SparseLengthsSum);
 

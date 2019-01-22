@@ -394,11 +394,11 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags) {
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {}
+void THMapAllocator::close() { }
 
 #endif
 

@@ -27,16 +27,18 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(
+            &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(
+            &ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),

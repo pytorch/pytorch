@@ -1,8 +1,6 @@
 #ifndef CAFFE2_UTILS_FIXED_DIVISOR_H_
 #define CAFFE2_UTILS_FIXED_DIVISOR_H_
 
-#include <stdint.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -29,13 +27,16 @@ class FixedDivisor<std::int32_t> {
   FixedDivisor() = default;
 
   explicit FixedDivisor(const std::int32_t d) : d_(d) {
+#ifndef __HIP_PLATFORM_HCC__
     CalcSignedMagic();
+#endif // __HIP_PLATFORM_HCC__
   }
 
   FIXED_DIVISOR_DECL std::int32_t d() const {
     return d_;
   }
 
+#ifndef __HIP_PLATFORM_HCC__
   FIXED_DIVISOR_DECL std::uint64_t magic() const {
     return magic_;
   }
@@ -43,12 +44,17 @@ class FixedDivisor<std::int32_t> {
   FIXED_DIVISOR_DECL int shift() const {
     return shift_;
   }
+#endif // __HIP_PLATFORM_HCC__
 
   /// Calculates `q = n / d`.
   FIXED_DIVISOR_DECL std::int32_t Div(const std::int32_t n) const {
+#ifdef __HIP_PLATFORM_HCC__
+    return n / d_;
+#else // __HIP_PLATFORM_HCC__
     // In lieu of a mulhi instruction being available, perform the
     // work in uint64
     return (int32_t)((magic_ * (uint64_t)n) >> shift_);
+#endif // __HIP_PLATFORM_HCC__
   }
 
   /// Calculates `r = n % d`.
@@ -64,6 +70,7 @@ class FixedDivisor<std::int32_t> {
   }
 
  private:
+#ifndef __HIP_PLATFORM_HCC__
   // Calculates magic multiplicative value and shift amount for calculating `q =
   // n / d` for signed 32-bit integers.
   // Implementation taken from Hacker's Delight section 10.
@@ -107,10 +114,14 @@ class FixedDivisor<std::int32_t> {
     shift_ = p;
     magic_ = (std::uint64_t)(std::uint32_t)magic;
   }
+#endif // __HIP_PLATFORM_HCC__
 
   std::int32_t d_ = 1;
+
+#ifndef __HIP_PLATFORM_HCC__
   std::uint64_t magic_;
   int shift_;
+#endif // __HIP_PLATFORM_HCC__
 };
 
 } // namespace caffe2

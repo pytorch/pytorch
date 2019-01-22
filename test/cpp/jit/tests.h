@@ -272,13 +272,14 @@ void testFusion() {
   testConcat(2);
 }
 
-struct Attr : public Attributes<Attr> {};
 void testAttributes() {
+  Graph g;
   auto one = attr::alpha;
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Attr attr;
+  Node *n = g.create(Symbol::fromQualString("foo::bar"));
+  Node &attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -290,7 +291,8 @@ void testAttributes() {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Attr attr2;
+  Node *n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node &attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
   attr2.f_(one, 5);
@@ -941,7 +943,9 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
     c.value()->setUniqueName(cname);
     d.value()->setUniqueName(dname);
     graph->registerOutput(d.value());
+    torch::jit::overrideCanFuseOnCPU(true);
     FuseGraph(graph);
+    torch::jit::overrideCanFuseOnCPU(false);
     return graph;
   };
 
@@ -1838,7 +1842,7 @@ struct TopoMoveTestFixture {
       const std::string& insertPoint) {
     std::function<bool(Node*, Node*)> func =
         [this](Node* toInsert, Node* insertPoint) {
-          return toInsert->moveBeforeTopologicallyValid(insertPoint, *aliasDb);
+          return aliasDb->moveBeforeTopologicallyValid(toInsert, insertPoint);
         };
     return moveWithChecks(toInsert, insertPoint, func);
   }
@@ -1848,7 +1852,7 @@ struct TopoMoveTestFixture {
       const std::string& insertPoint) {
     std::function<bool(Node*, Node*)> func =
         [this](Node* toInsert, Node* insertPoint) {
-          return toInsert->moveAfterTopologicallyValid(insertPoint, *aliasDb);
+          return aliasDb->moveAfterTopologicallyValid(toInsert, insertPoint);
         };
     return moveWithChecks(toInsert, insertPoint, func);
   }
@@ -2033,15 +2037,15 @@ void testAliasAnalysis() {
 
     graph->lint();
 
-    const auto aliasDb = AliasAnalysis(graph);
+    auto aliasDb = AliasAnalysis(graph);
     // Can't move past a mutation of a used value
-    JIT_ASSERT(!c->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
-    JIT_ASSERT(d->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
+    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
 
     // b should alias to a (since they are both inputs)
     JIT_ASSERT(
-        !addsB->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
-    JIT_ASSERT(addsB->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+        !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
+    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
 
     graph->lint();
   }
@@ -2058,12 +2062,11 @@ void testAliasAnalysis() {
     auto c = graph->insert(aten::add, {fresh, aliasesB});
     graph->lint();
 
-    const auto aliasDb = AliasAnalysis(graph);
-
-    JIT_ASSERT(!aliasesB->node()->moveAfterTopologicallyValid(
-        mutatesAliasOfB->node(), aliasDb));
-    JIT_ASSERT(!usesB->node()->moveAfterTopologicallyValid(
-        mutatesAliasOfB->node(), aliasDb));
+    auto aliasDb = AliasAnalysis(graph);
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        aliasesB->node(), mutatesAliasOfB->node()));
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        usesB->node(), mutatesAliasOfB->node()));
   }
 }
 } // namespace

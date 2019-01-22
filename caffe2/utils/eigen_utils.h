@@ -5,6 +5,7 @@
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
+
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {

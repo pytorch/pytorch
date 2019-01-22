@@ -374,12 +374,12 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .NS(addBlock)
 
-#define AS(name) def(#name, &Attributes<Node>::name)
+#define AS(name) def(#name, &Node::name)
       // methods from Attributes
       .AS(copyAttributes)
       .AS(hasAttributes)
 #undef AS
-#define AS(name) def(#name, &Attributes<Node>::name##S)
+#define AS(name) def(#name, &Node::name##S)
       // The default method names take Symbol, but the string conversion for
       // Symbol you to qualify with attr::. This is not very user friendly
       // for attributes, so expose the string variants instead.
@@ -491,6 +491,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
+      .def("dim", [](const Type& t) { return t.expect<TensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -541,6 +542,8 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
+      .def(
+          py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);

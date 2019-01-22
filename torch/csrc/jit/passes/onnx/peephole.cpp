@@ -411,12 +411,11 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
-  Node* constant_fill = graph->create(onnx::ConstantFill, 1);
-  constant_fill->insertBefore(n);
-  constant_fill->i_(attr::input_as_shape, 1);
-  constant_fill->addInput(concated_dims->outputs()[0]);
+  Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
+  constant_of_shape->insertBefore(n);
+  constant_of_shape->addInput(concated_dims->outputs()[0]);
+  n->replaceInput(input_index, constant_of_shape->outputs()[0]);
 
-  n->replaceInput(input_index, constant_fill->outputs()[0]);
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
   }
@@ -560,6 +559,30 @@ static void eraseListConstruct(Block* block) {
   }
 }
 
+static void fuseSplitListUnpack(Block *b) {
+  for(auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto *child_block : it->blocks()) {
+      fuseSplitListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack && it->input()->node()->kind() == onnx::Split) {
+      auto origSplitNode = it->input()->node();
+
+      Node * splitNode = b->owningGraph()->create(onnx::Split, it->outputs().size());
+      for (size_t i=0; i<splitNode->outputs().size(); ++i) {
+        splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      }
+      splitNode->copyAttributes(*origSplitNode);
+      splitNode->insertBefore(origSplitNode);
+      splitNode->addInput(origSplitNode->input());
+      it->replaceAllUsesWith(splitNode);
+      it->removeAllInputs();
+      origSplitNode->destroy();
+      it.destroyCurrent();
+      continue;
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -592,6 +615,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
   eraseListConstruct(graph->block());
+  fuseSplitListUnpack(graph->block());
 }
 
 } // namespace jit

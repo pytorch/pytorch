@@ -140,6 +140,7 @@ def run(paths):
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
             try:
+                declaration['schema_string'] = "aten::" + func['func']
                 if '->' in func['func']:
                     func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
                 else:
@@ -154,6 +155,7 @@ def run(paths):
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
+                declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)

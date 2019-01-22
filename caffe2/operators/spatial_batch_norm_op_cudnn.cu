@@ -118,7 +118,7 @@ class CuDNNSpatialBNOp final : public SpatialBNOp<CUDAContext> {
     T* Y_data = Y->mutable_data<T>();
 
     if (N > 0) {
-      const std::vector<int> input_dims(X.dims().cbegin(), X.dims().cend());
+      const std::vector<int> input_dims(X.sizes().cbegin(), X.sizes().cend());
       if (input_dims != data_dims_) {
         data_dims_ = input_dims;
         SetTensorDescriptor(
@@ -303,7 +303,7 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
       return true;
     }
 
-    const std::vector<int> input_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> input_dims(X.sizes().cbegin(), X.sizes().cend());
     if (input_dims != data_dims_) {
       data_dims_ = input_dims;
       SetTensorDescriptor(
@@ -344,6 +344,7 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
   cudnnTensorDescriptor_t param_desc_;
   cudnnBatchNormMode_t mode_;
 
+  // TODO: int -> int64_t
   std::vector<int> data_dims_;
 };
 

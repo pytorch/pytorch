@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -81,7 +82,7 @@ namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> input,
@@ -168,7 +169,7 @@ __global__ void lstm_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> storage,
@@ -233,7 +234,7 @@ __global__ void lstm_cell_backward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void gru_cell_forward(
             TensorInfo<scalar_t, index_type> Input,
@@ -303,7 +304,7 @@ __global__ void gru_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void gru_cell_backward(
              TensorInfo<scalar_t, index_type> gradInInput,
