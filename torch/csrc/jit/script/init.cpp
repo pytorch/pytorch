@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/sugared_value.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function_schema.h>
@@ -97,7 +98,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
             Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
       }
       TypePtr ret_type = DynamicType::get();
-      if (n_binders != 1) {
+      if (n_binders == 0) {
+        ret_type = NoneType::get();
+      } else if (n_binders > 1) {
         std::vector<TypePtr> tuple_values(n_binders, ret_type);
         ret_type = TupleType::create(std::move(tuple_values));
       }
@@ -132,13 +135,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 'd');
-    Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}));
+    Node* new_node =
+        getPythonOp(m.graph(), THPObjectPtr(func.release().ptr()), cconv);
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for (auto& i : matched_schema->inputs)
       new_node->addInput(i);
 
-    JIT_ASSERT(matched_schema->return_types.size() == 1);
     Value* output =
         new_node->addOutput()->setType(matched_schema->return_types.at(0));
     return std::make_shared<SimpleValue>(output);
@@ -159,6 +161,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     }
   }
 
+  virtual Node* getPythonOp(
+      std::shared_ptr<Graph> graph,
+      THPObjectPtr func_ptr,
+      std::string& cconv) const {
+    return graph->insertNode(
+        graph->createPythonOp(std::move(func_ptr), cconv, {}));
+  }
+
   py::object self;
 };
 
@@ -174,6 +184,28 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
     // on modules like math.pi or torch.float to be constants
     // eventhough it is possible, though rare, for someone to mutate them
     return toSugaredValue(member, m, loc, /*is_constant=*/true);
+  }
+};
+
+// For ignored Python functions, set the PythonOp in the graph to
+// be ignored on export
+struct VISIBILITY_HIDDEN IgnoredPythonValue : public PythonValue {
+  IgnoredPythonValue(py::object self) : PythonValue(std::move(self)) {}
+
+  std::string kind() const override {
+    return "ignored python value";
+  }
+
+protected:
+  virtual Node* getPythonOp(
+      std::shared_ptr<Graph> graph,
+      THPObjectPtr func_ptr,
+      std::string& cconv) const override {
+    Node* node = graph->insertNode(
+        graph->createPythonOp(std::move(func_ptr), cconv, {}));
+    auto python_op = static_cast<PythonOp*>(node);
+    python_op->ignore_on_export = true;
+    return node;
   }
 };
 
@@ -443,6 +475,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
+  }
+  py::object ignored_python_op =
+      py::module::import("torch.jit").attr("_try_get_ignored_op")(obj);
+  if (py::cast<bool>(ignored_python_op)) {
+    return std::make_shared<IgnoredPythonValue>(obj);
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -745,12 +782,12 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "_python_print",
-          [](Module& self) {
+          [](Module& self, bool enforce_importable) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, true);
+            PythonPrint(ss, self, tensors, enforce_importable);
             return std::make_pair(ss.str(), tensors);
-          })
+          }, py::arg("enforce_importable") = true)
       .def_property_readonly(
           "code",
           [](Module& self) {
