@@ -5,7 +5,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 
-#include "ATen/Allocator.h"
+#include "c10/core/Allocator.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
