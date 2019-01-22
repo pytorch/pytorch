@@ -1,0 +1,67 @@
+ir_version: 3
+producer_name: "pytorch"
+producer_version: "0.4"
+graph {
+  node {
+    input: "x"
+    output: "1"
+    output: "2"
+    op_type: "ATen"
+    attribute {
+      name: "dim"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "operator"
+      s: "unique"
+      type: STRING
+    }
+    attribute {
+      name: "return_inverse"
+      i: 0
+      type: INT
+    }
+    attribute {
+      name: "sorted"
+      i: 1
+      type: INT
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

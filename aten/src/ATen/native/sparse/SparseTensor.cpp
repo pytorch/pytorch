@@ -288,7 +288,7 @@ SparseTensor dense_to_sparse(const Tensor& self){
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
   AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  AT_CHECK(sparse_dim <= dims, 
+  AT_CHECK(sparse_dim <= dims,
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
@@ -302,7 +302,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
     indices = nz.clone();
   } else {
     Tensor i = nz.narrow(0, 0, sparse_dim);
-    std::tie(indices, std::ignore) = _unique_dim(i, 1);
+    std::tie(indices, std::ignore) = at::unique_dim(i, 1);
     indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
   }
 

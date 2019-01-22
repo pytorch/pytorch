@@ -738,7 +738,7 @@ def brute_pdist(inp, p=2):
     k = n * (n - 1) // 2
     if k == 0:
         # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
     square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
     unroll = square.view(square.shape[:-2] + (n * n,))
     inds = torch.ones(k, dtype=torch.int)
@@ -813,6 +813,7 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
+    'test_conv_double_backward',
     'test_conv_double_backward_groups',
     'test_Conv3d_dilated',
     'test_Conv3d_stride_padding',

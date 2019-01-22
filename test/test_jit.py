@@ -4123,6 +4123,107 @@ a")
                 return a + b
             ''')
 
+    def test_optional_refinement(self):
+        @torch.jit.script
+        def test_if_none_assignment(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                x = 1
+            return x + 1
+
+        self.assertEqual(test_if_none_assignment(1), 2)
+
+        @torch.jit.script
+        def test_ternary(x):
+            # type: (Optional[int]) -> int
+            x = x if x is not None else 2
+            return x
+
+        @torch.jit.script
+        def test_not_none(x):
+            # type: (Optional[int]) -> None
+            if x is not None:
+                print(x + 1)
+
+        @torch.jit.script
+        def test_and(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if x is not None and y is not None:
+                print(x + y)
+
+        @torch.jit.script
+        def test_not(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if not (x is not None and y is not None):
+                pass
+            else:
+                print(x + y)
+
+        @torch.jit.script
+        def test_bool_expression(x):
+            # type: (Optional[int]) -> None
+            if x is not None and x < 2:
+                print(x + 1)
+
+        @torch.jit.script
+        def test_nested_bool_expression(x, y):
+            # type: (Optional[int], Optional[int]) -> int
+            if x is not None and x < 2 and y is not None:
+                x = x + y
+            else:
+                x = 5
+            return x + 2
+
+        @torch.jit.script
+        def test_or(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if y is None or x is None:
+                pass
+            else:
+                print(x + y)
+
+        # backwards compatibility
+        @torch.jit.script
+        def test_manual_unwrap_opt(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                x = 1
+            else:
+                x = torch.jit._unwrap_optional(x)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def or_error(x, y):
+                # type: (Optional[int], Optional[int]) -> int
+                if x is None or y is None:
+                    print(x + y)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def and_error(x, y):
+                # type: (Optional[int], Optional[int]) -> int
+                if x is None and y is None:
+                    pass
+                else:
+                    print(x + y)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def named_var(x):
+                # type: (Optional[int]) -> None
+                x_none = x is not None
+                if x_none:
+                    print(x + 1)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def named_var_and(x, y):
+                # type: (Optional[int], Optional[int]) -> None
+                x_none = x is not None
+                if y is not None and x_none:
+                    print(x + y)
+
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):
@@ -4308,6 +4409,35 @@ a")
         self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
+
+    def test_script_unique_none(self):
+        def test_unique_inverse(a):
+            b, c = torch.unique(a, return_inverse=True)
+            return b + 1
+
+        def test_unique_inverse_nonedim(a):
+            b, c = torch.unique(a, return_inverse=True, dim=None)
+            return b + 1
+
+        def test_unique_noinverse(a):
+            b = torch.unique(a)
+            return b + 1
+
+        def test_unique_noinverse_nonedim(a):
+            b = torch.unique(a, dim=None)
+            return b + 1
+
+        a = torch.rand(5, 6, 7)
+
+        self.checkTrace(test_unique_inverse, [a], inputs_require_grads=False)
+        self.checkTrace(test_unique_inverse_nonedim, [a], inputs_require_grads=False)
+        self.checkTrace(test_unique_noinverse, [a], inputs_require_grads=False)
+        self.checkTrace(test_unique_noinverse_nonedim, [a], inputs_require_grads=False)
+        self.checkScript(test_unique_inverse, [a])
+        self.checkScript(test_unique_inverse_nonedim, [a])
+        # TODO: scripting unique when return_inverse = False is not supported yet
+        # self.checkScript(test_unique_noinverse, [a])
+        # self.checkScript(test_unique_noinverse_nonedim, [a])
 
     def test_script_bool_constant(self):
         script = '''
@@ -9440,6 +9570,17 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    def test_view_write(self):
+        def fn(x, y):
+            l = []
+            l.append(x)
+            x_view = l[0]
+            a = x + x
+            x_view.add_(y)
+            b = x + x
+            return a == b
+        self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -11690,7 +11831,7 @@ def add_nn_module_test(*args, **kwargs):
     module_name = name.split("_")[0]
 
     module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal._weak_types.get(module) is None:
+    if module is None or torch._jit_internal.weak_types.get(module) is None:
         return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
@@ -12051,6 +12192,48 @@ class TestAsync(JitTestCase):
         x = torch.rand(3, 4, 5)
         with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
             wait_script_nest(x)
+
+    def test_async_grad_guard_with_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.enable_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, True)
+        self.assertEqual(after_wait, True)
+
+    def test_async_grad_guard_no_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.no_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, False)
+        self.assertEqual(after_wait, False)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
