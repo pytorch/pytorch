@@ -41,7 +41,8 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
-    # Enables [] argument by translating to legacy {}. See [temp translations]
+    # Enables default argument [] by translating to legacy {}.
+    # See [temp translations]
     elif s == '[]':
         return '{}'
     elif re.match(r'{.*}', s):

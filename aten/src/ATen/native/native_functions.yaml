@@ -353,7 +353,6 @@
 
 - func: bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _bincount_cpu
@@ -478,14 +477,11 @@
 
 - func: conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
 
 - func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
 
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
@@ -497,14 +493,11 @@
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
 
 - func: conv_transpose2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
 
 - func: s_copy_(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
@@ -1113,7 +1106,6 @@
   matches_jit_signature: True
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
@@ -1871,7 +1863,6 @@
 # `torch.functional.py`. They shall be moved here once we have mapping between
 # Python strings and C++ Enum in codegen.
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
   variants: function, method
 
@@ -4261,7 +4252,6 @@
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor, Tensor, Tensor)
@@ -4280,7 +4270,6 @@
   python_module: nn
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
   python_module: nn
 
@@ -4301,7 +4290,6 @@
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor, Tensor, Tensor)
@@ -4320,7 +4308,6 @@
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
   python_module: nn
 
@@ -4342,7 +4329,6 @@
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor, Tensor, Tensor)
@@ -4362,7 +4348,6 @@
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
   matches_jit_signature: True
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> (Tensor, Tensor, Tensor)
@@ -4381,7 +4366,6 @@
   python_module: nn
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: True
   python_module: nn
 
