@@ -747,7 +747,16 @@ def sort_declarations(grouped_decls):
 
 
 def get_python_signature(declaration, include_out):
-    # Compute the Python function signature for argument parsing
+    # Compute the Python function signature for argument parsing,
+    # as specified in torch/csrc/utils/python_arg_parser.h.  WARNING:
+    # this is NOT the same type signature as specified by PEP 484
+    # as understood by mypy; our format was independently developed
+    # and has some quirks to make it more suitable specifically
+    # for error parsing.
+    #
+    # For a translation to mypy-valid type signatures, see
+    # tools/gen_pyi.py.  If you change any logic here, please
+    # check that file too.
     py_formal_args = []
     output_args = []
     type_args = []
