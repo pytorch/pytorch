@@ -111,6 +111,14 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
+inline IValue createGenericDict(py::handle obj, const TypePtr& key_type, const TypePtr& value_type) {
+  std::unordered_map<IValue, IValue> elems;
+  for (auto key : obj) {
+    elems[toIValue(key, key_type)] = toIValue(obj[key], value_type);
+  }
+  return at::ivalue::Dict<IValue, IValue>::create(std::move(elems));
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -185,6 +193,20 @@ inline IValue toIValue(
           return py::cast<std::vector<at::Tensor>>(obj);
         default:
           return createGenericList(obj, elem_type);
+      }
+    }
+    case TypeKind::DictType: {
+      const auto& dict_type = type->expect<DictType>();
+      switch (dict_type->getKeyType()->kind()) {
+        case TypeKind::IntType:
+        case TypeKind::FloatType:
+        case TypeKind::StringType:
+          return createGenericDict(obj, dict_type->getKeyType(), dict_type->getValueType());
+        default:
+          AT_ERROR(
+              "Cannot create dict for key type ",
+              dict_type->getKeyType()->str(),
+              ", only int, float, and string keys are supported");
       }
     }
     case TypeKind::OptionalType: {
@@ -297,6 +319,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     return t;
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDict();
+    const auto& elements = dict->elements();
+    py::dict py_dict;
+    for (auto pair : elements) {
+      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+    }
+    return py_dict;
+
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

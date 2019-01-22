@@ -467,6 +467,25 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  void printDict(
+      std::ostream& stmt,
+      at::ArrayRef<Value*> key_value_pairs,
+      const char* begin = "{",
+      const char* end = "}") {
+    stmt << begin;
+    auto delimiter = "";
+    for (size_t i = 0; i < key_value_pairs.size(); ++i) {
+      stmt << delimiter;
+      auto key = key_value_pairs[i];
+      auto value = key_value_pairs[i + 1];
+
+      stmt << useOf(key) << ": " << useOf(value);
+
+      delimiter = ", ";
+    }
+    stmt << end;
+  }
+
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
     if (lhs.size() > 0) {
       indent();
@@ -776,6 +795,15 @@ struct PythonPrintPass {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
+      case prim::DictConstruct: {
+        stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+        printDict(stmt, node->inputs());
+        stmt << ")";
+      } break;
+      case prim::DictIndex: {
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
+      } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
         auto name = genMethodName("__forked_function");
@@ -1044,12 +1072,14 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::Constant,
       prim::fork,
       prim::ListConstruct,
+      prim::DictConstruct,
       prim::ListUnpack,
       prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
+      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,

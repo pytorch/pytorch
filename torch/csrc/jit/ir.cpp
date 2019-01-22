@@ -1218,6 +1218,30 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   return n;
 }
 
+Node* Graph::createDict(
+    const TypePtr& key_type,
+    const TypePtr& value_type,
+    std::unordered_map<Value*, Value*>& values) {
+
+  auto n = create(prim::DictConstruct, 1);
+  for (auto v : values) {
+    JIT_ASSERT(v.first->type()->isSubtypeOf(key_type));
+    JIT_ASSERT(v.second->type()->isSubtypeOf(value_type));
+
+    n->addInput(v.first) ;
+    n->addInput(v.second);
+  }
+  n->output()->setType(DictType::create(key_type, value_type));
+  return n;
+}
+
+Node* Graph::createDictIndex(Value* dict, Value* index) {
+  auto n = create(prim::DictIndex, {dict, index});
+  auto dict_type = dict->type()->expect<DictType>();
+  n->output()->setType(dict_type->getValueType());
+  return n;
+}
+
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});

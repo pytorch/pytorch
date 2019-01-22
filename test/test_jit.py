@@ -39,7 +39,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
-from typing import List, Optional
+from typing import List, Dict, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 
@@ -9540,6 +9540,27 @@ a")
             return python_list_op(lst)
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
+    def test_dict(self):
+        def simple(x):
+            # type: (Dict[str, int]) -> Dict[str, int]
+            return x
+
+        self.checkScript(simple, ({'item': 20, 'other_item': 120},))
+
+        def index(x):
+            # type: (Dict[str, int]) -> int
+            return x['item']
+
+        self.checkScript(index, ({'item': 20, 'other_item': 120},))
+
+        @torch.jit.script
+        def missing_index(x):
+            # type: (Dict[str, int]) -> int
+            return x['dne']
+
+        with self.assertRaisesRegex(RuntimeError, "could not find key"):
+            missing_index({'item': 20, 'other_item': 120})
 
     def test_view_write(self):
         def fn(x, y):

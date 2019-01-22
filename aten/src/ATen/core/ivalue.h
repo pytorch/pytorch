@@ -11,9 +11,19 @@
 
 #include <ATen/core/Tensor.h>
 
+
 namespace c10 {
 struct IValue;
+}
 
+namespace std {
+template<>
+struct hash<c10::IValue> {
+  size_t operator()(const c10::IValue& ivalue) const;
+};
+} // namespace std
+
+namespace c10 {
 namespace ivalue {
 
 template <typename T>
@@ -65,6 +75,31 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   }
 };
 
+template <typename Key, typename Value>
+struct C10_EXPORT Dict : c10::intrusive_ptr_target {
+ private:
+  std::unordered_map<Key, Value> elements_;
+
+ public:
+  Dict(std::unordered_map<Key, Value> elements_) : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<Dict<Key, Value>> create(std::unordered_map<Key, Value> elements_) {
+    return c10::make_intrusive<Dict<Key, Value>>(std::move(elements_));
+  }
+  const std::unordered_map<Key, Value>& elements() const {
+    return elements_;
+  }
+  operator const std::unordered_map<Key, Value>&() const {
+    return elements();
+  }
+
+  std::unordered_map<Key, Value>& elements() {
+    return elements_;
+  }
+  operator std::unordered_map<Key, Value>&() {
+    return elements();
+  }
+};
+
 struct Future;
 
 struct CAFFE2_API Tuple : public List<IValue> {
@@ -78,6 +113,8 @@ using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
+using GenericDict = Dict<IValue, IValue>;
+
 
 }
 
@@ -102,6 +139,7 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
+  _(GenericDict) \
   _(Future) \
   _(Device)
 
@@ -164,6 +202,22 @@ struct CAFFE2_API IValue final {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
+  }
+
+
+  inline bool operator==(const IValue& other) const {
+    if (tag != other.tag) {
+      throw std::runtime_error("Can't compare IValues with different tags");
+    }
+    if (isInt()) {
+      return toInt() == other.toInt();
+    } else if (isString()) {
+      return toStringRef() == other.toStringRef();
+    } else if (isDouble()) {
+        return toDouble() == other.toDouble();
+    } else {
+      throw std::runtime_error("Can't compare IValues with this tag");
+    }
   }
 
   // Accessors for subtypes are arranged together below
@@ -298,6 +352,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
+  const std::unordered_map<IValue, IValue>& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -363,6 +418,19 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::GenericList> toGenericList() const & {
     AT_ASSERT(isGenericList());
     return toIntrusivePtr<ivalue::GenericList>();
+  }
+
+  // GenericDict
+  IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
+  IValue(std::unordered_map<IValue, IValue> v);
+  bool isGenericDict() const { return Tag::GenericDict == tag; }
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
+    AT_ASSERT(isGenericDict());
+    return moveToIntrusivePtr<ivalue::GenericDict>();
+  }
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const & {
+    AT_ASSERT(isGenericDict());
+    return toIntrusivePtr<ivalue::GenericDict>();
   }
 
   // None
@@ -680,6 +748,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
+DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
@@ -745,6 +814,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 inline IValue::IValue(std::vector<IValue> v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
+: tag(Tag::GenericDict), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::unordered_map<IValue, IValue> v)
+: IValue(ivalue::GenericDict::create(std::move(v))) {}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -768,6 +844,10 @@ inline const std::vector<bool>& IValue::toBoolListRef() const {
 
 inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
+}
+
+inline const std::unordered_map<IValue, IValue>& IValue::toGenericDictRef() const {
+  return toGenericDict()->elements();
 }
 
 inline const std::string& IValue::toStringRef() const {
@@ -811,6 +891,17 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
         && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 }
-
-
 } // namespace c10
+
+inline size_t std::hash<c10::IValue>::operator()(
+    const c10::IValue& ivalue) const {
+  if (ivalue.isInt()) {
+    return std::hash<int>()(ivalue.toInt());
+  } else if (ivalue.isString()) {
+    return std::hash<int>()(ivalue.toString());
+  } else if (ivalue.isDouble()) {
+    return std::hash<int>()(ivalue.toDouble());
+  } else {
+    throw std::runtime_error("Can't hash IValues with this tag");
+  }
+}

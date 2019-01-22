@@ -17,6 +17,8 @@ using ::c10::ivalue::GenericList;
 using ::c10::ivalue::IntList;
 using ::c10::ivalue::TensorList;
 
+using ::c10::ivalue::GenericDict;
+
 using ::c10::ivalue::ConstantString;
 
 } // namespace jit
