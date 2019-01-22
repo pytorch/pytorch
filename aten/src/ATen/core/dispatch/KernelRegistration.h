@@ -96,7 +96,7 @@ private:
   template<class State>
   static std::unique_ptr<c10::KernelState> stateCreator() {
     static_assert(std::is_default_constructible<State>::value, "State class must be default constructible");
-    return std::make_unique<State>();
+    return guts::make_unique<State>();
   }
 
   c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
