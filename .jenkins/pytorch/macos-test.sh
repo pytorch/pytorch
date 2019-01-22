@@ -85,8 +85,8 @@ test_custom_script_ops() {
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  TORCH_PACKAGES="$(python -c 'import torch; import os; print(os.path.abspath(os.path.dirname(torch.__file__)))')"
+  CMAKE_PREFIX_PATH="$TORCH_PACKAGES" cmake ..
   make VERBOSE=1
   popd
 

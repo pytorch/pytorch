@@ -160,10 +160,10 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   # Build custom operator tests.
   CUSTOM_OP_BUILD="$PWD/../custom-op-build"
   CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  TORCH_PACKAGES="$(python -c 'import torch; import os; print(os.path.abspath(os.path.dirname(torch.__file__)))')"
   mkdir "$CUSTOM_OP_BUILD"
   pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
+  CMAKE_PREFIX_PATH=$TORCH_PACKAGES" cmake "$CUSTOM_OP_TEST"
   make VERBOSE=1
   popd
 fi
