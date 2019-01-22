@@ -198,8 +198,17 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 }
 
 static inline bool canCastSameKind(ScalarType from, ScalarType to) {
-  return (from == to) || (promoteTypes(from, to) == to) ||
-      (isIntegralType(from) && isIntegralType(to)) ||
+  if (from == to) {
+    // identity casts are always allowed
+    return true;
+  } else if (promoteTypes(from, to) == to) {
+    // promotion implies safe casting
+  } else if (from == ScalarType::Byte || to == ScalarType::Byte) {
+    // unsigned is considered a separate kind
+    return false;
+  }
+  // Check same kind.
+  return (isIntegralType(from) && isIntegralType(to)) ||
       (isFloatingType(from) && isFloatingType(to)) ||
       (isComplexType(from) && isComplexType(to));
 }
