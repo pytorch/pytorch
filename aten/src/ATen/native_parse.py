@@ -76,7 +76,16 @@ def sanitize_types(types):
     return [sanitize_type(types)]
 
 
-def parse_arguments(args, func_decl, func_name, func_return):
+def get_annotation(t):
+    match = re.match(r'(Tensor.*)\((.+)\)', t)
+    annotation = None
+    if match:
+        t = match.group(1)
+        annotation = match.group(2)
+    return t, annotation
+
+
+def parse_arguments(args, func_decl, func_name, func_return, inplace):
     arguments = []
     is_out_fn = func_name.endswith('_out')
     if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
@@ -100,6 +109,8 @@ def parse_arguments(args, func_decl, func_name, func_return):
 
         t, name = type_and_name
         default = None
+
+        t, annotation = get_annotation(t)
 
         # Enables Generator? by translating to legacy Generator*. See [temp translations]
         if t == 'Generator?':
@@ -135,11 +146,20 @@ def parse_arguments(args, func_decl, func_name, func_return):
         if kwarg_only:
             argument_dict['kwarg_only'] = True
 
+        argument_dict['annotation'] = annotation
         arguments.append(argument_dict)
+    if inplace:
+        found_self = False
+        for argument in arguments:
+            if argument['name'] == "self" and inplace:
+                assert argument['annotation'] and argument['annotation'].endswith("!"), \
+                    "Inplace function \"{}\" needs to annotate Tensor argument named self as mutable.".format(func_decl['func'])
+                found_self = True
+        assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
     return arguments
 
 
-def parse_return_arguments(return_decl, inplace):
+def parse_return_arguments(return_decl, inplace, func_decl):
     arguments = []
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
@@ -153,7 +173,9 @@ def parse_return_arguments(return_decl, inplace):
         field_name = None
         if len(type_and_maybe_name) == 1:
             t = type_and_maybe_name[0]
-            if inplace:
+            t, annotation = get_annotation(t)
+            if t == "Tensor" and inplace:
+                assert annotation and annotation.endswith("!"), "Return Tensor of function \"{}\" flagged as inplace needs to be annotated as mutable".format(func_decl['func'])
                 name = 'self'
             else:
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
@@ -202,12 +224,21 @@ def run(paths):
                     func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
                 else:
                     raise Exception('Expected return declaration')
-                fn_name, arguments = func_decl.split('(')
-                arguments = arguments.split(')')[0]
+                # print("func_decl")
+                # print(func_decl)
+                fn_name, arguments = func_decl.split('(', 1)
+                # print("fn_name")
+                # print(fn_name)
+                # print("arguments")
+                # print(arguments)
+                assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
+                arguments = arguments[:-1]  # Expect closing )
+                # print("arguments1")
+                # print(arguments)
                 declaration['name'] = func.get('name', fn_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
-                return_arguments = parse_return_arguments(return_decl, declaration['inplace'])
-                arguments = parse_arguments(arguments, func, declaration['name'], return_arguments)
+                return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
+                arguments = parse_arguments(arguments, func, declaration['name'], return_arguments, declaration['inplace'])
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
