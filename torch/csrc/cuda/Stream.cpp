@@ -85,7 +85,7 @@ static PyObject * THCPStream_query(THCPStream *self) {
 
 static PyObject * THCPStream_synchronize(THCPStream *self) {
   HANDLE_TH_ERRORS
-  self->cuda_stream.synchronize();
+  with_no_gil([&] { self->cuda_stream.synchronize(); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
