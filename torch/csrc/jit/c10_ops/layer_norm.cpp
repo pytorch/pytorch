@@ -30,22 +30,22 @@ RegisterOperators reg({
     "caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon) -> (Tensor, Tensor, Tensor)",
     [](Stack& stack) {
         ArrayRef<IValue> inputs = last(stack, 3);
-        IValue input = std::move(inputs[0]);
+        Tensor input = std::move(inputs[0]).toTensor();
         const IValue& axis = inputs[1];
         const IValue& epsilon = inputs[2];
         drop(stack, 3);
 
-        if (input.toTensor().requires_grad()) {
+        if (input.requires_grad()) {
           throw std::runtime_error("Autograd not yet supported for c10 ops.");
         }
 
-        Tensor c10_output(at::empty({0}));
-        Tensor c10_output_mean(at::empty({0}));
-        Tensor c10_output_stdev(at::empty({0}));
+        Tensor c10_output(at::empty({0}, input.device()));
+        Tensor c10_output_mean(at::empty({0}, input.device()));
+        Tensor c10_output_stdev(at::empty({0}, input.device()));
 
         // TODO remove std::array for args here, instead pass through inputs directly as ArrayRef
         std::array<c10::IValue, 7> args{
-          IValue(torch::autograd::Variable(std::move(input).toTensor()).data()),
+          IValue(torch::autograd::Variable(std::move(input)).data()),
           IValue(c10_output),
           IValue(c10_output_mean),
           IValue(c10_output_stdev),
