@@ -523,7 +523,7 @@ def _dummy_type(name):
         class_name = self.__class__.__name__
         raise RuntimeError(
             "Tried to instantiate dummy base class {}".format(class_name))
-    return type(storage_name, (object,), {"__init__": init_err})
+    return type(name, (object,), {"__init__": init_err})
 
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
