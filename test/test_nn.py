@@ -6802,6 +6802,34 @@ class TestNN(NNTestCase):
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
+    @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
+    def test_nnpack_conv(self):
+        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
+            for batch, padding, chan_in, chan_out in \
+                    product([1, 2], [0, 1, 2], [2], [3]):
+
+                for has_bias in [True, False]:
+                    input_shape = [batch, chan_in]
+                    weight_shape = [chan_out, chan_in]
+                    for _ in range(2):
+                        input_shape.append(inp_size)
+                        weight_shape.append(kern)
+
+                    input = torch.randn(input_shape, requires_grad=True, dtype=torch.float)
+                    weight = torch.randn(weight_shape, requires_grad=True, dtype=torch.float)
+                    if has_bias:
+                        bias = torch.randn([chan_out], requires_grad=True, dtype=torch.float)
+                    output = torch._nnpack_spatial_convolution(input, weight, padding=padding, bias=bias)
+                    output_expected = torch.nn.functional.conv2d(input, weight, padding=padding, bias=bias)
+                    self.assertAlmostEqual(output, output_expected, delta=3e-4)
+
+                    gradient_o = torch.randn(output.shape, dtype=torch.float)
+
+                    grads = torch.autograd.grad(output, [input, weight], gradient_o)
+                    grads_expected = torch.autograd.grad(output_expected, [input, weight], gradient_o)
+                    for gr, gr_expected in zip(grads, grads_expected):
+                        self.assertAlmostEqual(gr, gr_expected, delta=3e-4)
+
     def test_fold_invalid_arg(self):
         # input wrong dimension
 

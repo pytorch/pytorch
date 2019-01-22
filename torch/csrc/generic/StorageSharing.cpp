@@ -282,7 +282,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   }
   THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   std::string s_handle = std::string(buffer, handle_size);
-  std::shared_ptr<void> basePtr = THCCaching_CUDAIpcDevptr(s_handle);
+  std::shared_ptr<void> basePtr = at::cuda::THCCaching_CUDAIpcDevptr(s_handle);
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset

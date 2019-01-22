@@ -13,16 +13,17 @@ namespace {
 
 template <class T, class Context>
 void batch_matmul_op_cpu_impl(
-    const C10Tensor& A_,
-    const C10Tensor& B_,
-    const C10Tensor& Y_,
+    const at::Tensor& A_,
+    const at::Tensor& B_,
+    const at::Tensor& Y_,
     int trans_a,
     int trans_b,
     int broadcast,
-    caffe2::ops::BatchMatmul::State* state) {
-  Tensor A(A_);
-  Tensor B(B_);
-  Tensor Y(Y_);
+    intrusive_ptr<Blob> state_) {
+  Tensor A{C10Tensor(A_)};
+  Tensor B{C10Tensor(B_)};
+  Tensor Y{C10Tensor(Y_)};
+  caffe2::ops::BatchMatmul::State* state = state_->GetMutable<caffe2::ops::BatchMatmul::State>();
   CPUContext context;
   using Engine = caffe2::DefaultEngine;
 

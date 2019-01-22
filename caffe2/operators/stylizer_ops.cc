@@ -138,7 +138,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     // For ARM NEON, we read in multiples of kNeonNoiseReadSize since
     // the inner loop is vectorized. Round up to the next highest
     // multiple of kNeonNoiseReadSize
-    size = math::roundUp(size, kNeonNoiseReadSize) + size;
+    size = math::RoundUp(size, kNeonNoiseReadSize) + size;
     noise->Resize(size);
 
     math::RandGaussian<float, CPUContext>(

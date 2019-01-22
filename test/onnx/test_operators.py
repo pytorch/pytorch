@@ -290,6 +290,14 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.clamp(max=0.1), x)
 
+    def test_unique(self):
+        x = torch.randn(10, requires_grad=True)
+        self.assertONNX(lambda x: torch.unique(x), x)
+
+    def test_unique_dim(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        self.assertONNX(lambda x: torch.unique(x, dim=1), x)
+
     def test_hardtanh(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.nn.Hardtanh(-0.5, 0.5)(x), x)

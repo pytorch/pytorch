@@ -1320,6 +1320,20 @@
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
 
+- func: _nnpack_available() -> bool
+
+- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, IntList[2] padding) -> Tensor
+  variants: function
+
+- func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, IntList[2] padding, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, IntList[2] padding) -> Tensor
+  variants: function
+
+- func: _nnpack_spatial_convolution_backward_weight(Tensor input, IntList weightsize, Tensor grad_output, IntList[2] padding) -> Tensor
+  variants: function
+
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
 - func: ones_out(Tensor result, IntList size) -> Tensor
@@ -1880,17 +1894,23 @@
   matches_jit_signature: True
   variants: method
 
-- func: _unique(Tensor self, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
+- func: unique(Tensor self, bool sorted=true, bool return_inverse=false, int64_t? dim=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
+# unique_dim is not exposed to python, special cased in gen_python_functions.py
+- func: unique_dim(Tensor self, int64_t dim, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: function
+
+# FIXME: for back compatibility reason, _unique and _unique_dim is still there
+# it just calls unique. These two functions should be deleted in the future
+- func: _unique(Tensor self, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: _unique_dim(Tensor self, int64_t dim, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
   variants: function
-  dispatch:
-    CPU: _unique_dim_cpu
-    CUDA: _unique_dim_cuda
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
 

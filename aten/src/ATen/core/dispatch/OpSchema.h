@@ -1,12 +1,17 @@
 #pragma once
 
 #include <ATen/core/dispatch/DispatchKey.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 #include <c10/core/DeviceType.h>
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 
 namespace c10 {
+
+// TODO Use folly::Function for perf
+using KernelFunction = std::function<IValue(ArrayRef<IValue>)>;
 
 namespace details {
 
@@ -16,7 +21,7 @@ namespace details {
  */
 template <class Arg>
 using is_tensor_arg = std::
-    is_same<C10Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
+    is_same<at::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
 inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   switch (device_type) {
@@ -29,17 +34,40 @@ inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   }
 }
 
-inline TensorParameterDispatchKey tensor_to_dispatch_key(const C10Tensor& tensor) {
+inline TensorParameterDispatchKey tensor_to_dispatch_key(const at::Tensor& tensor) {
   return TensorParameterDispatchKey{
-      to_device_type_id(tensor.impl()->device_type()),
+      to_device_type_id(tensor.device().type()),
       LayoutId(0),
-      tensor.impl()->dtype().id()};
+      tensor.dtype().id()};
+}
+
+template<size_t index, size_t offset, class ParameterTypes, class Enable = void> struct get_ith_tensor_arg_ {
+  static_assert(!std::is_same<ParameterTypes, ParameterTypes>::value, "Index out of bounds");
+};
+template<size_t index, size_t offset, class Head, class... Tail>
+struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index == 0 && is_tensor_arg<Head>::value>> {
+  static at::Tensor call(ArrayRef<IValue> args) {
+    if (!args[offset].isTensor()) {
+      throw std::runtime_error("Expected argument " + guts::to_string(offset) + " to be of type Tensor but found different type.");
+    }
+    return args[offset].toTensor();
+  }
+};
+template<size_t index, size_t offset, class Head, class... Tail>
+struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index != 0 || !is_tensor_arg<Head>::value>> {
+  static at::Tensor call(ArrayRef<IValue> args) {
+    return get_ith_tensor_arg_<(is_tensor_arg<Head>::value ? (index-1) : index), offset + 1, guts::typelist::typelist<Tail...>>::call(args);
+  }
+};
+template<class ParameterTypes, size_t index> at::Tensor get_ith_tensor_arg(ArrayRef<IValue> args) {
+  return get_ith_tensor_arg_<index, 0, ParameterTypes>::call(args);
 }
 
 // Extract type ids for all tensors from an array of tensors
-template<size_t num_dispatch_args, size_t num_tensor_args, size_t... indices>
-guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds__(const guts::array<const C10Tensor*, num_tensor_args>& tensor_args, guts::index_sequence<indices...>) {
-  return {tensor_to_dispatch_key(*tensor_args[indices])...};
+template<class OpSchemaDef, size_t... indices>
+guts::array<TensorParameterDispatchKey, OpSchemaDef::num_dispatch_args()> getDispatchTypeIds__(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
+  using ParameterTypes = typename guts::function_traits<typename OpSchemaDef::Signature>::parameter_types;
+  return {tensor_to_dispatch_key(get_ith_tensor_arg<ParameterTypes, indices>(args))...};
 }
 
 /**
@@ -49,10 +77,9 @@ guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds__(
  * @param args List of arguments to get type ids from
  * @return guts::array<TensorParameterDispatchKey, n>, where n is the number of tensor arguments (is_tensor_arg) in the class
  */
-template<size_t num_dispatch_args, class... Args>
-guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds_(const Args&... args) {
-  auto tensor_args = guts::filter_map<const C10Tensor*, is_tensor_arg>([] (const C10Tensor& v){return &v;}, args...);
-  return getDispatchTypeIds__<num_dispatch_args>(tensor_args, guts::make_index_sequence<num_dispatch_args>());
+template<class OpSchemaDef>
+guts::array<TensorParameterDispatchKey, OpSchemaDef::num_dispatch_args()> getDispatchTypeIds_(ArrayRef<IValue> args) {
+  return getDispatchTypeIds__<OpSchemaDef>(args, guts::make_index_sequence<OpSchemaDef::num_dispatch_args()>());
 }
 
 // TODO Test getDispatchTypeIds_
@@ -88,6 +115,63 @@ struct has_name_defined<T, guts::void_t<
 
 // TODO Test has_name_defined
 
+template<class T>
+struct ivalue_to_arg_type {
+  static T call(const IValue& v) {
+    return std::move(v).to<T>();
+  }
+};
+template<class T>
+struct ivalue_to_arg_type<ArrayRef<T>> {
+  static ArrayRef<T> call(const IValue& v) {
+    return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
+  }
+};
+
+template<class ReturnType, class ParamTypes, class FuncType> struct _wrapKernel {};
+template<class ReturnType, class... ParamTypes, class FuncType> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, FuncType> {
+  using parameter_types = guts::typelist::typelist<ParamTypes...>;
+
+  template<size_t... indices>
+  static KernelFunction call(FuncType* kernel, guts::index_sequence<indices...>) {
+    return [kernel] (ArrayRef<IValue> args) -> IValue {
+      if (args.size() != sizeof...(ParamTypes)) {
+        throw std::runtime_error("Wrong number of arguments for operator call");
+      }
+      return return_type_to_ivalue(
+        (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...)
+      );
+    };
+  }
+};
+template<class... ParamTypes, class FuncType> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, FuncType> {
+  using parameter_types = guts::typelist::typelist<ParamTypes...>;
+
+  template<size_t... indices>
+  static KernelFunction call(FuncType* kernel, guts::index_sequence<indices...>) {
+    return [kernel] (ArrayRef<IValue> args) -> IValue {
+      if (args.size() != sizeof...(ParamTypes)) {
+        throw std::runtime_error("Wrong number of arguments for operator call");
+      }
+      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
+      return IValue();
+    };
+  }
+};
+
+template<class SignatureTraits>
+KernelFunction wrapKernel(typename SignatureTraits::func_type* kernel) {
+  using return_type = typename SignatureTraits::return_type;
+  using parameter_types = typename SignatureTraits::parameter_types;
+  using func_type = typename SignatureTraits::func_type;
+  constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
+
+  return _wrapKernel<return_type, parameter_types, func_type>::call(
+    kernel,
+    guts::make_index_sequence<num_parameters>()
+  );
+}
+
 /**
  * Wrapper class around a user-provided schema definition some useful information about the schema.
  *
@@ -122,6 +206,10 @@ public:
   static constexpr size_t num_tensor_args = guts::typelist::count_if<details::is_tensor_arg, parameter_types>::value;
 
   static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
+
+  static KernelFunction wrap_kernel(func_type* kernel) {
+    return details::wrapKernel<signature_traits>(kernel);
+  }
 
 private:
   static_assert(details::has_parameter_names_defined<OpSchemaDef>::value, "Operator schema doesn't define parameter_names member.");
@@ -169,16 +257,16 @@ class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_
 public:
   using dispatch_key_type = DispatchKey<OpSchemaDef::num_dispatch_args()>;
 
-  template<class... Args>
-  static inline dispatch_key_type dispatch_key(const Args&... args) {
+  static inline dispatch_key_type dispatch_key(ArrayRef<IValue> args) {
+    /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;
     static_assert(std::is_same<
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
-      >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
+      >::value, "Invalid argument types passed to OpSchema::dispatch_key()");*/
     return dispatch_key_type {
-      details::getDispatchTypeIds_<OpSchemaDef::num_dispatch_args()>(args...)
+      details::getDispatchTypeIds_<OpSchemaDef>(args)
     };
   }
 };
@@ -201,21 +289,22 @@ private:
   static_assert(guts::is_hashable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have an overload for std::hash. Please define it.");
 
   static_assert(std::is_same<
-    guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename dispatch_key_traits::parameter_types>>,
-    guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename signature::parameter_types>>
-    >::value, "Operator schema defines custom dispatch_key() derivation function, but the arguments don't match the operator signature.");
+    guts::typelist::typelist<c10::ArrayRef<c10::IValue>>,
+    typename dispatch_key_traits::parameter_types
+    >::value, "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type ArrayRef<IValue>.");
 
 public:
 
-  template<class... Args>
-  static inline dispatch_key_type dispatch_key(const Args&... args) {
+  static inline dispatch_key_type dispatch_key(ArrayRef<IValue> args) {
+    /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;
     static_assert(std::is_same<
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
-    return OpSchemaDef::dispatch_key(args...);
+    */
+    return OpSchemaDef::dispatch_key(args);
   }
 };
 

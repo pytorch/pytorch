@@ -28,7 +28,7 @@ SKIP_PYTHON_BINDINGS = [
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
     '_potrs.*', '_cholesky.*',
-    'slice', 'randint(_out)?',
+    'slice', 'randint(_out)?', 'unique_dim', '_unique', '_unique_dim',
     'item', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
     'copy_sparse_to_sparse_',

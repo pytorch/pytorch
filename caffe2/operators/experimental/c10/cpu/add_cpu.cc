@@ -11,14 +11,14 @@ namespace {
 
 template <class DataType>
 void add_op_cpu_impl(
-    const C10Tensor& A_,
-    const C10Tensor& B_,
-    const C10Tensor& C_,
+    const at::Tensor& A_,
+    const at::Tensor& B_,
+    const at::Tensor& C_,
     bool legacy_broadcast,
     int axis) {
-  Tensor A(A_);
-  Tensor B(B_);
-  Tensor C(C_);
+  Tensor A{C10Tensor(A_)};
+  Tensor B{C10Tensor(B_)};
+  Tensor C{C10Tensor(C_)};
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
