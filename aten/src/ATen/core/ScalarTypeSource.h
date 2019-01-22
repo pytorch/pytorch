@@ -17,7 +17,7 @@ class ScalarTypeSource final {
       : is_scalar_(true), scalar_type_(scalar.scalarType()) {}
   /* implicit */ ScalarTypeSource(Tensor tensor)
       : is_tensor_(true), scalar_type_(tensor.scalar_type()),
-        backend_(tensor.type().backend()), zero_dim_(tensor.dim() == 0) {}
+        zero_dim_(tensor.dim() == 0) {}
 
   bool isScalarType() const {
     return is_scalar_type_;
@@ -43,17 +43,11 @@ class ScalarTypeSource final {
     return scalar_type_;
   }
 
-  Backend backend() const {
-    AT_CHECK(isTensor());
-    return backend_;
-  }
-
  private:
   const bool is_scalar_type_ = false;
   const bool is_scalar_ = false;
   const bool is_tensor_ = false;
   const ScalarType scalar_type_ = ScalarType::Undefined;
-  const Backend backend_ = Backend::Undefined;
   const bool zero_dim_ = false;
 };
 

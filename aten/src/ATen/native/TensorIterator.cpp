@@ -114,13 +114,36 @@ void TensorIterator::compute_types() {
 }
 
 Type& TensorIterator::compute_common_type() {
-  SmallVector<Tensor, 4> tensors;
-  std::transform(
-      operands_.begin(),
-      operands_.end(),
-      std::back_inserter(tensors),
-      [](const OperandInfo& op) { return op.tensor; });
-  return resultType(tensors);
+  Backend backend = Backend::Undefined;
+  Backend scalar_backend = Backend::Undefined;
+
+  SmallVector<ScalarTypeSource, 4> result_type_input;
+  for (auto& op : operands_) {
+    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      // resultType doesn't support with wrapped number hack
+      // unwrap back to a scalar
+      result_type_input.push_back(op.tensor.item());
+      scalar_backend = backend;
+    } else {
+      result_type_input.push_back(op.tensor);
+      if (backend == Backend::Undefined) {
+        backend = op.tensor.type().backend();
+      } else if (backend != op.tensor.type().backend()) {
+        AT_ERROR(
+            "Cannot run operations between backends ",
+            backend,
+            " and ",
+            op.tensor.type().backend());
+      }
+    }
+  }
+  ScalarType result_type = resultType(result_type_input);
+
+  if (backend == Backend::Undefined) {
+    backend = scalar_backend;
+  }
+  AT_ASSERT(backend != Backend::Undefined);
+  return at::globalContext().getNonVariableType(backend, result_type);
 }
 
 DimVector TensorIterator::compatible_stride(int element_size) const {

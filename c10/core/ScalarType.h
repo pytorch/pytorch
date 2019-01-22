@@ -203,6 +203,7 @@ static inline bool canCastSameKind(ScalarType from, ScalarType to) {
     return true;
   } else if (promoteTypes(from, to) == to) {
     // promotion implies safe casting
+    return true;
   } else if (from == ScalarType::Byte || to == ScalarType::Byte) {
     // unsigned is considered a separate kind
     return false;

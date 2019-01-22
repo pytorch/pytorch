@@ -80,9 +80,10 @@ class C10_API Scalar {
       return ScalarType::ComplexDouble;
     } else if (isFloatingPoint()) {
       return ScalarType::Double;
-    } else {
+    } else if (isIntegral()) {
       return ScalarType::Long;
     }
+    AT_ERROR("Unknown scalar type");
   }
 
   Scalar operator-() const;
