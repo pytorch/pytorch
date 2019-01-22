@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
 #if AT_NNPACK_ENABLED()
 #include "nnpack.h"
@@ -151,7 +151,8 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 }
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
-  return input.type().backend() == at::Backend::CPU &&
+  return at::_nnpack_available() &&
+         input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_strided() && // doesn't support strides
          !is_dilated() && // or dilation
@@ -321,7 +322,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   int64_t dim = k - 2;
 
-  AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
+  AT_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
@@ -466,10 +467,8 @@ at::Tensor _convolution_nogroup(
       } else {  /* dim == 4, non-dilated */
         if (params.use_nnpack(input)) {
 #if AT_NNPACK_ENABLED()
-          return at::nnpack_spatial_convolution(
-              input, weight, bias,
-              kernel_size[1], kernel_size[0],
-              params.padding[1], params.padding[0]);
+          return at::_nnpack_spatial_convolution(
+              input, weight, bias, padding);
 #endif
         } else {
           /* CPU implementation has specialized MM kernels

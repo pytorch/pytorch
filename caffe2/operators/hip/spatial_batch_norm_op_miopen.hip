@@ -136,9 +136,9 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   T* Y_data = Y->template mutable_data<T>();
 
   // See if we need to reshape.
-  if (N > 0 && X.dims() != miopen_input_dims_) {
+  if (N > 0 && X.sizes() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
-    miopen_input_dims_ = X.dims().vec();
+    miopen_input_dims_ = X.sizes().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -252,6 +252,8 @@ bool MIOpenSpatialBNOp::RunOnDevice() {
   }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<at::Half>()){
+    return DoRunWithType<at::Half, float>();
   } else {
     LOG(FATAL) << "Unsupported input types";
   }
@@ -275,8 +277,8 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.ndim(), 1);
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
-  if (N > 0 && X.dims() != miopen_input_dims_) {
-    miopen_input_dims_ = X.dims().vec();
+  if (N > 0 && X.sizes() != miopen_input_dims_) {
+    miopen_input_dims_ = X.sizes().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -336,6 +338,8 @@ bool MIOpenSpatialBNGradientOp::RunOnDevice() {
   }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   } else {
     LOG(FATAL) << "Unsupported input types";
   }

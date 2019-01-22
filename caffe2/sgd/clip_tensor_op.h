@@ -29,8 +29,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
     const auto* input_tensor_data = input_tensor.template data<float>();
     const auto* val_data = val.template data<float>();
 
-    auto* clipped = Output(0);
-    clipped->ResizeLike(input_tensor);
+    auto* clipped = Output(0, input_tensor.sizes(), at::dtype<float>());
     float* clipped_tensor_data = clipped->template mutable_data<float>();
 
     if (InputSize() > 2) {
@@ -51,7 +50,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
           &context_);
     } else {
       if (input_tensor_data != clipped_tensor_data) {
-        clipped->CopyFrom(input_tensor, &context_);
+        clipped->CopyFrom(input_tensor, /*async*/ true);
       }
     }
 

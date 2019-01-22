@@ -11,6 +11,7 @@
 
 namespace caffe2 {
 namespace math {
+
 namespace utils {
 
 MATH_UTILS_DECL bool Not(const bool x) {
@@ -135,6 +136,34 @@ CAFFE2_API void ComputeTransposedStrides(
     int* strides);
 
 } // namespace utils
+
+// Calculates ceil(a / b). User must be careful to ensure that there
+// is no overflow or underflow in the calculation.
+template <typename T>
+constexpr T DivUp(const T a, const T b) {
+  return (a + b - T(1)) / b;
+}
+
+// Rounds a up to the next highest multiple of b. User must be careful
+// to ensure that there is no overflow or underflow in the calculation
+// of divUp.
+template <typename T>
+constexpr T RoundUp(const T a, const T b) {
+  return DivUp<T>(a, b) * b;
+}
+
+// Returns log2(n) for a positive integer type
+template <typename T>
+constexpr int IntegerLog2(T n, int p = 0) {
+  return (n <= 1) ? p : IntegerLog2(n / 2, p + 1);
+}
+
+// Returns the next highest power-of-2 for an integer type
+template <typename T>
+constexpr T IntegerNextHighestPowerOf2(T v) {
+  return (IntegerIsPowerOf2(v) ? T(2) * v : (T(1) << (IntegerLog2(v) + 1)));
+}
+
 } // namespace math
 } // namespace caffe2
 

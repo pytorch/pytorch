@@ -49,7 +49,6 @@ class SpatialBNOp : public Operator<Context> {
     const auto& X = Input(INPUT);
     const auto& scale = Input(SCALE);
     const auto& bias = Input(BIAS);
-    auto* Y = Output(OUTPUT);
 
     const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
@@ -64,13 +63,15 @@ class SpatialBNOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(scale.numel(), C);
     CAFFE_ENFORCE_EQ(bias.numel(), C);
 
-    Y->ResizeLike(X);
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* scale_data = scale.template data<T>();
     const T* bias_data = bias.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    alpha_.Resize(C);
-    beta_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     if (is_test_) {
@@ -258,8 +259,8 @@ class SpatialBNOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
 
   INPUT_TAGS(
       INPUT,
@@ -317,23 +318,23 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(scale.numel(), C);
     CAFFE_ENFORCE_EQ(mean.numel(), C);
     CAFFE_ENFORCE_EQ(rstd.numel(), C);
-    auto* dX = Output(INPUT_GRAD);
-    auto* dscale = Output(SCALE_GRAD);
-    auto* dbias = Output(BIAS_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    at::IntList dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
-      dscale->ResizeLike(scale);
-      dbias->ResizeLike(scale);
+      dscale_sizes = scale.sizes();
+      dbias_sizes = scale.sizes();
     } else {
       const auto& dscale_sum = Input(AGGREGATE_SCALE_GRAD);
       const auto& dbias_sum = Input(AGGREGATE_BIAS_GRAD);
-      if (dscale != &dscale_sum) {
-        dscale->ResizeLike(dscale_sum);
-      }
-      if (dbias != &dbias_sum) {
-        dbias->ResizeLike(dbias_sum);
-      }
+      // Note: previously there was alias check to decide whether to call
+      // ResizeLike or not, since we only call Resize when the size does not match
+      // the size of cached Tensor, this check is not necessary
+      dscale_sizes = dscale_sum.sizes();
+      dbias_sizes = dbias_sum.sizes();
     }
+    auto* dscale = Output(SCALE_GRAD, dscale_sizes, at::dtype<T>());
+    auto* dbias = Output(BIAS_GRAD, dbias_sizes, at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* dY_data = dY.template data<T>();
     const T* scale_data = scale.template data<T>();
@@ -348,9 +349,12 @@ class SpatialBNGradientOp : public Operator<Context> {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
       return true;
     }
-    alpha_.Resize(C);
-    beta_.Resize(C);
-    gamma_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &gamma_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     T* gamma_data = gamma_.template mutable_data<T>();
@@ -442,9 +446,9 @@ class SpatialBNGradientOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
-  Tensor gamma_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
+  Tensor gamma_;
 
   INPUT_TAGS(
       INPUT,

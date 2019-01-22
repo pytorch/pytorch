@@ -54,6 +54,7 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
       const qnnp_status createStatus = qnnp_create_channel_shuffle_nc_x8(
         G /* groups */,
         C / G /* group channels */,
+        0 /* flags */,
         &this->qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

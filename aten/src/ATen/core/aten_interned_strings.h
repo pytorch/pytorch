@@ -43,6 +43,7 @@ _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _cholesky_helper) \
+_(aten, _cholesky_solve_helper) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, _convolution_nogroup) \
@@ -102,7 +103,6 @@ _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
-_(aten, _potrs_helper) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
@@ -139,8 +139,6 @@ _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
-_(aten, _th_all) \
-_(aten, _th_any) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_clamp) \
@@ -152,7 +150,6 @@ _(aten, _th_max) \
 _(aten, _th_median) \
 _(aten, _th_min) \
 _(aten, _th_mode) \
-_(aten, _th_norm) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -236,18 +233,21 @@ _(aten, broadcast_tensors) \
 _(aten, btrifact) \
 _(aten, btrifact_with_info) \
 _(aten, btrisolve) \
+_(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, combinations) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
@@ -523,7 +523,6 @@ _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, potri) \
-_(aten, potrs) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
@@ -626,6 +625,7 @@ _(aten, sub) \
 _(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
+_(aten, sum_to_size) \
 _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
@@ -683,6 +683,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, upsample_bicubic2d) \
+_(aten, upsample_bicubic2d_backward) \
+_(aten, upsample_bicubic2d_forward) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \

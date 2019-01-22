@@ -832,6 +832,44 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
+def fractional_max_pool2d_test(test_case):
+    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(1, 3, 5, 7),
+            fullname='FractionalMaxPool2d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                4, 3), _random_samples=random_samples),
+            input_size=(1, 3, 7, 6),
+            fullname='FractionalMaxPool2d_size')
+
+
+def fractional_max_pool3d_test(test_case):
+    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(2, 4, 5, 5, 5),
+            fullname='FractionalMaxPool3d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                4, 4, 4), _random_samples=random_samples),
+            input_size=(2, 4, 7, 7, 7),
+            fullname='FractionalMaxPool3d_size')
+    elif test_case == 'asymsize':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
+                10, 3, 2), _random_samples=random_samples),
+            input_size=(2, 4, 16, 7, 5),
+            fullname='FractionalMaxPool3d_asymsize')
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -874,6 +912,11 @@ new_module_tests = [
     multimarginloss_p_no_reduce_test(),
     multimarginloss_margin_no_reduce_test(),
     multimarginloss_weights_no_reduce_test(),
+    fractional_max_pool2d_test('ratio'),
+    fractional_max_pool2d_test('size'),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -1652,19 +1695,6 @@ new_module_tests = [
         test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
-        constructor=lambda: nn.FractionalMaxPool2d(
-            2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 5, 5),
-        fullname='FractionalMaxPool2d_ratio',
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
-            4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 7, 7),
-        fullname='FractionalMaxPool2d_size',
-        test_cuda=False,
-    ),
-    dict(
         module_name='PixelShuffle',
         constructor_args=(3,),
         input_size=(1, 9, 4, 4),
@@ -1683,7 +1713,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4),
         desc='nearest_scale_1d',
     ),
@@ -1701,7 +1731,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear', False),
+        constructor_args=(None, 4., 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_scale_1d',
     ),
@@ -1713,7 +1743,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear', True),
+        constructor_args=(None, 4., 'linear', True),
         input_size=(1, 2, 4),
         desc='linear_scale_1d_align_corners',
     ),
@@ -1731,7 +1761,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4, 4),
         desc='nearest_scale_2d',
     ),
@@ -1749,19 +1779,19 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'bilinear', False),
+        constructor_args=(None, 4., 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 2), 'bilinear', False),
+        constructor_args=(None, (2., 2.), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_shared_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear', False),
+        constructor_args=(None, (2., 1.), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d',
     ),
@@ -1773,9 +1803,58 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear', True),
+        constructor_args=(None, (2., 1.), 'bilinear', True),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', False),
+        input_size=(1, 2, 2, 3),
+        desc='bicubic_tuple_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4., 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 2.), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_shared_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 1.), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_tuple_2d_align_corners',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 1.), 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d_align_corners',
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
@@ -1791,7 +1870,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_scale_3d',
     ),
@@ -1809,7 +1888,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 3, 'trilinear', False),
+        constructor_args=(None, 3., 'trilinear', False),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
@@ -1823,7 +1902,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 3, 'trilinear', True),
+        constructor_args=(None, 3., 'trilinear', True),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
@@ -2208,6 +2287,8 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.mean()
     elif reduction == 'sum':
         return result.sum()
+    elif reduction == 'batchmean' and results.dim() != 0:
+        return result.sum() / result.size(0)
     return result
 
 
@@ -2637,7 +2718,7 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1, torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10)),
         legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
@@ -3013,7 +3094,7 @@ class ModuleTest(TestBase):
             test_case.assertEqual(cpu_output, gpu_output, self.precision)
 
             # Run backwards on CPU and GPU and compare results
-            for i in range(5):
+            for _ in range(5):
                 cpu_gradOutput = cpu_output.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)

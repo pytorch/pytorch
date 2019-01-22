@@ -1,16 +1,16 @@
 #pragma once
 
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/Context.h"
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/Exceptions.h"
-#include "c10/cuda/CUDAFunctions.h"
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/Context.h>
+#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/Exceptions.h>
+#include <c10/cuda/CUDAFunctions.h>
 
 #include <cstdint>
 
-#include "cuda_runtime_api.h"
-#include "cusparse.h"
-#include "cublas_v2.h"
+#include <cuda_runtime_api.h>
+#include <cusparse.h>
+#include <cublas_v2.h>
 
 namespace at {
 namespace cuda {
@@ -39,6 +39,19 @@ manage their own state. There is only a single CUDA context/state.
 /* Device info */
 inline int64_t getNumGPUs() {
     return c10::cuda::device_count();
+}
+
+/**
+ * In some situations, you may have compiled with CUDA, but no CUDA
+ * device is actually available.  Test for this case using is_available().
+ */
+inline bool is_available() {
+    int count;
+    cudaError_t err = cudaGetDeviceCount(&count);
+    if (err == cudaErrorInsufficientDriver) {
+      return false;
+    }
+    return count > 0;
 }
 
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();

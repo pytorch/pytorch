@@ -1,19 +1,19 @@
-#include "ATen/TypeDefault.h"
+#include <ATen/TypeDefault.h>
 
 // ${generated_comment}
 
-#include "ATen/core/SparseTensorRef.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/Functions.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/core/SparseTensorRef.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #include <c10/core/Scalar.h>
-#include "ATen/core/SparseTensorRef.h"
-#include "c10/core/Storage.h"
-#include "ATen/Tensor.h"
-#include "ATen/core/TensorOptions.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/SparseTensorUtils.h"
+#include <ATen/core/SparseTensorRef.h>
+#include <c10/core/Storage.h>
+#include <ATen/Tensor.h>
+#include <c10/core/TensorOptions.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/SparseTensorUtils.h>
 
 namespace at {
 
@@ -84,22 +84,16 @@ Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::functi
 }
 Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return _th_tensor(storage, 0, sizes, strides);
+  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return _th_tensor(storage, 0, sizes, strides);
+  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 
-Storage TypeDefault::storage(bool resizable) const {
-  return Storage(typeMeta(), 0, allocator(), resizable);
-}
-Storage TypeDefault::storage(size_t size, bool resizable) const {
-  return Storage(typeMeta(), size, allocator(), resizable);
-}
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return Storage(
       typeMeta(),
@@ -122,11 +116,6 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
     c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
   }
   return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
-}
-
-
-Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

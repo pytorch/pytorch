@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVector.h"
+#define TH_GENERIC_FILE "TH/generic/THVector.h"
 #else
 
 // Opaque C++ struct

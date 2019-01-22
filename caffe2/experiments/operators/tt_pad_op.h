@@ -44,8 +44,7 @@ class TTPadOp final : public Operator<Context> {
     auto X_dim0 = X.size(0);
     auto X_dim1 = X.size(1);
 
-    auto* X_orig_dim0 = Output(1);
-    X_orig_dim0->Resize(1);
+    auto* X_orig_dim0 = Output(1, {1}, at::dtype<int64_t>());
     *X_orig_dim0->template mutable_data<int64_t>() = X_dim0;
 
     if (X_dim0 % scale_ != 0) {

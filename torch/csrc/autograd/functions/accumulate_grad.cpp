@@ -1,10 +1,10 @@
-#include "torch/csrc/autograd/functions/accumulate_grad.h"
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/functions/tensor.h"
-#include "torch/csrc/autograd/functions/utils.h"
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/functions/utils.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -64,7 +64,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     // a thing never promised and documented, but used in some hacks seen
     // on the internet.
     if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
-      grad_variable.data() = new_grad.data() + grad_variable.data();
+      grad_variable.set_data(new_grad.data() + grad_variable.data());
     } else {
       grad_variable.data() += new_grad.data();
     }

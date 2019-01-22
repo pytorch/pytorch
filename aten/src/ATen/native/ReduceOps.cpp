@@ -1,13 +1,14 @@
-#include "ATen/native/ReduceOps.h"
+#include <ATen/native/ReduceOps.h>
 
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/WrapDimUtilsMulti.h"
-#include "ReduceOpsUtils.h"
-#include "TensorIterator.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <functional>
@@ -20,8 +21,12 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
+DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
-DEFINE_DISPATCH(norm_kernel);
+DEFINE_DISPATCH(norm_stub);
+DEFINE_DISPATCH(mean_stub);
+DEFINE_DISPATCH(and_stub);
+DEFINE_DISPATCH(or_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
@@ -95,10 +100,16 @@ static std::unique_ptr<TensorIterator> make_reduction(
   auto mask = make_dim_mask(dim, ndim);
   allocate_reduction_result(result, self, mask, keepdim, dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
-  if (self.type().scalarType() != dtype) {
-    return TensorIterator::reduce_op(viewed_result, self.to(dtype));
+
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  if (self.type().scalarType() == dtype ||
+      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result, self);
   }
-  return TensorIterator::reduce_op(viewed_result, self);
+  return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
 static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
@@ -110,7 +121,7 @@ static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
 }
 
 static inline Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
-  return at::_th_cumsum(integer_upcast(self, dtype), dim);
+  return at::legacy::th::_th_cumsum(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -130,7 +141,7 @@ static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_th_cumsum_out(result, self.toType(result.type().scalarType()), dim);
+  return at::legacy::th::_th_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -142,7 +153,7 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
 }
 
 static inline Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
-  return at::_th_cumprod(integer_upcast(self, dtype), dim);
+  return at::legacy::th::_th_cumprod(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -162,7 +173,7 @@ static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t di
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_th_cumprod_out(result, self.toType(result.type().scalarType()), dim);
+  return at::legacy::th::_th_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -174,29 +185,6 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
 }
 
 // ALL REDUCE #################################################################
-
-static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
-  ScalarType scalarType = self.type().scalarType();
-  AT_CHECK(
-      at::isFloatingType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
-  if (self.numel() > 0) {
-    Tensor result = at::native::sum(self);
-    return result.div_(self.numel());
-  } else {
-    return self.type().scalarTensor(std::numeric_limits<double>::quiet_NaN());
-  }
-}
-
-Tensor mean(const Tensor &self, ScalarType dtype) {
-  return at::native::mean(self, optional<ScalarType>(dtype));
-}
-
-Tensor mean(const Tensor &self) {
-  return at::native::mean(self, c10::nullopt);
-}
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
                             bool promote_integers=false) {
@@ -264,31 +252,27 @@ Tensor prod(const Tensor &self) {
   return at::native::prod(self, {}, false, c10::nullopt);
 }
 
-// \ALL REDUCE ################################################################
-
-// DIM REDUCE #################################################################
-
 static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
-                 bool keepdim, optional<ScalarType> dtype) {
-  ScalarType scalarType = result.type().scalarType();
+                 bool keepdim, optional<ScalarType> opt_dtype) {
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
-  at::native::sum_out(
-      result, self.toType(result.type().scalarType()), dim, keepdim);
-  if (result.numel() > 0 && self.ndimension() > 0) {
-    int64_t numel = n_dim_size(self, dim);
-    if (numel > 0) {
-      result.div_(numel);
-    } else {
-      // NumPy equivalent
-      result.fill_(std::numeric_limits<double>::quiet_NaN());
-    }
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    mean_stub(iter->device_type(), *iter);
   }
   return result;
 }
+
+// \ALL REDUCE ################################################################
+
+// DIM REDUCE #################################################################
 
 Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
   return at::native::mean_out(
@@ -300,6 +284,23 @@ Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) 
 
 Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::mean_out(result, self, dim, false, dtype);
+}
+
+static inline Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::mean_out(result, self, dim, keepdim, dtype);
+}
+
+static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
+  return at::native::mean(self, {}, false, dtype);
+}
+
+Tensor mean(const Tensor &self, ScalarType dtype) {
+  return at::native::mean(self, optional<ScalarType>(dtype));
+}
+
+Tensor mean(const Tensor &self) {
+  return at::native::mean(self, c10::nullopt);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
@@ -326,26 +327,6 @@ Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) 
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
   return at::native::prod_out(result, self, dim, false, dtype);
-}
-
-static inline Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
-  ScalarType scalarType = self.type().scalarType();
-  AT_CHECK(
-      at::isFloatingType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
-  Tensor result = at::native::sum(self, dim, keepdim);
-  if (result.numel() > 0 && self.ndimension() > 0) {
-    int64_t numel = n_dim_size(self, dim);
-    if (numel > 0) {
-      result.div_(numel);
-    } else {
-      // NumPy equivalent
-      result.fill_(std::numeric_limits<double>::quiet_NaN());
-    }
-  }
-  return result;
 }
 
 Tensor mean(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
@@ -406,66 +387,94 @@ Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
   return at::native::logsumexp_out(result, self, dim, keepdim);
 }
 
-Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
-    return result;
-  if (self.is_contiguous() && result.is_contiguous()) {
-    _dimreduce_setup(result, self, dim);
-    norm_kernel(kCPU, result, self, p, dim);
-    if (!keepdim) {
-      result.squeeze_(dim);
-    }
-    return result;
-  } else {
-    return at::_th_norm_out(result, self, p, dim, keepdim);
-  }
-}
-
-Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
+static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
+                               IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto p = opt_p.value_or(2.0);
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
-    return result;
+
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      toString(scalarType),
+      " instead.");
+
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("norm", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.zero_();
   } else {
-    if (self.is_cuda()) {
-      return at::_th_norm_out(result, self, p, dim, keepdim);
-    } else {
-      return _norm_out_cpu(result, self, p, dim, keepdim);
-    }
+    norm_stub(iter->device_type(), *iter, p);
   }
+  return result;
 }
 
-Tensor _norm(const Tensor &self, Scalar p) {
+static inline Tensor _norm(const Tensor &self, Scalar p) {
   if (self.is_sparse()) {
     return at::native_norm(self, p);
   } else {
     AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
              "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
     AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
-    if (self.is_cuda()) {
-      return at::_th_norm(self, p);
-    } else {
-      if (self.is_contiguous()) {
-        Tensor result = CPU(kFloat).scalarTensor(0).toType(self.type());
-        norm_kernel(kCPU, result, self, p, c10::nullopt);
-        return result;
-      } else {
-        return at::_th_norm(self, p);
-      }
-    }
+
+    Tensor result;
+    return at::native::norm_out(result, self, p, {}, false, c10::nullopt);
   }
 }
 
-Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::norm_out(result, self, p, dim, keepdim);
+Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) {
+  return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
+Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim) {
+  return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
+}
+
+static Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim,
+            optional<ScalarType> opt_dtype) {
+  Tensor result;
+  return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
+}
+
+Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) {
+  return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
+}
+
+Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
+  return at::native::norm(self, p, {}, false, optional<ScalarType>(dtype));
+}
+
+Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim) {
+  return at::native::norm(self, p, dim, keepdim, c10::nullopt);
+}
+
+// leave it so we support sparse tensors
 Tensor norm(const Tensor& self, Scalar p) {
   return at::native::_norm(self, p);
+}
+
+inline Tensor & _all(Tensor & result, std::unique_ptr<TensorIterator> & iter) {
+  if (iter->numel() == 0) {
+    result.fill_(1);
+  } else {
+    and_stub(iter->device_type(), *iter);
+  }
+
+  return result;
+}
+
+Tensor all(const Tensor& self) {
+  AT_CHECK(self.type().backend() == Backend::CPU ||
+    self.type().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
+    "backend, got: ", toString(self.type().backend()));
+  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte,
+    "all only supports torch.uint8 dtype");
+
+  Tensor result = at::empty({0}, self.options());
+  auto iter = make_reduction(
+    "all", result, self, {}, false, at::ScalarType::Byte);
+  return _all(result, iter);
 }
 
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
@@ -474,15 +483,42 @@ Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "all only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte, "all only supports torch.uint8 dtype");
+  AT_CHECK(self.type().backend() == Backend::CPU ||
+    self.type().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
+    "backend, got: ", toString(self.type().backend()));
+  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte,
+    "all only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
-    return at::_th_all_out(result, self, dim, keepdim);
+    auto iter = make_reduction(
+      "all", result, self, dim, keepdim, at::ScalarType::Byte);
+    return _all(result, iter);
   }
+}
+
+inline Tensor & _any(Tensor & result, std::unique_ptr<TensorIterator> & iter) {
+  if (iter->numel() == 0) {
+    result.fill_(0);
+  } else {
+    or_stub(iter->device_type(), *iter);
+  }
+
+  return result;
+}
+
+Tensor any(const Tensor& self) {
+  AT_CHECK(self.type().backend() == Backend::CPU ||
+    self.type().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
+    "backend, got: ", toString(self.type().backend()));
+  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte,
+    "any only supports torch.uint8 dtype");
+
+  Tensor result = at::empty({0}, self.options());
+  auto iter = make_reduction(
+    "any", result, self, {}, false, at::ScalarType::Byte);
+  return _any(result, iter);
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
@@ -491,15 +527,33 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "any only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte, "any only supports torch.uint8 dtype");
+  AT_CHECK(self.type().backend() == Backend::CPU ||
+    self.type().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
+    "backend, got: ", toString(self.type().backend()));
+  AT_CHECK(self.type().scalarType() == at::ScalarType::Byte,
+    "any only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
-    return at::_th_any_out(result, self, dim, keepdim);
+    auto iter = make_reduction(
+      "any", result, self, dim, keepdim, at::ScalarType::Byte);
+    return _any(result, iter);
   }
+}
+
+static Tensor &std_var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim, bool take_sqrt) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(NAN);
+  } else {
+    std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
+  }
+  return result;
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
@@ -507,24 +561,16 @@ Tensor var(const Tensor& self, bool unbiased) {
            "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_th_var(self, unbiased);
+  return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_var(self, unbiased);
 }
 
-Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor var(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &var_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {
-    return result;
-  } else {
-    return at::_th_var_out(result, self, dim, unbiased, keepdim);
-  }
+Tensor &var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
+  return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
@@ -532,24 +578,16 @@ Tensor std(const Tensor& self, bool unbiased) {
            "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_th_std(self, unbiased);
+  return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_std(self, unbiased);
 }
 
-Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor std(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &std_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {
-    return result;
-  } else {
-    return at::_th_std_out(result, self, dim, unbiased, keepdim);
-  }
+Tensor &std_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
+  return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 
 }} // namespace at::native

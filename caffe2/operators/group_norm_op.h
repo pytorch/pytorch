@@ -47,8 +47,8 @@ class GroupNormOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* Y = Output(OUTPUT);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     T* mu_data = nullptr;
     T* rsig_data = nullptr;
     if (OutputSize() == 3) {
@@ -57,8 +57,8 @@ class GroupNormOp final : public Operator<Context> {
       mu_data = mu->template mutable_data<T>();
       rsig_data = rsig->template mutable_data<T>();
     } else {
-      mu_.Resize(N, G);
-      rsig_.Resize(N, G);
+      ReinitializeTensor(&mu_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      ReinitializeTensor(&rsig_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
       mu_data = mu_.template mutable_data<T>();
       rsig_data = rsig_.template mutable_data<T>();
     }
@@ -88,8 +88,8 @@ class GroupNormOp final : public Operator<Context> {
       T* mu,
       T* rsig) {
     const int C = G * D;
-    scale_.Resize(N, C);
-    bias_.Resize(N, C);
+    ReinitializeTensor(&scale_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&bias_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* scale_data = scale_.template mutable_data<T>();
     T* bias_data = bias_.template mutable_data<T>();
     if (order_ == StorageOrder::NCHW) {
@@ -175,10 +175,10 @@ class GroupNormOp final : public Operator<Context> {
   const StorageOrder order_;
   const bool is_test_;
 
-  Tensor mu_{Context::GetDeviceType()};
-  Tensor rsig_{Context::GetDeviceType()};
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
+  Tensor mu_;
+  Tensor rsig_;
+  Tensor scale_;
+  Tensor bias_;
 
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
@@ -218,12 +218,10 @@ class GroupNormGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* dX = Output(INPUT_GRAD);
-    auto* dgamma = Output(GAMMA_GRAD);
-    auto* dbeta = Output(BETA_GRAD);
-    dX->ResizeLike(X);
-    dgamma->ResizeLike(gamma);
-    dbeta->ResizeLike(beta);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    auto* dgamma = Output(GAMMA_GRAD, gamma.sizes(), at::dtype<T>());
+    auto* dbeta = Output(BETA_GRAD, beta.sizes(), at::dtype<T>());
     return RunOnDeviceImpl(
         N,
         G,
@@ -257,8 +255,8 @@ class GroupNormGradientOp final : public Operator<Context> {
   const int group_;
   const StorageOrder order_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
 
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta

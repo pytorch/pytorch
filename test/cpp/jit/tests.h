@@ -16,17 +16,18 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
-#define ASSERT_ANY_THROW(statement)                                      \
-  bool threw = false;                                                    \
-  try {                                                                  \
-    (void)statement;                                                     \
-  } catch (const std::exception& e) {                                    \
-    threw = true;                                                        \
-  }                                                                      \
-  ASSERT_TRUE(threw);                                                    \
+#define ASSERT_ANY_THROW(statement)   \
+  bool threw = false;                 \
+  try {                               \
+    (void)statement;                  \
+  } catch (const std::exception& e) { \
+    threw = true;                     \
+  }                                   \
+  ASSERT_TRUE(threw);
 
 #endif // defined(USE_GTEST)
 
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/assertions.h"
@@ -45,16 +46,16 @@
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
-#include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
@@ -271,13 +272,14 @@ void testFusion() {
   testConcat(2);
 }
 
-struct Attr : public Attributes<Attr> {};
 void testAttributes() {
+  Graph g;
   auto one = attr::alpha;
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Attr attr;
+  Node *n = g.create(Symbol::fromQualString("foo::bar"));
+  Node &attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -289,7 +291,8 @@ void testAttributes() {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Attr attr2;
+  Node *n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node &attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
   attr2.f_(one, 5);
@@ -439,38 +442,39 @@ std::shared_ptr<Graph> build_lstm() {
   return r;
 }
 
-void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std::vector<at::Tensor> & outputs) {
+std::vector<at::Tensor> run(
+    InterpreterState& interp,
+    const std::vector<at::Tensor>& inputs) {
   std::vector<IValue> stack(inputs.begin(), inputs.end());
   interp.run(stack);
-  outputs.clear();
-  for (auto& ivalue : stack) {
-    outputs.push_back(std::move(ivalue).toTensor());
-  }
+  return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
 std::pair<tensor_list, tensor_list> runGradient(
     Gradient& grad_spec,
     tensor_list& tensors_in,
     tensor_list& tensor_grads_in) {
-  tensor_list tensors_out, tensor_grads_out;
+  static const auto as_tensorlist = [](const Stack& stack) {
+    return fmap(stack, [](const IValue& i) { return i.toTensor(); });
+  };
   Code f_code{grad_spec.f}, df_code{grad_spec.df};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
-  run(f_interpreter, tensors_in, tensors_out);
+  auto f_stack = fmap<IValue>(tensors_in);
+  f_interpreter.run(f_stack);
 
-  tensor_list df_inputs;
-  df_inputs.insert(
-      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  Stack df_stack;
+  df_stack.insert(
+      df_stack.end(), tensor_grads_in.begin(), tensor_grads_in.end());
   for (auto offset : grad_spec.df_input_captured_inputs)
-    df_inputs.push_back(tensors_in[offset]);
+    df_stack.push_back(tensors_in[offset]);
   for (auto offset : grad_spec.df_input_captured_outputs)
-    df_inputs.push_back(tensors_out[offset]);
-  run(df_interpreter, df_inputs, tensor_grads_out);
+    df_stack.push_back(f_stack[offset]);
+  df_interpreter.run(df_stack);
 
   // Outputs of f needs to be sliced
-  tensors_out.erase(
-      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
-  return std::make_pair(tensors_out, tensor_grads_out);
+  f_stack.erase(f_stack.begin() + grad_spec.f_real_outputs, f_stack.end());
+  return std::make_pair(as_tensorlist(f_stack), as_tensorlist(df_stack));
 }
 
 void assertAllClose(const tensor_list& a, const tensor_list& b) {
@@ -496,9 +500,8 @@ void testInterp() {
 
   auto lstm_g = build_lstm();
   Code lstm_function(lstm_g);
-  std::vector<at::Tensor> outputs;
   InterpreterState lstm_interp(lstm_function);
-  run(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
+  auto outputs = run(lstm_interp, {input[0], hx, cx, w_ih, w_hh});
   std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
 
   // std::cout << almostEqual(outputs[0],hx) << "\n";
@@ -515,13 +518,14 @@ void testTHNNConv() {
 
   // make inputs
   at::Tensor input = torch::randn(input_size);
-  at::Tensor weight = torch::randn({out_channels, input_size[1], kernel_size[0], kernel_size[1]});
+  at::Tensor weight = torch::randn(
+      {out_channels, input_size[1], kernel_size[0], kernel_size[1]});
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
   at::Tensor output, finput, fgradinput;
-  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(input, weight, kernel_size,
-								 bias, stride, padding);
+  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(
+      input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
   at::Tensor grad_output = torch::randn_like(output);
@@ -530,9 +534,16 @@ void testTHNNConv() {
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
-  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(grad_output, input, weight,
-									  kernel_size, stride, padding,
-									  finput, fgradinput, {true, true, true});
+  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
+      grad_output,
+      input,
+      weight,
+      kernel_size,
+      stride,
+      padding,
+      finput,
+      fgradinput,
+      {true, true, true});
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
@@ -544,7 +555,9 @@ void testTHNNConv() {
   auto weightg = graph->addInput("weight");
   auto biasg = graph->addInput("bias");
 
-  Value* conv = graph->insert(aten::thnn_conv2d_forward, {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
+  Value* conv = graph->insert(
+      aten::thnn_conv2d_forward,
+      {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
   auto outputs = conv->node()->outputs();
   for (auto output : outputs) {
     graph->registerOutput(output);
@@ -572,7 +585,7 @@ void testTHNNConv() {
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
   std::tie(tensors_out, tensor_grads_out) =
-    runGradient(grad_spec, tensors_in, tensor_grads_in);
+      runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
@@ -589,7 +602,9 @@ void testTHNNConv() {
 }
 
 void testATenNativeBatchNorm() {
-  // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
+  // running_mean, Tensor running_var, bool training, float momentum, float eps)
+  // -> (Tensor, Tensor, Tensor)
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
   bool training = true;
   float momentum = 0.9;
@@ -610,7 +625,15 @@ void testATenNativeBatchNorm() {
 
   // run forward eagerly
   at::Tensor output, savemean, saveinvstd;
-  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(input, weight, bias, running_mean_eager, running_var_eager, training, momentum, eps);
+  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(
+      input,
+      weight,
+      bias,
+      running_mean_eager,
+      running_var_eager,
+      training,
+      momentum,
+      eps);
 
   // make grad_outputs
   at::Tensor grad_output = torch::randn_like(output);
@@ -619,10 +642,21 @@ void testATenNativeBatchNorm() {
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
-  // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(grad_output, input, weight,
-										running_mean_eager, running_var_eager,
-										savemean, saveinvstd, training, eps, {true, true, true});
+  // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor
+  // weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor
+  // save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor,
+  // Tensor, Tensor)
+  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(
+      grad_output,
+      input,
+      weight,
+      running_mean_eager,
+      running_var_eager,
+      savemean,
+      saveinvstd,
+      training,
+      eps,
+      {true, true, true});
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
@@ -636,7 +670,16 @@ void testATenNativeBatchNorm() {
   auto running_meang = graph->addInput("running_mean");
   auto running_varg = graph->addInput("running_var");
 
-  Value* bn = graph->insert(aten::native_batch_norm, {inputg, weightg, biasg, running_meang, running_varg, training_val, momentum_val, eps_val});
+  Value* bn = graph->insert(
+      aten::native_batch_norm,
+      {inputg,
+       weightg,
+       biasg,
+       running_meang,
+       running_varg,
+       training_val,
+       momentum_val,
+       eps_val});
   auto outputs = bn->node()->outputs();
   for (auto output : outputs) {
     graph->registerOutput(output);
@@ -666,7 +709,7 @@ void testATenNativeBatchNorm() {
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
   std::tie(tensors_out, tensor_grads_out) =
-    runGradient(grad_spec, tensors_in, tensor_grads_in);
+      runGradient(grad_spec, tensors_in, tensor_grads_in);
 
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
@@ -770,15 +813,20 @@ void testADFormulas() {
        [](const VL& v) -> VL { return {v[0].tanh()}; }},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
       {"view",
-        unary_pointwise_2d,
-        [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
+       unary_pointwise_2d,
+       [](const VL& v) -> VL {
+         return {v[0].view({3, 2})};
+       }},
       {"expand",
-        {{2, 1}},
-        [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
+       {{2, 1}},
+       [](const VL& v) -> VL {
+         return {v[0].expand({2, 3})};
+       }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
-      // TODO: enable once we'll be able to capture lists across forward-backward
+      // TODO: enable once we'll be able to capture lists across
+      // forward-backward
       //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return
       // fmap<Variable>(v[0].chunk(4, 1)); }},
       //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return
@@ -836,7 +884,7 @@ void testDifferentiate(std::ostream& out = std::cout) {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  std::vector<size_t> expected_captured_outputs = {1};
+  std::vector<size_t> expected_captured_outputs = {1, 2};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
   ASSERT_EQ(grad_spec.f_real_outputs, 1);
@@ -860,8 +908,10 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
-  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
+  auto a_var = autograd::make_variable(
+      at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(
+      at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
   PropagateInputShapes(graph);
   PropagateRequiresGrad(graph);
@@ -869,15 +919,62 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_input_vjps = {1, 2}; // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
-  ASSERT_EQ(grad_spec.f_real_outputs, 2); // we need one temporary %4 = (d + a)
+  ASSERT_EQ(grad_spec.f_real_outputs, 2);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, std::vector<size_t>({0}));
-  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2}));
+  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
   out << *grad_spec.f;
   out << *grad_spec.df;
   out << "\n";
+}
+
+void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
+  // Build up a fake graph with a FusionGroup
+  auto createGraphWithNames = [](std::string cname, std::string dname) {
+    auto graph = std::make_shared<Graph>();
+    at::ScalarType s = at::ScalarType::Float;
+    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+    auto a = SymbolicVariable::asNewInput(*graph, type);
+    auto b = SymbolicVariable::asNewInput(*graph, type);
+    auto c = a * b;
+    auto d = c * a;
+    c.value()->setUniqueName(cname);
+    d.value()->setUniqueName(dname);
+    graph->registerOutput(d.value());
+    torch::jit::overrideCanFuseOnCPU(true);
+    FuseGraph(graph);
+    torch::jit::overrideCanFuseOnCPU(false);
+    return graph;
+  };
+
+  auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
+    const auto& nodes = graph->nodes();
+    auto maybe_fusion_group =
+        std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+          return node->kind() == prim::FusionGroup;
+        });
+    JIT_ASSERTM(
+        maybe_fusion_group != nodes.end(),
+        "testRegisterFusionCachesKernel: could not create FusionGroup");
+    return *maybe_fusion_group;
+  };
+
+  // Create two alpha-equivalent fusion groups
+  auto graph1 = createGraphWithNames("c1", "d1");
+  auto fg1 = getFusionGroup(graph1);
+
+  auto graph2 = createGraphWithNames("c2", "d2");
+  auto fg2 = getFusionGroup(graph2);
+
+  // Register both with the fusion compiler.
+  auto expected_key = registerFusion(fg1);
+  auto second_key = registerFusion(fg2);
+
+  // Because the graphs are alpha-equivalent, they should return the same key
+  // and therefore share a KernelSpec to share kernels for specializations
+  ASSERT_EQ(second_key, expected_key);
 }
 
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
@@ -1171,7 +1268,8 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
-    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(
+        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
@@ -1199,7 +1297,8 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].name(), "a");
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "b");
-    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(
+        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
     ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
@@ -1361,29 +1460,33 @@ void testSchemaParser() {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments().at(0)
-                                              .type()->expect<ListType>()
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
+                                              .at(0)
+                                              .type()
+                                              ->expect<ListType>()
                                               ->getElementType()
                                               ->expect<ListType>()
                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments().at(0)
-                                            .type()->expect<ListType>()
-                                            ->getElementType()
-                                            ->expect<ListType>()
-                                            ->getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
+                                              .at(0)
+                                              .type()
+                                              ->expect<ListType>()
+                                              ->getElementType()
+                                              ->expect<ListType>()
+                                              ->getElementType()));
 
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
-  auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
+  auto s3 =
+      parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
   ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s4.arguments().at(0)
-                                          .type()->expect<FutureType>()
-                                          ->getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(
+      s4.arguments().at(0).type()->expect<FutureType>()->getElementType()));
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
@@ -1486,9 +1589,9 @@ void testTopologicalIndex() {
   }
 }
 
-
 std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
-  return std::unique_ptr<detail::DynamicDAG<std::string>>(new detail::DynamicDAG<std::string>());
+  return std::unique_ptr<detail::DynamicDAG<std::string>>(
+      new detail::DynamicDAG<std::string>());
 }
 
 void testNewVertex() {
@@ -1737,20 +1840,20 @@ struct TopoMoveTestFixture {
   bool moveBeforeTopologicallyValid(
       const std::string& toInsert,
       const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
-                                                Node* insertPoint) {
-      return toInsert->moveBeforeTopologicallyValid(insertPoint, *aliasDb);
-    };
+    std::function<bool(Node*, Node*)> func =
+        [this](Node* toInsert, Node* insertPoint) {
+          return aliasDb->moveBeforeTopologicallyValid(toInsert, insertPoint);
+        };
     return moveWithChecks(toInsert, insertPoint, func);
   }
 
   bool moveAfterTopologicallyValid(
       const std::string& toInsert,
       const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
-                                                Node* insertPoint) {
-      return toInsert->moveAfterTopologicallyValid(insertPoint, *aliasDb);
-    };
+    std::function<bool(Node*, Node*)> func =
+        [this](Node* toInsert, Node* insertPoint) {
+          return aliasDb->moveAfterTopologicallyValid(toInsert, insertPoint);
+        };
     return moveWithChecks(toInsert, insertPoint, func);
   }
 
@@ -1934,15 +2037,15 @@ void testAliasAnalysis() {
 
     graph->lint();
 
-    const auto aliasDb = AliasAnalysis(graph);
+    auto aliasDb = AliasAnalysis(graph);
     // Can't move past a mutation of a used value
-    JIT_ASSERT(!c->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
-    JIT_ASSERT(d->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
+    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
 
     // b should alias to a (since they are both inputs)
     JIT_ASSERT(
-        !addsB->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
-    JIT_ASSERT(addsB->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+        !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
+    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
 
     graph->lint();
   }
@@ -1959,12 +2062,11 @@ void testAliasAnalysis() {
     auto c = graph->insert(aten::add, {fresh, aliasesB});
     graph->lint();
 
-    const auto aliasDb = AliasAnalysis(graph);
-
-    JIT_ASSERT(!aliasesB->node()->moveAfterTopologicallyValid(
-        mutatesAliasOfB->node(), aliasDb));
-    JIT_ASSERT(!usesB->node()->moveAfterTopologicallyValid(
-        mutatesAliasOfB->node(), aliasDb));
+    auto aliasDb = AliasAnalysis(graph);
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        aliasesB->node(), mutatesAliasOfB->node()));
+    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        usesB->node(), mutatesAliasOfB->node()));
   }
 }
 } // namespace

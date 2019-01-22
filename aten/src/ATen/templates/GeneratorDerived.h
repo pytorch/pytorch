@@ -4,13 +4,13 @@
 
 #include <$header>
 
-#include "ATen/core/Generator.h"
+#include <ATen/core/Generator.h>
 
 namespace at {
 
 class Context;
 struct ${name}Generator : public Generator {
-  ${name}Generator(Context * context);
+  CAFFE2_API ${name}Generator(Context * context);
   CAFFE2_API virtual ~${name}Generator();
 
   CAFFE2_API virtual ${name}Generator& copy(const Generator& from) override;

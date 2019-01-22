@@ -146,9 +146,8 @@ bool CuDNNDropoutOp::DoRunWithType() {
     }
     return true;
   } else {
-    auto* mask = Output(1);
     // Reshape tensor descriptors if necessary
-    if (X.sizes() != cudnn_input_dims_ && !is_test_) {
+    if (X.sizes() != cudnn_input_dims_) {
       CAFFE_ENFORCE(scratch_blob_);
       Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
       cudnn_input_dims_ = X.sizes().vec();
@@ -165,7 +164,6 @@ bool CuDNNDropoutOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
           data_desc_, &reserve_space_size_in_bytes_));
 
-      mask->Resize(reserve_space_size_in_bytes_);
       states->Resize(states_size_in_bytes_);
 
       if (!states_initialized_) {
@@ -187,6 +185,10 @@ bool CuDNNDropoutOp::DoRunWithType() {
         states_initialized_ = true;
       }
     }
+    auto* mask = Output(
+        1,
+        {static_cast<int64_t>(reserve_space_size_in_bytes_)},
+        at::dtype<uint8_t>());
     CUDNN_ENFORCE(cudnnDropoutForward(
         cudnn_wrapper_.inline_cudnn_handle(),
         dropout_desc_,

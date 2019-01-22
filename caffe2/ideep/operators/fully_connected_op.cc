@@ -101,9 +101,17 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
 
     ideep::inner_product_backward_weights::compute(X_in, dY, *dfilter, *dbias);
 
+    /**
+     * In mkl-dnn,weight gradient shape is determined by X_in,
+     * so we should ensure that weight gradient shape is consistent with weight shape.
+     */
+    if (dfilter->get_dims() != filter.get_dims()) {
+      dfilter->reshape(filter.get_dims());
+    }
+
     if (OutputSize() > INPUT_GRAD) {
       ideep::inner_product_backward_data::compute(
-          dY, filter_in, X_in.get_dims(), *Output(INPUT_GRAD));
+          dY, filter_in, X.get_dims(), *Output(INPUT_GRAD));
     }
 
     return true;

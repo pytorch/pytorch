@@ -1,11 +1,11 @@
-#include "torch/csrc/autograd/engine.h"
+#include <torch/csrc/autograd/engine.h>
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -26,12 +26,6 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
-
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <THC/THC.h>
-#include <ATen/cuda/CUDAGuard.h>
-#endif
 
 namespace torch { namespace autograd {
 
@@ -71,9 +65,16 @@ struct FunctionTask {
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+// Empty FunctionTask are first.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    if (!t1.fn) {
+      return false;
+    } else if (!t2.fn) {
+      return true;
+    } else {
+      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    }
   }
 };
 
@@ -206,17 +207,20 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#ifdef USE_CUDA
   // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with USE_CUDA, but
+  // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  at::cuda::OptionalCUDAGuard guard;
+  at::OptionalDeviceGuard guard;
   if (device != -1) {
-    guard.set_index(device);
+    if (at::hasCUDA()) {
+      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+    }
+    if (at::hasHIP()) {
+      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    }
   }
-#endif
   worker_device = device;
   thread_main(nullptr);
 }
@@ -297,7 +301,7 @@ static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
+static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
@@ -340,7 +344,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(grads[i], metadata.shape());
+      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
@@ -399,7 +403,7 @@ static variable_list call_function(FunctionTask& task) {
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+    return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
 }
@@ -628,14 +632,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = 0;
-#ifdef USE_CUDA
-  // check for case of compiled with CUDA but no available devices
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
-    cudaGetLastError();
-    num_devices = 0;
-  }
-#endif
+  int num_devices = at::getNumGPUs();
   // One for CPU, plus one for every GPU device
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);

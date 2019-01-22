@@ -11,10 +11,8 @@ TARGET_COMPILE_DEFINITIONS(shm PRIVATE
 )
 
 target_include_directories(shm PRIVATE
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
-  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
@@ -26,3 +24,7 @@ INSTALL(TARGETS shm
           LIBRARY DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}"
           ARCHIVE DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}")
 INSTALL(FILES libshm.h DESTINATION "include")
+
+if (MSVC AND NOT TORCH_STATIC)
+  INSTALL(FILES $<TARGET_PDB_FILE:shm> DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}" OPTIONAL)
+endif()

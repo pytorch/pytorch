@@ -65,7 +65,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+    for compiler in cc c++ gcc g++; do
       (
         echo "#!/bin/sh"
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
@@ -79,8 +79,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  python tools/amd_build/build_pytorch_amd.py
-  python tools/amd_build/build_caffe2_amd.py
+  python tools/amd_build/build_amd.py
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
@@ -130,7 +129,7 @@ fi
 git add -f build/bin
 
 # Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
@@ -139,7 +138,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
 fi
 
 # Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   mkdir -p c10/build
   pushd c10/build
   cmake ..

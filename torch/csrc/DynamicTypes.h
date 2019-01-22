@@ -2,11 +2,11 @@
 
 // Provides conversions between Python tensor objects and at::Tensor.
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/Device.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 
 #include <memory>
 #include <string>

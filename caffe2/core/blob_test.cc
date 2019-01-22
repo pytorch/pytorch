@@ -587,6 +587,11 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.numel(), large_number * 100);
 }
 
+TEST(TensorTest, UndefinedTensor) {
+  Tensor x;
+  EXPECT_FALSE(x.defined());
+}
+
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
   int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
@@ -1142,10 +1147,12 @@ TEST(TensorSerialization, MistakenlySerializingDtypeUninitializedTensor) {
   LOG(INFO) << "serialized proto: " << b.DebugString();
 
   Blob new_blob;
+  // Deserializing an empty Tensor gives a {0}-dim, float CPU Tensor
   DeserializeBlob(output, &new_blob);
   const Tensor& new_tensor = new_blob.Get<Tensor>();
   LOG(INFO) << "tensor " << new_tensor.DebugString();
-  EXPECT_FALSE(new_tensor.dtype_initialized());
+  EXPECT_TRUE(new_tensor.dtype_initialized());
+  LOG(INFO) << "dtype:" << new_tensor.dtype();
   EXPECT_EQ(0, new_tensor.numel());
   EXPECT_EQ(1, new_tensor.dim());
 }

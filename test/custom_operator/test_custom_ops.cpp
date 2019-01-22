@@ -1,4 +1,5 @@
 #include <torch/script.h>
+#include <torch/cuda.h>
 
 #include "op.h"
 
@@ -147,7 +148,7 @@ int main(int argc, const char* argv[]) {
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
   test_move_to_dtype(path_to_exported_script_module);
 
-  if (torch::globalContext().getNumGPUs() > 0) {
+  if (torch::cuda::device_count() > 0) {
     test_move_to_device(path_to_exported_script_module);
   }
 

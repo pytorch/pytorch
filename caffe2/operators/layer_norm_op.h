@@ -33,7 +33,7 @@ class LayerNormOp final : public Operator<Context> {
     auto* Y = Output(0);
     const int canonical_axis = X.canonical_axis_index(axis_);
     std::vector<int64_t> moments_dims(
-        X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+        X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
     moments_dims.push_back(1);
     auto* mean = Output(1, moments_dims, at::dtype<T>());
     auto* sig = Output(2, moments_dims, at::dtype<T>());
@@ -126,17 +126,17 @@ class LayerNormGradientOp final : public Operator<Context> {
     const auto& mean = Input(2);
     const auto& sig = Input(3);
     const auto& X = Input(4);
-    auto* dX = Output(0);
+
     const int canonical_axis = X.canonical_axis_index(axis_);
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
 
-    dX->ResizeLike(X);
-    ds_.Resize(M);
-    db_.Resize(M);
-    dY_scale_.Resize(M);
-    X_scale_.Resize(M);
-    bias_.Resize(M);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    ReinitializeTensor(&ds_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&db_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&dY_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&X_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(&bias_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* mean_data = mean.template data<T>();
@@ -200,11 +200,11 @@ class LayerNormGradientOp final : public Operator<Context> {
 
   const int axis_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
-  Tensor dY_scale_{Context::GetDeviceType()};
-  Tensor X_scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
+  Tensor dY_scale_;
+  Tensor X_scale_;
+  Tensor bias_;
 };
 
 } // namespace caffe2

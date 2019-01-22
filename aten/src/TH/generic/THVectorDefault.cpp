@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVectorDefault.cpp"
+#define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
 #include <TH/THRandom.h>

@@ -2,7 +2,7 @@
 #include <unordered_set>
 #include <vector>
 #include <ATen/core/interned_strings.h>
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 namespace c10 {
 class AliasInfo {
@@ -50,7 +50,8 @@ class AliasInfo {
   }
 
   // TODO this doesn't check any contained types yet
-  bool isSubsetOf(const AliasInfo& other) {
+  // non-strict: returns true if self.sets() == other.sets()
+  bool isSubsetOf(const AliasInfo& other) const {
     for (const auto& alias : this->sets()) {
       if (other.sets().count(alias) == 0) {
         return false;

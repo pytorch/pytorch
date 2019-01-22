@@ -138,7 +138,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, bool>());
+      .def(py::init<const std::string&, int, int, bool>());
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, ::c10d::Store&>());
@@ -383,7 +383,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               // Use the hostname to resolve the network address to
               // use. Note: if the hostname does not resolve to an address (e.g.
               // because of misconfigured /etc/hosts file), this will not work.
-              std::array<char, HOST_NAME_MAX> hostname;
+              std::array<char, HOST_NAME_MAX> hostname{};
               auto rv = gethostname(hostname.data(), hostname.size());
               if (rv != 0) {
                 throw std::system_error(errno, std::system_category());

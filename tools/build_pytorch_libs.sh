@@ -7,8 +7,21 @@
 # build process.
 #
 # TODO: Replace this with the root-level CMakeLists.txt
+#
+# To build on Android:
+# ANDROID_NDK=~/Android/Sdk/ndk-bundle/ BUILD_TORCH=ON ONNX_NAMESPACE=onnx_torch PYTORCH_PYTHON=/usr/bin/python3 PROTOBUF_PROTOC_EXECUTABLE=../build_host_protoc/bin/protoc ANDROID_ABI=x86 ../tools/build_pytorch_libs.sh caffe2
 
-set -ex
+set -e
+if [[ $VERBOSE_SCRIPT == '1' ]]; then
+  set -x
+  report() {
+    echo "$@"
+  }
+else
+  report() {
+    :
+  }
+fi
 
 SYNC_COMMAND="cp"
 if [ -x "$(command -v rsync)" ]; then
@@ -163,7 +176,7 @@ elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
   BUILD_TYPE="RelWithDebInfo"
 fi
 
-echo "Building in $BUILD_TYPE mode"
+report "Building in $BUILD_TYPE mode"
 
 function path_remove {
   # Delete path by parts so we can never accidentally remove sub paths
@@ -183,6 +196,30 @@ function path_remove {
 function build_caffe2() {
   # pwd is pytorch_root/build
 
+  if [[ -n $ANDROID_ABI ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$(pwd)/../build_host_protoc/bin/protoc")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_AVX=OFF")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DANDROID_TOOLCHAIN=clang")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_OPENMP=OFF")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DANDROID_NDK=$ANDROID_NDK")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DANDROID_ABI=$ANDROID_ABI")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DANDROID_NATIVE_API_LEVEL=21")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_MOBILE_OPENGL=OFF")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_MKL=OFF")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-Dprotobuf_BUILD_PROTOC_BINARIES=OFF")
+    BUILD_PYTHON=OFF
+    BUILD_SHARED_LIBS=OFF
+    BUILD_BINARY=OFF
+    BUILD_TEST=OFF
+    USE_NNPACK=ON
+    USE_DISTRIBUTED=OFF
+    BLAS=Eigen
+    BUILD_CAFFE2_OPS=OFF
+    export CMAKE_MAKE_PROGRAM=ninja
+  fi
+
   # TODO change these to CMAKE_ARGS for consistency
   if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
@@ -193,6 +230,21 @@ function build_caffe2() {
   fi
   if [[ -n $CMAKE_PREFIX_PATH ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
+  fi
+  if [[ -n $BLAS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DBLAS=$BLAS")
+  fi
+  if [[ -n $CUDA_NVCC_EXECUTABLE ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE")
+  fi
+  if [[ -n $USE_REDIS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_REDIS=$USE_REDIS")
+  fi
+  if [[ -n $USE_GLOG ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GLOG=$USE_GLOG")
+  fi
+  if [[ -n $USE_GFLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GFLAGS=$USE_GFLAGS")
   fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
@@ -205,7 +257,7 @@ function build_caffe2() {
 		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       -DBUILD_TORCH=$BUILD_TORCH \
-		       -DBUILD_PYTHON=$BUILD_PYTHON \
+		       -DBUILD_PYTHON=$ \
 		       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
 		       -DBUILD_BINARY=$BUILD_BINARY \
 		       -DBUILD_TEST=$BUILD_TEST \
@@ -228,9 +280,8 @@ function build_caffe2() {
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
 		       -DUSE_QNNPACK=$USE_QNNPACK \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
-		       -DUSE_GLOG=OFF \
-		       -DUSE_GFLAGS=OFF \
 		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
 		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
 		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
@@ -245,7 +296,7 @@ function build_caffe2() {
 		       $GLOO_FLAGS \
 		       -DTHD_SO_VERSION=1 \
 		       $THD_FLAGS \
-		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+		       "${EXTRA_CAFFE2_CMAKE_FLAGS[@]}"
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -270,24 +321,19 @@ function build_caffe2() {
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then
-      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
-      echo "All the files in caffe2/proto are $(find caffe2/proto)"
+
+      if [[ $VERBOSE_SCRIPT == '1' ]]; then
+        report "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
+        report "All the files in caffe2/proto are $(find caffe2/proto)"
+      fi
+
       for proto_file in $(pwd)/caffe2/proto/*.py; do
-          cp $proto_file "$(pwd)/../caffe2/proto/"
+          # __init__.py is not auto-generated, copying it breaks
+          # mod-times for rebuild logic
+          if [[ "$proto_file" != "$(pwd)/caffe2/proto/__init__.py" ]]; then
+            cp $proto_file "$(pwd)/../caffe2/proto/"
+          fi
       done
-  fi
-
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-      # root/torch/lib/tmp_install/lib
-      echo "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
-      for lib in *.dylib; do
-          echo "Updating install_name for $(pwd)/$lib"
-          install_name_tool -id @rpath/$lib $lib
-      done
-      popd
   fi
 }
 
@@ -305,28 +351,46 @@ for arg in "$@"; do
     fi
 done
 
-pushd $TORCH_LIB_DIR
+pushd $TORCH_LIB_DIR > /dev/null
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
-echo "tools/build_pytorch_libs.sh succeeded at $(date)"
-echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
+report "tools/build_pytorch_libs.sh succeeded at $(date)"
+report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
 
-echo "Copying $INSTALL_DIR/lib to $(pwd)"
+report "Copying $INSTALL_DIR/lib to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
-echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
+report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
 
-echo "Copying $INSTALL_DIR/include to $(pwd)"
+report "Copying $INSTALL_DIR/include to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
 
-popd
+# Copy the test files to pytorch/caffe2 manually
+# They were built in pytorch/torch/lib/tmp_install/test
+# Why do we do this? So, setup.py has this section called 'package_data' which
+# you need to specify to include non-default files (usually .py files).
+# package_data takes a map from 'python package' to 'globs of files to
+# include'. By 'python package', it means a folder with an __init__.py file
+# that's not excluded in the find_packages call earlier in setup.py. So to
+# include our cpp_test into the site-packages folder in
+# site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
+# root caffe2 folder and then tell setup.py to include them. Having another
+# folder like site-packages/caffe2_cpp_test would also be possible by adding a
+# caffe2_cpp_test folder to pytorch with an __init__.py in it.
+if [[ "$INSTALL_TEST" == "ON" ]]; then
+    echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
+    mkdir -p "$BASE_DIR/caffe2/cpp_test/"
+    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+fi
+
+popd > /dev/null

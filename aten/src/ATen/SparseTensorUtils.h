@@ -22,22 +22,6 @@ inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-// Port of the old THCSTensor_(checkGPU), but it doesn't really belong here
-// because it is more general
-// NB: I dropped kernelP2PEnabled support
-// NB: This only works if the tensors are KNOWN to be CUDA.
-// TODO: Generalize it so it works on CPU as well
-inline bool check_device(ArrayRef<Tensor> ts) {
-  if (ts.empty()) {
-    return true;
-  }
-  int64_t curDevice = current_device();
-  for (const Tensor& t : ts) {
-    if (t.get_device() != curDevice) return false;
-  }
-  return true;
-}
-
 // Takes indices and values and directly puts them into the sparse tensor, no
 // copy.  This used to be called THSTensor_(_move)
 inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {

@@ -53,7 +53,7 @@ class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
   std::mutex mutex_;
   std::condition_variable condition_;
   std::condition_variable completed_;
-  bool running_;
+  std::atomic_bool running_;
   bool complete_;
   std::size_t available_;
   std::size_t total_;
@@ -88,9 +88,6 @@ class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
 
   /// @brief Wait for queue to be empty
   void waitWorkComplete();
-
-  // @brief Wait for the specific future to finish in the queue
-  void workOnTasksUntilCompleted(c10::intrusive_ptr<ivalue::Future> future);
 
  protected:
   virtual void init_thread() {}

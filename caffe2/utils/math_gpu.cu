@@ -35,6 +35,12 @@
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
 #endif // __HIP_PLATFORM_HCC__
 
+#ifdef __HIP_PLATFORM_HCC__
+using CUBLAS_HALF_TYPE = rocblas_half;
+#else // __HIP_PLATFORM_HCC
+using CUBLAS_HALF_TYPE = __half;
+#endif // __HIP_PLATFORM_HCC
+
 #include "caffe2/utils/math_utils.h"
 
 #if THRUST_VERSION >= 100800
@@ -340,6 +346,8 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cbrt, cbrtf)
 
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Erf, erff)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Erf, erf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cube, utils::Cube<float>)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Cube, utils::Cube<double>)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
@@ -743,9 +751,6 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     at::Half* C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -757,6 +762,39 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // rocblas doesn't support cublasSgemmEx type API yet.
+    // It has more general rocblas_gemm_ex API which is more close to
+    // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
+    // whereas cublasgemmEx does C = alpha*op( A )*op( B ) + beta*C
+    ROCBLAS_ENFORCE(rocblas_gemm_ex(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        &alpha,
+        B,
+        rocblas_datatype_f16_r,
+        ldb,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        &beta,
+        C,
+        rocblas_datatype_f16_r,
+        N,
+        C, // D
+        rocblas_datatype_f16_r, // D type
+        N, // ldd
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasSgemmEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -775,6 +813,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         C,
         CUDA_R_16F,
         N));
+#endif // __HIP_PLATFORM_HCC__
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -789,19 +828,18 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         N,
         M,
         K,
-        &alpha_fp16,
-        (const __half*)B,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
-        &beta_fp16,
-        (__half*)C,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         N));
   } else {
     // fail
     CAFFE_THROW("Unsupported math type");
   }
-#endif
 }
 
 template <>
@@ -968,9 +1006,6 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1083,7 +1118,6 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
-#endif
 }
 
 template <>
@@ -1104,10 +1138,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<at::Half, CUDAContext>(
@@ -1127,7 +1158,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
-#if CUDA_VERSION < 9010
+#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
     // loop over matrices in the batch
     for (int i = 0; i < batch_size; ++i) {
       Gemm<at::Half, CUDAContext>(
@@ -1139,6 +1170,42 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
 #else
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // D[i*stride_d] = alpha*op(A[i*stride_a])*op(B[i*stride_b]) +
+    // beta*C[i*stride_c], for i in [0,batch_count-1]
+    ROCBLAS_ENFORCE(rocblas_gemm_strided_batched_ex(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        &alpha,
+        B,
+        rocblas_datatype_f16_r,
+        ldb,
+        B_stride,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        A_stride,
+        &beta,
+        C,
+        rocblas_datatype_f16_r,
+        ldc,
+        C_stride,
+        C, // D
+        rocblas_datatype_f16_r, // D type
+        ldc, // ldd
+        C_stride, // D stride
+        batch_size,
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -1163,6 +1230,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#endif // __HIP_PLATFORM_HCC__
 #endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
@@ -1177,22 +1245,21 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         N,
         M,
         K,
-        &alpha_fp16,
-        (const __half*)B,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
         B_stride,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
         A_stride,
-        &beta_fp16,
-        (__half*)C,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         ldc,
         C_stride,
         batch_size));
   } else {
     CAFFE_THROW("Unsupported math type");
   }
-#endif
 #endif
 }
 
@@ -1479,9 +1546,6 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
   const cublasOperation_t cu_trans_A =
       (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
 
@@ -1494,6 +1558,39 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // rocblas doesn't support cublasSgemmEx type API yet.
+    // It has more general rocblas_gemm_ex API which is more close to
+    // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
+    // whereas cublasgemmEx does C = alpha*op( A )*op( B ) + beta*C
+    ROCBLAS_ENFORCE(rocblas_gemm_ex(
+        context->rocblashandle(),
+        cu_trans_A,
+        rocblas_operation_none,
+        m,
+        1,
+        k,
+        &alpha,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        x,
+        rocblas_datatype_f16_r,
+        k,
+        &beta,
+        y,
+        rocblas_datatype_f16_r,
+        ldc,
+        y, // D
+        rocblas_datatype_f16_r, // D type
+        ldc, // ldd
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasSgemmEx(
         context->cublas_handle(),
         cu_trans_A,
@@ -1512,6 +1609,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         y,
         CUDA_R_16F,
         ldc));
+#endif // __HIP_PLATFORM_HCC__
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     const __half alpha_fp16 = at::Half(alpha);
     const __half beta_fp16 = at::Half(beta);
@@ -1524,19 +1622,18 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         m,
         1,
         k,
-        &alpha_fp16,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
-        (const __half*)x,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(x),
         k,
-        &beta_fp16,
-        (__half*)y,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(y),
         ldc));
   } else {
     // fail
     CAFFE_THROW("Unsupported math type");
   }
-#endif
 }
 
 namespace {
@@ -1727,8 +1824,8 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#if defined(__HIP_PLATFORM_HCC__)
+  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
@@ -2358,8 +2455,8 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#if defined(__HIP_PLATFORM_HCC__)
+  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
 #else
   CUBLAS_ENFORCE(
       cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
@@ -2397,8 +2494,8 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
-#if defined(__HIP_PLATFORM_HCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#if defined(__HIP_PLATFORM_HCC__)
+  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
 #else
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -4121,51 +4218,6 @@ CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(int64_t)
 #undef CAFFE2_SPECIALIZED_CUDA_TRANSPOSE
-
-namespace {
-
-template <typename T, StorageOrder kOrder>
-__global__ void AffineChannelCUDAKernel(
-    const int size,
-    const int C,
-    const int HxW,
-    const T* X,
-    const T* scale,
-    const T* bias,
-    T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, size) {
-    const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    Y[i] = __ldg(scale + c) * __ldg(X + i) + __ldg(bias + c);
-#else
-    Y[i] = scale[c] * X[i] + bias[c];
-#endif
-  }
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(T, kOrder)              \
-  template <>                                                          \
-  CAFFE2_CUDA_EXPORT void AffineChannel<T, CUDAContext, kOrder>(       \
-      const int N,                                                     \
-      const int C,                                                     \
-      const int HxW,                                                   \
-      const T* X,                                                      \
-      const T* scale,                                                  \
-      const T* bias,                                                   \
-      T* Y,                                                            \
-      CUDAContext* context) {                                          \
-    const int size = N * C * HxW;                                      \
-    AffineChannelCUDAKernel<T, kOrder>                                 \
-        <<<CAFFE_GET_BLOCKS(size),                                     \
-           CAFFE_CUDA_NUM_THREADS,                                     \
-           0,                                                          \
-           context->cuda_stream()>>>(size, C, HxW, X, scale, bias, Y); \
-  }
-CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL
 
 #define CAFFE2_SPECIALIZED_CUDA_NCHW2NHWC(T)               \
   template <>                                              \

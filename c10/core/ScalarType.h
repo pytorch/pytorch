@@ -1,16 +1,12 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/Half.h>
+#include <c10/util/Half.h>
 #include <c10/util/typeid.h>
 
 #include <cstdint>
 #include <iostream>
 #include <complex>
-
-namespace at {
-class Tensor;
-}
 
 namespace c10 {
 
@@ -200,8 +196,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
-
-typedef ArrayRef<at::Tensor> TensorList;
 
 inline std::ostream& operator<<(
     std::ostream& stream,

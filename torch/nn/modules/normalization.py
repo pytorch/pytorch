@@ -25,8 +25,8 @@ class LocalResponseNorm(Module):
         k: additive factor. Default: 1
 
     Shape:
-        - Input: :math:`(N, C, ...)`
-        - Output: :math:`(N, C, ...)` (same shape as input)
+        - Input: :math:`(N, C, *)`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -130,6 +130,8 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
+    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps']
+
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
@@ -160,6 +162,7 @@ class LayerNorm(Module):
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
+@weak_module
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
     the paper `Group Normalization`_ .
@@ -185,8 +188,8 @@ class GroupNorm(Module):
             and zeros (for biases). Default: ``True``.
 
     Shape:
-        - Input: :math:`(N, num\_channels, *)`
-        - Output: :math:`(N, num\_channels, *)` (same shape as input)
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -202,6 +205,9 @@ class GroupNorm(Module):
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
+    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
+                     'bias']
+
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
         self.num_groups = num_groups
@@ -221,6 +227,7 @@ class GroupNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
+    @weak_script_method
     def forward(self, input):
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)

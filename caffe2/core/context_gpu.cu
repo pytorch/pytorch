@@ -178,8 +178,8 @@ static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 // Data structures for optional memory tracking. Access to these structures
 // is garded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
-static std::vector<long> g_total_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
-static std::vector<long> g_max_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 
 static long g_total_mem = 0;
 static long g_last_rep = 0;
@@ -207,11 +207,11 @@ static void Caffe2InitializeCuda() {
   // of GPUs.
   CAFFE_ENFORCE_LE(
       NumCudaDevices(),
-      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      CAFFE2_COMPILE_TIME_MAX_GPUS,
-      "). Increase that and recompile the caffe binary.");
+      C10_COMPILE_TIME_MAX_GPUS,
+      "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
     DeviceGuard g(i);
@@ -384,14 +384,14 @@ void TrackMemoryAlloc(size_t nbytes) {
       long max_t = g_max_by_gpu_map[gpu];
       if (max_t > 0) {
         if (max_t != t) {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
-                    << " (max: " << max_t / 1024 / 1024 << " MB)";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
+                  << " (max: " << max_t / 1024 / 1024 << " MB)";
         } else {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
         }
       }
     }
-    LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
+    VLOG(1) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
     g_last_rep = g_total_mem;
   }
 }

@@ -24,8 +24,31 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   return tensor && *tensor && tensor->GetDeviceType() == device_type;
 }
 
-inline Tensor* BlobSetTensor(Blob* blob, const Tensor& tensor) {
-  return blob->Reset<Tensor>(new Tensor(tensor));
+inline Tensor* BlobSetTensor(Blob* blob, Tensor&& tensor) {
+  return blob->Reset<Tensor>(new Tensor(std::move(tensor)));
+}
+
+inline Tensor GetSizedTensorWithOptions(
+    Tensor&& previous_tensor,
+    at::IntList dims,
+    at::TensorOptions options) {
+  Tensor tensor = std::move(previous_tensor);
+  if (tensor.GetDevice() == options.device() ||
+      (!tensor.GetDevice().has_index() &&
+       tensor.GetDeviceType() == options.device().type())) {
+    if (tensor.sizes() != dims) {
+      // Resize when the dims doesn't match
+      tensor.Resize(dims);
+    }
+    if (tensor.dtype() == options.dtype()) {
+      tensor.raw_mutable_data();
+    } else {
+      // create a new Tensor when the data_type doesn't match
+      return caffe2::empty(dims, options);
+    }
+    return tensor;
+  }
+  return caffe2::empty(dims, options);
 }
 
 // need to keep both functions that returns Tensor* and the one
@@ -61,7 +84,7 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
 
 inline Tensor
 XBlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
-  return *BlobGetMutableTensor(blob, dims, options);
+  return BlobGetMutableTensor(blob, dims, options)->UnsafeSharedInstance();
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
@@ -78,6 +101,16 @@ inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
           << " DeviceType:" << device_type;
 
   return BlobSetTensor(blob, Tensor(device_type));
+}
+
+inline const Tensor& BlobGetTensor(const Blob& blob, DeviceType device_type) {
+  if (blob.IsType<Tensor>()) {
+    const auto& tensor = blob.Get<Tensor>();
+    if (tensor.GetDeviceType() == device_type) {
+      return tensor;
+    }
+  }
+  CAFFE_THROW("Blob didn't contain a Tensor or the device_type doesn't match");
 }
 
 }  // namespace caffe2
