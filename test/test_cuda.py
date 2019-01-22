@@ -7,6 +7,9 @@ import sys
 from itertools import repeat
 import os
 from contextlib import contextmanager
+import threading
+import queue
+import time
 
 import torch
 import torch.cuda
@@ -1612,6 +1615,65 @@ class TestCuda(TestCase):
         event.synchronize()
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
+
+    @staticmethod
+    def _stream_synchronize(spin_time=50000000):
+        s = torch.cuda.current_stream()
+        torch.cuda._sleep(spin_time)
+        s.synchronize()
+
+    @staticmethod
+    def _event_synchronize(spin_time=50000000):
+        s = torch.cuda.current_stream()
+        torch.cuda._sleep(spin_time)
+        e = s.record_event()
+        e.synchronize()
+
+    @staticmethod
+    def _event_wait(spin_time=50000000):
+        s0 = torch.cuda.current_stream()
+        s1 = torch.cuda.Stream()
+        torch.cuda._sleep(spin_time - 10)
+        e = torch.cuda.Event(blocking=True)
+        e.record()
+        e.wait(s1)
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(10)
+        s1.synchronize()
+
+    @staticmethod
+    def _test_stream_event_nogil(sync_func, p2c, c2p):
+        with torch.cuda.device('cuda:1'):
+            c2p.put(0)
+            p2c.get()
+            sync_func(50000000)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_stream_event_nogil(self):
+        for sync_func in [TestCuda._stream_synchronize,
+                          TestCuda._event_synchronize,
+                          TestCuda._event_wait]:
+            p2c = queue.Queue()
+            c2p = queue.Queue()
+
+            t = threading.Thread(
+                target=TestCuda._test_stream_event_nogil,
+                args=(sync_func, p2c, c2p))
+            t.daemon = True
+            t.start()
+
+            c2p.get()
+            tik = time.time()
+            with torch.cuda.device('cuda:0'):
+                p2c.put(0)
+                sync_func(50000000)
+
+            t.join()
+            tok = time.time()
+
+            self.assertGreater(tok - tik, 0.05)
+            self.assertLess(tok - tik, 0.1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
