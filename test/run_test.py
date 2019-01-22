@@ -43,6 +43,7 @@ TESTS = [
     'torch',
     'type_info',
     'utils',
+    'namedtuple_return_api',
 ]
 
 WINDOWS_BLACKLIST = [
