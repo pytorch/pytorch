@@ -10530,7 +10530,7 @@ class TestFuser(JitTestCase):
         graph = backward_graph(s)
         self.assertAllFused(graph)
         # check that a, b share storage, i.e. were generated as a single output in the fuser
-        self.assertEqual(ga, gb)
+        self.assertEqual(ga.data_ptr(), gb.data_ptr())
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
