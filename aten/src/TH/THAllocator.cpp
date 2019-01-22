@@ -507,14 +507,14 @@ THRefcountedMapAllocatorArgCheck::THRefcountedMapAllocatorArgCheck(int flags) {}
 
 THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size)
   : THRefcountedMapAllocatorArgCheck(flags),
-    THMapAllocator(filename, flags, size + TH_ALLOC_ALIGNMENT) 
+    THMapAllocator(filename, flags, size + TH_ALLOC_ALIGNMENT)
 {
   AT_ERROR("refcounted file mapping not supported on your system");
 }
 
 THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
   : THRefcountedMapAllocatorArgCheck(flags),
-    THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT) 
+    THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT)
 {
   AT_ERROR("refcounted file mapping not supported on your system");
 }

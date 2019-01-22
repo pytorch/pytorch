@@ -63,7 +63,9 @@ macro(custom_protobuf_find)
   if (NOT TARGET protobuf::libprotobuf)
     add_library(protobuf::libprotobuf ALIAS libprotobuf)
     add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
-    #add_executable(protobuf::protoc ALIAS protoc)
+    if (TARGET protoc)
+      add_executable(protobuf::protoc ALIAS protoc)
+    endif()
   endif()
 endmacro()
 
@@ -86,11 +88,11 @@ if (ANDROID OR IOS)
   # since we derive our cmake files from there.
   # TODO(jiayq): change this once https://github.com/google/protobuf/pull/3878
   # merges.
-  #if (TARGET protoc)
-  #  set_target_properties(
-  #    libprotoc protoc PROPERTIES
-  #    EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
-  #endif()
+  if (TARGET protoc)
+    set_target_properties(
+      libprotoc protoc PROPERTIES
+      EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
+  endif()
 elseif (BUILD_CUSTOM_PROTOBUF)
   message(STATUS "Building using own protobuf under third_party per request.")
   custom_protobuf_find()

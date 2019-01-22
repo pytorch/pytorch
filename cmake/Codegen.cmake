@@ -50,16 +50,16 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-#if (BUILD_ATEN_MOBILE)
-#  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
-#          DESTINATION include/ATen
-#          FILES_MATCHING PATTERN "*.h")
-#endif()
+if (BUILD_ATEN_MOBILE AND NOT BUILD_TORCH_MOBILE)
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
+          DESTINATION include/ATen
+          FILES_MATCHING PATTERN "*.h")
+endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
-#if (NOT BUILD_ATEN_MOBILE OR BUILD_ATEN_MOBILE)
+if (NOT BUILD_ATEN_MOBILE OR BUILD_TORCH_MOBILE)
   SET(OPT_FLAG "-O3 ")
   IF(MSVC)
     SET(OPT_FLAG "/Ox /fp:strict ")
@@ -198,4 +198,4 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
-#endif()
+endif()

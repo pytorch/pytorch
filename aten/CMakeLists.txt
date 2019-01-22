@@ -1,6 +1,6 @@
-#if (BUILD_ATEN_MOBILE)
-#  return()
-#endif()
+if (BUILD_ATEN_MOBILE AND NOT BUILD_TORCH_MOBILE)
+  return()
+endif()
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH
@@ -8,9 +8,9 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT BUILD_TORCH_MOBILE)
   list(APPEND CMAKE_MODULE_PATH  /usr/lib/x86_64-linux-gnu/)
-  list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+  list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 endif()
 
 cmake_policy(SET CMP0012 NEW)

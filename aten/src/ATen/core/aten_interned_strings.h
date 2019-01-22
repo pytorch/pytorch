@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !C10_MOBILE || true
+#if !C10_MOBILE || C10_MOBILE_FULL
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, RoiPooling2d_backward) \
 _(aten, RoiPooling2d_forward) \
