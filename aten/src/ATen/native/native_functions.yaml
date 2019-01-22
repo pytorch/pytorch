@@ -115,6 +115,7 @@
 
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
 
+# Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -1142,14 +1143,15 @@
 - func: matrix_power(Tensor self, int64_t n) -> Tensor
   variants: function, method
 
-- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
 
+# Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
 
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
@@ -3022,9 +3024,9 @@
 - func: eig(Tensor self, bool eigenvectors=false) -> (Tensor, Tensor)
   variants: method, function
 
-- func: svd_out(Tensor U, Tensor S, Tensor V, Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+- func: svd_out(Tensor U, Tensor S, Tensor V, Tensor self, bool some=true, bool compute_uv=true) -> (Tensor U, Tensor S, Tensor V)
 
-- func: svd(Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+- func: svd(Tensor self, bool some=true, bool compute_uv=true) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
 
 - func: cholesky_out(Tensor result, Tensor self, bool upper=false) -> Tensor
@@ -3576,10 +3578,12 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: adaptive_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] output_size) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: adaptive_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] output_size) -> (Tensor, Tensor)
   python_module: nn
 
-- func: adaptive_max_pool2d(Tensor self, IntList[2] output_size) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: adaptive_max_pool2d(Tensor self, IntList[2] output_size) -> (Tensor, Tensor)
   python_module: nn
 
 - func: adaptive_max_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices) -> Tensor
@@ -3589,10 +3593,12 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: adaptive_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] output_size) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: adaptive_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] output_size) -> (Tensor, Tensor)
   python_module: nn
 
-- func: adaptive_max_pool3d(Tensor self, IntList[3] output_size) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: adaptive_max_pool3d(Tensor self, IntList[3] output_size) -> (Tensor, Tensor)
   python_module: nn
 
 - func: adaptive_max_pool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices) -> Tensor
@@ -3626,13 +3632,15 @@
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
 
-- func: fractional_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
     CUDA: fractional_max_pool2d_out_cuda
 
-- func: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_cpu
@@ -3677,7 +3685,8 @@
 - func: max_pool2d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
   python_module: nn
 
-- func: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   python_module: nn
 
 - func: max_pool2d_with_indices_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
@@ -3686,10 +3695,12 @@
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
 
-- func: max_pool3d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: max_pool3d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   python_module: nn
 
-- func: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   python_module: nn
 
 - func: max_pool3d_with_indices_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
