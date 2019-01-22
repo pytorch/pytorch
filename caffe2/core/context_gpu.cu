@@ -434,9 +434,9 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         if (FLAGS_caffe2_gpu_memory_tracking) {
           auto b = r.compare_exchange_deleter(
             &c10::cuda::CUDACachingAllocator::raw_delete,
-            [](void* ptr) { // stateless!
-              g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
-              c10::cuda::CUDACachingAllocator::raw_delete(ptr);
+            [](void* nptr) { // stateless!
+              g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(nptr));
+              c10::cuda::CUDACachingAllocator::raw_delete(nptr);
             }
           );
           AT_ASSERT(b);
@@ -497,7 +497,6 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         // This case is impossible because we don't use this
         // deleter in this case.
         AT_ASSERT(0);
-        break;
       }
     }
   }
