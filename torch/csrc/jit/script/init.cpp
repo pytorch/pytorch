@@ -162,7 +162,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   virtual Node* getPythonOp(
-      std::shared_ptr<Graph> graph,
+      std::shared_ptr<Graph>& graph,
       THPObjectPtr func_ptr,
       std::string& cconv) const {
     return graph->insertNode(
@@ -197,8 +197,8 @@ struct VISIBILITY_HIDDEN IgnoredPythonValue : public PythonValue {
   }
 
 protected:
-  virtual Node* getPythonOp(
-      std::shared_ptr<Graph> graph,
+  Node* getPythonOp(
+      std::shared_ptr<Graph>& graph,
       THPObjectPtr func_ptr,
       std::string& cconv) const override {
     Node* node = graph->insertNode(
