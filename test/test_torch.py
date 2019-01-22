@@ -9556,6 +9556,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
+    def test_promote_types(self):
+        self.assertEqual(torch._promote_types(torch.int8, torch.int8), torch.int8)
+        self.assertEqual(torch._promote_types(torch.int8, torch.int16), torch.int16)
+        self.assertEqual(torch._promote_types(torch.int16, torch.int8), torch.int16)
+        self.assertEqual(torch._promote_types(torch.int16, torch.int32), torch.int32)
+
+        self.assertEqual(torch._promote_types(torch.int8, torch.uint8), torch.int16)
+        self.assertEqual(torch._promote_types(torch.int16, torch.uint8), torch.int16)
+
+        self.assertEqual(torch._promote_types(torch.float16, torch.float32), torch.float32)
+        self.assertEqual(torch._promote_types(torch.float16, torch.float32), torch.float32)
+        self.assertEqual(torch._promote_types(torch.float64, torch.float16), torch.float64)
+
+        self.assertEqual(torch._promote_types(torch.int16, torch.float16), torch.float16)
+        self.assertEqual(torch._promote_types(torch.int32, torch.float32), torch.float32)
+        self.assertEqual(torch._promote_types(torch.int64, torch.float32), torch.float32)
+        self.assertEqual(torch._promote_types(torch.int64, torch.float64), torch.float64)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
