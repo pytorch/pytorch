@@ -28,6 +28,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"optional<ScalarType>", ParameterType::SCALARTYPE},
+  {"ScalarTypeSource", ParameterType::SCALARTYPESOURCE},
   {"ScalarTypeSourceList", ParameterType::SCALARTYPESOURCE_LIST},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
@@ -142,6 +143,9 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
     case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPESOURCE:
+      return THPDtype_Check(obj) || PyBool_Check(obj) || THPUtils_checkLong(obj) ||
+          THPUtils_checkDouble(obj) || PyComplex_Check(obj) || THPVariable_Check(obj);
     case ParameterType::SCALARTYPESOURCE_LIST: return PyTuple_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::DEVICE:
@@ -164,6 +168,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::SCALARTYPE: return "torch.dtype";
+    case ParameterType::SCALARTYPESOURCE: return "dtype, number or tensor";
     case ParameterType::SCALARTYPESOURCE_LIST: return "tuple of dtypes, numbers or tensors";
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::DEVICE: return "torch.device";

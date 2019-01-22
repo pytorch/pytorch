@@ -49,6 +49,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/python_scalar_type_source.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
@@ -127,6 +128,7 @@ struct PythonArgs {
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
+  inline at::ScalarTypeSource scalartypesource(int i);
   inline std::vector<at::ScalarTypeSource> scalartypesourcelist(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline const THPLayout& layout(int i);
@@ -178,6 +180,7 @@ struct FunctionParameter {
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
   at::Scalar default_scalar;
+  at::ScalarTypeSource default_scalartypesource;
   std::vector<int64_t> default_intlist;
   union {
     bool default_bool;
@@ -328,36 +331,6 @@ inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType de
   return scalartype(i);
 }
 
-std::vector<at::ScalarTypeSource> PythonArgs::scalartypesourcelist(int i) {
-  if (!args[i]) return std::vector<at::ScalarTypeSource>();
-  PyObject* arg = args[i];
-  AT_CHECK(PyTuple_Check(arg));
-  auto size = PyTuple_GET_SIZE(arg);
-  std::vector<at::ScalarTypeSource> res;
-  for (int idx = 0; idx < size; idx++) {
-    PyObject* obj = PyTuple_GET_ITEM(arg, idx);
-    if (THPVariable_Check(obj)) {
-      res.push_back(reinterpret_cast<THPVariable*>(obj)->cdata);
-    } else if (PyBool_Check(obj)) {
-      res.push_back(obj == Py_True);
-    } else if (THPUtils_checkLong(obj)) {
-      res.push_back(at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
-    } else if (THPUtils_checkDouble(obj)) {
-      res.push_back(at::Scalar(THPUtils_unpackDouble(obj)));
-    } else if (PyComplex_Check(obj)) {
-      res.push_back(at::Scalar(THPUtils_unpackComplexDouble(obj)));
-    } else if (THPDtype_Check(obj)) {
-      res.push_back(reinterpret_cast<THPDtype*>(obj)->scalar_type);
-    } else {
-      throw TypeError(
-          "expected one of tensor, dtype or number as argument %d, but got %s",
-          i,
-          Py_TYPE(obj)->tp_name);
-    }
-  }
-  return res;
-}
-
 inline at::ScalarType PythonArgs::scalartype(int i) {
   if (!args[i]) {
     auto scalartype = signature.params[i].default_scalartype;
@@ -371,6 +344,38 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return scalartype(i);
+}
+
+at::ScalarTypeSource PythonArgs::scalartypesource(int i) {
+  if (!args[i]) return at::ScalarTypeSource();
+  PyObject* arg = args[i];
+  c10::optional<at::ScalarTypeSource> s = THPUtils_scalarTypeSource(arg);
+  if (!s) {
+    throw TypeError(
+        "expected one of tensor, dtype or number as argument %d, but got %s",
+        i,
+        Py_TYPE(arg)->tp_name);
+  }
+  return *s;
+}
+
+std::vector<at::ScalarTypeSource> PythonArgs::scalartypesourcelist(int i) {
+  if (!args[i]) return std::vector<at::ScalarTypeSource>();
+  PyObject* arg = args[i];
+  AT_CHECK(PyTuple_Check(arg));
+  auto size = PyTuple_GET_SIZE(arg);
+  std::vector<at::ScalarTypeSource> res;
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = PyTuple_GET_ITEM(arg, idx);
+    c10::optional<at::ScalarTypeSource> s = THPUtils_scalarTypeSource(obj);
+    if (!s) {
+      throw TypeError(
+          "expected one of tensor, dtype or number as argument, but got %s",
+          Py_TYPE(obj)->tp_name);
+    }
+    res.push_back(*s);
+  }
+  return res;
 }
 
 inline const THPLayout& PythonArgs::layout(int i) {

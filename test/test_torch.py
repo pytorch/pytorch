@@ -9633,6 +9633,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(torch._result_type(torch.tensor(1.0, dtype=torch.float32), torch.tensor([1])), torch.float32)
         self.assertEqual(torch._result_type(torch.tensor(1, dtype=torch.float32), 1.0, torch.int64), torch.float32)
 
+    def test_can_cast(self):
+        self.assertTrue(torch._can_cast(torch.int8, torch.int8))
+        self.assertTrue(torch._can_cast(torch.int8, torch.int16))
+        self.assertTrue(torch._can_cast(torch.int16, torch.int8))
+        self.assertTrue(torch._can_cast(torch.int16, torch.int32))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float64))
+        self.assertTrue(torch._can_cast(torch.float64, torch.float64))
+
+        self.assertTrue(torch._can_cast(torch.int64, torch.float32))
+        self.assertFalse(torch._can_cast(torch.float32, torch.int64))
+
+        self.assertFalse(torch._can_cast(torch.int8, torch.uint8))
+        self.assertFalse(torch._can_cast(torch.uint8, torch.int8))
+        self.assertTrue(torch._can_cast(torch.uint8, torch.int16))
+        self.assertTrue(torch._can_cast(torch.uint8, torch.int64))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
