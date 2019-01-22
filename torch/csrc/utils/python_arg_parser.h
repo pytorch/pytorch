@@ -333,20 +333,21 @@ std::vector<at::ScalarTypeSource> PythonArgs::scalartypesourcelist(int i) {
   PyObject* arg = args[i];
   AT_CHECK(PyTuple_Check(arg));
   auto size = PyTuple_GET_SIZE(arg);
-  std::vector<at::ScalarTypeSource> res(size);
+  std::vector<at::ScalarTypeSource> res;
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = PyTuple_GET_ITEM(arg, idx);
     if (THPVariable_Check(obj)) {
-      res.emplace_back(reinterpret_cast<THPVariable*>(obj)->cdata);
-    } else if (PyComplex_Check(obj)) {
-      res.emplace_back(at::Scalar(THPUtils_unpackComplexDouble(obj)));
-    } else if (THPUtils_checkDouble(obj)) {
-      res.emplace_back(at::Scalar(THPUtils_unpackDouble(obj)));
+      res.push_back(reinterpret_cast<THPVariable*>(obj)->cdata);
+    } else if (PyBool_Check(obj)) {
+      res.push_back(obj == Py_True);
     } else if (THPUtils_checkLong(obj)) {
-      res.emplace_back(
-          at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+      res.push_back(at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    } else if (THPUtils_checkDouble(obj)) {
+      res.push_back(at::Scalar(THPUtils_unpackDouble(obj)));
+    } else if (PyComplex_Check(obj)) {
+      res.push_back(at::Scalar(THPUtils_unpackComplexDouble(obj)));
     } else if (THPDtype_Check(obj)) {
-      res.emplace_back(reinterpret_cast<THPDtype*>(args[i])->scalar_type);
+      res.push_back(reinterpret_cast<THPDtype*>(obj)->scalar_type);
     } else {
       throw TypeError(
           "expected one of tensor, dtype or number as argument %d, but got %s",

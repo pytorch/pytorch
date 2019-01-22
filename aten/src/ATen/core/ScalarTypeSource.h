@@ -8,54 +8,53 @@ namespace at {
 // e.g. resultType.
 class ScalarTypeSource final {
  public:
-  ScalarTypeSource()
-      : is_scalar_type_(false), is_scalar_(false), is_tensor_(false) {}
+  ScalarTypeSource() {}
   /* implicit */ ScalarTypeSource(ScalarType scalar_type)
-      : is_scalar_type_(true),
-        is_scalar_(false),
-        is_tensor_(false),
-        scalar_type_(scalar_type) {}
+      : is_scalar_type_(true), scalar_type_(scalar_type) {}
+  /* implicit */ ScalarTypeSource(bool boolean)
+      : is_scalar_(true), scalar_type_(ScalarType::Byte) {}
   /* implicit */ ScalarTypeSource(Scalar scalar)
-      : is_scalar_type_(false),
-        is_scalar_(true),
-        is_tensor_(false),
-        scalar_(scalar) {}
+      : is_scalar_(true), scalar_type_(scalar.scalarType()) {}
   /* implicit */ ScalarTypeSource(Tensor tensor)
-      : is_scalar_type_(false),
-        is_scalar_(false),
-        is_tensor_(true),
-        tensor_(tensor) {}
+      : is_tensor_(true), scalar_type_(tensor.scalar_type()),
+        backend_(tensor.type().backend()), zero_dim_(tensor.dim() == 0) {}
 
-  bool isScalarType() {
+  bool isScalarType() const {
     return is_scalar_type_;
   }
-  bool isScalar() {
+
+  bool isScalar() const {
     return is_scalar_;
   }
-  bool isTensor() {
+
+  bool isTensor() const {
     return is_tensor_;
   }
 
-  ScalarType asScalarType() {
-    AT_CHECK(isScalarType());
+  bool isZeroDimTensor() const {
+    return is_tensor_ && zero_dim_;
+  }
+
+  bool isNonZeroDimTensor() const {
+    return is_tensor_ && !zero_dim_;
+  }
+
+  ScalarType scalarType() const {
     return scalar_type_;
   }
-  Scalar asScalar() {
-    AT_CHECK(isScalar());
-    return scalar_;
-  }
-  Tensor asTensor() {
+
+  Backend backend() const {
     AT_CHECK(isTensor());
-    return tensor_;
+    return backend_;
   }
 
  private:
-  bool is_scalar_type_;
-  bool is_scalar_;
-  bool is_tensor_;
-  Scalar scalar_;
-  ScalarType scalar_type_;
-  Tensor tensor_;
+  const bool is_scalar_type_ = false;
+  const bool is_scalar_ = false;
+  const bool is_tensor_ = false;
+  const ScalarType scalar_type_ = ScalarType::Undefined;
+  const Backend backend_ = Backend::Undefined;
+  const bool zero_dim_ = false;
 };
 
 } // namespace at

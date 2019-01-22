@@ -75,6 +75,15 @@ class C10_API Scalar {
   bool isComplex() const {
     return Tag::HAS_z == tag;
   }
+  ScalarType scalarType() const {
+    if (isComplex()) {
+      return ScalarType::ComplexDouble;
+    } else if (isFloatingPoint()) {
+      return ScalarType::Double;
+    } else {
+      return ScalarType::Long;
+    }
+  }
 
   Scalar operator-() const;
 

@@ -9561,18 +9561,78 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(torch._promote_types(torch.int8, torch.int16), torch.int16)
         self.assertEqual(torch._promote_types(torch.int16, torch.int8), torch.int16)
         self.assertEqual(torch._promote_types(torch.int16, torch.int32), torch.int32)
-
         self.assertEqual(torch._promote_types(torch.int8, torch.uint8), torch.int16)
         self.assertEqual(torch._promote_types(torch.int16, torch.uint8), torch.int16)
+        self.assertEqual(torch._promote_types(torch.float64, torch.float32), torch.float64)
 
-        self.assertEqual(torch._promote_types(torch.float16, torch.float32), torch.float32)
-        self.assertEqual(torch._promote_types(torch.float16, torch.float32), torch.float32)
-        self.assertEqual(torch._promote_types(torch.float64, torch.float16), torch.float64)
-
-        self.assertEqual(torch._promote_types(torch.int16, torch.float16), torch.float16)
         self.assertEqual(torch._promote_types(torch.int32, torch.float32), torch.float32)
         self.assertEqual(torch._promote_types(torch.int64, torch.float32), torch.float32)
         self.assertEqual(torch._promote_types(torch.int64, torch.float64), torch.float64)
+
+    def test_result_type(self):
+        self.assertRaises(TypeError, lambda: torch._result_type())
+
+        # dtypes
+        self.assertEqual(torch._result_type(torch.int8), torch.int8)
+        self.assertEqual(torch._result_type(torch.int32), torch.int32)
+        self.assertEqual(torch._result_type(torch.float32), torch.float32)
+
+        self.assertEqual(torch._result_type(torch.int8, torch.int8), torch.int8)
+        self.assertEqual(torch._result_type(torch.int8, torch.int16), torch.int16)
+        self.assertEqual(torch._result_type(torch.int32, torch.int8, torch.int16), torch.int32)
+        self.assertEqual(torch._result_type(torch.int32, torch.int64), torch.int64)
+
+        self.assertEqual(torch._result_type(torch.uint8, torch.int8), torch.int16)
+        self.assertEqual(torch._result_type(torch.uint8, torch.int16), torch.int16)
+        self.assertEqual(torch._result_type(torch.float32, torch.float64), torch.float64)
+
+        self.assertEqual(torch._result_type(torch.int32, torch.float32), torch.float32)
+        self.assertEqual(torch._result_type(torch.int32, torch.float64), torch.float64)
+        self.assertEqual(torch._result_type(torch.int64, torch.float64), torch.float64)
+
+        self.assertEqual(torch._result_type(torch.int8), torch.int8)
+        self.assertEqual(torch._result_type(torch.int32), torch.int32)
+        self.assertEqual(torch._result_type(torch.float32), torch.float32)
+
+        # scalars
+        self.assertEqual(torch._result_type(2.5), torch.float64)
+        self.assertEqual(torch._result_type(2), torch.int64)
+        self.assertEqual(torch._result_type(True), torch.uint8)
+
+        self.assertEqual(torch._result_type(False, 2), torch.int64)
+        self.assertEqual(torch._result_type(2, 2.5), torch.float64)
+
+        # tensors
+        self.assertEqual(torch._result_type(torch.ones([])), torch.get_default_dtype())
+        self.assertEqual(torch._result_type(torch.ones([], dtype=torch.int32)), torch.int32)
+        self.assertEqual(torch._result_type(torch.ones([2, 2], dtype=torch.int32)), torch.int32)
+
+        self.assertEqual(torch._result_type(torch.tensor(1), torch.tensor(False)), torch.int64)
+        self.assertEqual(torch._result_type(torch.tensor(1), torch.tensor(1.0)), torch.float64)
+        self.assertEqual(torch._result_type(torch.tensor([1]), torch.tensor([False])), torch.int64)
+        self.assertEqual(torch._result_type(torch.tensor([1]), torch.tensor([1.0, 1.0])), torch.float64)
+
+        # type input has highest priority
+        self.assertEqual(torch._result_type(torch.int8, torch.tensor(1)), torch.int8)
+        self.assertEqual(torch._result_type(torch.int8, torch.tensor([1, 1])), torch.int8)
+        self.assertEqual(torch._result_type(torch.float32, 1.0), torch.float32)
+        self.assertEqual(torch._result_type(torch.float32, torch.tensor(1.0)), torch.float32)
+
+        # nonzero dim tensors are next
+        self.assertEqual(torch._result_type(torch.tensor([False]), torch.tensor(1)), torch.uint8)
+        self.assertEqual(torch._result_type(torch.tensor([1, 1], dtype=torch.int8), torch.tensor(1)), torch.int8)
+        self.assertEqual(torch._result_type(torch.tensor([1], dtype=torch.float16), 1.0), torch.float16)
+
+        # zero dim tensors are next
+        self.assertEqual(torch._result_type(torch.tensor(1, dtype=torch.int16), 1), torch.int16)
+        self.assertEqual(torch._result_type(torch.tensor(1.0, dtype=torch.float32), 1), torch.float32)
+
+        # lower priority input participates if it's of the highest kind
+        self.assertEqual(torch._result_type(1.0, torch.int32), torch.float64)
+        self.assertEqual(torch._result_type(1.0, torch.tensor(1)), torch.float64)
+        self.assertEqual(torch._result_type(torch.tensor(1.0, dtype=torch.float32), torch.tensor([1])), torch.float32)
+        self.assertEqual(torch._result_type(torch.tensor(1, dtype=torch.float32), 1.0, torch.int64), torch.float32)
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1

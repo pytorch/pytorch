@@ -7,8 +7,7 @@ namespace at {
 namespace {
 
 template <typename F>
-static std::tuple<ScalarType, Backend>
-compute_result_type(TensorList tensors, const F& predicate) {
+static std::tuple<ScalarType, Backend> compute_result_type(TensorList tensors, const F& predicate) {
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
   for (auto& tensor : tensors) {
@@ -57,7 +56,56 @@ Type& resultType(TensorList tensors) {
 }
 
 ScalarType resultType(ArrayRef<ScalarTypeSource> inputs) {
-  return ScalarType::Short;
+    // Check first that this is not a mixed backend operation.
+    auto backend = Backend::Undefined;
+    for (auto& input : inputs) {
+      if (input.isTensor()) {
+        if (backend == Backend::Undefined) {
+          backend = input.backend();
+        } else if (backend != input.backend()) {
+          AT_ERROR(
+              "Cannot run operations between backends ",
+              backend, " and ", input.backend());
+        }
+      }
+    }
+
+    typedef std::function<bool(const ScalarTypeSource)> ParticipatesFunction;
+
+    // Operands of the highest kind determine result type.
+    static const std::vector<ParticipatesFunction> kind_participation_order = {
+      [](const ScalarTypeSource& s) { return isComplexType(s.scalarType()); },
+      [](const ScalarTypeSource& s) { return isFloatingType(s.scalarType()); },
+      [](const ScalarTypeSource& s) { return isIntegralType(s.scalarType()); },
+    };
+
+    // Priority amongst the operands of the same kind.
+    static const std::vector<ParticipatesFunction> priority_participation_order = {
+      &ScalarTypeSource::isScalarType,
+      &ScalarTypeSource::isNonZeroDimTensor,
+      &ScalarTypeSource::isZeroDimTensor,
+      &ScalarTypeSource::isScalar,
+    };
+
+    for (auto& kind_participation : kind_participation_order) {
+      for (auto& priority_participation : priority_participation_order) {
+        auto result_type = ScalarType::Undefined;
+        for (auto& input : inputs) {
+          if (kind_participation(input) && priority_participation(input)) {
+            if (result_type == ScalarType::Undefined) {
+              result_type = input.scalarType();
+            } else {
+              result_type = promoteTypes(result_type, input.scalarType());
+            }
+          }
+        }
+        if (result_type != ScalarType::Undefined) {
+          return result_type;
+        }
+      }
+    }
+    AT_ERROR("Cannot determine result type.");
+    return ScalarType::Undefined;
 }
 
 }  // namespace at
