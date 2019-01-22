@@ -1488,3 +1488,23 @@ def log_sigmoid(g, input):
 @parse_args('v')
 def erf(g, input):
     return g.op('Erf', input)
+
+
+@parse_args('v', 'i', 'i')
+def flatten(g, input, start_dim, end_dim) :
+    input_dims = input.type().sizes()
+
+    if end_dim < 0 :
+        end_dim = len(input_dims) + end_dim
+
+    output_dims = []
+    for i in range(0,len(input_dims)):
+        if start_dim < i and end_dim >= i:
+            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
+        else :
+            dim = input_dims[i]
+            output_dims.append(dim)
+
+    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
+    p = _reshape_from_tensor(g, input, shape)
+    return p
