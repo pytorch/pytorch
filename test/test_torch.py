@@ -157,6 +157,10 @@ class _TestTorchMixin(object):
     def test_dir(self):
         dir(torch)
 
+    def test_C_attr(self):
+        for name in ['_CudaEventBase', '_CudaStreamBase']:
+            self.assertEqual(name, getattr(torch._C, name).__name__)
+
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
                          types.BuiltinFunctionType, types.BuiltinMethodType)
