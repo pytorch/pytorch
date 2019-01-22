@@ -152,8 +152,15 @@ only simple, universal types, as well as a handful of fundamental Tensor structu
 (e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
 bound to ATen (in practice, C++ and Python.)
 
-Return also supports specifying (optional) return argument names; these are useful for writing
-derivatives in terms of return arguments in `tools/autograd/derivatives.yaml`.
+Return also supports specifying (optional) return argument names. These serve
+two functions:
+
+- They let you easily write derivatives in terms of return arguments in
+  `tools/autograd/derivatives.yaml`
+
+- They correspond to the named field the output can be referred to from
+  Python.  (This means that changing a return argument name is
+  BC-breaking, be careful!)
 
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 

@@ -105,6 +105,8 @@ def parse_return_arguments(return_decl, inplace):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         type_and_maybe_name = [a.strip() for a in arg.rsplit(' ', 1)]
+        # See Note [field_name versus name]
+        field_name = None
         if len(type_and_maybe_name) == 1:
             t = type_and_maybe_name[0]
             if inplace:
@@ -113,9 +115,12 @@ def parse_return_arguments(return_decl, inplace):
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
         else:
             t, name = type_and_maybe_name
+            field_name = name
 
         typ = sanitize_type(t)
         argument_dict = {'type': typ, 'name': name}
+        if field_name is not None:
+            argument_dict['field_name'] = field_name
         argument_dict['output'] = True
 
         arguments.append(argument_dict)
@@ -132,6 +137,13 @@ def has_sparse_dispatches(dispatches):
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
+
+
+def propagate_field_names(output_arguments, return_arguments):
+    if output_arguments:
+        for i, r in enumerate(return_arguments):
+            if 'field_name' in r:
+                output_arguments[i]['field_name'] = r['field_name']
 
 
 def run(paths):
@@ -152,6 +164,7 @@ def run(paths):
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'])
                 arguments = parse_arguments(arguments, func, declaration['name'], return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
+                propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
