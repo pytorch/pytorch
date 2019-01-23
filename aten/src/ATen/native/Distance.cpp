@@ -26,8 +26,6 @@ Tensor pdist(const Tensor& self, const double p) {
   return at::_pdist_forward(self.contiguous(), p);
 }
 
-
-
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
     AT_CHECK(x1.dim() == 2, "cdist only supports 2D tensors, X1 got: ", x1.dim(), "D");
     auto device1 = x1.type().device_type();
