@@ -69,7 +69,7 @@ void validateBlock(
           onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
         WithInsertPoint guard(node);
         auto* new_node = b->owningGraph()->insertNode(b->owningGraph()->create(
-            Symbol(::torch::jit::onnx::ATen),
+            Symbol(::c10::onnx::ATen),
             node->inputs(),
             node->outputs().size()));
         for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -277,7 +277,7 @@ void EncoderBase::EncodeBlock(
         EncodeBlock(graph, block, initializers);
       }
     }
-    if (node->kind() == torch::jit::onnx::Loop) {
+    if (node->kind() == ::c10::onnx::Loop) {
       AT_ASSERT(node->blocks().size() == 1);
 
       auto body = p_n->add_attribute();
@@ -286,7 +286,7 @@ void EncoderBase::EncodeBlock(
       auto g = body->mutable_g();
       EncodeBlock(g, node->blocks()[0]);
     }
-    if (node->kind() == torch::jit::onnx::If) {
+    if (node->kind() == ::c10::onnx::If) {
       AT_ASSERT(node->blocks().size() == 2);
 
       auto true_branch = p_n->add_attribute();

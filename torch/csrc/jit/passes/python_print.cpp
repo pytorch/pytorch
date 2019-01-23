@@ -1060,8 +1060,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // to be correctly printed for export (a process that happens before
   // optimization passes run)
   const static std::unordered_set<Symbol> unneeded = {
-      onnx::Reshape, // only used in onnx
-      onnx::Shape, // only used in onnx
+      c10::onnx::Reshape, // only used in onnx
+      c10::onnx::Shape, // only used in onnx
       prim::AnyDefined, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it

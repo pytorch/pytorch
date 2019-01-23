@@ -11,6 +11,10 @@ typedef SSIZE_T ssize_t;
 namespace torch {
 namespace jit {
 
+namespace onnx {
+using namespace ::c10::onnx;
+}
+
 bool isRNN(const Node* node) {
   auto k = node->kind();
   return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;

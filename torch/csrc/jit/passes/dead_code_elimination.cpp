@@ -8,6 +8,10 @@
 namespace torch {
 namespace jit {
 
+namespace prim {
+using namespace ::c10::prim;
+}
+
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
@@ -66,7 +70,7 @@ class DeadCodeEliminator {
     }
 
     // Collect all inputs that are actually live
-    if (outerNode->kind() == prim::Loop || outerNode->kind() == onnx::Loop) {
+    if (outerNode->kind() == prim::Loop || outerNode->kind() == c10::onnx::Loop) {
       // Special handling to deal with loop carried dependencies.
       auto loop = LoopView(outerNode);
       for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {

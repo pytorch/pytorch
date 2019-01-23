@@ -21,6 +21,10 @@
 namespace torch {
 namespace jit {
 
+namespace prim {
+using namespace ::c10::prim;
+}
+
 struct propagation_error : std::exception {};
 
 #define SHAPE_ASSERT(cond) \
@@ -1561,7 +1565,7 @@ class ShapePropagator {
             input_type->withSizesStrides(sizes, strides));
       }
       return true;
-    } else if (node->kind() == onnx::Shape) {
+    } else if (node->kind() == ::c10::onnx::Shape) {
       SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
       std::vector<int64_t> dim_vec = {
           (int64_t)tensor_types.at(0)->sizes().size()};
@@ -1569,7 +1573,7 @@ class ShapePropagator {
       node->output()->setType(
           CompleteTensorType::create(at::kLong, at::kCPU, dims));
       return true;
-    } else if (node->kind() == onnx::Reshape) {
+    } else if (node->kind() == ::c10::onnx::Reshape) {
       setUnshapedType(node);
       return true;
     }

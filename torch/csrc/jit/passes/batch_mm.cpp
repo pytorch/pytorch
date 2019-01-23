@@ -3,7 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/interned_strings.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>

@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
-#include <torch/csrc/jit/interned_strings.h>
 #include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -17,6 +16,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -40,8 +40,19 @@ struct Function;
 namespace torch {
 namespace jit {
 
+using ::c10::Symbol;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+
+namespace prim {
+using namespace ::c10::prim;
+}
+namespace attr {
+using namespace ::c10::attr;
+}
+namespace aten {
+using namespace ::c10::aten;
+}
 
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
@@ -1200,9 +1211,9 @@ inline const Graph* Value::owningGraph() const {
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 struct PythonOp : public Node {
-  static constexpr Symbol Kind = prim::PythonOp;
+  static constexpr Symbol Kind = ::c10::prim::PythonOp;
 
-  PythonOp(Graph* graph) : Node(graph, prim::PythonOp) {}
+  PythonOp(Graph* graph) : Node(graph, ::c10::prim::PythonOp) {}
   PythonOp* init(
       THPObjectPtr&& pyobj,
       const std::string& cconv,

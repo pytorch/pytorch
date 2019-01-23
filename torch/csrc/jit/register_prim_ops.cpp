@@ -518,7 +518,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        onnx::Reshape,
+        c10::onnx::Reshape,
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor input, shape;
@@ -531,7 +531,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        onnx::Shape,
+        c10::onnx::Shape,
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();

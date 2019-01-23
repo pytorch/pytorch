@@ -6,11 +6,13 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/jit/interned_strings.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
+
+using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
