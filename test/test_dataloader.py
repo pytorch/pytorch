@@ -358,7 +358,10 @@ class TestProperExitDataset(Dataset):
         return self.size
 
     def __getitem__(self, idx):
-        if self.error_event is not None and self.error_event.is_set():
+        worker_info = torch.utils.data.get_worker_info()
+        if self.error_event is not None and self.error_event.is_set() and \
+                worker_info.id == worker_info.num_workers - 1:
+            # only error in the last worker
             raise RuntimeError('Worker error')
         return torch.tensor([idx])
 
@@ -376,7 +379,10 @@ class TestProperExitIterableDataset(IterableDataset):
         return self
 
     def __next__(self):
-        if self.error_event is not None and self.error_event.is_set():
+        worker_info = torch.utils.data.get_worker_info()
+        if self.error_event is not None and self.error_event.is_set() and \
+                worker_info.id == worker_info.num_workers - 1:
+            # only error in the last worker
             raise RuntimeError('Worker error')
         self.remaining -= 1
         if self.remaining < 0:
@@ -451,7 +457,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
             elif exit_method == 'loader_kill':
                 kill_pid(os.getpid())
             elif exit_method == 'worker_kill':
-                kill_pid(workers[0].pid)
+                kill_pid(workers[-1].pid)  # kill last worker
 
     if not hold_iter_reference:
         # Tries to trigger the __del__ clean-up rather than the automatic
