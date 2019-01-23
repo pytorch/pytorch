@@ -6,7 +6,7 @@ namespace c10 {
 
 class OpKernel final {
 public:
-  explicit constexpr OpKernel(KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
+  explicit OpKernel(KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
   : kernel_(kernel), state_creator_(state_creator) {}
 
   OpKernel(OpKernel&&) = default;
