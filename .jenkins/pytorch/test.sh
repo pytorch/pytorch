@@ -35,7 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   pip install -q hypothesis --user
 
-  if [[ "$BUILD_ENVIRONMENT" != py2-clang7-rocmdeb-ubuntu16.04 ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != py2-clang7-rocmdeb-ubuntu16.04 ]] && [[ "$BUILD_ENVIRONMENT" != *-py2.7* ]]; then
     pip install -q mypy --user
   fi
 fi
