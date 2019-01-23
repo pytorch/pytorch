@@ -60,7 +60,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   void ExtractValues() {
     auto source_values =
         this->template GetRepeatedArgument<Type>("values");
-    values_.Resize(source_values.size());
+    ReinitializeTensor(&values_, {static_cast<int64_t>(source_values.size())}, at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
@@ -70,19 +70,19 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
   template <typename Type>
   bool FillWithType(Tensor* output) {
-    DCHECK_EQ(output->size(), values_.size())
-        << "output size: " << output->size()
-        << " given size: " << values_.size();
+    DCHECK_EQ(output->numel(), values_.numel())
+        << "output size: " << output->numel()
+        << " given size: " << values_.numel();
     auto* data = output->template mutable_data<Type>();
     const Type* values_data = values_.template data<Type>();
-    if (output->size()) {
+    if (output->numel()) {
       context_.CopyItemsFromCPU(
-          TypeMeta::Make<Type>(), output->size(), values_data, data);
+          TypeMeta::Make<Type>(), output->numel(), values_data, data);
     }
     return true;
   }
 
   bool (GivenTensorFillOp::*body_)(Tensor* output);
-  Tensor values_{CPU};
+  Tensor values_;
 };
 } // namespace caffe2

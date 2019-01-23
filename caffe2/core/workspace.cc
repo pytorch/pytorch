@@ -9,9 +9,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/plan_executor.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_print_blob_sizes_at_exit,
     false,
     "If true, workspace destructor will print all blob shapes");
@@ -306,6 +306,11 @@ ThreadPool* Workspace::GetThreadPool() {
     thread_pool_ = ThreadPool::defaultThreadPool();
   }
   return thread_pool_.get();
+}
+
+std::shared_ptr<Workspace::Bookkeeper> Workspace::bookkeeper() {
+  static auto shared = std::make_shared<Workspace::Bookkeeper>();
+  return shared;
 }
 
 } // namespace caffe2

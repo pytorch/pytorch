@@ -2,14 +2,16 @@
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/predictor_consts.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 namespace predictor_utils {
 
-const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
+CAFFE2_API const NetDef& getNet(
+    const MetaNetDef& def,
+    const std::string& name) {
   for (const auto& n : def.nets()) {
     if (n.key() == name) {
       return n.value();
@@ -33,7 +35,7 @@ std::unique_ptr<MetaNetDef> extractMetaNetDef(
     BlobProto proto;
     CAFFE_ENFORCE(proto.ParseFromString(cursor->value()));
     Blob blob;
-    blob.Deserialize(proto);
+    DeserializeBlob(proto, &blob);
     CAFFE_ENFORCE(blob.template IsType<string>());
     auto def = caffe2::make_unique<MetaNetDef>();
     CAFFE_ENFORCE(def->ParseFromString(blob.template Get<string>()));

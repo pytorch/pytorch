@@ -16,10 +16,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,
@@ -29,14 +29,14 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
   // block_size is the number of elements and fused_block_size is the size of
   // an entire row, including scale and bias.
   const auto scale_bias_offset = 8 / sizeof(InType);
-  const TIndex fused_block_size = block_size + scale_bias_offset;
-  TIndex current = 0;
+  const int64_t fused_block_size = block_size + scale_bias_offset;
+  int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     EigenVectorArrayMap<OutType> out_vector(out, block_size);
     for (int i = 0; i < lengths[m]; ++i) {
       CAFFE_ENFORCE_LT(current, index_size);
-      TIndex idx = indices[current];
+      int64_t idx = indices[current];
       CAFFE_ENFORCE(
           0 <= idx && idx < data_size,
           "Index ",
@@ -85,77 +85,80 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
 }
 
 // Proxy back to generic implementation
-#define FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(                                    \
-    IndexType, InType, OutType)                                                         \
-  void                                                                                  \
-      Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__base( \
-          const TIndex block_size,                                                      \
-          const TIndex output_size,                                                     \
-          const TIndex index_size,                                                      \
-          const TIndex data_size,                                                       \
-          const InType* input,                                                          \
-          const IndexType* indices,                                                     \
-          const int* lengths,                                                           \
-          const float* weights,                                                         \
-          bool normalize_by_lengths,                                                    \
-          OutType* out) {                                                               \
-    Fused8BitRowwiseEmbeddingLookupGenericSlow<                                         \
-        IndexType,                                                                      \
-        InType,                                                                         \
-        OutType,                                                                        \
-        false>(                                                                         \
-        block_size,                                                                     \
-        output_size,                                                                    \
-        index_size,                                                                     \
-        data_size,                                                                      \
-        input,                                                                          \
-        indices,                                                                        \
-        lengths,                                                                        \
-        weights,                                                                        \
-        normalize_by_lengths,                                                           \
-        out);                                                                           \
-  }                                                                                     \
-  template <>                                                                           \
-  void Fused8BitRowwiseEmbeddingLookup<IndexType, InType, OutType, false>(              \
-      const TIndex block_size,                                                          \
-      const TIndex output_size,                                                         \
-      const TIndex index_size,                                                          \
-      const TIndex data_size,                                                           \
-      const InType* input,                                                              \
-      const IndexType* indices,                                                         \
-      const int* lengths,                                                               \
-      const float* weights,                                                             \
-      bool normalize_by_lengths,                                                        \
-      OutType* out) {                                                                   \
-    const int32_t one = 1;                                                              \
-    CAFFE_ENFORCE_EQ(                                                                   \
-        reinterpret_cast<const uint8_t*>(&one)[0],                                      \
-        1,                                                                              \
-        "Fused8BitRowwiseEmbeddingLookup is not supported on this platform");           \
-    AVX2_FMA_DO(                                                                        \
-        Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false,     \
-        block_size,                                                                     \
-        output_size,                                                                    \
-        index_size,                                                                     \
-        data_size,                                                                      \
-        input,                                                                          \
-        indices,                                                                        \
-        lengths,                                                                        \
-        weights,                                                                        \
-        normalize_by_lengths,                                                           \
-        out);                                                                           \
-    BASE_DO(                                                                            \
-        Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false,     \
-        block_size,                                                                     \
-        output_size,                                                                    \
-        index_size,                                                                     \
-        data_size,                                                                      \
-        input,                                                                          \
-        indices,                                                                        \
-        lengths,                                                                        \
-        weights,                                                                        \
-        normalize_by_lengths,                                                           \
-        out);                                                                           \
+#define FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(                                        \
+    IndexType, InType, OutType)                                                             \
+  void                                                                                      \
+      Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__base(     \
+          const int64_t block_size,                                                         \
+          const int64_t output_size,                                                        \
+          const int64_t index_size,                                                         \
+          const int64_t data_size,                                                          \
+          const InType* input,                                                              \
+          const IndexType* indices,                                                         \
+          const int* lengths,                                                               \
+          const float* weights,                                                             \
+          bool normalize_by_lengths,                                                        \
+          OutType* out) {                                                                   \
+    Fused8BitRowwiseEmbeddingLookupGenericSlow<                                             \
+        IndexType,                                                                          \
+        InType,                                                                             \
+        OutType,                                                                            \
+        false>(                                                                             \
+        block_size,                                                                         \
+        output_size,                                                                        \
+        index_size,                                                                         \
+        data_size,                                                                          \
+        input,                                                                              \
+        indices,                                                                            \
+        lengths,                                                                            \
+        weights,                                                                            \
+        normalize_by_lengths,                                                               \
+        out);                                                                               \
+  }                                                                                         \
+  decltype(                                                                                 \
+      Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__base)     \
+      Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__avx2_fma; \
+  template <>                                                                               \
+  void Fused8BitRowwiseEmbeddingLookup<IndexType, InType, OutType, false>(                  \
+      const int64_t block_size,                                                             \
+      const int64_t output_size,                                                            \
+      const int64_t index_size,                                                             \
+      const int64_t data_size,                                                              \
+      const InType* input,                                                                  \
+      const IndexType* indices,                                                             \
+      const int* lengths,                                                                   \
+      const float* weights,                                                                 \
+      bool normalize_by_lengths,                                                            \
+      OutType* out) {                                                                       \
+    const int32_t one = 1;                                                                  \
+    CAFFE_ENFORCE_EQ(                                                                       \
+        reinterpret_cast<const uint8_t*>(&one)[0],                                          \
+        1,                                                                                  \
+        "Fused8BitRowwiseEmbeddingLookup is not supported on this platform");               \
+    AVX2_FMA_DO(                                                                            \
+        Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false,         \
+        block_size,                                                                         \
+        output_size,                                                                        \
+        index_size,                                                                         \
+        data_size,                                                                          \
+        input,                                                                              \
+        indices,                                                                            \
+        lengths,                                                                            \
+        weights,                                                                            \
+        normalize_by_lengths,                                                               \
+        out);                                                                               \
+    BASE_DO(                                                                                \
+        Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false,         \
+        block_size,                                                                         \
+        output_size,                                                                        \
+        index_size,                                                                         \
+        data_size,                                                                          \
+        input,                                                                              \
+        indices,                                                                            \
+        lengths,                                                                            \
+        weights,                                                                            \
+        normalize_by_lengths,                                                               \
+        out);                                                                               \
   }
 
 FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(int32_t, uint8_t, float);

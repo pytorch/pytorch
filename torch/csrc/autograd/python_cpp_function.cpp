@@ -1,18 +1,19 @@
-#include "torch/csrc/autograd/python_cpp_function.h"
+#include <torch/csrc/autograd/python_cpp_function.h>
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <memory>
-#include <stdio.h>
+#include <cstdio>
 #include <typeindex>
 #include <unordered_map>
 
-#include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/python_hook.h"
-#include "torch/csrc/autograd/python_anomaly_mode.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
 
 using namespace torch::autograd;
 
@@ -152,6 +153,10 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
   return registerFunctionHook(fn, hook);
 }
 
+PyObject* THPCppFunction_name(PyObject* self) {
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  return THPUtils_packString(fn.name());
+}
 
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
@@ -184,8 +189,19 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
 
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
-PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
+struct DefaultFunctionType {
+  DefaultFunctionType() : type() {
+    _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
+    Py_INCREF(&type);
+  }
+
+  PyTypeObject type;
+};
+
+PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
 {
+  static DefaultFunctionType default_type;
+
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -201,12 +217,13 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    PyTypeObject* type;
     if (it == cpp_function_types.end()) {
-      return PyErr_Format(PyExc_TypeError,
-          "Don't know how to create Python object for %s", typeid(fn).name());
+      type = &default_type.type;
+    } else {
+      type = (PyTypeObject*)it->second.get();
     }
 
-    PyTypeObject* type = (PyTypeObject*)it->second.get();
     THPObjectPtr obj(type->tp_alloc(type, 0));
     if (!obj) return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();

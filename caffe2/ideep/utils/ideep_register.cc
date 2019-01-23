@@ -1,14 +1,47 @@
 #include <caffe2/core/event_cpu.h>
 #include <caffe2/core/operator.h>
-#include <caffe2/proto/caffe2.pb.h>
+#include <caffe2/proto/caffe2_pb.h>
 #include <ideep_pin_singletons.hpp>
 #include "ideep_context.h"
+
+namespace at {
+REGISTER_CONTEXT(DeviceType::IDEEP, caffe2::IDEEPContext);
+
+namespace {
+void CopyBytesWrapper(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device) {
+  if (nbytes == 0) {
+    return;
+  }
+  CAFFE_ENFORCE(src);
+  CAFFE_ENFORCE(dst);
+  memcpy(dst, src, nbytes);
+}
+} // namespace
+
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::IDEEP,
+    DeviceType::CPU,
+    CopyBytesWrapper);
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CPU,
+    DeviceType::IDEEP,
+    CopyBytesWrapper);
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::IDEEP,
+    DeviceType::IDEEP,
+    CopyBytesWrapper);
+} // namespace at
 
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
@@ -26,12 +59,5 @@ REGISTER_EVENT_QUERY_FUNCTION(IDEEP, EventQueryCPU);
 REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(IDEEP, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(IDEEP, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(IDEEP, EventResetCPU);
-
-BaseStaticContext* GetIDEEPStaticContext() {
-  static IDEEPStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(IDEEP, GetIDEEPStaticContext());
 
 } // namespace caffe2

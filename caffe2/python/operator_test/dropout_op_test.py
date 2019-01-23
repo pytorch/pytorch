@@ -10,11 +10,12 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestDropout(hu.HypothesisTestCase):
+class TestDropout(serial.SerializedTestCase):
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            in_place=st.booleans(),
            ratio=st.floats(0, 0.999),
            engine=st.sampled_from(["", "CUDNN"]),

@@ -3,7 +3,7 @@
 
 #include <THD/THD.h>
 
-#include "torch/csrc/THP.h"
-#include "Module.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/Module.h>
 
 #endif

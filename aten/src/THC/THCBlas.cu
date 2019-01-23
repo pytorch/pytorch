@@ -1,6 +1,7 @@
-#include "THCBlas.h"
-#include "THCGeneral.h"
-#include "THCHalf.h"
+#include <THC/THCBlas.h>
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <algorithm>
 
@@ -50,7 +51,7 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
-half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
+at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, at::Half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
   if (n == 1) {
@@ -59,7 +60,7 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
   }
 
   if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
-    half result;
+    at::Half result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
     THCublasCheck(cublasDotEx(handle, n,
@@ -72,10 +73,10 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
-  return THC_float2half(0);
+  return 0.0;
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
-  return THC_float2half(0);
+  return 0.0;
 #endif
 }
 
@@ -267,7 +268,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 #  define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, half alpha, half *a, int64_t lda, half *b, int64_t ldb, half beta, half *c, int64_t ldc)
+void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -285,9 +286,18 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
       cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
       cublasSetStream(handle, THCState_getCurrentStream(state));
 
+#ifdef __HIP_PLATFORM_HCC__
+     float fAlpha = alpha;
+     float fBeta = beta;
+     THCublasCheck(rocblas_gemm_ex(handle, opa, opb, i_m, i_n, i_k,
+                   &fAlpha, a, rocblas_datatype_f16_r, i_lda, b, rocblas_datatype_f16_r,
+                   i_ldb, &fBeta, c, rocblas_datatype_f16_r, i_ldc, c, rocblas_datatype_f16_r,
+                   i_ldc, rocblas_datatype_f32_r, rocblas_gemm_algo_standard, 0, 0, NULL, NULL));
+#else
+
       // Simulated Hgemm
-      float fAlpha = THC_half2float(alpha);
-      float fBeta = THC_half2float(beta);
+      float fAlpha = alpha;
+      float fBeta = beta;
 
 #if CUDA_VERSION < 9000
       THCublasCheck(cublasSgemmEx(handle, opa, opb,
@@ -295,25 +305,22 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
                                   a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                   i_ldb, &fBeta, c, CUDA_R_16F, i_ldc));
 #else
-      cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       if (prop->major >= 5){
-#ifndef __HIP_PLATFORM_HCC__
         THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-#endif
 	THCublasCheck(cublasGemmEx(handle, opa, opb,
                                    i_m, i_n, i_k, &fAlpha,
                                    a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                    i_ldb, &fBeta, c, CUDA_R_16F, i_ldc,
                                    CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
-#ifndef __HIP_PLATFORM_HCC__
 	THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-#endif
       }else{
         THCublasCheck(cublasSgemmEx(handle, opa, opb,
                                     i_m, i_n, i_k, &fAlpha,
                                     a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                     i_ldb, &fBeta, c, CUDA_R_16F, i_ldc));
       }
+#endif
 #endif
       return;
     }
@@ -345,10 +352,10 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
-#if CUDA_VERSION >= 9010
+#if CUDA_VERSION >= 9010  || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                             half alpha, const half *a, int64_t lda, int64_t strideA, const half *b, int64_t ldb, int64_t strideB,
-                             half beta, half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
+                             at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
+                             at::Half beta, at::Half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
@@ -363,8 +370,17 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
 
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
-  float fAlpha = THC_half2float(alpha);
-  float fBeta = THC_half2float(beta);
+  float fAlpha = alpha;
+  float fBeta = beta;
+#ifdef __HIP_PLATFORM_HCC__
+  THCublasCheck(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
+                                   (void*)&fAlpha, a, rocblas_datatype_f16_r, (int)lda, strideA,
+                                   b, rocblas_datatype_f16_r, (int)ldb, strideB,
+                                   (void*)&fBeta, c, rocblas_datatype_f16_r, (int)ldc, strideC,
+                                   c, rocblas_datatype_f16_r, (int)ldc, strideC,
+                                   (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+                                   0, 0, NULL, NULL));
+#else
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
@@ -373,6 +389,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
                                    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
 }
 #endif
 
@@ -493,6 +510,7 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
 
 /* Inverse */
 void THCudaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize) {
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Sgetrf only supports n, lda, batchSize"
@@ -501,9 +519,13 @@ void THCudaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, i
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasSgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
+#else
+  THError("THCudaBlas_Sgetrf not supported in ROCM.");
+#endif
 }
 
 void THCudaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, int *info, int batchSize) {
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Dgetrf only supports n, lda, batchSize"
@@ -512,10 +534,14 @@ void THCudaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, 
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasDgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
+#else
+  THError("THCudaBlas_Dgetrf not supported in ROCM.");
+#endif
 }
 
 void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const float **a, int lda, int *pivot, float **b, int ldb, int *info, int batchSize)
 {
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
@@ -528,11 +554,15 @@ void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const floa
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasSgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+#else
+  THError("THCudaBlas_Sgetrs not supported in ROCM.");
+#endif
 }
 
 
 void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const double **a, int lda, int *pivot, double **b, int ldb, int *info, int batchSize)
 {
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
@@ -545,10 +575,13 @@ void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const doub
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasDgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+#else
+  THError("THCudaBlas_Dgetrs not supported in ROCM.");
+#endif
 }
 
 void THCudaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {
-
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Sgetri only supports n, lda, ldc, batchSize"
@@ -557,10 +590,13 @@ void THCudaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pi
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasSgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
+#else
+  THError("THCudaBlas_Sgetri not supported in ROCM.");
+#endif
 }
 
 void THCudaBlas_Dgetri(THCState *state, int n, const double **a, int lda, int *pivot, double **c, int ldc, int *info, int batchSize) {
-
+#ifndef __HIP_PLATFORM_HCC__
   if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
   {
     THError("Cublas_Dgetri only supports n, lda, ldc, batchSize"
@@ -569,4 +605,7 @@ void THCudaBlas_Dgetri(THCState *state, int n, const double **a, int lda, int *p
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasDgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
+#else
+  THError("THCudaBlas_Dgetri not supported in ROCM.");
+#endif
 }

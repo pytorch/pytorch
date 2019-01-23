@@ -3,7 +3,7 @@
 #include "caffe2/onnx/backend_rep.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 #include <functional>
@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-constexpr int kKnownOpsetVersion = 7;
+constexpr int kKnownOpsetVersion = 9;
 
 namespace caffe2 {
 namespace onnx {
@@ -157,7 +157,8 @@ class CAFFE2_API Caffe2Backend {
   void BuildTensorFillingOp(
       caffe2::OperatorDef* c2_op,
       const TensorProto& onnx_tensor,
-      const std::string& name = "");
+      const std::string& output_name = "",
+      const std::string& shape_name = "");
 
  private:
   using SpecialOpConverter =
@@ -192,6 +193,10 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateConstant(OnnxNode* onnx_node, const ConversionContext& ctx);
 
+  Caffe2Ops CreateConstantOfShape(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
+
   Caffe2Ops CreateConvPoolOpBase(
       OnnxNode* onnx_node,
       const ConversionContext& ctx);
@@ -212,9 +217,24 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
 
+  std::string PreprocessSliceIndexTensor(OnnxNode* onnx_node,
+                                                        Caffe2Ops& ret,
+                                                        std::string indices_tensor,
+                                                        std::string axes_tensor,
+                                                        std::string rank_tensor,
+                                                        std::string zero_tensor,
+                                                        std::string one_tensor,
+                                                        int default_value);
+
+  Caffe2Ops CreateDynamicSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
+
   Caffe2Ops CreateSplit(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, const ConversionContext& ctx);
+
+  Caffe2Ops CreateRandomNormal(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,

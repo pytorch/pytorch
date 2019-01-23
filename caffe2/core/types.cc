@@ -1,5 +1,5 @@
 #include "caffe2/core/types.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <atomic>
 #include <memory>
@@ -7,8 +7,6 @@
 #include <vector>
 
 namespace caffe2 {
-
-CAFFE_KNOWN_TYPE(caffe2::float16);
 
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   static_assert(sizeof(int) == 4,
@@ -27,7 +25,7 @@ TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
     {TypeMeta::Id<uint16_t>(), TensorProto_DataType_UINT16},
     {TypeMeta::Id<int16_t>(), TensorProto_DataType_INT16},
     {TypeMeta::Id<int64_t>(), TensorProto_DataType_INT64},
-    {TypeMeta::Id<float16>(), TensorProto_DataType_FLOAT16},
+    {TypeMeta::Id<at::Half>(), TensorProto_DataType_FLOAT16},
     {TypeMeta::Id<double>(), TensorProto_DataType_DOUBLE},
   };
   const auto it = data_type_map.find(meta.id());
@@ -39,6 +37,7 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
   static std::map<TensorProto::DataType, TypeMeta> type_meta_map{
       {TensorProto_DataType_FLOAT, TypeMeta::Make<float>()},
       {TensorProto_DataType_INT32, TypeMeta::Make<int>()},
+      {TensorProto_DataType_BYTE, TypeMeta::Make<uint8_t>()},
       {TensorProto_DataType_STRING, TypeMeta::Make<std::string>()},
       {TensorProto_DataType_BOOL, TypeMeta::Make<bool>()},
       {TensorProto_DataType_UINT8, TypeMeta::Make<uint8_t>()},
@@ -46,7 +45,7 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
       {TensorProto_DataType_UINT16, TypeMeta::Make<uint16_t>()},
       {TensorProto_DataType_INT16, TypeMeta::Make<int16_t>()},
       {TensorProto_DataType_INT64, TypeMeta::Make<int64_t>()},
-      {TensorProto_DataType_FLOAT16, TypeMeta::Make<float16>()},
+      {TensorProto_DataType_FLOAT16, TypeMeta::Make<at::Half>()},
       {TensorProto_DataType_DOUBLE, TypeMeta::Make<double>()},
   };
   const auto it = type_meta_map.find(dt);

@@ -18,20 +18,13 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/THCHalf.cu)
-ENDIF()
-
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCStream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCThreadLocal.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
@@ -64,8 +57,6 @@ INSTALL(FILES
           THCSleep.h
           THCStorage.h
           THCStorageCopy.h
-          THCStream.h
-          THCThreadLocal.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
@@ -98,7 +89,6 @@ INSTALL(FILES
           THCGenerateFloatType.h
           THCGenerateFloatTypes.h
           THCGenerateDoubleType.h
-          THCHalf.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
           THCTensorSort.cuh
@@ -128,7 +118,6 @@ INSTALL(FILES
           generic/THCStorageCopy.cpp
           generic/THCStorageCopy.cu
           generic/THCStorageCopy.h
-          generic/THCTensorCopy.cpp
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
           generic/THCTensorMasked.h

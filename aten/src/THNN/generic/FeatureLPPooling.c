@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/FeatureLPPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/FeatureLPPooling.c"
 #else
 
 #ifndef FEATURE_LP_DEFS
@@ -215,8 +215,8 @@ THNN_(FeatureLPPooling_updateOutput)(
   FeatureLPPoolingSizes outputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(output, batchMode);
 
-  real* inputP = THTensor_(data)(input);
-  real* outputP = THTensor_(data)(output);
+  scalar_t* inputP = input->data<scalar_t>();
+  scalar_t* outputP = output->data<scalar_t>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
@@ -309,10 +309,10 @@ THNN_(FeatureLPPooling_updateGradInput)(
   FeatureLPPoolingSizes gradInputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(gradInput, batchMode);
 
-  real* gradOutputP = THTensor_(data)(gradOutput);
-  real* gradInputP = THTensor_(data)(gradInput);
-  real* outputP = THTensor_(data)(output);
-  real* inputP = THTensor_(data)(input);
+  scalar_t* gradOutputP = gradOutput->data<scalar_t>();
+  scalar_t* gradInputP = gradInput->data<scalar_t>();
+  scalar_t* outputP = output->data<scalar_t>();
+  scalar_t* inputP = input->data<scalar_t>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
@@ -325,11 +325,11 @@ THNN_(FeatureLPPooling_updateGradInput)(
 
           // Load output (f(x_is)). It is possible that this is zero, in
           // which case we'll ignore this point.
-          real outputV =
+          scalar_t outputV =
             outputP[
               flpGetOffset(&outputDesc, batch, outputFeature, opt1, opt2)];
 
-          if (outputV == (real) 0) {
+          if (outputV == (scalar_t) 0) {
             continue;
           }
 
@@ -337,15 +337,15 @@ THNN_(FeatureLPPooling_updateGradInput)(
             FEATURE_LP_SIZE_TYPE inputFeature = outputFeature * stride + i;
             THAssert(inputFeature < inputDesc.size[1]);
 
-            real gradOutputV =
+            scalar_t gradOutputV =
               gradOutputP[
                 flpGetOffset(&gradOutputDesc, batch, outputFeature, opt1, opt2)];
-            real inputV =
+            scalar_t inputV =
               inputP[
                 flpGetOffset(&inputDesc, batch, inputFeature, opt1, opt2)];
 
             // Calculate grad * (x_i / f(x_is))^(p - 1)
-            real v = gradOutputV * pow(inputV / outputV, power - (accreal) 1);
+            scalar_t v = gradOutputV * pow(inputV / outputV, power - (accreal) 1);
 
             gradInputP[
               flpGetOffset(&gradInputDesc, batch, inputFeature, opt1, opt2)]

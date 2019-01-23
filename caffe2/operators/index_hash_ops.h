@@ -26,15 +26,16 @@ class IndexHashOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& indices = Input(INDICES);
-    auto* hashed_indices = Output(HASHED_INDICES);
-    hashed_indices->ResizeLike(indices);
+
+    auto* hashed_indices =
+        Output(HASHED_INDICES, indices.sizes(), at::dtype<T>());
 
     CAFFE_ENFORCE_GE(
         static_cast<int64_t>(std::numeric_limits<T>::max()),
         modulo_,
         "MODULO shouldn't be larger than the numeric limit of the indices");
 
-    auto N = indices.size();
+    auto N = indices.numel();
     auto* indices_data = indices.template data<T>();
     auto* hashed_indices_data = hashed_indices->template mutable_data<T>();
 

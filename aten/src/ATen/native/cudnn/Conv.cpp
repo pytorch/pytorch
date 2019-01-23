@@ -14,74 +14,74 @@ at::Tensor cudnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_bias(
     const at::Tensor& grad_output) {
-  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 }}
 
 #else  // AT_CUDNN_ENABLED
 
-#include "THC/THC.h"
+#include <THC/THC.h>
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include "ATen/native/utils/ParamsHash.h"
+#include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -119,7 +119,7 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
@@ -194,16 +194,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // Used on pad, stride and dilation
 static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
 {
-  if (args.size() > expected_size){
-    std::stringstream ss;
-    ss << "Too many " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
-  else if (args.size() < expected_size){
-    std::stringstream ss;
-    ss << "Not enough " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(args.size() <= expected_size,
+           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
+  AT_CHECK(args.size() >= expected_size,
+           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
 
   auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
   if (num_negative_values > 0){
@@ -211,11 +207,13 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
     ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
 
 
+// NOTE [ Convolution checks ]
+//
 // NB: For many call sites, it is not strictly necessary to check all of
 // these relationships (for example, for forward convolution, we compute
 // the size of output ourselves, so we don't actually need to check
@@ -422,7 +420,7 @@ size_t getMaxWorkspaceSize(
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
 
-    THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
+    THCudaCheck(THCudaMemGetInfo(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
 
     for (int i = 0; i < n_algo; i++) {
         cudnnStatus_t err;
@@ -447,7 +445,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
         return perfResults[i];
       }
     }
-    throw std::runtime_error("no deterministic convolution algorithms available in CuDNN");
+    AT_ERROR("no deterministic convolution algorithms available in CuDNN");
   } else {
     return perfResults[0];
   }
@@ -605,9 +603,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
-#if CUDNN_VERSION >= 6000
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
-#endif
     };
     // NOTE: - 1 because ALGO_WINOGRAD is not implemented
     static constexpr int num_algos = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT - 1;
@@ -712,7 +708,7 @@ Workspace chooseAlgorithm(
   search::getWorkspaceSize(args, *algo, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (std::runtime_error& e) {
+  } catch (const std::exception& e) {
     cudaGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -752,6 +748,8 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
                                      &one, odesc.desc(), output->data_ptr()));
 }
 
+// NOTE [ Convolution design ]
+//
 // The general strategy:
 //
 //    - cudnn_convolution (Tensor)
@@ -792,7 +790,6 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 //    - It takes output as a parameter (this should be computed!)
 //    - It doesn't do input checking
 //    - It doesn't resize output (it is assumed to be correctly sized)
-//    - It takes a ConvolutionParams struct
 //
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
@@ -837,9 +834,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t = input->type().tensor(
+  auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups));
+                                     padding, stride, dilation, groups),
+                    input->options());
 
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
@@ -848,19 +846,9 @@ Tensor cudnn_convolution_forward(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_forward_out(
-        narrowGroup(*output, output_channels_dim,        i, groups),
-        narrowGroup(*input,  input_channels_dim,         i, groups),
-        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
-        padding, stride, dilation, 1, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_forward_out(
       *output, *input, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return *output;
 }
@@ -956,6 +944,8 @@ void raw_cudnn_convolution_backward_input_out(
       &zero, args.idesc.desc(), grad_input.data_ptr()));
 }
 
+// NOTE [ Backward vs transpose convolutions ]
+//
 // Backward and transpose are algorithmically equivalent, but they
 // compute their geometry differently.  In a backwards, you knew what
 // the original size of the input tensor was, so you can cache that
@@ -975,7 +965,7 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto grad_input_t = grad_output->type().tensor(input_size);
+  auto grad_input_t = at::empty(input_size, grad_output->options());
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -984,19 +974,9 @@ Tensor cudnn_convolution_backward_input(
   // See #4500
   Tensor weight_contig = weight->contiguous();
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_backward_input_out(
-        narrowGroup(*grad_input, input_channels_dim, i, groups),
-        narrowGroup(*grad_output, output_channels_dim, i, groups),
-        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
-        padding, stride, dilation, 1, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return *grad_input;
 }
@@ -1110,26 +1090,16 @@ Tensor cudnn_convolution_backward_weight(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = grad_output->type().tensor(weight_size);
+  auto grad_weight_t = at::empty(weight_size, grad_output->options());
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
 
-#if CUDNN_VERSION < 7000
-  for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_backward_weight_out(
-        narrowGroup(*grad_weight, weight_output_channels_dim, i, groups),
-        narrowGroup(*grad_output, output_channels_dim, i, groups),
-        narrowGroup(*input, input_channels_dim, i, groups),
-        padding, stride, dilation, groups, benchmark, deterministic);
-  }
-#else
   raw_cudnn_convolution_backward_weight_out(
       *grad_weight, *grad_output, *input,
       padding, stride, dilation, groups, benchmark, deterministic);
-#endif
 
   return grad_weight_t;
 }
@@ -1178,8 +1148,8 @@ Tensor cudnn_convolution_backward_bias(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
   setCuDNNStreamToCurrent();
 
-  auto grad_bias_t = grad_output->type().tensor(
-                        { grad_output->size(output_channels_dim) });
+  auto grad_bias_t = at::empty(
+                        { grad_output->size(output_channels_dim) }, grad_output->options());
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
 

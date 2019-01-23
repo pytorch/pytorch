@@ -9,19 +9,19 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
 #include "caffe2/utils/thread_pool.h"
 
-CAFFE2_DECLARE_string(caffe2_override_executor);
+C10_DECLARE_string(caffe2_override_executor);
 
 namespace caffe2 {
 
@@ -124,25 +124,27 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   string name_;
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
-  AT_DISABLE_COPY_AND_ASSIGN(NetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
 class CAFFE2_API ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual TaskThreadPool* GetPool(const DeviceOption& option) const;
+  virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
+  virtual std::vector<OperatorBase*> GetOperators() const;
+  virtual int GetNumWorkers() const;
   virtual ~ExecutorHelper() {}
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,
     Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
-  CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 
 /**
  * @brief Creates a network, accessing / creating blobs in the given workspace.

@@ -1,26 +1,32 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
+#include <c10/util/Array.h>
+#include "caffe2/core/context_base.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/utils/Array.h"
+#include <ATen/core/blob.h>
 
 namespace caffe2 {
 namespace ops {
 
 struct AveragedLoss final {
   struct State final {
-    Tensor scratch = Tensor{CPU};
+    at::Tensor scratch = at::Tensor(C10Tensor(empty({}, CPU)));
   };
 
   static constexpr const char* name = "averaged_loss";
 
   using Signature = void(
-      const Tensor& input,
-      Tensor* output,
-      State* state,
-      BaseContext* context);
+      const at::Tensor& input,
+      const at::Tensor& output,
+      intrusive_ptr<Blob> state);
 
-  static constexpr c10::guts::array<const char*, 4> parameter_names = {
-      {"input", "output", "state", "context"}};
+  static constexpr size_t num_dispatch_args() {return 1;}
+
+  static constexpr size_t num_outputs() {return 1;}
+
+  static constexpr c10::guts::array<const char*, 3> parameter_names = {
+      {"input", "output", "state"}};
 };
 
 } // namespace ops

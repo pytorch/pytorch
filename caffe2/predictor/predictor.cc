@@ -10,26 +10,18 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
   auto blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob does not exist: ", name);
   CAFFE_ENFORCE(
-      blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
+      BlobIsTensorType(*blob, CPU), "Blob is not a CPU Tensor: ", name);
 }
 
-void shareInputTensor(
-    Workspace* ws,
-    const std::string& name,
-    TensorCPU* input) {
+Blob* getBlob(Workspace* ws, const std::string& name) {
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  auto* tensor = blob->GetMutableTensor(CPU);
-  tensor->ResizeLike(*input);
-  tensor->ShareData(*input);
+  return blob;
 }
 
-TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
-  enforceIsTensor(ws, name);
-  auto* blob = ws->GetBlob(name);
-  CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  return blob->GetMutableTensor(CPU);
+const Tensor& getTensor(Workspace* ws, const std::string& name) {
+  return *BlobGetMutableTensor(getBlob(ws, name), CPU);
 }
 
 } // namespace
@@ -40,7 +32,12 @@ Predictor::Predictor(
     Workspace* parent,
     bool run_init,
     int optimization)
-    : Predictor(makePredictorConfig(init_net, run_net, parent, run_init)) {}
+    : Predictor(makePredictorConfig(
+          init_net,
+          run_net,
+          parent,
+          run_init,
+          optimization)) {}
 
 Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   const auto& initialized_vec = config_.ws->Blobs();
@@ -49,29 +46,31 @@ Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   for (const auto& name : config_.predict_net->external_input()) {
     if (!initialized.count(name)) {
       auto* blob = config_.ws->CreateBlob(name);
-      blob->GetMutableTensor(CPU);
+      BlobGetMutableTensor(blob, CPU);
     }
   }
   CAFFE_ENFORCE(config_.ws->CreateNet(config_.predict_net));
 }
 
-bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
+bool Predictor::operator()(const TensorList& inputs, TensorList* outputs) {
   CAFFE_ENFORCE(
       inputs.size() <=
       static_cast<unsigned>(config_.predict_net->external_input_size()));
   for (size_t i = 0; i < inputs.size(); ++i) {
-    shareInputTensor(
-        config_.ws.get(), config_.predict_net->external_input(i), inputs[i]);
+    // This is evil and shares the same underlying tensor
+    BlobSetTensor(
+        getBlob(config_.ws.get(), config_.predict_net->external_input(i)),
+        inputs[i].UnsafeSharedInstance());
   }
 
   if (!config_.ws->RunNet(config_.predict_net->name())) {
     return false;
   }
-
-  outputs->resize(config_.predict_net->external_output_size());
-  for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(
-        config_.ws.get(), config_.predict_net->external_output(i));
+  outputs->clear();
+  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+    outputs->emplace_back(
+        getTensor(config_.ws.get(), config_.predict_net->external_output(i))
+            .UnsafeSharedInstance());
   }
   return true;
 }
@@ -80,7 +79,7 @@ bool Predictor::run_map_workspace(const TensorMap& inputs) {
   if (!config_.input_names.empty()) {
     CAFFE_ENFORCE_EQ(inputs.size(), input_names().size());
   }
-  for (auto input : inputs) {
+  for (auto& input : inputs) {
     if (!input_names().empty()) {
       CAFFE_ENFORCE(
           std::find(input_names().begin(), input_names().end(), input.first) !=
@@ -88,33 +87,37 @@ bool Predictor::run_map_workspace(const TensorMap& inputs) {
           "Input can't be found: ",
           input.first);
     }
-    shareInputTensor(config_.ws.get(), input.first, input.second);
+    // This is evil and shares the same underlying tensor
+    BlobSetTensor(
+        getBlob(config_.ws.get(), input.first),
+        input.second.UnsafeSharedInstance());
   }
 
   return config_.ws->RunNet(config_.predict_net->name());
 }
 
-bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+bool Predictor::operator()(const TensorMap& inputs, TensorList* outputs) {
   if (!run_map_workspace(inputs)) {
     return false;
   }
-
-  outputs->resize(config_.predict_net->external_output_size());
-  for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(
-        config_.ws.get(), config_.predict_net->external_output(i));
+  outputs->clear();
+  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+    outputs->push_back(
+        getTensor(config_.ws.get(), config_.predict_net->external_output(i))
+            .UnsafeSharedInstance());
   }
   return true;
 }
 
-bool Predictor::run_map_outputs(const TensorMap& inputs, TensorMap* outputs) {
+bool Predictor::operator()(const TensorMap& inputs, TensorMap* outputs) {
   if (!run_map_workspace(inputs)) {
     return false;
   }
 
-  outputs->reserve(output_names().size());
   for (const std::string& outputName : output_names()) {
-    (*outputs)[outputName] = extractOutputTensor(config_.ws.get(), outputName);
+    outputs->emplace(
+        outputName,
+        getTensor(config_.ws.get(), outputName).UnsafeSharedInstance());
   }
   return true;
 }

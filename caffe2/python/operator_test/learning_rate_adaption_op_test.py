@@ -3,16 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from hypothesis import given
-import hypothesis.strategies as st
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
+from hypothesis import given
+import hypothesis.strategies as st
 import numpy as np
 
 
-class TestLearningRateAdaption(hu.HypothesisTestCase):
-    @given(inputs=hu.tensors(n=2),
+class TestLearningRateAdaption(serial.SerializedTestCase):
+    @serial.given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            lr_alpha=st.floats(min_value=0.01, max_value=0.99,

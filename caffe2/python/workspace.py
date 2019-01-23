@@ -44,20 +44,38 @@ is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
 has_hip_support = C.has_hip_support
 if has_gpu_support:
+    GpuDeviceType = caffe2_pb2.CUDA
     NumCudaDevices = C.num_cuda_devices
+    # This is a duplicate of NumCudaDevices. Remove
+    # NumCudaDevices once replaced everywhere in the code
+    NumGpuDevices = C.num_cuda_devices
     GetCUDAVersion = C.get_cuda_version
     GetCuDNNVersion = C.get_cudnn_version
 
-    def GetCudaPeerAccessPattern():
+    def GetGpuPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
 
     GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
+    GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
-    GetCuDNNVersion = lambda: 0 # noqa
-    GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
+
+if has_hip_support:
+    GpuDeviceType = caffe2_pb2.HIP
+    NumGpuDevices = C.num_hip_devices
+
+    def GetGpuPeerAccessPattern():
+        return np.asarray(C.get_hip_peer_access_pattern())
+    GetDeviceProperties = C.get_device_properties
+
+if not has_gpu_support and not has_hip_support:
+    # setting cuda as the default GpuDeviceType as some tests
+    # like core, scope tests use GpuDeviceType even without gpu support
+    GpuDeviceType = caffe2_pb2.CUDA
+    NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
+    GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
@@ -81,7 +99,6 @@ def _GetFreeFlaskPort():
         # don't do much here as this is mostly for convenience in research
         # rather than 24x7 service.
         return port
-
 
 def StartMint(root_folder=None, port=None):
     """Start a mint instance.
@@ -313,29 +330,8 @@ def FeedBlob(name, arr, device_option=None):
     Returns:
       True or False, stating whether the feed is successful.
     """
-    if type(arr) is caffe2_pb2.TensorProto:
-        arr = utils.Caffe2TensorToNumpyArray(arr)
-    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
-        # Plain NumPy strings are weird, let's use objects instead
-        arr = arr.astype(np.object)
-
-    if device_option is None:
-        device_option = scope.CurrentDeviceScope()
-
-    if device_option and device_option.device_type == caffe2_pb2.CUDA:
-        if arr.dtype == np.dtype('float64'):
-            logger.warning(
-                "CUDA operators do not support 64-bit doubles, " +
-                "please use arr.astype(np.float32) or np.int32 for ints." +
-                " Blob: {}".format(name) +
-                " type: {}".format(str(arr.dtype))
-            )
-
-    name = StringifyBlobName(name)
-    if device_option is not None:
-        return C.feed_blob(name, arr, StringifyProto(device_option))
-    else:
-        return C.feed_blob(name, arr)
+    ws = C.Workspace.current
+    return _Workspace_feed_blob(ws, name, arr, device_option)
 
 
 def FetchBlobs(names):
@@ -388,6 +384,23 @@ def FetchInt8Blob(name):
         'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
             StringifyBlobName(name))
     return Int8Tensor(*result)
+
+
+def FetchInt8BlobRealVal(name):
+    """Fetches an Int8 blob from the workspace and return its real value representation.
+
+    Inputs:
+      name: the name of the Int8 blob - a string or a BlobReference
+    Returns:
+      real value representation of int8 numpy array
+    """
+    result = C.fetch_blob(StringifyBlobName(name))
+    assert isinstance(result, tuple), \
+        'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
+            StringifyBlobName(name))
+    int8_blob = Int8Tensor(*result)
+    return (int8_blob.data.astype(np.int32) - int(int8_blob.zero_point)).astype(
+        np.float32) * int8_blob.scale
 
 
 def _Workspace_fetch_int8_blob(ws, name):
@@ -621,7 +634,7 @@ def FeedImmediate(*args, **kwargs):
         return FeedBlob(*args, **kwargs)
 
 
-# CWorkspace utilities
+# C.Workspace methods.
 
 def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
     return CallWithExceptionIntercept(
@@ -630,9 +643,6 @@ def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
         GetNetName(net),
         StringifyProto(net), overwrite,
     )
-
-
-C.Workspace.create_net = _Workspace_create_net_with_exception_intercept
 
 
 def _Workspace_run(ws, obj):
@@ -654,8 +664,44 @@ def _Workspace_run(ws, obj):
         "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
 
-C.Workspace.run = _Workspace_run
+def _Workspace_feed_blob(ws, name, arr, device_option=None):
+    if type(arr) is caffe2_pb2.TensorProto:
+        arr = utils.Caffe2TensorToNumpyArray(arr)
+    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
+        # Plain NumPy strings are weird, let's use objects instead
+        arr = arr.astype(np.object)
 
+    if device_option is None:
+        device_option = scope.CurrentDeviceScope()
+
+    if device_option and device_option.device_type == caffe2_pb2.CUDA:
+        if arr.dtype == np.dtype('float64'):
+            logger.warning(
+                "CUDA operators do not support 64-bit doubles, " +
+                "please use arr.astype(np.float32) or np.int32 for ints." +
+                " Blob: {}".format(name) +
+                " type: {}".format(str(arr.dtype))
+            )
+
+    name = StringifyBlobName(name)
+    if device_option is not None:
+        return ws.create_blob(name).feed(arr, device_option)
+    else:
+        return ws.create_blob(name).feed(arr)
+
+
+def _Workspace_remove_blob(ws, blob):
+    ws._remove_blob(str(blob))
+
+
+Workspace = C.Workspace
+Workspace.create_net = _Workspace_create_net_with_exception_intercept
+Workspace.run = _Workspace_run
+Workspace.feed_blob = _Workspace_feed_blob
+Workspace.remove_blob = _Workspace_remove_blob
+
+
+# C.Blob methods.
 
 def _Blob_feed(blob, arg, device_option=None):
     if device_option is not None:

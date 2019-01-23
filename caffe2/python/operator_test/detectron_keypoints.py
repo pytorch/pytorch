@@ -3,7 +3,10 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    pass  # skip if opencv is not available
 import numpy as np
 
 

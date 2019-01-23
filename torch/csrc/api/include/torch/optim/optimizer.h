@@ -1,53 +1,63 @@
 #pragma once
 
-#include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/nn/cursor.h>
-#include <torch/tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <string>
 #include <vector>
+
+// Forward declarations confuse Doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace at {
+class Tensor;
+} // namespace at
+
+namespace torch {
+using at::Tensor;
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace optim {
 namespace detail {
-
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-class OptimizerBase {
+class TORCH_API OptimizerBase {
  public:
-  using ParameterCursor = torch::detail::CursorBase<Tensor>;
-
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
-
-  /// Constructs the `Optimizer` from a ParameterCursor, such as
-  /// `nn::Module::parameters()` returns.
-  explicit OptimizerBase(const ParameterCursor& cursor);
 
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  /// Override this method if you want to modify the way parameters are added to
-  /// the `Optimizer`.
-  virtual void add_parameters(const std::vector<Tensor>& parameters);
-
-  /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  /// NOTE: Calls the `vector<Tensor>` overload of `add_parameters` -- override
-  /// that method if you want to modify the behavior of `add_parameters`.
-  virtual void add_parameters(const ParameterCursor& cursor);
+  void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
-  /// Provides a reference to the parameters this optimizer holds.
+  /// Provides a const reference to the parameters this optimizer holds.
   const std::vector<Tensor>& parameters() const noexcept;
+
+  /// Provides a reference to the parameters this optimizer holds.
+  std::vector<Tensor>& parameters() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept;
+
+  /// Serializes the optimizer state into the given `archive`.
+  virtual void save(serialize::OutputArchive& archive) const;
+
+  /// Deserializes the optimizer state from the given `archive`.
+  virtual void load(serialize::InputArchive& archive);
 
  protected:
   OptimizerBase() = default;
@@ -67,26 +77,21 @@ class OptimizerBase {
   /// Accesses a buffer at the given index, converts it to the type of the
   /// parameter at the corresponding index (a no-op if they match).
   /// Additionally, zeros out the buffers when this is called on the index
-  Tensor& buffer_at(std::vector<Tensor>& buffers, size_t index) {
-    if (buffers.size() <= index) {
-      buffers.reserve(index);
-      for (auto i = buffers.size(); i <= index; ++i) {
-        buffers.push_back(torch::zeros_like(parameters_.at(i)));
-      }
-    }
-    // Copy the buffer to the device and dtype of the parameter.
-    const auto& parameter = parameters_.at(index);
-    const auto& buffer = buffers.at(index);
-    if (buffer.device() != parameter.device() ||
-        buffer.dtype() != parameter.dtype()) {
-      buffers[index] = buffer.to(parameter.device(), parameter.dtype());
-    }
-    return buffers[index];
-  }
+  Tensor& buffer_at(std::vector<Tensor>& buffers, size_t index);
 
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
 };
+
+/// Serializes an `OptimizerBase` into an `OutputArchive`.
+TORCH_API serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const OptimizerBase& optimizer);
+
+/// Deserializes a `Tensor` from an `InputArchive`.
+TORCH_API serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    OptimizerBase& optimizer);
 } // namespace detail
 
 /// Optimizer that defines a required `step()` method that takes no arguments

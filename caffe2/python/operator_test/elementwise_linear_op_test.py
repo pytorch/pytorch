@@ -6,13 +6,14 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestElementwiseLinearOp(hu.HypothesisTestCase):
+class TestElementwiseLinearOp(serial.SerializedTestCase):
 
-    @given(n=st.integers(2, 100), d=st.integers(2, 10), **hu.gcs)
+    @serial.given(n=st.integers(2, 100), d=st.integers(2, 10), **hu.gcs)
     # @given(n=st.integers(2, 50), d=st.integers(2, 50), **hu.gcs_cpu_only)
     def test(self, n, d, gc, dc):
         X = np.random.rand(n, d).astype(np.float32)

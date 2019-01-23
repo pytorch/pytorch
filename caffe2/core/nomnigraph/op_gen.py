@@ -99,30 +99,33 @@ def gen_class(op, op_def):
     attribute_setters = []
     for attr in attributes:
         lower_name = attr[0][0].lower() + attr[0][1:]
+        private_name = lower_name + "_"
         default_arg = "" if len(attr) < 3 else " = {}".format(attr[2])
         name = attr[0]
         t = attr[1]
         attr_arg = "{type} {lower_name}".format(
             type=t, lower_name=lower_name + default_arg
         )
-        attr_init = "{name}({lower_name})".format(name=name, lower_name=lower_name)
-        attr_declare = "{type} {name};".format(type=t, name=name)
+        attr_init = "{private_name}({lower_name})".format(
+            private_name=private_name, lower_name=lower_name)
+        attr_declare = "{type} {private_name};".format(
+            type=t, private_name=private_name)
         attr_get = dedent(
             """
               {type} get{name}() const {{
-                return {name};
+                return {private_name};
               }}
             """.format(
-                type=t, name=name
+                type=t, name=name, private_name=private_name
             )
         )
         attr_set = dedent(
             """
               void set{name}({type} {lower_name}) {{
-                {name} = {lower_name};
+                {private_name} = {lower_name};
               }}
             """.format(
-                type=t, name=name, lower_name=lower_name
+                type=t, name=name, private_name=private_name, lower_name=lower_name
             )
         )
         attribute_args.append(attr_arg)
@@ -137,9 +140,11 @@ def gen_class(op, op_def):
             lower_other_op = other_op[0].lower() + other_op[1:]
             other_init = [default_init]
             for attr in attributes:
+                lower_name = attr[0][0].lower() + attr[0][1:]
+                private_name = lower_name + "_"
                 other_init.append(
-                    "{name}({other_op}.get{name}())".format(
-                        name=attr[0], other_op=lower_other_op
+                    "{private_name}({other_op}.get{name}())".format(
+                        name=attr[0], private_name=private_name, other_op=lower_other_op
                     )
                 )
             init = dedent(

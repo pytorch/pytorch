@@ -6,12 +6,13 @@ from __future__ import unicode_literals
 import numpy as np
 import unittest
 from scipy import interpolate
+import sys
 
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, utils
 from caffe2.proto import caffe2_pb2
 
-import detectron_keypoints as keypoint_utils
+import caffe2.python.operator_test.detectron_keypoints as keypoint_utils
 
 NUM_TEST_ROI = 14
 NUM_KEYPOINTS = 19
@@ -75,6 +76,7 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
             ],
             device_option=caffe2_pb2.DeviceOption())
 
+    @unittest.skipIf('cv2' not in sys.modules, 'python-opencv is not installed')
     def test_close_to_FAIR(self):
         # 10 pixel error in scale of 500px bbox
         self.assertReferenceChecks(

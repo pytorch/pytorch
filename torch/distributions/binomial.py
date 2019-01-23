@@ -7,9 +7,9 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 
 class Binomial(Distribution):
     r"""
-    Creates a Binomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). `total_count` must be
-    broadcastable with `probs`/`logits`.
+    Creates a Binomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). :attr:`total_count` must be
+    broadcastable with :attr:`probs`/:attr:`logits`.
 
     Example::
 
@@ -28,7 +28,8 @@ class Binomial(Distribution):
         logits (Tensor): Event log-odds
     """
     arg_constraints = {'total_count': constraints.nonnegative_integer,
-                       'probs': constraints.unit_interval}
+                       'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
@@ -49,6 +50,20 @@ class Binomial(Distribution):
         else:
             batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Binomial, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.total_count = self.total_count.expand(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+            new._param = new.probs
+        else:
+            new.logits = self.logits.expand(batch_shape)
+            new._param = new.logits
+        super(Binomial, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -83,9 +98,13 @@ class Binomial(Distribution):
             shape = self._extended_shape(sample_shape) + (max_count,)
             bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
             if self.total_count.min() != max_count:
-                arange = torch.arange(max_count, out=self.total_count.new_empty(max_count))
+                arange = torch.arange(max_count, dtype=self._param.dtype, device=self._param.device)
                 mask = arange >= self.total_count.unsqueeze(-1)
-                bernoullis.masked_fill_(mask, 0.)
+                if torch._C._get_tracing_state():
+                    # [JIT WORKAROUND] lack of support for .masked_fill_()
+                    bernoullis[mask.expand(shape)] = 0.
+                else:
+                    bernoullis.masked_fill_(mask, 0.)
             return bernoullis.sum(dim=-1)
 
     def log_prob(self, value):
@@ -94,18 +113,16 @@ class Binomial(Distribution):
         log_factorial_n = torch.lgamma(self.total_count + 1)
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
-        max_val = (-self.logits).clamp(min=0.0)
-        # Note that: torch.log1p(-self.probs)) = max_val - torch.log1p((self.logits + 2 * max_val).exp()))
+        # Note that: torch.log1p(-self.probs)) = - torch.log1p(self.logits.exp()))
         return (log_factorial_n - log_factorial_k - log_factorial_nmk +
-                value * self.logits + self.total_count * max_val -
-                self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
+                value * self.logits - self.total_count * torch.log1p(self.logits.exp()))
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
-        values = self._new(1 + total_count,)
-        torch.arange(1 + total_count, out=values)
+        values = torch.arange(1 + total_count, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         return values

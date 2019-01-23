@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/detail/CUDAHooksInterface.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 namespace at {
 namespace native {
 
@@ -38,6 +38,25 @@ bool cudnn_is_acceptable(const Tensor& self) {
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.
   return true;
+}
+
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach is not implemented for Tensor");
+  return self;
+}
+
+Tensor & detach_(Tensor & self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach_ is not implemented for Tensor");
+  return self;
+}
+
+Tensor contiguous(const Tensor & self) {
+  if (self.is_contiguous()) {
+    return self;
+  }
+  return self.clone();
 }
 
 }

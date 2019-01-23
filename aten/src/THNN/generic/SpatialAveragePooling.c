@@ -1,6 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialAveragePooling.c"
 #else
+
+#include <THNN/generic/pooling_shape.h>
+#include <algorithm>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
@@ -34,29 +37,10 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   int64_t nInputPlane = input->size(dimh-1);
   int64_t inputHeight = input->size(dimh);
   int64_t inputWidth = input->size(dimw);
-  int64_t outputHeight, outputWidth;
   int64_t nOutputPlane = nInputPlane;
 
-  if(ceil_mode)
-  {
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-  }
-
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
   if (outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -83,8 +67,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           bool ceil_mode,
           bool count_include_pad)
 {
-  real *output_data;
-  real *input_data;
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   int dimw = 2;
   int dimh = 1;
@@ -113,25 +97,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   inputHeight = input->size(dimh);
   nInputPlane = input->size(dimc);
 
-  if(ceil_mode)
-  {
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  else
-  {
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
@@ -140,8 +107,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
-  input_data = THTensor_(data)(input);
-  output_data = THTensor_(data)(output);
+  input_data = input->data<scalar_t>();
+  output_data = output->data<scalar_t>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -151,8 +118,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
     {
       int64_t xx, yy;
       /* For all output pixels... */
-      real *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
-      real *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+      scalar_t *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
+      scalar_t *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
       int64_t i;
       for(i = 0; i < outputWidth*outputHeight; i++)
         ptr_output[i] = 0;
@@ -164,15 +131,15 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           /* Compute the mean of the input image... */
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
-          int64_t hend = fminf(hstart + kH, inputHeight + padH);
-          int64_t wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hend = std::min(hstart + kH, inputHeight + padH);
+          int64_t wend = std::min(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          hend = fminf(hend, inputHeight);
-          wend = fminf(wend, inputWidth);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          hend = std::min(hend, inputHeight);
+          wend = std::min(wend, inputWidth);
 
-          real sum = 0;
+          scalar_t sum = 0;
 
           int divide_factor;
           if(count_include_pad)
@@ -193,7 +160,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialAveragePooling_updateGradInput)(
@@ -222,8 +189,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int64_t outputHeight;
   int64_t nInputPlane; // number of channels (or colors)
 
-  real *gradOutput_data;
-  real *gradInput_data;
+  scalar_t *gradOutput_data;
+  scalar_t *gradInput_data;
 
   int64_t k;
 
@@ -243,25 +210,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   inputHeight = input->size(dimh);
   nInputPlane = input->size(dimc);
 
-  if(ceil_mode)
-  {
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  else
-  {
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
@@ -271,8 +221,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradInput), 4, "gradInput must be contiguous");
 
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
@@ -280,11 +230,11 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     int64_t p;
     for(p = 0; p < nbatch; p++)
     {
-      real *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
+      scalar_t *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
       int64_t xx, yy;
 
-      real* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-      real *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+      scalar_t* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+      scalar_t *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
 
       int64_t i;
       for(i=0; i<inputWidth*inputHeight; i++)
@@ -296,15 +246,15 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
         {
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
-          int64_t hend = fminf(hstart + kH, inputHeight + padH);
-          int64_t wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hend = std::min(hstart + kH, inputHeight + padH);
+          int64_t wend = std::min(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          hend = fminf(hend, inputHeight);
-          wend = fminf(wend, inputWidth);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          hend = std::min(hend, inputHeight);
+          wend = std::min(wend, inputWidth);
 
-          real z = *ptr_gradOutput++;
+          scalar_t z = *ptr_gradOutput++;
 
           int divide_factor;
           if(count_include_pad)
@@ -323,7 +273,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

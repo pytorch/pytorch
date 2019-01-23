@@ -1,22 +1,17 @@
 #ifndef THC_ALLOCATOR_INC
 #define THC_ALLOCATOR_INC
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
-THC_API THAllocator* getTHCudaHostAllocator(void);
-THC_API THAllocator* getTHCUVAAllocator(void);
 // IPC doesn't support (re)allocation
 
-#ifdef __cplusplus
-class AT_API THCIpcDeleter {
-public:
-  THCIpcDeleter(void* data, int device) : data_(data), device_(device) {};
+class CAFFE2_API THCIpcDeleter {
+ public:
+  THCIpcDeleter(std::shared_ptr<void> basePtr);
   ~THCIpcDeleter();
-  static at::DataPtr makeDataPtr(void* data, int device);
+  static at::DataPtr makeDataPtr(std::shared_ptr<void> basePtr, void* data);
 private:
-  void* data_;
-  int device_;
+  std::shared_ptr<void> basePtr_;
 };
-#endif
 
 #endif

@@ -14,19 +14,18 @@ void Caffe2BackendRep::CheckInit() {
   }
 }
 
-
 void Caffe2BackendRep::Run(
-    const caffe2::Predictor::TensorVector& inputs,
-    caffe2::Predictor::TensorVector* outputs) {
+    const caffe2::Predictor::TensorList& inputs,
+    caffe2::Predictor::TensorList* outputs) {
   CheckInit();
-  predictor_->run(inputs, outputs);
+  (*predictor_)(inputs, outputs);
 }
 
 void Caffe2BackendRep::RunMap(
     const caffe2::Predictor::TensorMap& inputs,
-    caffe2::Predictor::TensorVector* outputs) {
+    caffe2::Predictor::TensorList* outputs) {
   CheckInit();
-  predictor_->run_map(inputs, outputs);
+  (*predictor_)(inputs, outputs);
 }
 
 }}

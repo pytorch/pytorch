@@ -1,16 +1,20 @@
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 #include <type_traits>
 
 namespace at { namespace native {
 
 bool is_cuda(const Tensor& self) {
-  return self.type().is_cuda();
+  return self.is_cuda();
 }
 
 bool is_distributed(const Tensor& self) {
   return self.type().is_distributed();
+}
+
+bool is_complex(const Tensor& self) {
+  return at::isComplexType(self.type().scalarType());
 }
 
 bool is_floating_point(const Tensor& self) {
@@ -27,7 +31,7 @@ bool is_signed(const Tensor &self) {
 }
 
 bool is_sparse(const Tensor& self) {
-  return self.type().is_sparse();
+  return self.is_sparse();
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {

@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
