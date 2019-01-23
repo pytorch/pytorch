@@ -20,7 +20,7 @@ class SyncBatchNorm(Function):
         torch.distributed.all_gather(invstd_l, invstd, process_group)
 
         # calcualte global mean & invstd
-        mean, invstd = torch.batch_norm_update_stats(
+        mean, invstd = torch.batch_norm_gather_stats(
             input,
             mean_all,
             invstd_all,
