@@ -574,7 +574,7 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      if (names) ss << names.value()[i] << "=";
+      if (hasNames()) ss << names()[i] << "=";
       ss << elements()[i]->str();
     }
     ss << ")";
@@ -586,7 +586,7 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      if (names) ss << names.value()[i] << "=";
+      if (hasNames()) ss << names()[i] << "=";
       ss << elements()[i]->python_str();
     }
     ss << "]";
@@ -596,7 +596,10 @@ struct CAFFE2_API TupleType : public Type {
     return has_free_variables_;
   }
   bool hasNames() const {
-    return names.has_value();
+    return names_.has_value();
+  }
+  const std::vector<std::string> &names() const {
+    return names_.value();
   }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
@@ -611,7 +614,7 @@ private:
   TupleType(std::vector<TypePtr> elements_, OptNameList names)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_))
-  , names(std::move(names)) {
+  , names_(std::move(names)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
@@ -633,7 +636,7 @@ private:
   }
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
-  OptNameList names;
+  OptNameList names_;
 };
 
 struct NumberType;
