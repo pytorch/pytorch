@@ -20,18 +20,6 @@ def _addindent(s_, numSpaces):
     return s
 
 
-def _if_float_tensor(fn):
-    '''
-    Calls `fn` on a value `t` only if `t` is a float tensor, or not a tensor (in
-    which case it's a module, as part of a recursive call to apply()).
-    '''
-    def apply(t):
-        if not isinstance(t, torch.Tensor) or t.is_floating_point():
-            return fn(t)
-        return t
-    return apply
-
-
 class Module(object):
     r"""Base class for all neural network modules.
 
@@ -115,7 +103,10 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if not isinstance(name, torch._six.string_classes):
+        if '_buffers' not in self.__dict__:
+            raise AttributeError(
+                "cannot assign buffer before Module.__init__() call")
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -196,7 +187,7 @@ class Module(object):
 
     def _apply(self, fn):
         for module in self.children():
-            fn(module)
+            module._apply(fn)
 
         for param in self._parameters.values():
             if param is not None:
@@ -296,7 +287,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(_if_float_tensor(lambda t: t.float()))
+        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
     def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
@@ -304,7 +295,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(_if_float_tensor(lambda t: t.double()))
+        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
     def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
@@ -312,7 +303,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(_if_float_tensor(lambda t: t.half()))
+        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -388,9 +379,7 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
-            if isinstance(t, torch.Tensor):
-                return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
-            return t.to(device, dtype, non_blocking)
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
 
@@ -663,8 +652,8 @@ class Module(object):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is provided as :attr`local_metadata`.
-        For state dicts without metadata, :attr`local_metadata` is empty.
+        module in input :attr:`state_dict` is provided as :attr:`local_metadata`.
+        For state dicts without metadata, :attr:`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
 

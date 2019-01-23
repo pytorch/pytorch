@@ -131,6 +131,7 @@ struct PythonArgs {
   inline at::ScalarTypeSource scalartypesource(int i);
   inline std::vector<at::ScalarTypeSource> scalartypesourcelist(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
+  inline c10::optional<int64_t> toInt64Optional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
@@ -439,6 +440,12 @@ inline int64_t PythonArgs::toInt64(int i) {
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
+  return toInt64(i);
+}
+
+inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return toInt64(i);
 }
 

@@ -5,7 +5,7 @@
 #define TH_GENERIC_FILE "THNN/generic/TemporalUpSamplingLinear.c"
 #else
 
-#include <THNN/generic/linear_upsampling.h>
+#include <THNN/generic/upsampling.h>
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,

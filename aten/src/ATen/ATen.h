@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/CPUGeneral.h>
 #include <ATen/Context.h>
 #include <ATen/Device.h>

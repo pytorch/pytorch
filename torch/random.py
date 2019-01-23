@@ -56,10 +56,10 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
             the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot
             of devices, since this function will run very slowly in that case.
-            If you explicitly specify devices, this warning will be supressed
+            If you explicitly specify devices, this warning will be suppressed
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
-            to reindent your Python code.
+            to delete it and unindent your Python code under it.
     """
 
     import torch.cuda

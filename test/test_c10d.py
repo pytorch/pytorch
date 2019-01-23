@@ -204,7 +204,7 @@ def create_tcp_store(addr):
         try:
             port = common.find_free_port()
             ports.append(port)
-            return c10d.TCPStore(addr, port, True)
+            return c10d.TCPStore(addr, port, 1, True)
         except RuntimeError as error:
             if str(error) == "Address already in use":
                 continue
@@ -226,8 +226,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = c10d.TCPStore(addr, port, True)  # noqa: F841
-            store2 = c10d.TCPStore(addr, port, True)  # noqa: F841
+            store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+            store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -254,7 +254,7 @@ class RendezvousEnvTest(TestCase):
             raise unittest.SkipTest("C10D is not built with NCCL process group,"
                                     " skipping test")
         vars = {
-            "WORLD_SIZE": "2",
+            "WORLD_SIZE": "1",
             "RANK": "0",
             "MASTER_ADDR": "127.0.0.1",
             "MASTER_PORT": common.find_free_port(),
@@ -287,9 +287,9 @@ class RendezvousEnvTest(TestCase):
             with self.assertRaisesRegex(ValueError, 'WORLD_SIZE expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
-            c10d.init_process_group(backend='nccl', world_size=2)
+            c10d.init_process_group(backend='nccl', world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 2)
+            self.assertEqual(c10d.get_world_size(), 1)
             c10d.destroy_process_group()
 
         with Env(without(vars, 'RANK')):
@@ -298,19 +298,19 @@ class RendezvousEnvTest(TestCase):
                 next(gen)
             c10d.init_process_group(backend='nccl', rank=0)
             self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 2)
+            self.assertEqual(c10d.get_world_size(), 1)
             c10d.destroy_process_group()
 
         with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
-            c10d.init_process_group(backend='nccl', rank=0, world_size=2)
+            c10d.init_process_group(backend='nccl', rank=0, world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 2)
+            self.assertEqual(c10d.get_world_size(), 1)
             c10d.destroy_process_group()
 
         with Env(vars):
             c10d.init_process_group(backend='nccl')
             self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 2)
+            self.assertEqual(c10d.get_world_size(), 1)
             c10d.destroy_process_group()
 
         with Env(without(vars, 'MASTER_ADDR')):
@@ -324,9 +324,9 @@ class RendezvousEnvTest(TestCase):
                 next(gen)
 
         with Env(without(vars, 'WORLD_SIZE')):
-            gen = c10d.rendezvous('env://?world_size={}'.format(2))
+            gen = c10d.rendezvous('env://?world_size={}'.format(1))
             _, _, size = next(gen)
-            self.assertEqual(size, 2)
+            self.assertEqual(size, 1)
 
         with Env(without(vars, 'RANK')):
             gen = c10d.rendezvous('env://?rank={}'.format(0))
@@ -334,38 +334,28 @@ class RendezvousEnvTest(TestCase):
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
-            gen = c10d.rendezvous('env://?rank={}&world_size={}'.format(0, 2))
+            gen = c10d.rendezvous('env://?rank={}&world_size={}'.format(0, 1))
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
-            self.assertEqual(size, 2)
+            self.assertEqual(size, 1)
 
     @retry_on_address_already_in_use_error
     def test_nominal(self):
-        os.environ['WORLD_SIZE'] = '2'
+        os.environ['WORLD_SIZE'] = '1'
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = str(common.find_free_port())
 
-        # First rank
+        # Single rank
         os.environ['RANK'] = '0'
         gen0 = c10d.rendezvous('env://')
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
-        self.assertEqual(2, size0)
+        self.assertEqual(1, size0)
 
-        # Second rank
-        os.environ['RANK'] = '1'
-        gen1 = c10d.rendezvous('env://')
-        store1, rank1, size1 = next(gen1)
-        self.assertEqual(1, rank1)
-        self.assertEqual(2, size1)
-
-        # Set value on both stores
         store0.set("key0", "value0")
-        store1.set("key1", "value1")
 
-        # Cross check with get
-        self.assertEqual(b"value0", store1.get("key0"))
-        self.assertEqual(b"value1", store0.get("key1"))
+        # check with get
+        self.assertEqual(b"value0", store0.get("key0"))
 
 
 class RendezvousFileTest(TestCase):
@@ -417,23 +407,17 @@ class RendezvousTCPTest(TestCase):
     def test_nominal(self):
         addr = 'localhost'
         port = common.find_free_port()
-        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 2)
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
-        self.assertEqual(2, size0)
-        gen1 = c10d.rendezvous(url + "&rank=1")
-        store1, rank1, size1 = next(gen1)
-        self.assertEqual(1, rank1)
-        self.assertEqual(2, size1)
+        self.assertEqual(1, size0)
 
-        # Set value on both stores
+        # Set value on the single store
         store0.set("key0", "value0")
-        store1.set("key1", "value1")
 
-        # Cross check with get
-        self.assertEqual(b"value0", store1.get("key0"))
-        self.assertEqual(b"value1", store0.get("key1"))
+        # check with get
+        self.assertEqual(b"value0", store0.get("key0"))
 
 
 class MultiProcessTestCase(TestCase):

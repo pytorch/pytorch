@@ -88,8 +88,8 @@ int64_t _safe_size(IntList sizes, IntList dim) {
   return size;
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
-  double p = p_.toDouble();
+Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+  double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {
@@ -114,10 +114,21 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   return self_scaled * scale_v;
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, IntList dim, bool keepdim) {
+  IntList sizes = self.sizes();
   if (!keepdim && self.dim() != 0) {
-    grad = grad.unsqueeze(dim);
-    norm = norm.unsqueeze(dim);
+    if (dim.size()==1) {
+      grad = grad.unsqueeze(dim[0]);
+      norm = norm.unsqueeze(dim[0]);
+    } else {
+      auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
+      for (size_t i = 0; i < sizes.size(); i++){
+        if (dims_to_unsqueeze[i]) {
+          grad = grad.unsqueeze(i);
+          norm = norm.unsqueeze(i);
+        }
+      }
+    }
   }
   return norm_backward(grad, self, p_, norm);
 }
@@ -675,22 +686,15 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
     L = L.transpose(-1, -2);
   }
 
-  auto batch_tril = [](const Tensor & A) -> Tensor {
-    int64_t n = A.size(-1);
-    auto indices = at::ones({n, n}, A.options().dtype(at::kByte));
-    indices = indices.triu(1).expand_as(A);
-    return at::where(indices, at::zeros({}, A.options()), A);
-  };
-
-  auto phi = [&batch_tril](const Tensor & A) -> Tensor {
-    auto B = A.dim() == 2 ? A.tril() : batch_tril(A);
+  auto phi = [](const Tensor & A) -> Tensor {
+    auto B = A.tril();
     B = B - 0.5 * at::diag_embed(B.diagonal(0, -1, -2), 0, -2, -1);
     return B;
   };
 
   // make sure not to double-count variation, since
   // only half of output matrix is unique
-  auto Lbar = grad.dim() == 2 ? grad.tril() : batch_tril(grad);
+  auto Lbar = grad.tril();
 
   auto P = phi(at::matmul(L, Lbar));
   Tensor S;
@@ -1371,7 +1375,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 }
 
 // See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
-Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, optional<int64_t> storage_offset_) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -1379,6 +1383,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   // Step (0)     for the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
   // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
+  auto storage_offset = storage_offset_.value_or(input_geometry.storage_offset());
   auto odim = grad.dim();
   std::vector<int64_t> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);

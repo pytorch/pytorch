@@ -257,8 +257,8 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     auto& Y = Input(1);
     auto& dY = Input(2);
     CAFFE_ENFORCE_EQ(dY.dim(), 4);
-    auto* dX = Output(0);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(0, X.sizes(), at::dtype<float>());
     ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
     if (input_dims_ != X.sizes()) {
       VLOG(1) << "MaxPoolGradient RTC recompiling";

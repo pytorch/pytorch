@@ -18,8 +18,8 @@ REGISTER_HIP_OPERATOR(
     PythonGradient,
     GPUFallbackOp);
 
-REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
-REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
+REGISTER_HIP_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_HIP_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
@@ -69,7 +69,7 @@ void addHIPObjectMethods(py::module& m) {
           "Copy data from given DLPack tensor into this tensor.")
       .def_property_readonly(
           "_shape",
-          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->dims(); })
+          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->sizes(); })
       .def(
           "_reshape",
           [](DLPackWrapper<HIPContext>* t, std::vector<int64_t> dims) {

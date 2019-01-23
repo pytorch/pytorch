@@ -1,4 +1,4 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "0.4"
 graph {
@@ -8,8 +8,8 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
+        data_type: 11
+        raw_data: "\000\000\000\000\000\000\360?"
       }
       type: TENSOR
     }

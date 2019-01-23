@@ -152,6 +152,13 @@ def get_thnn_args(thnn_function, params, inplace):
         param = params_by_name[name]
         if param['type'] == 'IntList' and 'size' in param:
             name = name + '_'
+        # NB: We calculate the dimension based on the name of
+        # the argument, not its positional order.  This means
+        # that we may reorder arguments to get them in
+        # the right place; e.g., if a THNN implementation
+        # has arguments in the order kernelW, kernelH, we
+        # will generate a caller that is kernel[1], kernel[0]
+        # to order them in the correct way.
         index = DIMENSION_OFFSET[suffix]
         if index < 0:
             index += param['size']
@@ -298,6 +305,11 @@ def backward_declaration(base, thnn_functions):
             if arg['name'] == 'output_size':
                 break
         arguments.insert(output_size_idx + 1, input_size_arg)
+
+    if 'im2col' in base['name']:
+        # Add input_size as parameter to im2col backwards function
+        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': 2}
+        arguments.insert(2, input_size_arg)
 
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:

@@ -3,11 +3,11 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef CAFFE2_MOBILE
+#ifndef C10_MOBILE
 #error "mobile build state not defined"
 #endif
 
-#if CAFFE2_MOBILE
+#if C10_MOBILE
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -44,6 +44,6 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
 
 } // namespace caffe2
 
-#endif // CAFFE2_MOBILE
+#endif // C10_MOBILE
 
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_MOBILE_OP_H_
