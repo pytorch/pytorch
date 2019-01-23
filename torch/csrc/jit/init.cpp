@@ -376,7 +376,7 @@ void initJITBindings(PyObject* module) {
 
 
   struct PythonFutureWrapper {
-    PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut) : fut(fut) {}
+    PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut) : fut(std::move(fut)) {}
 
     c10::intrusive_ptr<c10::ivalue::Future> fut;
   };

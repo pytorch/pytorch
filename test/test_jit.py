@@ -12339,7 +12339,9 @@ class TestAsync(JitTestCase):
             val = torch.jit._wait(fut)
             return my_list[0]
 
-        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; this probably indicates your program cannot be understood by the tracer.'):
+        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; '
+                                                  'this probably indicates your program cannot be understood '
+                                                  'by the tracer.'):
             traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
 
 

@@ -122,21 +122,24 @@ void setValueTrace(const IValue& v, Value* value) {
   }
 }
 
-void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value) {
+void setFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut, Value* value) {
   getTracingState()->env_stack.back().future_map[fut] = value;
 }
 
-Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut) {
-  auto& state = getTracingState();
+Value* getFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
+  auto& env_stack = getTracingState()->env_stack;
 
-  auto& future_map = getTracingState()->env_stack.back().future_map;
-  auto it = future_map.find(fut);
-  if (it == future_map.end()) {
+  for (size_t i = 0; i < env_stack.size(); ++i) {
+    auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
+    auto it = future_map.find(fut);
+    if (it == future_map.end())
+      continue;
+    return it->second;
+  }
+
     std::ostringstream oss;
     oss << "Tried to trace Future that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
-  }
-  return it->second;
 }
 
 
