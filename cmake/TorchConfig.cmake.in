@@ -44,7 +44,7 @@ if (NOT ANDROID)
   find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 else()
   find_library(TORCH_LIBRARY NO_CMAKE_FIND_ROOT_PATH torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
-wendif()
+endif()
 add_library(torch UNKNOWN IMPORTED)
 set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 
