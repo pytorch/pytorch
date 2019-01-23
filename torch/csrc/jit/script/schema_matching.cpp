@@ -323,7 +323,7 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values, c10::OptNameList field
   if (values.size() == 1) {
     return values[0];
   }
-  return g.insertNode(g.createTuple(values, field_names))->output();
+  return g.insertNode(g.createTuple(values, std::move(field_names)))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node
