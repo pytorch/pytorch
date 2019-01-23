@@ -54,11 +54,11 @@ RegisterOperators reg({
           epsilon,
           IValue(cache)
         });
-        push(stack, Tuple::create({
+        push(stack,
           torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
           torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),
           torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
-        }));
+        );
         return 0;
       })
   });
