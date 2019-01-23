@@ -648,6 +648,21 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
 
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_shared_storage_on_cuda(self):
+        whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
+        m = torch.jit.ScriptModule()
+        m.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
+        m.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+        m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertTrue(m2.p0.is_cuda)
+        self.assertTrue(m2.b0.is_cuda)
+        self.assertTrue(m2.p0.is_shared())
+        self.assertTrue(m2.b0.is_shared())
+        self.assertEqual(m2.b0.storage().data_ptr(), m2.p0.storage().data_ptr())
+
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
