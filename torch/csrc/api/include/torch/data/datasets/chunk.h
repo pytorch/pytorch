@@ -52,7 +52,8 @@ class BatchDataBuffer {
         batch_size_(batch_size),
         example_sampler_(std::move(example_sampler)),
         ignore_empty_chunk_(ignore_empty_chunk),
-        queue_capacity_(queue_capacity) {}
+        queue_capacity_(queue_capacity),
+        stop_(false) {}
 
   /// Return batch data from the queue. Called from the ChunkDataset main
   /// thread.
@@ -101,10 +102,10 @@ class BatchDataBuffer {
     std::unique_lock<std::mutex> lock(queue_mutex_);
     cv_write_.wait(lock, [this] {
       // stop loading if we have preloaded enough data.
-      return this->total_example_count_in_queue_ < this->queue_capacity_ || stop_;
+      return this->total_example_count_in_queue_ < this->queue_capacity_ || stop_.load();
     });
 
-    if (stop_){
+    if (stop_.load()){
       // When stop_ is true, it means this current thread needs to be tore down.
       // Return without any further processing.
       lock.unlock();
@@ -120,8 +121,9 @@ class BatchDataBuffer {
       AT_ASSERT(
           batch_example_indices &&
           batch_example_indices.value().size() == example_count)
-      BatchRequestType indices = batch_example_indices.value();
+      BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
+        AT_ASSERT(i < data_size);
         batch.emplace_back(std::move(data[i]));
       }
       remaining_size -= example_count;
@@ -166,10 +168,10 @@ class BatchDataBuffer {
     std::unique_lock<std::mutex> lock(queue_mutex_);
     cv_write_.wait(lock, [this] {
       // stop loading if we have preloaded enough data.
-      return this->total_example_count_in_queue_ < this->queue_capacity_ || stop_;
+      return this->total_example_count_in_queue_ < this->queue_capacity_ || stop_.load();
     });
 
-    if (stop_){
+    if (stop_.load()){
       // When stop_ is true, it means this current thread needs to be tore down,
       // the batch buffer will be discarded, so no need to enqueue any new
       // exceptions.
@@ -245,7 +247,7 @@ class BatchDataBuffer {
   // preloader to finish previous work before tearing down the thread, the
   // preloader could be still waiting for the conditional variable, thus cause
   // the program to hang. This boolean is used to break this waiting condition.
-  bool stop_ = false;
+  std::atomic<bool> stop_;
 };
 } // namespace detail
 
@@ -323,7 +325,8 @@ class ChunkDataset final
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
-        options_(std::move(options)) {
+        options_(std::move(options)),
+        quit_worker_(false) {
   }
 
   virtual ~ChunkDataset() {
@@ -387,7 +390,7 @@ class ChunkDataset final
  private:
   /// running on worker thread to preload chunk data.
   void preloader(size_t id) {
-    while (!quit_worker_) {
+    while (!quit_worker_.load()) {
       try {
         size_t chunk_id = 0;
         if (auto chunk_sampler_result = chunk_sampler_.next(1)) {
@@ -414,7 +417,7 @@ class ChunkDataset final
 
   /// Block the current thread until the workers finish execution and exit.
   void free_workers() {
-    if (!quit_worker_) {
+    if (!quit_worker_.load()) {
       quit_worker_ = true;
       if(batch_buffer_){
         batch_buffer_->stop();
@@ -427,12 +430,12 @@ class ChunkDataset final
 
  private:
   // Templated class that defines what is a chunk and how to read chunk data.
-  // When a chunk is returned by chunk_reader_, ChunkDtatset split it into
+  // When a chunk is returned by chunk_reader_, ChunkDataset split it into
   // batches and caches them in batch_buffer_.
   ChunkReader chunk_reader_;
 
   // chunk sampler to shuffle different chunks
-  samplers::ThreadSafeSampler<ChunkSamplerType> chunk_sampler_;
+  samplers::LockedSampler<ChunkSamplerType> chunk_sampler_;
 
   // example sampler to shuffle examples in a specific chunk
   ExampleSamplerType example_sampler_;
@@ -448,7 +451,7 @@ class ChunkDataset final
   const ChunkDatasetOptions options_;
 
   // indicate whether the worker thread can be teared down
-  bool quit_worker_ = false;
+  std::atomic<bool> quit_worker_;
 };
 } // namespace datasets
 } // namespace data

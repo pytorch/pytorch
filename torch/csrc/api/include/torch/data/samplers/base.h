@@ -44,12 +44,12 @@ class Sampler {
 
 /// Wraps a provided sampler to make it thread safe.
 template <typename OriginalSampler>
-class ThreadSafeSampler
+class LockedSampler
     : public Sampler<typename OriginalSampler::BatchRequestType> {
  public:
   using BatchRequestType = typename OriginalSampler::BatchRequestType;
 
-  explicit ThreadSafeSampler(OriginalSampler sampler) : sampler_(std::move(sampler)) {}
+  explicit LockedSampler(OriginalSampler sampler) : sampler_(std::move(sampler)) {}
 
   void reset(optional<size_t> new_size) override {
     std::lock_guard<std::mutex> lock(this->mutex_);
