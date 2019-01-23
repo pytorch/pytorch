@@ -10,10 +10,10 @@ namespace c10 { namespace hip {
 // Takes a valid HIPAllocator (of any sort) and turns it into
 // an allocator pretending to be a CUDA allocator.  See
 // Note [Masquerading as CUDA]
-class HIPAllocatorMasqueradingAsCUDA : public Allocator {
+class HIPAllocatorMasqueradingAsCUDA final : public Allocator {
   Allocator* allocator_;
 public:
-  HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
+  explicit HIPAllocatorMasqueradingAsCUDA(Allocator* allocator)
     : allocator_(allocator) {}
   DataPtr allocate(size_t size) const override {
     DataPtr r = allocator_->allocate(size);

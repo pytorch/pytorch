@@ -270,7 +270,7 @@ void batch_matmul_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchMatmul)
-    .kernel(&caffe2::batch_matmul_op_cpu_impl<float, caffe2::CPUContext>)
+    .kernel<&caffe2::batch_matmul_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(c10::DispatchKey<2>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
