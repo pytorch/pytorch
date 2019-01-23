@@ -85,23 +85,26 @@ def sanitize_types(types):
 
 
 def get_annotation(t):
+    found = False
+    if t == "Tensor?(a!)":
+        print(t)
+        found = True
     match = re.match(r'(Tensor.*)\((.+)\)', t)
     annotation = None
     if match:
         t = match.group(1)
         annotation = match.group(2)
+    if found:
+        print(t)
+        print(annotation)
     return t, annotation
 
 
-def parse_arguments(args, func_decl, func_name, func_return, inplace):
+def parse_arguments(args, func_decl, declaration, func_return):
     arguments = []
-    is_out_fn = func_name.endswith('_out')
-    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
-        raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
-                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
-                           "(which usually manifests itself as the result variable being undefined.) "
-                           "The culprit was: {}".format(func_name))
     kwarg_only = False
+    func_name = declaration['name']
+    inplace = declaration['inplace']
 
     if len(args.strip()) == 0:
         return arguments
@@ -118,8 +121,6 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
         t, name = type_and_name
         default = None
 
-        t, annotation = get_annotation(t)
-
         # Enables Generator? by translating to legacy Generator*. See [temp translations]
         if t == 'Generator?':
             t = 'Generator*'
@@ -128,13 +129,15 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
             ns = name.split('=', 1)
             # This enables Tensor? x=None and translates to legacy
             # "Tensor? x={}". See [temp translations].
-            if t == 'Tensor?' and ns[1] == 'None':
+            if t.startswith('Tensor?') and ns[1] == 'None':
                 ns[1] = "[]"  # Will translate to {} via parse_default
             # This enables "Generator? x = None and translates to legacy
             # "Generator* x = nullptr". See [temp translations].
             if t == 'Generator*' and ns[1] == 'None':
                 ns[1] = 'nullptr'
             name, default = ns[0], parse_default(ns[1])
+
+        t, annotation = get_annotation(t)
 
         typ = sanitize_types(t)
         assert len(typ) == 1
@@ -147,15 +150,47 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
         argument_dict['type'] = temp_type_translations(argument_dict['type'])
         if default is not None:
             argument_dict['default'] = default
-        # TODO: convention is that the ith-argument correspond to the i-th return, but it would
-        # be better if we just named everything and matched by name.
-        if is_out_fn and arg_idx < len(func_return):
-            argument_dict['output'] = True
         if kwarg_only:
             argument_dict['kwarg_only'] = True
 
         argument_dict['annotation'] = annotation
         arguments.append(argument_dict)
+    
+    is_out_fn = False
+    arguments_out = []
+    arguments_other = []
+    for argument in arguments:
+        # TODO: convention is that the ith-argument correspond to the i-th return, but it would
+        # be better if we just named everything and matched by name.
+        print(argument.get('annotation', ''))
+        print(argument.get('annotation', ''))
+        if argument['type'] == "Tensor" and argument['annotation'] and re.match(r'^(.*!)$', argument['annotation']) and argument.get('kwarg_only'):
+            argument['output'] = True
+            argument['kwarg_only'] = False
+            arguments_out.append(argument)
+            is_out_fn = True
+        else:
+            arguments_other.append(argument)
+
+    for arg_idx, argument in enumerate(arguments_out):
+        assert argument['annotation'] == func_return[arg_idx]['annotation'], \
+                "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, the ith-argument needs to correspond to the i-th return.".format(func_decl['func'])
+
+    assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors as can be passed as output.".format(func_decl['func'])
+
+    if func_name.endswith('_out'):
+        raise RuntimeError("Native functions may not be suffixed with _out as we transistion to a unified schema. "
+                           "Otherwise you will cause confusion amongst consumers of native functions.")
+
+    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
+        raise RuntimeError("Native functions with output MUST be declared with only the function variant; "
+                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
+                           "(which usually manifests itself as the result variable being undefined.) "
+                           "The culprit was: {}".format(func_name))
+    if not is_out_fn:
+        assert len(arguments_out) == 0, "func {} is not marked as output yet contains output keyword arguments"
+
+    arguments = arguments_out + arguments_other
 
     # Explicit check for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
@@ -171,6 +206,9 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
                 assert argument['name'] == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
+
+    if is_out_fn:
+        declaration['name'] += "_out"
     return arguments
 
 
@@ -247,7 +285,7 @@ def run(paths):
                 declaration['name'] = func.get('name', fn_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
-                arguments = parse_arguments(arguments, func, declaration['name'], return_arguments, declaration['inplace'])
+                arguments = parse_arguments(arguments, func, declaration, return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
