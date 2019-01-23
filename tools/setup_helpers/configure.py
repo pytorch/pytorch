@@ -5,9 +5,6 @@ from .env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
                   check_env_flag, check_negative_env_flag,
                   hotpatch_build_env_vars)
 
-
-hotpatch_build_env_vars()
-
 from .build import (BLAS, BUILD_BINARY, BUILD_CAFFE2_OPS, BUILD_TEST,
                     USE_FBGEMM, USE_FFMPEG, USE_LEVELDB, USE_LMDB, USE_OPENCV,
                     USE_REDIS, USE_TENSORRT, USE_ZSTD, CUDA_NVCC_EXECUTABLE)

@@ -307,35 +307,9 @@ def check_pydep(importname, module):
 
 # Calls build_pytorch_libs.sh/bat with the correct env variables
 def build_caffe2():
-    if IS_WINDOWS:
-        build_libs_cmd = ['tools\\build_pytorch_libs.bat']
-    else:
-        build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
-
-    my_env, extra_flags = get_pytorch_env_with_flags()
-    build_libs_cmd.extend(extra_flags)
-    my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
-    my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
-    my_env["PYTORCH_BUILD_VERSION"] = version
-
-    cmake_prefix_path = full_site_packages
-    if "CMAKE_PREFIX_PATH" in my_env:
-        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
-    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
-
-    if VERBOSE_SCRIPT:
-        my_env['VERBOSE_SCRIPT'] = '1'
-    try:
-        os.mkdir('build')
-    except OSError:
-        pass
-
-    kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
-
-    if subprocess.call(build_libs_cmd, env=my_env, **kwargs) != 0:
-        report("Failed to run '{}'".format(' '.join(build_libs_cmd)))
-        sys.exit(1)
-
+    import tools.build_pytorch_libs
+    tools.build_pytorch_libs.build_caffe2(version=version, cmake_python_library=cmake_python_library, build_python=True,
+    rerun_cmake=tools.setup_helpers.configure.RERUN_CMAKE)
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):

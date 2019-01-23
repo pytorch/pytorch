@@ -53,3 +53,5 @@ def hotpatch_build_env_vars():
     # Also hotpatch a few with BUILD_* equivalent
     build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
     [hotpatch_var(v, 'BUILD_') for v in build_env_vars]
+
+hotpatch_build_env_vars()
