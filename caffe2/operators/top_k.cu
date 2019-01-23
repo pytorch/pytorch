@@ -56,7 +56,7 @@ void RunRadixSelectionImpl(
     int64_t* indices,
     CUDAContext* context) {
   const int block = std::min(
-      math::roundUp(static_cast<int>(inner_size), kWarpSize),
+      math::RoundUp(static_cast<int>(inner_size), kWarpSize),
       CAFFE_CUDA_NUM_THREADS);
   gatherTopK<T, kSelectMax, int64_t>
       <<<outer_size, block, 0, context->cuda_stream()>>>(

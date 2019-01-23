@@ -192,4 +192,7 @@ class Event(torch._C._CudaEventBase):
         return ctypes.c_void_p(self.cuda_event)
 
     def __repr__(self):
-        return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
+        if self.cuda_event:
+            return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
+        else:
+            return '<torch.cuda.Event uninitialized>'

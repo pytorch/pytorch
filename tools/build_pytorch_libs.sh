@@ -314,15 +314,7 @@ function build_caffe2() {
 mkdir -p $INSTALL_DIR
 
 # Build
-for arg in "$@"; do
-    if [[ "$arg" == "caffe2" ]]; then
-        build_caffe2
-    else
-        pushd "$THIRD_PARTY_DIR"
-        build $arg
-        popd
-    fi
-done
+build_caffe2
 
 pushd $TORCH_LIB_DIR > /dev/null
 

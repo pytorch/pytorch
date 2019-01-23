@@ -18,7 +18,7 @@ import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
-from torch._six import inf, nan, string_classes
+from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
@@ -1062,7 +1062,7 @@ class _TestTorchMixin(object):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not isinstance(ans, tuple) else ans[0]
+                return ans if not istuple(ans) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)
@@ -6909,6 +6909,32 @@ class _TestTorchMixin(object):
         val1 = rec.select(-1, -1).data[0][0][0].sum()
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
+
+    def test_namedtuple_return(self):
+        a = torch.randn(5, 5)
+
+        # test max
+        ret = a.max(dim=0)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
+        # test svd
+        ret = a.svd()
+        self.assertEqual(ret.U, ret[0])
+        self.assertEqual(ret.S, ret[1])
+        self.assertEqual(ret.V, ret[2])
+        ret1 = torch.svd(a, out=tuple(ret))
+        self.assertEqual(ret1.U, ret1[0])
+        self.assertEqual(ret1.S, ret1[1])
+        self.assertEqual(ret1.V, ret1[2])
+        self.assertEqual(ret1.U, ret[0])
+        self.assertEqual(ret1.S, ret[1])
+        self.assertEqual(ret1.V, ret[2])
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)

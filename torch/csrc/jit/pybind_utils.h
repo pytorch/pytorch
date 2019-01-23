@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/stack.h>
 #include <torch/csrc/jit/type.h>
+#include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -79,7 +80,7 @@ inline IValue toIValue(py::handle input) {
       AT_ERROR("sparse tensors not supported");
     }
     return ten;
-  } else if (py::isinstance<py::tuple>(input)) {
+  } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
     s.reserve(input_tuple.size());
