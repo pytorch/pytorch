@@ -171,7 +171,7 @@ struct PDist {
             scalar_t * res = res_start + start;
             const scalar_t * const res_end = res_start + end;
 
-            int64_t k = 0;
+            int64_t k = start;
             while (res != res_end) {
                 int64_t i = k / r2;
                 int64_t j = k % r2;
@@ -188,7 +188,7 @@ struct PDist {
         });
     }
 
-  static void apply_cdict(Tensor& result, const Tensor& x1, const Tensor& x2, const scalar_t p) {
+  static void apply_cdist(Tensor& result, const Tensor& x1, const Tensor& x2, const scalar_t p) {
       if (p == 0.0) {
           run_cdist_parallel<zdist_calc>(result, x1, x2, p);
       } else if (p == 1.0) {
@@ -314,7 +314,7 @@ static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
     AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
-        PDist<scalar_t>::apply_cdict(result, x1, x2, p);
+        PDist<scalar_t>::apply_cdist(result, x1, x2, p);
     });
 }
 

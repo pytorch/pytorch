@@ -1146,15 +1146,23 @@ class _TestTorchMixin(object):
     def test_cdist_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for r1 in [0, 2]:
-                for m in[0, 5]:
-                    for r2 in[0, 3]:
-                        x = torch.zeros((r1, m), device=device)
-                        y = torch.zeros((r2, m), device=device)
-                        if r1 == 0 or r2 == 0:
-                            self.assertEqual(torch.empty(r1, r2, device=device), torch.cdist(x, y))
-                        else:
-                            self.assertEqual(torch.zeros(r1, r2, device=device), torch.cdist(x, y))
+            x = torch.randn((0, 5), device=device)
+            y = torch.randn((4, 5), device=device)
+            self.assertEqual(torch.empty(0, 4, device=device), torch.cdist(x, y))
+
+            x = torch.randn((2, 5), device=device)
+            y = torch.randn((0, 5), device=device)
+            self.assertEqual(torch.empty(2, 0, device=device), torch.cdist(x, y))
+
+            x = torch.randn((2, 0), device=device)
+            y = torch.randn((3, 0), device=device)
+            self.assertEqual(torch.zeros(2, 3, device=device), torch.cdist(x, y))
+
+            x = torch.randn((2, 0), device=device)
+            y = torch.randn((0, 0), device=device)
+            self.assertEqual(torch.empty(2, 0, device=device), torch.cdist(x, y))
+
+
 
     def test_cdist_norm(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -1167,10 +1175,16 @@ class _TestTorchMixin(object):
                             y = torch.randn(r2, m, device=device)
                             actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
-                            self.assertEqual(expected.shape, actual.shape)
                             self.assertTrue(torch.allclose(expected, actual))
 
-
+    def test_cdist_large(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.randn(1000, 10, device=device)
+            y = torch.randn(1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
