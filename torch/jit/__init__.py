@@ -115,6 +115,10 @@ def load(f, map_location=None):
                 setattr(curr, name, ScriptModule())
             curr = getattr(curr, name)
         return curr
+    
+    if isinstance(f, string_classes):
+        if not os.path.exists(f):
+            raise ValueError("The provided filename {} does not exist".format(f))
 
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
