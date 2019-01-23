@@ -36,6 +36,36 @@ class AliasSetTracker {
     return map_.count(v);
   }
 
+  void erase(Value* v) {
+    if (!contains(v)) {
+      return;
+    }
+
+    for (auto set : map_.at(v)) {
+      erase(set);
+      // WARNING `set` is now a dangling pointer, so don't do anything with it!
+    }
+    map_.erase(v);
+  }
+
+  void erase(Node* n) {
+    // We should only erase unused nodes
+    for (const auto output : n->outputs()) {
+      JIT_ASSERT(output->uses().size() == 0);
+    }
+
+    // Only support schematized nodes for now. If/loop will require special
+    // handling for inner blocks
+    JIT_ASSERT(n->maybeSchema());
+
+    for (const auto v : n->inputs()) {
+      erase(v);
+    }
+    for (const auto v : n->outputs()) {
+      erase(v);
+    }
+  }
+
   // Whether `a` *may be* an alias of `b`
   bool isAlias(const Value* a, const Value* b) const {
     if (isWildcard(a) || isWildcard(b)) {
@@ -188,8 +218,8 @@ class AliasSetTracker {
   // Dump the contents of the alias db to stdout in human-readable form
   void dump() const {
     std::unordered_set<Element*> roots;
-    for (auto& el : sets_) {
-      roots.insert(find(el.get()));
+    for (auto& ptrPair : sets_) {
+      roots.insert(find(ptrPair.first));
     }
 
     size_t setId = 0;
@@ -238,7 +268,7 @@ class AliasSetTracker {
     el->size = 1;
 
     auto rawPtr = el.get();
-    sets_.push_back(std::move(el));
+    sets_.emplace(rawPtr, std::move(el));
     return rawPtr;
   }
 
@@ -284,6 +314,53 @@ class AliasSetTracker {
     writes_.erase(bRoot);
   }
 
+  // Remove `toDelete` from the set tracker and free its associated memory
+  //
+  // NOTE: this is linear in the number of nodes in an alias set. If we are
+  // erasing stuff a lot, we may need to use a more complicated approach to
+  // make things faster.
+  void erase(Element* toDelete) {
+    // TODO HANDLE WILDCARD MAP
+    const auto root = find(toDelete);
+
+    // If we are trying to delete the root element of the set, we need to
+    // select a new root.
+    c10::optional<Element*> newRoot;
+    if (root == toDelete) {
+      newRoot = root->next;
+      if (newRoot.value() == root) {
+        // This can only happen if there was a single element in the set.
+        // Just return in that case.
+        return;
+      }
+    }
+
+    // Iterate through the next-list, erasing references to `el`
+    auto cur = root;
+    const auto end = root;
+
+    bool first = true; // We have to consider the root once, so the first time
+                       // we see it don't terminate the loop
+    while (cur != end && !first) {
+      first = false;
+      if (cur->next == toDelete) {
+        cur->next = toDelete->next;
+      }
+      if (cur->parent == toDelete) {
+        cur->parent = newRoot.value_or(root);
+      }
+    }
+
+    // If we selected a new root, update the write map
+    if (newRoot && writes_.count(root)) {
+      JIT_ASSERT(root == toDelete);
+      writes_[*newRoot] = std::move(writes_.at(root));
+      writes_.erase(root);
+    }
+
+    sets_.erase(toDelete);
+  }
+
   void dump(Element* el) const {
     auto cur = el;
     const auto end = el;
@@ -311,8 +388,9 @@ class AliasSetTracker {
     return find(a) == find(b);
   }
 
-  // Owning stoarge for elements
-  std::vector<std::unique_ptr<Element>> sets_;
+  // Owning stoarge for elements.
+  // It's a map of element raw ptrs => the owning ptr for easy retrieval
+  std::unordered_map<Element*, std::unique_ptr<Element>> sets_;
   // Mapping values to the alias sets they are in.
   std::unordered_map<const Value*, std::unordered_set<Element*>> map_;
   // Mapping of alias sets to the nodes that write to that alias set.
@@ -1166,6 +1244,71 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
   } else {
     return c10::nullopt;
   }
+}
+
+bool AliasDb::canDeinplace(Node* node) const {
+  auto name = std::string(node->kind().toQualString());
+  if (!hasWrites(node) || name.at(name.size() - 1) != '_') {
+    // Not an in-place op.
+    return false;
+  }
+
+  // Check if the node is safe to be de-inplaced:
+  // 1. No wildcard node after `node`.
+  const auto lastWildcard = getLastWildcard();
+  if (lastWildcard && (*lastWildcard)->isAfter(node)) {
+    return false;
+  }
+  // 2. No aliases of the output used after `node`.
+  Value* output = node->output();
+  for (const Value* v : getAliases(output)) {
+    if (v == output) {
+      continue;
+    }
+    for (const Use& u : v->uses()) {
+      if (u.user->isAfter(node)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+Node* AliasDb::deinplace(Node* node) {
+  JIT_ASSERT(canDeinplace(node));
+
+  // Replace the in-place node with the out-of-place equivalent.
+  auto name = std::string(node->kind().toQualString());
+  WithInsertPoint insert_guard{node};
+  name.pop_back(); // Remove the underscore
+  Graph* graph = node->owningGraph();
+  Node* deinplaced = graph->insertNode(
+      graph->create(Symbol::fromQualString(name), node->inputs()));
+  Value* deinplacedOutput = deinplaced->output();
+  node->output()->replaceAllUsesWith(deinplacedOutput);
+
+  // Remove from the alias db.
+  erase(node);
+  node->destroy();
+
+  // Add the new node to the alias db.
+  // insert(deinplaced);
+  return deinplaced;
+}
+
+void AliasDb::erase(Node* node) {
+  wildcardNodes_.erase(node);
+  if (node->hasAttribute(attr::Subgraph)) {
+    const auto subgraph = node->g(attr::Subgraph).get();
+    subgraphToOwner_.erase(subgraph);
+  }
+  setTracker_->erase(node);
+}
+
+// This assumes that all nodes before `node` have been analyzed already.
+void AliasDb::insert(Node* node) {
+  analyze(node);
 }
 } // namespace jit
 } // namespace torch

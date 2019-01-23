@@ -70,6 +70,15 @@ class AliasDb {
   bool couldMoveAfterTopologically(Node* n, Node* movePoint);
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
 
+  // Returns true if `n` is safe to be deinplaced.
+  bool canDeinplace(Node* n) const;
+
+  // De-inplace this node, turning it into a pure operator (e.g. add_ -> add)
+  // and rewriting subsequent uses of `n`'s output to use the result.
+  //
+  // Returns the new deinplaced node.
+  Node* deinplace(Node* n);
+
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
 
@@ -91,6 +100,10 @@ class AliasDb {
 
   // Does `n` write to a value that may alias one of the graph inputs?
   bool writesToInputAlias(Node* n) const;
+
+  // Update API for the AliasDB.
+  void insert(Node* node);
+  void erase(Node* node);
 
   void analyze(const std::shared_ptr<Graph>& graph);
   void analyze(Block* block);

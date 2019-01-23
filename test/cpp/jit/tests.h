@@ -279,8 +279,8 @@ void testAttributes() {
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Node *n = g.create(Symbol::fromQualString("foo::bar"));
-  Node &attr = *n;
+  Node* n = g.create(Symbol::fromQualString("foo::bar"));
+  Node& attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -292,8 +292,8 @@ void testAttributes() {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Node *n2 = g.create(Symbol::fromQualString("foo::baz"));
-  Node &attr2 = *n2;
+  Node* n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node& attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
   attr2.f_(one, 5);
@@ -2068,6 +2068,48 @@ void testAliasAnalysis() {
         aliasesB->node(), mutatesAliasOfB->node()));
     JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
+  }
+  {
+    // test de-inplacing
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // a += b
+    // d = a + a
+    auto aMut = graph->insert(aten::add_, {a, b});
+    auto d = graph->insert(aten::add, {aMut, aMut});
+    graph->registerOutput(d);
+
+    graph->lint();
+
+    auto aInput = at::ones({5}, at::kCPU);
+    auto bInput = at::zeros({5}, at::kCPU);
+
+    auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+    // Run the original graph
+    GraphExecutor executor(graph);
+    auto stack = createStack({v(aInput), v(bInput)});
+    executor.run(stack);
+    ASSERT_EQ(stack.size(), 1);
+    auto inplaceResult = stack[0].toTensor();
+
+    // De-inplace the add_ op
+    AliasDb aliasDb(graph);
+    JIT_ASSERT(aliasDb.canDeinplace(aMut->node()));
+    auto deinplaced = aliasDb.deinplace(aMut->node());
+    JIT_ASSERT(deinplaced->kind() == aten::add);
+
+    graph->lint();
+
+    // Run the new graph
+    executor = GraphExecutor(graph);
+    stack = createStack({v(aInput), v(bInput)});
+    executor.run(stack);
+    ASSERT_EQ(stack.size(), 1);
+    auto deinplacedResult = stack[0].toTensor();
+    // They should be equal.
+    JIT_ASSERT(almostEqual(inplaceResult, deinplacedResult));
   }
 }
 } // namespace
