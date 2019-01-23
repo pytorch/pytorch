@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
