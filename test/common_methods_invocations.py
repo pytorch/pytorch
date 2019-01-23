@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
 from torch.autograd import Variable, Function, detect_anomaly
@@ -945,12 +945,12 @@ tri_tests_args = [
 ]
 
 tri_large_tests_args = [
-    (1, 268435455),
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
     # they pass.
     #
+    # (1, 268435455),
     # (5000, 5000),
     # (10000, 10000),
     # (268435455, 1),
@@ -988,7 +988,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if isinstance(args, tuple):
+    if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

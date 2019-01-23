@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_H_SOFTMAX_OP_H_
 #define CAFFE2_OPERATORS_H_SOFTMAX_OP_H_
 
+#include <c10/util/Optional.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -25,9 +26,9 @@ class HSoftmaxOpBase : public Operator<Context> {
 
  protected:
   std::unordered_map<int, PathProto> hierarchy_all_map_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  c10::optional<Tensor> scale_;
+  c10::optional<Tensor> sum_multiplier_;
+  c10::optional<Tensor> bias_multiplier_;
   static constexpr T kLOG_THRESHOLD() {
     return 1e-20f;
   }

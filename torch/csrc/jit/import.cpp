@@ -8,10 +8,13 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/functional.h>
 
-#include <caffe2/core/types.h>
-#include <caffe2/proto/caffe2_pb.h>
-#include <caffe2/proto/torch_pb.h>
-#include <caffe2/serialize/inline_container.h>
+#include "caffe2/core/common.h"
+#include "caffe2/core/types.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch_pb.h"
+#include "caffe2/serialize/file_adapter.h"
+#include "caffe2/serialize/inline_container.h"
+#include "caffe2/serialize/istream_adapter.h"
 
 #include <ATen/ATen.h>
 
@@ -22,6 +25,10 @@
 
 namespace torch {
 namespace jit {
+
+using caffe2::serialize::ReadAdapterInterface;
+using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::FileAdapter;
 
 namespace {
 
@@ -34,9 +41,8 @@ namespace {
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(const std::string& filename);
-
   ScriptModuleDeserializer(std::istream* is);
-
+  explicit ScriptModuleDeserializer(std::unique_ptr<ReadAdapterInterface> rai);
   void deserialize(
       ModuleLookup module_lookup,
       c10::optional<at::Device> device);
@@ -67,6 +73,9 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
     : reader_(is) {}
+
+ScriptModuleDeserializer::ScriptModuleDeserializer(std::unique_ptr<ReadAdapterInterface> rai)
+    : reader_(std::move(rai)) {}
 
 void ScriptModuleDeserializer::deserialize(
     ModuleLookup module_lookup,
@@ -229,9 +238,34 @@ void import_ir_module(
   deserializer.deserialize(module_lookup, device);
 }
 
+void import_ir_module(
+    ModuleLookup module_lookup,
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::Device> device) {
+  ScriptModuleDeserializer deserializer(std::move(rai));
+  deserializer.deserialize(module_lookup, device);
+}
+
 std::shared_ptr<script::Module> load(
     std::istream& in,
     c10::optional<at::Device> device) {
+  std::unique_ptr<IStreamAdapter> rai =
+    caffe2::make_unique<IStreamAdapter>(&in);
+  auto module = load(std::move(rai), device);
+  return module;
+}
+
+std::shared_ptr<script::Module> load(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  auto module = load(std::move(rai), device);
+  return module;
+}
+
+std::shared_ptr<script::Module> load(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
   auto module = std::make_shared<script::Module>();
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
@@ -245,20 +279,8 @@ std::shared_ptr<script::Module> load(
     return curr;
   };
 
-  ScriptModuleDeserializer deserializer(&in);
+  ScriptModuleDeserializer deserializer(std::move(rai));
   deserializer.deserialize(module_lookup, device);
-
-  return module;
-}
-
-std::shared_ptr<script::Module> load(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  std::ifstream in(filename, std::ios_base::binary);
-
-  AT_CHECK(!in.fail(), "load: could not open file ", filename);
-
-  auto module = load(in, device);
 
   return module;
 }

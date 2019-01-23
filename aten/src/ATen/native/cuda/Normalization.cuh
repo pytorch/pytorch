@@ -395,6 +395,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
                                                             const Tensor& running_mean_, const Tensor& running_var_,
                                                             bool train, double momentum, double epsilon) {
 
+  TensorArg input_arg{ input_, "input", 1 },
+            weight_arg{ weight_, "weight", 2 },
+            bias_arg{ bias_, "bias", 3 },
+            run_mean_arg{ running_mean_, "running_mean", 4 },
+            run_var_arg{ running_var_, "running_var", 5 };
+  CheckedFrom c = "batch_norm_cuda";
+  checkAllSameGPU(c, {input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
+
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor save_mean_;

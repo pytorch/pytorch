@@ -289,16 +289,32 @@ using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;
 
-#define SYSCHECK(expr)                                        \
-  {                                                           \
-    do {                                                      \
-      errno = 0;                                              \
-      auto ___output = (expr);                                \
-      (void)___output;                                        \
-    } while (errno == EINTR);                                 \
-    if (errno != 0)                                           \
+// `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
+// `errno` to `EINVAL` in child process on some macos
+// (https://stackoverflow.com/a/20295079), and thus `errno` should really only
+// be inspected if an error occured.
+//
+// `success_cond` is an expression used to check if an error has happend. So for
+// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
+// is stored in variable `__output` and may be used in `success_cond`.
+#define SYSCHECK(expr, success_cond)                          \
+while (true) {                                                \
+  auto __output = (expr);                                     \
+  (void) __output;                                            \
+  if (!(success_cond)) {                                      \
+    if (errno == EINTR) {                                     \
+      continue;                                               \
+    } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
-  }
+    }                                                         \
+  } else {                                                    \
+    break;                                                    \
+  }                                                           \
+}
+
+// Most functions indicate error by returning `-1`. This is a helper macro for
+// this common case with `SYSCHECK`.
+#define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
 class ResourceGuard {
@@ -350,7 +366,7 @@ void sendBytes(
 
   while (bytesToSend > 0) {
     ssize_t bytesSent;
-    SYSCHECK(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+    SYSCHECK_ERR_RETURN_NEG1(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -372,7 +388,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
-    SYSCHECK(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+    SYSCHECK_ERR_RETURN_NEG1(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

@@ -193,8 +193,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival->toTensor());
-    tensor = GetSizedTensorWithOptions(tensor, dims, options);
+    Tensor tensor = GetSizedTensorWithOptions(
+        caffe2::Tensor(ival->toTensor()), dims, options);
+    // assign it back in case it changed
     auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
     *ival = IValue(at_tensor);
 
@@ -222,12 +223,6 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     t->CopyFrom(src, async);
     return t;
   }
-
-  Tensor* OutputTensorAlias(int idx, const Tensor& src) {
-    return BlobSetTensor(OutputBlob(idx),
-                  src.Alias());
-  }
-
 
   template <typename T>
   inline T* Output(int idx, T* allocated) {
@@ -794,8 +789,7 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize;              \
-  /* using override */ using OperatorBase::IsInputOutputAlias;      \
-  /* using override */ using OperatorBase::OutputTensorAlias
+  /* using override */ using OperatorBase::IsInputOutputAlias
 
 #define USE_OPERATOR_FUNCTIONS(context)                     \
   USE_OPERATOR_BASE_FUNCTIONS;                              \
