@@ -1743,9 +1743,9 @@ class TestCuda(TestCase):
             self.assertGreater(tok - tik, 0.045)
             # If GIL is enforced, the execution time should be a little higher
             # than 100ms in theory. But, again due to the timing inaccuracy, it
-            # may go below 100ms. Therefore, we set upper bound to 80ms to avoid
+            # may go below 100ms. Therefore, we set upper bound to 95ms to avoid
             # false negative.
-            self.assertLess(tok - tik, 0.08)
+            self.assertLess(tok - tik, 0.095)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
