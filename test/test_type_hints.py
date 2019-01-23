@@ -70,6 +70,7 @@ def get_all_examples():
         "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
         "import numpy  # type: ignore",
         "import io  # type: ignore",
+        "import itertools  # type: ignore",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
@@ -107,7 +108,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = os.path.join(os.getcwd(), 'test', 'generated_type_hints_smoketest.py')
+        fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
         try:
