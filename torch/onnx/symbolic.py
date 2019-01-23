@@ -1504,7 +1504,7 @@ def flatten(g, input, start_dim, end_dim) :
     if start_dim == 0 and end_dim == len(input_dims) - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
 
-    # use Reshape for cases where the output shape is not 2D 
+    # use Reshape for cases where the output shape is not 2D
     output_dims = []
     for i in range(0, len(input_dims)):
         if start_dim < i and end_dim >= i:
