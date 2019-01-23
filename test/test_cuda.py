@@ -1692,7 +1692,7 @@ class TestCuda(TestCase):
         self.assertTrue(s.query())
 
         # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception is otherwise.
+        # exception if otherwise.
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
@@ -1711,7 +1711,7 @@ class TestCuda(TestCase):
         self.assertTrue(s.query())
 
         # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception is otherwise.
+        # exception if otherwise.
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
@@ -1738,7 +1738,7 @@ class TestCuda(TestCase):
         self.assertTrue(e_sync.query())
 
         # not necessary to check e_tik and e_tok, as elapsed_time would throw
-        # exception is otherwise.
+        # exception if otherwise.
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
@@ -1780,7 +1780,6 @@ class TestCuda(TestCase):
                 e_tok.synchronize()
                 total_time = e_tik.elapsed_time(e_tok)
 
-            print (parent_time, child_time, total_time)
             # Without GIL, the two 50ms synchronization can overlap, and hence
             # the expected execution time should be only a little bit higher
             # than 50ms and well below 100ms. However, the real spin time of
