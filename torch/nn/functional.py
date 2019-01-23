@@ -1262,80 +1262,63 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
 
 @weak_script
-def _sample_gumbel(shape, eps=1e-10, out=None):
-    # type: (List[int], float, Optional[Tensor]) -> Tensor
-    """
-    Sample from Gumbel(0, 1)
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
-    """
-    if out is None:
-        U = torch.rand(shape)
-    else:
-        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
-    return - torch.log(eps - torch.log(U + eps))
-
-
-@weak_script
-def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
-    # type: (Tensor, float, float) -> Tensor
-    """
-    Draw a sample from the Gumbel-Softmax distribution
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
-    (MIT license)
-    """
-    dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=torch.empty_like(logits))
-    y = logits + gumbel_noise
-    return softmax(y / tau, dims - 1)
-
-
-@weak_script
-def gumbel_softmax(logits, tau=1., hard=False, eps=1e-10):
-    # type: (Tensor, float, bool, float) -> Tensor
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+    # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
-    Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
 
     Args:
-      logits: `[batch_size, num_features]` unnormalized log probabilities
+      logits: `[..., num_features]` unnormalized log probabilities
       tau: non-negative scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
+      dim (int): A dimension along which softmax will be computed. Default: -1.
 
     Returns:
-      Sampled tensor of shape ``batch_size x num_features`` from the Gumbel-Softmax distribution.
+      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
       If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across features
+      be probability distributions that sum to 1 across `dim`.
 
-    Constraints:
+    .. note::
+      This function is here for legacy reasons, may be removed from nn.Functional in the future.
 
-    - Currently only work on 2D input :attr:`logits` tensor of shape ``batch_size x num_features``
+    .. note::
+      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
 
-    Based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
+      It achieves two things:
+      - makes the output value exactly one-hot
+      (since we add then subtract y_soft value)
+      - makes the gradient equal to y_soft gradient
+      (since we strip all other gradients)
+
+    Examples::
+        >>> logits = torch.randn(20, 32)
+        >>> # Sample soft categorical using reparametrization trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=False)
+        >>> # Sample hard categorical using "Straight-through" trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=True)
+
+    .. _Gumbel-Softmax distribution:
+        https://arxiv.org/abs/1611.00712
+        https://arxiv.org/abs/1611.01144
     """
-    shape = logits.size()
-    assert len(shape) == 2
-    y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
+
+    if eps != 1e-10:
+        warnings.warn("`eps` parameter is deprecated and has no effect.")
+
+    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
+
     if hard:
-        _, k = y_soft.max(-1)
-        # this bit is based on
-        # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = torch.zeros(shape, dtype=logits.dtype, device=logits.device).scatter_(-1, k.view(-1, 1), 1.0)
-        # this cool bit of code achieves two things:
-        # - makes the output value exactly one-hot (since we add then
-        #   subtract y_soft value)
-        # - makes the gradient equal to y_soft gradient (since we strip
-        #   all other gradients)
-        y = y_hard - y_soft.detach() + y_soft
+        # Straight through.
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
     else:
-        y = y_soft
-    return y
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
 
 
 @weak_script
@@ -2807,28 +2790,21 @@ pdist = _add_docstr(torch.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
-If the input tensor has shape ... B x N x M, the result will be tensor with
-shape ... B x N * (N - 1) / 2. Every dimension prior to the last two are
-treated as independent batches of N vectors, each with M elements. If we use
-ordinal numbers to refer to the vectors in a batch, the last dimension of the
-output will be ordered as:
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
+if the rows are contiguous.
 
-```
-[dist(1, 2), dist(1, 2), ..., dist(1, N), dist(2, 3), ..., dist(N-1, N)]
-```
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
 
-The square verion of pdist that has redundant distances and the diagonal can be
-be computed with
-`torch.norm(inpup[..., None, :] - input[..., None, :, :], p=p, dim=-1)`.
-Appropriately selecting and flattening the upper triangular of the
-last two dimensions will produce identical results as pdist.
-
-This function is similar to
-`scipy.spatial.distance.pdist(input, 'minkowski', p=p)`
-if :math:`p \in (0, \infty)`.
+This function is equivalent to `scipy.spatial.distance.pdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
 
 Args:
-    input: input tensor of shape :math:`... \times N \times M`.
+    input: input tensor of shape :math:`N \times M`.
     p: p value for the p-norm distance to calculate between each vector pair
         :math:`\in [0, \infty]`.
 """)
