@@ -121,29 +121,82 @@ IF "%CMAKE_GENERATOR%"=="" (
   )
 )
 
-: Invoke functionality for each build requested
-FOR %%a IN (%_BUILD_ARGS%) DO (
-  echo --------------------------------------------------------------------------------
-  echo ^|
-  echo ^|  Building %%a
-  echo ^|
-  echo --------------------------------------------------------------------------------
+: Note [Backslash munging on Windows]
+: In CMake, Windows native backslashes are not well handled.
+: It will cause a warning as the following
+:   CMake Warning (dev) at cmake (source_group):
+:    Syntax error in cmake code at cmake
+:    when parsing string
+:      Header Files C:\include\cudnn.h
+:    Invalid escape sequence \i
+: which is said to become an error in the future.
+: As an alternative, we should use forward slashes instead.
+: Here those paths should be escaped before passing to CMake.
+if not "%NVTOOLEXT_HOME%" == "" set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+if not "%CUDNN_INCLUDE_DIR%" == "" set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+if not "%CUDNN_LIB_DIR%" == "" set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+if not "%CUDNN_LIBRARY%" == "" set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+if not "%PYTORCH_PYTHON_LIBRARY%" == "" set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+if not "%NUMPY_INCLUDE_DIR%" == "" set NUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR:\=/%
 
-  IF "%%a"=="caffe2" (
-    call:build_caffe2 %%a
-  ) ELSE (
-    IF "%%a"=="libshm_windows" (
-      SET IS_OURS=1
-      pushd torch\lib
-      call:build %%a
-      popd
-    ) ELSE (
-      pushd third_party
-      call:build %%a
-      popd
+IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
+if not exist build mkdir build
+pushd build
+cmake .. %CMAKE_GENERATOR_COMMAND% ^
+                -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+                -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
+                -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
+                -DBUILD_TORCH="%BUILD_TORCH%" ^
+                -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
+                -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
+                -DBUILD_PYTHON=%BUILD_PYTHON% ^
+                -DBUILD_BINARY=%BUILD_BINARY% ^
+                -DBUILD_TEST=%BUILD_TEST% ^
+                -DINSTALL_TEST=%INSTALL_TEST% ^
+                -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
+                -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
+                -DUSE_CUDA=%USE_CUDA% ^
+                -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
+                -DUSE_FBGEMM=%USE_FBGEMM% ^
+                -DUSE_NUMPY=%USE_NUMPY% ^
+                -DNUMPY_INCLUDE_DIR="%NUMPY_INCLUDE_DIR%" ^
+                -DUSE_NNPACK=%USE_NNPACK% ^
+                -DUSE_LEVELDB=%USE_LEVELDB% ^
+                -DUSE_LMDB=%USE_LMDB% ^
+                -DUSE_OPENCV=%USE_OPENCV% ^
+                -DUSE_QNNPACK=%USE_QNNPACK% ^
+                -DUSE_FFMPEG=%USE_FFMPEG% ^
+                -DUSE_GLOG=OFF ^
+                -DUSE_GFLAGS=OFF ^
+                -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
+                -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
+                -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
+                -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
+                -DUSE_MKLDNN=%USE_MKLDNN% ^
+                -DATEN_NO_CONTRIB=1 ^
+                -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
+                -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
+                -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                -DUSE_ROCM=%USE_ROCM% %EXTRA_CAFFE2_CMAKE_FLAGS%
+IF ERRORLEVEL 1 exit 1
+IF NOT ERRORLEVEL 0 exit 1
+
+%MAKE_COMMAND%
+IF ERRORLEVEL 1 exit 1
+IF NOT ERRORLEVEL 0 exit 1
+
+:: Install Python proto files
+IF "%BUILD_PYTHON%" == "ON" (
+  for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+    IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+      copy /Y %%i ..\caffe2\proto\
     )
   )
 )
+
+popd
 
 : Copy Artifacts
 cd torch\lib
@@ -157,116 +210,3 @@ xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
 cd ..\..
-
-goto:eof
-
-: Generate Build Functionality
-:build
-  @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  if not exist build mkdir build\%~1
-  pushd build\%~1
-  cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DCMAKE_C_FLAGS="%C_FLAGS%" ^
-                  -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
-                  -DCMAKE_CXX_FLAGS="%C_FLAGS% %CPP_FLAGS%" ^
-                  -DCUDA_NVCC_FLAGS="%BASIC_CUDA_FLAGS%" ^
-                  -DUSE_CUDA=%USE_CUDA% ^
-                  -DBUILD_EXAMPLES=OFF ^
-                  -DBUILD_TEST=%BUILD_TEST% ^
-                  -DUSE_NNPACK=%USE_NNPACK% ^
-                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-  IF ERRORLEVEL 1 exit 1
-  IF NOT ERRORLEVEL 0 exit 1
-
-  %MAKE_COMMAND%
-  IF ERRORLEVEL 1 exit 1
-  IF NOT ERRORLEVEL 0 exit 1
-  popd
-  @endlocal
-
-goto:eof
-
-: libtorch-specific build functionality
-:build_caffe2
-  @setlocal
-  : Note [Backslash munging on Windows]
-  : In CMake, Windows native backslashes are not well handled.
-  : It will cause a warning as the following
-  :   CMake Warning (dev) at cmake (source_group):
-  :    Syntax error in cmake code at cmake
-  :    when parsing string
-  :      Header Files C:\include\cudnn.h
-  :    Invalid escape sequence \i
-  : which is said to become an error in the future.
-  : As an alternative, we should use forward slashes instead.
-  : Here those paths should be escaped before passing to CMake.
-  if not "%NVTOOLEXT_HOME%" == "" set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
-  if not "%CUDNN_INCLUDE_DIR%" == "" set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
-  if not "%CUDNN_LIB_DIR%" == "" set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
-  if not "%CUDNN_LIBRARY%" == "" set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
-  if not "%PYTORCH_PYTHON_LIBRARY%" == "" set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
-  if not "%NUMPY_INCLUDE_DIR%" == "" set NUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR:\=/%
-
-  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  if not exist build mkdir build
-  pushd build
-  cmake .. %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-                  -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
-                  -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
-                  -DBUILD_TORCH="%BUILD_TORCH%" ^
-                  -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
-                  -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
-                  -DBUILD_PYTHON=%BUILD_PYTHON% ^
-                  -DBUILD_BINARY=%BUILD_BINARY% ^
-                  -DBUILD_TEST=%BUILD_TEST% ^
-                  -DINSTALL_TEST=%INSTALL_TEST% ^
-                  -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
-                  -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
-                  -DUSE_CUDA=%USE_CUDA% ^
-                  -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
-                  -DUSE_FBGEMM=%USE_FBGEMM% ^
-                  -DUSE_NUMPY=%USE_NUMPY% ^
-                  -DNUMPY_INCLUDE_DIR="%NUMPY_INCLUDE_DIR%" ^
-                  -DUSE_NNPACK=%USE_NNPACK% ^
-                  -DUSE_LEVELDB=%USE_LEVELDB% ^
-                  -DUSE_LMDB=%USE_LMDB% ^
-                  -DUSE_OPENCV=%USE_OPENCV% ^
-                  -DUSE_QNNPACK=%USE_QNNPACK% ^
-                  -DUSE_FFMPEG=%USE_FFMPEG% ^
-                  -DUSE_GLOG=OFF ^
-                  -DUSE_GFLAGS=OFF ^
-                  -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
-                  -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
-                  -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
-                  -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DUSE_MKLDNN=%USE_MKLDNN% ^
-                  -DATEN_NO_CONTRIB=1 ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
-                  -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
-                  -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
-                  -DUSE_ROCM=%USE_ROCM% %EXTRA_CAFFE2_CMAKE_FLAGS%
-  IF ERRORLEVEL 1 exit 1
-  IF NOT ERRORLEVEL 0 exit 1
-
-  %MAKE_COMMAND%
-  IF ERRORLEVEL 1 exit 1
-  IF NOT ERRORLEVEL 0 exit 1
-
-  :: Install Python proto files
-  IF "%BUILD_PYTHON%" == "ON" (
-    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
-      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
-        copy /Y %%i ..\caffe2\proto\
-      )
-    )
-  )
-
-  popd
-  @endlocal
-
-goto:eof

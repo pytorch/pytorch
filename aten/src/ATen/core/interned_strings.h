@@ -118,6 +118,7 @@ namespace c10 {
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
   _(onnx, Split)                   \
+  _(onnx, ConstantOfShape)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
