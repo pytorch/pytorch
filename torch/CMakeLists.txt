@@ -727,4 +727,18 @@ if (BUILD_PYTHON)
     RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
     LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
     ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+  add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/torch/__init__.pyi"
+    COMMAND
+    ${PYCMD} tools/pyi/gen_pyi.py
+      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    DEPENDS
+    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    "${TORCH_SRC_DIR}/torch/__init__.pyi.in"
+    torch_python
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+    )
 endif()

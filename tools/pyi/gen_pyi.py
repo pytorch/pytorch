@@ -31,7 +31,7 @@ Here's our general strategy:
   type information recorded in Declarations.yaml (generate_type_hints)
 
 There are a number of type hints which we've special-cased;
-read do_gen_pyi for the gory details.
+read gen_pyi for the gory details.
 """
 
 # TODO: Consider defining some aliases for our Union[...] types, to make
@@ -271,8 +271,8 @@ def generate_type_hints(fname, decls, is_tensor=False):
     return type_hints
 
 
-def do_gen_pyi():
-    """do_gen_pyi()
+def gen_pyi(declarations, out):
+    """gen_pyi()
 
     This function generates a pyi file for torch. To do this, it imports torch and loops
     over the members of torch and torch.Tensor.
@@ -294,7 +294,7 @@ def do_gen_pyi():
 
     # Load information from YAML
     fns = collections.defaultdict(list)
-    for d in yaml.load(open('torch/share/ATen/Declarations.yaml'),
+    for d in yaml.load(open(declarations),
                        Loader=yaml_loader):
 
         name = d['name']
@@ -462,13 +462,21 @@ def do_gen_pyi():
     }
     TORCH_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '__init__.pyi.in'))
 
-    # TODO: 'out'-ify this properly.  This is less pressing because we
-    # don't need to generate stubs in the normal codepath.
-    write('.', 'torch/__init__.pyi', TORCH_TYPE_STUBS, env)
+    write(out, 'torch/__init__.pyi', TORCH_TYPE_STUBS, env)
 
 
-def gen_pyi():
-    # we import torch, better do that in a subprocess
-    p = multiprocessing.Process(target=do_gen_pyi)
-    p.start()
-    p.join()
+def main():
+    parser = argparse.ArgumentParser(
+        description='Generate type stubs for PyTorch')
+    parser.add_argument('declarations', metavar='DECL',
+                        default='torch/share/ATen/Declarations.yaml',
+                        help='path to Declarations.yaml')
+    parser.add_argument('out', metavar='OUT',
+                        default='.',
+                        help='path to output directory')
+    args = parser.parse_args()
+    gen_autograd(args.declarations, args.out)
+
+
+if __name__ == '__main__':
+    main()
