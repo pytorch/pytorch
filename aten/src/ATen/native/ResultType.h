@@ -40,16 +40,20 @@ struct Type;
 
 namespace detail {
 
-template<typename T>
-static inline T castToType(ScalarType type, T arg) = delete;
-
-template<>
-Tensor castToType(ScalarType type, Tensor arg) {
-  return arg.to(type);
+template <typename T>
+static inline T castToType(ScalarType type, const T& arg) {
+  static_assert(
+      std::is_same<T, Tensor>::value || std::is_same<T, Scalar>::value,
+      "castOperands accepts Tensors or Scalars.");
 }
 
 template<>
-Scalar castToType(ScalarType type, Scalar arg) {
+Tensor castToType(ScalarType type, const Tensor& arg) {
+  return arg.toType(type);
+}
+
+template<>
+Scalar castToType(ScalarType type, const Scalar& arg) {
   bool is_i = false;
   bool is_d = false;
   bool is_z = false;
@@ -111,7 +115,7 @@ CAFFE2_API ScalarType resultType(ArrayRef<ScalarTypeSource> inputs);
 // function implementation.
 template<typename... T>
 static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T... args) {
-  SmallVector<ScalarTypeSource, 4> type_sources = {std::forward<T>(args)...};
+  SmallVector<ScalarTypeSource, sizeof...(args)> type_sources = {args...};
   if (!dtype) {
     dtype = resultType(type_sources);
   }
@@ -125,7 +129,7 @@ static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T..
         " into ",
         *dtype);
   }
-  return std::make_tuple(detail::castToType<T>(*dtype, std::forward<T>(args))...);
+  return std::make_tuple((detail::castToType<T>(*dtype, std::forward<T>(args)))...);
 }
 
 // Alternative to "castOperands", for cases when there is no target dtype to
@@ -133,7 +137,7 @@ static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T..
 // on them.
 template<typename... T>
 static inline std::tuple<T...> castOperandsToResultType(T... args) {
-  return castOperands<T...>(c10::nullopt, std::forward<T>(args)...);
+  return castOperands(c10::nullopt, std::forward<T>(args)...);
 }
 
 }  // namespace at
