@@ -18,6 +18,13 @@ string(
   content
   "${content}")
 
+string(
+  REPLACE
+  "static constexpr int kIndexInFileMessages ="
+  "static int const kIndexInFileMessages ="
+  content
+  "${content}")
+
 foreach(ns ${NAMESPACES})
   # Insert "const ::std::string& GetEmptyStringAlreadyInited();" within
   # the namespace and make sure we only do it once in the file. Unfortunately
