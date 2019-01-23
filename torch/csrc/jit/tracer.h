@@ -52,8 +52,8 @@ TORCH_API void setValueTrace(const IValue& v, Value* value);
 TORCH_API void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value);
 
 inline void delValueTrace(const Variable& var) {
-  AT_ASSERT(var.defined());
-  getTracingState()->value_map.erase(var);
+  JIT_ASSERT(var.defined());
+  getTracingState()->env_stack.back().value_map.erase(var);
 }
 
 inline std::function<void()> pauseTracing() {
@@ -63,43 +63,7 @@ inline std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
-// Given a variable 'var', return the 'node' which represents the instruction
-// which computes the value of this variable in the IR.
-// Here, we interpret untraced variables as constants that are just embedded
-// in the graph.  This is useful to handle code which does things like this
-// (from torch.autograd.variable, now moved to C++):
-//
-//    def mm(self, matrix):
-//      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
-//      return Addmm.apply(output, self, matrix, 0, 1, True)
-//
-// Here, mm fakes up a dummy variable with uninitialized data to do an inplace
-// update on, but subsequently ignores it because the alpha scaling factor is
-// zero. This is one of the cases where a Variable can be created inside of a
-// trace, and if we treat it as a constant, everything will work out.
-inline Value* getValueTrace(const Variable& var) {
-  auto& state = getTracingState();
-  if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
-    return state->graph->insertNode(n)->output();
-  }
-
-  auto& value_map = getTracingState()->value_map;
-  auto it = value_map.find(var);
-  if (it == value_map.end()) {
-    Value* constant = state->graph->insertConstant(var.data());
-    recordSourceLocation(constant->node());
-    constant->inferTypeFrom(var.data());
-    it = value_map.emplace_hint(it, var, constant);
-  }
-  if (!it->second->hasUniqueName()) {
-    auto unique_name = getTracingState()->lookup_var_name_fn(var);
-    if (!unique_name.empty()) {
-      it->second->setUniqueName(unique_name);
-    }
-  }
-  return it->second;
-}
+Value* getValueTrace(const Variable& var);
 
 TORCH_API Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut);
 
@@ -135,7 +99,7 @@ inline Value* getOutputTrace(
     return state->graph->insertNode(n)->output();
   }
 
-  auto& value_map = getTracingState()->value_map;
+  auto& value_map = getTracingState()->env_stack.back().value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     std::ostringstream os;
@@ -183,11 +147,12 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     if (type->isSubtypeOf(DynamicType::get())) {
       auto input_tensor = input.toTensor();
       auto name = Variable(input_tensor).name();
-      if (state->value_map.find(input_tensor) != state->value_map.end()) {
+      auto& value_map = state->env_stack.back().value_map;
+      if (value_map.find(input_tensor) != value_map.end()) {
         input_tensor = input_tensor.view(input_tensor.sizes());
       }
       value->setUniqueName(name);
-      state->value_map[input_tensor] = value;
+      value_map[input_tensor] = value;
       return input_tensor;
     } else if (auto tuple_type = type->cast<TupleType>()) {
       auto unpack_node =

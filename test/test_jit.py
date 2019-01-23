@@ -12327,6 +12327,21 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=1)
         self.assertGraphContainsExactly(traced.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
 
+    def test_trace_fork_wait_leaking(self):
+        my_list = []
+
+        def fork_body(x):
+            my_list.append(x + 1)
+            return x + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            val = torch.jit._wait(fut)
+            return my_list[0]
+
+        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; this probably indicates your program cannot be understood by the tracer.'):
+            traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
+
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

@@ -396,34 +396,38 @@ void initJITBindings(PyObject* module) {
       auto retval = c10::make_intrusive<c10::ivalue::Future>();
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
+      IValue output_ivalue;
+      {
+        tracer::WithTracingEnvStack env_guard;
 
-      // Run the user-supplied function
-      py_func_output = f(*args);
+        // Run the user-supplied function
+        py_func_output = f(*args);
 
-      // Convert the output of the user-supplied funciton to IValue. The type
-      // information of this IValue is used both to record the correct type in
-      // the trace.
-      auto output_ivalue = toIValue(py_func_output);
-      Value *out_val = jit::tracer::getNestedValueTrace(output_ivalue);
-      body_block->registerOutput(out_val);
-      node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
+        // Convert the output of the user-supplied funciton to IValue. The type
+        // information of this IValue is used both to record the correct type in
+        // the trace.
+        output_ivalue = toIValue(py_func_output);
+        Value *out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        body_block->registerOutput(out_val);
+        node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
 
-      // Lambda lift
+        // Lambda lift
 
-      auto forked_graph = std::make_shared<Graph>();
+        auto forked_graph = std::make_shared<Graph>();
 
-      std::unordered_map<Value*, Value*> uncaptures_map;
-      auto env = [&](Value* v) -> Value* {
-        if (!uncaptures_map.count(v)) {
-          uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-          fork_node->addInput(v);
-        }
-        return uncaptures_map[v];
-      };
-      forked_graph->block()->cloneFrom(body_block, env);
+        std::unordered_map<Value*, Value*> uncaptures_map;
+        auto env = [&](Value* v) -> Value* {
+          if (!uncaptures_map.count(v)) {
+            uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+            fork_node->addInput(v);
+          }
+          return uncaptures_map[v];
+        };
+        forked_graph->block()->cloneFrom(body_block, env);
 
-      fork_node->g_(attr::Subgraph, forked_graph);
-      fork_node->eraseBlock(0);
+        fork_node->g_(attr::Subgraph, forked_graph);
+        fork_node->eraseBlock(0);
+      }
 
       // Record the ivalue in the tracer
       jit::tracer::setFutureTrace(retval, node_output);

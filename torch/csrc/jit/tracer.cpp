@@ -39,11 +39,57 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+// Given a variable 'var', return the 'node' which represents the instruction
+// which computes the value of this variable in the IR.
+// Here, we interpret untraced variables as constants that are just embedded
+// in the graph.  This is useful to handle code which does things like this
+// (from torch.autograd.variable, now moved to C++):
+//
+//    def mm(self, matrix):
+//      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
+//      return Addmm.apply(output, self, matrix, 0, 1, True)
+//
+// Here, mm fakes up a dummy variable with uninitialized data to do an inplace
+// update on, but subsequently ignores it because the alpha scaling factor is
+// zero. This is one of the cases where a Variable can be created inside of a
+// trace, and if we treat it as a constant, everything will work out.
+Value* getValueTrace(const Variable& var) {
+  auto& state = getTracingState();
+  if (!var.defined()) {
+    Node* n = state->graph->createUndefined();
+    return state->graph->insertNode(n)->output();
+  }
+
+  auto& env_stack = getTracingState()->env_stack;
+
+  for (size_t i = 0; i < env_stack.size(); ++i) {
+    auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
+    auto it = value_map.find(var);
+    if (it == value_map.end())
+      continue;
+    if (!it->second->hasUniqueName()) {
+      auto unique_name = getTracingState()->lookup_var_name_fn(var);
+      if (!unique_name.empty()) {
+        it->second->setUniqueName(unique_name);
+      }
+    }
+    return it->second;
+  }
+
+  // Didn't find it. Bake in a constant
+  Value* constant = state->graph->insertConstant(var.data());
+  recordSourceLocation(constant->node());
+  constant->inferTypeFrom(var.data());
+  auto it = env_stack.back().value_map.find(var);
+  it = env_stack.back().value_map.emplace_hint(it, var, constant);
+  return it->second;
+}
+
 void setValueTrace(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
-    AT_ASSERT(var.defined());
-    getTracingState()->value_map[var] = value;
+    JIT_ASSERT(var.defined());
+    getTracingState()->env_stack.back().value_map[var] = value;
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
     auto graph = getTracingState()->graph;
@@ -77,13 +123,13 @@ void setValueTrace(const IValue& v, Value* value) {
 }
 
 void setFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut, Value* value) {
-  getTracingState()->future_map[fut] = value;
+  getTracingState()->env_stack.back().future_map[fut] = value;
 }
 
 Value* getFutureTrace(c10::intrusive_ptr<c10::ivalue::Future> fut) {
   auto& state = getTracingState();
 
-  auto& future_map = getTracingState()->future_map;
+  auto& future_map = getTracingState()->env_stack.back().future_map;
   auto it = future_map.find(fut);
   if (it == future_map.end()) {
     std::ostringstream oss;
@@ -248,7 +294,7 @@ void setTracingState(std::shared_ptr<TracingState> state) {
   detail::tracing_state = std::move(state);
 }
 
-TracingState::TracingState() : graph(new Graph()) {}
+TracingState::TracingState() : env_stack{TracingEnvironmentFrame()}, graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
 
