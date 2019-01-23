@@ -8,14 +8,20 @@
 //
 // Type promotion works similar to NumPy type promotion. Operands with a higher
 // category (i.e. integral, floating or complex) have precedence over other
-// operands and tensors have precedence over scalar operands within the same
-// category. The "resultType" function applies the promotion logic according to
-// these two rules.
+// operands. Within the same category, only the operands with the highest
+// available priority participate in the final type. The priority order is:
+//  - Operands that are explicit ScalarTypes
+//  - Tensor operands with >=1 dimensions
+//  - Tensor operands with 0 dimensions
+//  - Scalar or bool operands (same priority)
 //
-// Only typecasts that do not demote the type kind are allowed ("same_kind" in
-// NumPy). Thus, an operand can be downcasted into another type within the
-// same category but never to a lower category. The "castOperands" applies this
-// rule.
+// Some operations will be needed to be casted into a user specified type.
+// In this case, only typecasts that do not demote the type category are allowed
+// ("same_kind" in NumPy). Thus, an operand can be downcasted into another type
+// within the same category but never to a lower category.
+//
+// The function "resultType" applies the promotion rules and the function
+// "castOperands" applies the casting rules laid out above.
 //
 // If you are converting a function to support mixed types, also change
 // the backward function to go back to the original type.
