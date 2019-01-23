@@ -85,18 +85,11 @@ def sanitize_types(types):
 
 
 def get_annotation(t):
-    found = False
-    if t == "Tensor?(a!)":
-        print(t)
-        found = True
     match = re.match(r'(Tensor.*)\((.+)\)', t)
     annotation = None
     if match:
         t = match.group(1)
         annotation = match.group(2)
-    if found:
-        print(t)
-        print(annotation)
     return t, annotation
 
 
@@ -160,10 +153,6 @@ def parse_arguments(args, func_decl, declaration, func_return):
     arguments_out = []
     arguments_other = []
     for argument in arguments:
-        # TODO: convention is that the ith-argument correspond to the i-th return, but it would
-        # be better if we just named everything and matched by name.
-        print(argument.get('annotation', ''))
-        print(argument.get('annotation', ''))
         if argument['type'] == "Tensor" and argument['annotation'] and re.match(r'^(.*!)$', argument['annotation']) and argument.get('kwarg_only'):
             argument['output'] = True
             argument['kwarg_only'] = False
@@ -172,6 +161,8 @@ def parse_arguments(args, func_decl, declaration, func_return):
         else:
             arguments_other.append(argument)
 
+    # TODO: convention is that the ith-argument correspond to the i-th return, but it would
+    # be better if we just named everything and matched by name.
     for arg_idx, argument in enumerate(arguments_out):
         assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                 "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, the ith-argument needs to correspond to the i-th return.".format(func_decl['func'])
