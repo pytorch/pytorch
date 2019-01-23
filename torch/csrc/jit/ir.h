@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/interned_strings.h>
@@ -17,6 +16,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/function_schema.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -39,6 +39,9 @@ struct Function;
 
 namespace torch {
 namespace jit {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside

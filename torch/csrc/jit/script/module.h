@@ -2,7 +2,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
@@ -13,6 +12,7 @@
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -31,6 +31,9 @@
 namespace torch {
 namespace jit {
 namespace script {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // A method in a module, e.g. f in:
 //

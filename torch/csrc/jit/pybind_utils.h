@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
@@ -11,6 +10,7 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -30,6 +30,9 @@
 namespace torch {
 namespace jit {
 namespace detail {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
