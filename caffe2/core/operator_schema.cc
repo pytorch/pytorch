@@ -330,7 +330,8 @@ int OpSchema::CalculateOutput(int num_input) const {
   }
 }
 
-static void SparseLengthsFillerHelper(
+namespace {
+void SparseLengthsFillerHelper(
     const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t length_index,
@@ -340,7 +341,17 @@ static void SparseLengthsFillerHelper(
   (*fillers)[length_index].SparseLengths(shapes[value_index].front());
 }
 
-static void SparseSegmentsFillerHelper(
+void SparseWeightsFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
+    size_t weight_index,
+    std::vector<TensorFiller>* fillers) {
+  (*fillers)[weight_index]
+      .Min(0)
+      .Max(shapes[weight_index].front())
+      .Dist(FD_UNIFORM);
+}
+
+void SparseSegmentsFillerHelper(
     const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t segment_index,
@@ -353,6 +364,7 @@ static void SparseSegmentsFillerHelper(
       .Dist(FD_UNIFORM);
   (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
 }
+} // namespace
 
 // The helper is build sparse input with values, keys, and lengths; e.g.:
 // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
@@ -370,6 +382,31 @@ OpSchema& OpSchema::ValueKeyLengthInputFillers(
     SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
     // fill in the keys (value_index is used to get the correct shape)
     SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
+// The helper is build sparse input with values, keys, and lengths; e.g.:
+// values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+// keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+// weights = [1, 1, 1, 0, 2, 2, 2, 1, 2]
+//            \_____/  \________/  \__/
+// lengths =    [3,        4,       2]
+OpSchema& OpSchema::WeightedValueKeyLengthInputFillers(
+    size_t value_index,
+    size_t key_index,
+    size_t length_index,
+    size_t weight_index) {
+  filler_supplier_ = [this, value_index, key_index, length_index, weight_index](
+                         const std::vector<std::vector<int64_t>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
+    SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
+    // fill in the keys (value_index is used to get the correct shape)
+    SparseSegmentsFillerHelper(shapes, value_index, key_index, &fillers);
+    // fill in the weights
+    SparseWeightsFillerHelper(shapes, weight_index, &fillers);
     return fillers;
   };
   return *this;

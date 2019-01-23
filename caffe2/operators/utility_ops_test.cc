@@ -19,7 +19,7 @@ static void AddConstInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -38,8 +38,8 @@ TEST(UtilityOpTest, testReshapeWithScalar) {
   EXPECT_TRUE(op->Run());
   Blob* XNew = ws.GetBlob("XNew");
   const TensorCPU& XNewTensor = XNew->Get<Tensor>();
-  EXPECT_EQ(1, XNewTensor.ndim());
-  EXPECT_EQ(1, XNewTensor.size());
+  EXPECT_EQ(1, XNewTensor.dim());
+  EXPECT_EQ(1, XNewTensor.numel());
 }
 
 } // namespace caffe2

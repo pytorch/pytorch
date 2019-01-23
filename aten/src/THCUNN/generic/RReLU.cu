@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/RReLU.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/RReLU.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -16,7 +16,7 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  struct curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
+  curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
 
   if (train)
   {

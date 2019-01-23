@@ -1,8 +1,4 @@
 add_subdirectory(ios)
-# [FIX later or remove] opengl code will be broken because of tensor refactoring, remove this from CI to unblock
-if(USE_MOBILE_OPENGL AND (ANDROID OR IOS))
-  # add_subdirectory(opengl)
-endif()
 if (USE_ACL)
   # add_subdirectory(arm-compute)
 endif()

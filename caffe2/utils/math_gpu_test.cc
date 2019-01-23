@@ -72,8 +72,7 @@ void executeGpuBinaryOpTest(
 
   // Copy result to CPU so we can inspect it
   auto* tensory_host = BlobGetMutableTensor(bloby_host, CPU);
-  tensory_host->CopyFrom(*tensory, &context);
-  context.FinishDeviceComputation();
+  tensory_host->CopyFrom(*tensory);
 
   for (int i = 0; i < shapey; ++i) {
     EXPECT_EQ(tensory_host->data<float>()[i], correct_output(i));
@@ -126,8 +125,7 @@ TEST(MathUtilGPUTest, testAddStripedBatch) {
 
   // Copy result to CPU so we can inspect it
   auto* tensory_host = BlobGetMutableTensor(bloby_host, CPU);
-  tensory_host->CopyFrom(*tensory, &context);
-  context.FinishDeviceComputation();
+  tensory_host->CopyFrom(*tensory);
 
   for (int k = 0; k < 33; k++) {
     for (int i = 0; i < 25; i++) {
@@ -265,9 +263,9 @@ class GemmBatchedGPUTest
     W_->Resize(std::vector<int64_t>{3, 6, 10});
     Y_->Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CUDAContext>(
-        X_->size(), 1.0f, X_->mutable_data<float>(), cuda_context_.get());
+        X_->numel(), 1.0f, X_->mutable_data<float>(), cuda_context_.get());
     math::Set<float, CUDAContext>(
-        W_->size(), 1.0f, W_->mutable_data<float>(), cuda_context_.get());
+        W_->numel(), 1.0f, W_->mutable_data<float>(), cuda_context_.get());
     trans_X_ = std::get<0>(GetParam());
     trans_W_ = std::get<1>(GetParam());
   }
@@ -327,7 +325,7 @@ class GemmBatchedGPUTest
 
   void VerifyOutput(const float value) const {
     Tensor Y_cpu(*Y_, CPU);
-    for (int i = 0; i < Y_cpu.size(); ++i) {
+    for (int i = 0; i < Y_cpu.numel(); ++i) {
       EXPECT_FLOAT_EQ(value, Y_cpu.template data<float>()[i]);
     }
   }
@@ -395,7 +393,7 @@ class ReduceTensorGPUTest : public testing::Test {
     }
     X_->Resize(X_dims);
     Y_->Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_->size());
+    ASSERT_EQ(X_data.size(), X_->numel());
     cuda_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_->mutable_data<float>());
   }
@@ -403,9 +401,8 @@ class ReduceTensorGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
-    ASSERT_EQ(expected_output.size(), Y_host->size());
+    Y_host->CopyFrom(*Y_);
+    ASSERT_EQ(expected_output.size(), Y_host->numel());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
     }
@@ -674,7 +671,7 @@ class BroadcastGPUTest : public testing::Test {
       const std::vector<float>& X_data) {
     X_->Resize(X_dims);
     Y_->Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_->size());
+    ASSERT_EQ(X_data.size(), X_->numel());
     cuda_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_->mutable_data<float>());
   }
@@ -682,9 +679,8 @@ class BroadcastGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
-    ASSERT_EQ(expected_output.size(), Y_host->size());
+    Y_host->CopyFrom(*Y_);
+    ASSERT_EQ(expected_output.size(), Y_host->numel());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
     }
@@ -730,134 +726,6 @@ TEST_F(BroadcastGPUTest, BroadcastGPUFloatTest) {
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
 }
 
-class MomentsGPUTest : public testing::Test {
- protected:
-  void SetUp() override {
-    if (!HasCudaGPU()) {
-      return;
-    }
-    option_.set_device_type(PROTO_CUDA);
-    cuda_context_ = make_unique<CUDAContext>(option_);
-    Blob* blob_x = ws_.CreateBlob("X");
-    Blob* blob_mean = ws_.CreateBlob("mean");
-    Blob* blob_variance = ws_.CreateBlob("variance");
-    X_ = BlobGetMutableTensor(blob_x, CUDA);
-    mean_ = BlobGetMutableTensor(blob_mean, CUDA);
-    variance_ = BlobGetMutableTensor(blob_variance, CUDA);
-  }
-
-  void SetUpData(
-      const std::vector<int>& X_dims,
-      const std::vector<int>& axes,
-      const std::vector<float>& X_data) {
-    std::vector<int> Y_dims = X_dims;
-    for (const int axis : axes) {
-      Y_dims[axis] = 1;
-    }
-    X_->Resize(X_dims);
-    mean_->Resize(Y_dims);
-    variance_->Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_->size());
-    cuda_context_->CopyFromCPU<float>(
-        X_data.size(), X_data.data(), X_->mutable_data<float>());
-  }
-
-  void VerifyResult(
-      const std::vector<float>& mean_data,
-      const std::vector<float>& variance_data) {
-    Blob* blob_mean_host = ws_.CreateBlob("mean_host");
-    auto* mean_host = BlobGetMutableTensor(blob_mean_host, CPU);
-    mean_host->CopyFrom(*mean_, cuda_context_.get());
-    Blob* blob_variance_host = ws_.CreateBlob("variance_host");
-    auto* variance_host = BlobGetMutableTensor(blob_variance_host, CPU);
-    variance_host->CopyFrom(*variance_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
-
-    ASSERT_EQ(mean_data.size(), mean_host->size());
-    for (std::size_t i = 0; i < mean_data.size(); ++i) {
-      EXPECT_FLOAT_EQ(mean_data[i], mean_host->data<float>()[i]);
-    }
-    ASSERT_EQ(variance_data.size(), variance_host->size());
-    for (std::size_t i = 0; i < variance_data.size(); ++i) {
-      EXPECT_NEAR(variance_data[i], variance_host->data<float>()[i], kEps);
-    }
-  }
-
-  void RunMomentsTest(
-      const std::vector<int>& X_dims,
-      const std::vector<int>& axes,
-      const std::vector<float>& X_data,
-      const std::vector<float>& mean_data,
-      const std::vector<float>& variance_data) {
-    SetUpData(X_dims, axes, X_data);
-    math::Moments<float, CUDAContext>(
-        X_dims.size(),
-        X_dims.data(),
-        axes.size(),
-        axes.data(),
-        X_->data<float>(),
-        mean_->mutable_data<float>(),
-        variance_->mutable_data<float>(),
-        cuda_context_.get());
-    VerifyResult(mean_data, variance_data);
-  }
-
-  Workspace ws_;
-  DeviceOption option_;
-  std::unique_ptr<CUDAContext> cuda_context_;
-  Tensor* X_ = nullptr;
-  Tensor* mean_ = nullptr;
-  Tensor* variance_ = nullptr;
-};
-
-TEST_F(MomentsGPUTest, MomentsGPUFloatTest) {
-  if (!HasCudaGPU()) {
-    return;
-  }
-  // Test for 1D tensor.
-  RunMomentsTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {2.0f}, {2.0f / 3.0f});
-
-  // Test for 2D Tensor.
-  RunMomentsTest(
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.0f, 5.0f},
-      {2.0f / 3.0f, 2.0f / 3.0f});
-  RunMomentsTest(
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.5f, 3.5f, 4.5f},
-      {2.25f, 2.25f, 2.25f});
-  RunMomentsTest(
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {3.5f},
-      {35.0f / 12.0f});
-
-  // Test for 3D tensor.
-  RunMomentsTest(
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {2.5f, 6.5f},
-      {1.25, 1.25});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {4.0f, 5.0f},
-      {5.0f, 5.0f});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {3.5f, 5.5f},
-      {4.25, 4.25});
-}
-
 class TransposeGPUTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -883,7 +751,7 @@ class TransposeGPUTest : public testing::Test {
     }
     X_->Resize(X_dims);
     Y_->Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_->size());
+    ASSERT_EQ(X_data.size(), X_->numel());
     cuda_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_->mutable_data<float>());
   }
@@ -891,9 +759,8 @@ class TransposeGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
-    ASSERT_EQ(expected_output.size(), Y_host->size());
+    Y_host->CopyFrom(*Y_);
+    ASSERT_EQ(expected_output.size(), Y_host->numel());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
     }

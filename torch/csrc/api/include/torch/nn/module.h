@@ -1,29 +1,18 @@
 #pragma once
 
-#include <torch/detail/ordered_dict.h>
-#include <torch/nn/cursor.h>
 #include <torch/nn/pimpl.h>
+#include <torch/ordered_dict.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
 
+#include <functional>
+#include <iosfwd>
 #include <map>
 #include <memory>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
-
-// forward declarations confuse doxygen
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-namespace torch {
-namespace detail {
-template <typename T>
-class CursorBase;
-} // namespace detail
-} // namespace torch
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace nn {
@@ -33,9 +22,9 @@ namespace nn {
 /// \rst
 /// .. note::
 ///   The design and implementation of this class is largely based on the Python
-///   API. You may want to consult [its
-///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
-///   for further clarification on certain methods or behavior.
+///   API. You may want to consult the python documentation for
+///   :py:class:`pytorch:torch.nn.Module` for further clarification on certain
+///   methods or behavior.
 /// \endrst
 ///
 /// A `Module` is an abstraction over the implementation of some function or
@@ -70,15 +59,26 @@ namespace nn {
 /// are registered separately via `register_buffer`. These methods are part of
 /// the protected API of `Module` and are typically invoked from within a
 /// concrete `Module`s constructor.
-class Module {
+class TORCH_API Module : public std::enable_shared_from_this<Module> {
  public:
+  using ModuleApplyFunction = std::function<void(Module&)>;
+  using ConstModuleApplyFunction = std::function<void(const Module&)>;
+  using NamedModuleApplyFunction =
+      std::function<void(const std::string&, Module&)>;
+  using ConstNamedModuleApplyFunction =
+      std::function<void(const std::string&, const Module&)>;
+  using ModulePointerApplyFunction =
+      std::function<void(const std::shared_ptr<Module>&)>;
+  using NamedModulePointerApplyFunction =
+      std::function<void(const std::string&, const std::shared_ptr<Module>&)>;
+
   /// Tells the base `Module` about the name of the submodule.
   explicit Module(std::string name);
 
-  /// Constructs the base module without immediate knowledge of the submodule's
-  /// name. The name of the submodule is inferred via RTTI the first time
-  /// `.name()` is invoked.
-  Module() = default;
+  /// Constructs the module without immediate knowledge of the submodule's name.
+  /// The name of the submodule is inferred via RTTI (if possible) the first
+  /// time `.name()` is invoked.
+  Module();
 
   virtual ~Module() = default;
 
@@ -110,63 +110,156 @@ class Module {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const;
+      const optional<Device>& device = nullopt) const;
 
-  /// Provides a means to traverse the `Module` tree.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `Module&`.
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ModuleCursor modules();
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](nn::Module& module) {
+  ///     std::cout << module.name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(const ModuleApplyFunction& function);
 
-  /// Provides a means to traverse the `Module` tree.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `const Module&`.
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ConstModuleCursor modules() const;
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](const nn::Module& module) {
+  ///     std::cout << module.name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(const ConstModuleApplyFunction& function) const;
 
-  /// Traverses the (immediate) children of the `Module`.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `const std::string&` for the key of the module,
+  /// and a `Module&`. The key of the module itself is the empty string. If
+  /// `name_prefix` is given, it is prepended to every key as
+  /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ModuleCursor children();
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key, nn::Module& module) {
+  ///     std::cout << key << ": " << module.name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(
+      const NamedModuleApplyFunction& function,
+      const std::string& name_prefix = std::string());
 
-  /// Traverses the (immediate) children of the `Module`.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `const std::string&` for the key of the module,
+  /// and a `const Module&`. The key of the module itself is the empty string.
+  /// If `name_prefix` is given, it is prepended to every key as
+  /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ConstModuleCursor children() const;
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key, const nn::Module& module) {
+  ///     std::cout << key << ": " << module.name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(
+      const ConstNamedModuleApplyFunction& function,
+      const std::string& name_prefix = std::string()) const;
 
-  /// Provides a means to recursively access the parameters of the `Module`
-  /// tree.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `const std::shared_ptr<Module>&`.
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ParameterCursor parameters();
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](const std::shared_ptr<nn::Module>& module) {
+  ///     std::cout << module->name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(const ModulePointerApplyFunction& function) const;
 
-  /// Provides a means to recursively access the parameters of the `Module`
-  /// tree.
+  /// Applies the `function` to the `Module` and recursively to every submodule.
+  /// The function must accept a `const std::string&` for the key of the module,
+  /// and a `const std::shared_ptr<Module>&`. The key of the module itself is
+  /// the empty string. If `name_prefix` is given, it is prepended to every key
+  /// as
+  /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ConstParameterCursor parameters() const;
+  /// \rst
+  /// .. code-block:: cpp
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key,
+  ///                    const std::shared_ptr<nn::Module>& module) {
+  ///     std::cout << key << ": " << module->name() << std::endl;
+  ///   });
+  /// \endrst
+  void apply(
+      const NamedModulePointerApplyFunction& function,
+      const std::string& name_prefix = std::string()) const;
 
-  /// Provides a means to recursively access the buffers of the `Module` tree.
+  /// Returns the parameters of this `Module` and if `recurse` is true, also
+  /// recursively of every submodule.
+  std::vector<Tensor> parameters(bool recurse = true) const;
+
+  /// Returns an `OrderedDict` with the parameters of this `Module` along with
+  /// their keys, and if `recurse` is true also recursively of every submodule.
+  OrderedDict<std::string, Tensor> named_parameters(bool recurse = true) const;
+
+  /// Returns the buffers of this `Module` and if `recurse` is true, also
+  /// recursively of every submodule.
+  std::vector<Tensor> buffers(bool recurse = true) const;
+
+  /// Returns an `OrderedDict` with the buffers of this `Module` along with
+  /// their keys, and if `recurse` is true also recursively of every submodule.
+  OrderedDict<std::string, Tensor> named_buffers(bool recurse = true) const;
+
+  /// Returns the submodules of this `Module` (the entire submodule hierarchy)
+  /// and if `include_self` is true, also inserts a `shared_ptr` to this module
+  /// in the first position.
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  BufferCursor buffers();
+  /// \rst
+  /// .. warning::
+  ///   Only pass `include_self` as `true` if this `Module` is stored in a
+  ///   `shared_ptr`! Otherwise an exception will be thrown. You may still call
+  ///   this method with `include_self` set to false if your `Module` is not
+  ///   stored in a `shared_ptr`.
+  /// \endrst
+  std::vector<std::shared_ptr<Module>> modules(bool include_self = true) const;
 
-  /// Provides a means to recursively access the buffers of the `Module` tree.
+  /// Returns an `OrderedDict` of he submodules of this `Module` (the entire
+  /// submodule hierarchy) and thei keys, and if `include_self` is true, also
+  /// inserts a `shared_ptr` to this module in the first position. If
+  /// `name_prefix` is given, it is prepended to every key as
+  /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
   ///
-  /// See the documentation for `CursorBase` for information on how to operate
-  /// on the returned cursor.
-  ConstBufferCursor buffers() const;
+  /// \rst
+  /// .. warning::
+  ///   Only pass `include_self` as `true` if this `Module` is stored in a
+  ///   `shared_ptr`! Otherwise an exception will be thrown. You may still call
+  ///   this method with `include_self` set to false if your `Module` is not
+  ///   stored in a `shared_ptr`.
+  /// \endrst
+  OrderedDict<std::string, std::shared_ptr<Module>> named_modules(
+      const std::string& name_prefix = std::string(),
+      bool include_self = true) const;
 
-  /// Enables training mode.
-  virtual void train();
+  /// Returns the direct submodules of this `Module`.
+  std::vector<std::shared_ptr<Module>> children() const;
 
-  /// Disables training mode.
-  virtual void eval();
+  /// Returns an `OrderedDict` of the direct submodules of this `Module` and
+  /// their keys.
+  OrderedDict<std::string, std::shared_ptr<Module>> named_children() const;
+
+  /// Enables "training" mode.
+  virtual void train(bool on = true);
+
+  /// Calls train(false) to enable "eval" mode.
+  /// Do not override this method, override `train()` instead.
+  void eval();
 
   /// True if the module is in training mode.
   ///
@@ -211,9 +304,10 @@ class Module {
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
-  /// This method is useful when calling `apply()` on a `ModuleCursor`.
+  /// This method is useful when calling `apply()`.
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   void initialize_weights(nn::Module& module) {
   ///     torch::NoGradGuard no_grad;
   ///     if (auto* linear = module.as<nn::Linear>()) {
@@ -222,14 +316,32 @@ class Module {
   ///   }
   ///
   ///   MyModule module;
-  ///   module->modules().apply(initialize_weights);
+  ///   module->apply(initialize_weights);
   /// \endrst
   template <typename ModuleType>
   typename ModuleType::ContainedType* as() noexcept;
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
-  /// This method is useful when calling `apply()` on a `ModuleCursor`.
+  /// This method is useful when calling `apply()`.
+  /// \rst
+  /// .. code-block:: cpp
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
+  ///
+  ///   MyModule module;
+  ///   module->apply(initialize_weights);
+  /// \endrst
+  template <typename ModuleType>
+  const typename ModuleType::ContainedType* as() const noexcept;
+
+  /// Attempts to cast this `Module` to the given `ModuleType`.
+  ///
+  /// This method is useful when calling `apply()`.
   /// \rst
   /// .. code-block:: cpp
   ///
@@ -241,18 +353,48 @@ class Module {
   ///   }
   ///
   ///   MyModule module;
-  ///   module->modules().apply(initialize_weights);
+  ///   module.apply(initialize_weights);
   /// \endrst
   template <
       typename ModuleType,
       typename = torch::detail::disable_if_module_holder_t<ModuleType>>
   ModuleType* as() noexcept;
 
+  /// Attempts to cast this `Module` to the given `ModuleType`.
+  ///
+  /// This method is useful when calling `apply()`.
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
+  ///
+  ///   MyModule module;
+  ///   module.apply(initialize_weights);
+  /// \endrst
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  const ModuleType* as() const noexcept;
+
   /// Serializes the `Module` into the given `OutputArchive`.
   virtual void save(serialize::OutputArchive& archive) const;
 
   /// Deserializes the `Module` from the given `InputArchive`.
   virtual void load(serialize::InputArchive& archive);
+
+  /// Streams a pretty representation of the `Module` into the given `stream`.
+  /// By default, this representation will be the name of the module (taken from
+  /// `name()`), followed by a recursive pretty print of all of the `Module`'s
+  /// submodules.
+  ///
+  /// Override this method to change the pretty print. The input
+  /// `stream` should be returned from the method, to allow easy chaining.
+  virtual void pretty_print(std::ostream& stream) const;
 
  protected:
   /// Registers a parameter with this `Module`.
@@ -263,6 +405,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     weight_ = register_parameter("weight", torch::randn({A, B}));
   ///   }
@@ -280,6 +423,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
   ///   }
@@ -293,6 +437,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -311,6 +456,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -321,40 +467,64 @@ class Module {
       ModuleHolder<ModuleType> module_holder);
 
  private:
-  template <typename T>
-  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
-
   // Friend classes.
 
   template <typename Derived>
   friend class Cloneable;
-  template <typename T>
-  friend class detail::CursorBase;
+
+  /// Pretty prints the given `Module` into the `ostream`.
+  TORCH_API friend std::ostream& operator<<(
+      std::ostream& stream,
+      const nn::Module& module);
 
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, c10::optional<Device> device);
+  virtual void clone_(Module& other, const optional<Device>& device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
   void to_impl(Ts&&... ts);
 
+  /// Implements pretty printing the module hierarchy.
+  void pretty_print_recursive(
+      std::ostream& stream,
+      const std::string& indentation) const;
+
+  /// Applies the `function` to every submodule recursively, starting at this
+  /// `Module`'s children (thus not including the module itself).
+  void apply_to_submodules(
+      const NamedModulePointerApplyFunction& function,
+      const std::string& name_prefix = std::string()) const;
+
+  /// Returns a shared_ptr to `this` in a safe (checked) way.
+  std::shared_ptr<Module> shared_from_this_checked() const;
+
   /// The registered parameters of this `Module`.
-  OrderedDict<Tensor> parameters_;
+  OrderedDict<std::string, Tensor> parameters_;
 
   /// The registered buffers of this `Module`.
-  OrderedDict<Tensor> buffers_;
+  OrderedDict<std::string, Tensor> buffers_;
 
   /// The registered (direct) submodules of this `Module`.
-  OrderedDict<std::shared_ptr<Module>> children_;
+  OrderedDict<std::string, std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
-  mutable c10::optional<std::string> name_;
+  mutable optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};
 };
+
+/// Serialize a `Module` pointer into an `OutputArchive`.
+TORCH_API serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const std::shared_ptr<nn::Module>& module);
+
+/// Deserializes a `Module` from an `InputArchive`.
+TORCH_API serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    const std::shared_ptr<nn::Module>& module);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ nn::Module ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -365,15 +535,33 @@ typename ModuleType::ContainedType* Module::as() noexcept {
   return as<typename ModuleType::ContainedType>();
 }
 
+template <typename ModuleType>
+const typename ModuleType::ContainedType* Module::as() const noexcept {
+  // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
+  // `Linear`, since `LinearImpl` inherits `nn::Module`.
+  return as<typename ModuleType::ContainedType>();
+}
+
 template <typename ModuleType, typename>
 ModuleType* Module::as() noexcept {
   return dynamic_cast<ModuleType*>(this);
+}
+
+template <typename ModuleType, typename>
+const ModuleType* Module::as() const noexcept {
+  return dynamic_cast<const ModuleType*>(this);
 }
 
 template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
+  AT_CHECK(!name.empty(), "Submodule name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Submodule name must not contain a dot (got '",
+      name,
+      "')");
   auto& base_module = children_.insert(std::move(name), std::move(module));
   return std::dynamic_pointer_cast<ModuleType>(base_module);
 }
@@ -389,7 +577,7 @@ template <typename... Ts>
 void Module::to_impl(Ts&&... ts) {
   // First call `to()` on every child module.
   for (auto& child : children_) {
-    child.value->to(ts...);
+    child.value()->to(ts...);
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : parameters_) {

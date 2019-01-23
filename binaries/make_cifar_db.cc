@@ -57,7 +57,7 @@ const int kCIFAR100TestDataSize = 10000;
 
 void ReadImage(std::ifstream* file, int* label, char* buffer) {
   char label_char;
-  if (c10::FLAGS_is_cifar100) {
+  if (FLAGS_is_cifar100) {
     // Skip the coarse label.
     file->read(&label_char, 1);
   }
@@ -110,29 +110,29 @@ void WriteToDB(const string& filename, const int num_items,
 
 void ConvertCIFAR() {
   std::unique_ptr<db::DB> train_db(
-      db::CreateDB(c10::FLAGS_db, c10::FLAGS_output_train_db_name, db::NEW));
+      db::CreateDB(FLAGS_db, FLAGS_output_train_db_name, db::NEW));
   std::unique_ptr<db::DB> test_db(
-      db::CreateDB(c10::FLAGS_db, c10::FLAGS_output_test_db_name, db::NEW));
+      db::CreateDB(FLAGS_db, FLAGS_output_test_db_name, db::NEW));
 
-  if (!c10::FLAGS_is_cifar100) {
+  if (!FLAGS_is_cifar100) {
     // This is cifar 10.
     for (int fileid = 0; fileid < kCIFAR10TrainBatches; ++fileid) {
       stringstream train_file;
-      train_file << c10::FLAGS_input_folder << "/data_batch_" << fileid + 1
+      train_file << FLAGS_input_folder << "/data_batch_" << fileid + 1
                  << ".bin";
       WriteToDB(train_file.str(), kCIFAR10BatchSize,
                 fileid * kCIFAR10BatchSize, train_db.get());
     }
     stringstream test_file;
-    test_file << c10::FLAGS_input_folder << "/test_batch.bin";
+    test_file << FLAGS_input_folder << "/test_batch.bin";
     WriteToDB(test_file.str(), kCIFAR10TestDataSize, 0, test_db.get());
   } else {
     // This is cifar 100.
     stringstream train_file;
-    train_file << c10::FLAGS_input_folder << "/train.bin";
+    train_file << FLAGS_input_folder << "/train.bin";
     WriteToDB(train_file.str(), kCIFAR100TrainDataSize, 0, train_db.get());
     stringstream test_file;
-    test_file << c10::FLAGS_input_folder << "/test.bin";
+    test_file << FLAGS_input_folder << "/test.bin";
     WriteToDB(test_file.str(), kCIFAR100TestDataSize, 0, test_db.get());
   }
 }

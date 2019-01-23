@@ -18,15 +18,11 @@ class AccumulateOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
-    if (output->dims() != input.dims()) {
-      LOG(INFO) << "Reshaping and initializing output.";
-      output->ResizeLike(input);
-      math::Set<T, Context>(
-          output->size(), 0, output->template mutable_data<T>(), &context_);
-    }
+
+    // TODO: the operator depends on output being set to 0 before the run
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     math::Axpby<T, T, Context>(
-        input.size(),
+        input.numel(),
         static_cast<T>(1),
         input.template data<T>(),
         gamma_,

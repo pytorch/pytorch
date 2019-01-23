@@ -117,3 +117,13 @@ std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRe
   return labelMap;
 };
 
+nom::Graph<TestClass>::NodeRef createTestNode(nom::Graph<TestClass>& g) {
+  return g.createNode(TestClass());
+}
+
+std::map<std::string, std::string> TestNodePrinter(
+    nom::Graph<TestClass>::NodeRef /* unused */) {
+  std::map<std::string, std::string> labelMap;
+  labelMap["label"] = "Node";
+  return labelMap;
+}

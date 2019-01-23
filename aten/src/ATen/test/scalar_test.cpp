@@ -1,4 +1,4 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include <iostream>
 // define constants like M_PI and C keywords for MSVC
@@ -6,9 +6,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #endif
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "test_seed.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 
 using std::cout;
 using namespace at;
@@ -51,8 +50,7 @@ void test_overflow() {
 }
 
 TEST(TestScalar, TestScalar) {
-  manual_seed(123, at::kCPU);
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   Scalar what = 257;
   Scalar bar = 3.0;
@@ -77,17 +75,17 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(t.strides()[0], 4);
   ASSERT_EQ(t.strides()[1], 1);
 
-  Type& T = CPU(Float);
-  Tensor x = randn({1, 10}, T);
-  Tensor prev_h = randn({1, 20}, T);
-  Tensor W_h = randn({20, 20}, T);
-  Tensor W_x = randn({20, 10}, T);
+  TensorOptions options = dtype(kFloat);
+  Tensor x = randn({1, 10}, options);
+  Tensor prev_h = randn({1, 20}, options);
+  Tensor W_h = randn({20, 20}, options);
+  Tensor W_x = randn({20, 10}, options);
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  ASSERT_ANY_THROW(at::_local_scalar(Tensor{}));
+  ASSERT_ANY_THROW(Tensor{}.item());
 
   test_overflow();
 
@@ -95,15 +93,14 @@ TEST(TestScalar, TestScalar) {
     auto r = CUDA(Float).copy(next_h);
     ASSERT_TRUE(CPU(Float).copy(r).equal(next_h));
   }
-  ASSERT_NO_THROW(randn({10, 10, 2}, T));
+  ASSERT_NO_THROW(randn({10, 10, 2}, options));
 
   // check Scalar.toTensor on Scalars backed by different data types
-  ASSERT_EQ(scalar_to_tensor(bar).type().scalarType(), kDouble);
-  ASSERT_EQ(scalar_to_tensor(what).type().scalarType(), kLong);
-  ASSERT_EQ(
-      scalar_to_tensor(ones({})._local_scalar()).type().scalarType(), kDouble);
+  ASSERT_EQ(scalar_to_tensor(bar).scalar_type(), kDouble);
+  ASSERT_EQ(scalar_to_tensor(what).scalar_type(), kLong);
+  ASSERT_EQ(scalar_to_tensor(ones({}).item()).scalar_type(), kDouble);
 
-  if (x.type().scalarType() != ScalarType::Half) {
+  if (x.scalar_type() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
@@ -116,10 +113,10 @@ TEST(TestScalar, TestScalar) {
 
   // test direct C-scalar type conversions
   {
-    auto x = ones({1, 2}, T);
+    auto x = ones({1, 2}, options);
     ASSERT_ANY_THROW(x.item<float>());
   }
-  auto float_one = ones({}, T);
+  auto float_one = ones({}, options);
   ASSERT_EQ(float_one.item<float>(), 1);
   ASSERT_EQ(float_one.item<int32_t>(), 1);
   ASSERT_EQ(float_one.item<at::Half>(), 1);

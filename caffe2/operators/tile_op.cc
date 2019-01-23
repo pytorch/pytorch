@@ -84,13 +84,16 @@ Y:
     .Arg("tiles", "(*int*): number of replicas")
     .Arg("axis", "(*int*): axis to replicate along")
     .Input(0, "X", "(*Tensor*): input tensor")
-    .Input(1, "tiles", "(*Tensor`<int>`*): [OPTIONAL] number of replicas (overrides `tiles` argument)")
-    .Input(2, "axis", "(*Tensor`<int>`*): [OPTIONAL] axis to replicate along (overrides `axis` argument)")
-    .Output(
-        0,
-        "Y",
-        "(*Tensor*): output tensor")
-    .InheritOnnxSchema("Tile");
+    .Input(
+        1,
+        "tiles",
+        "(*Tensor`<int>`*): [OPTIONAL] number of replicas (overrides `tiles` argument)")
+    .Input(
+        2,
+        "axis",
+        "(*Tensor`<int>`*): [OPTIONAL] axis to replicate along (overrides `axis` argument)")
+    .Output(0, "Y", "(*Tensor*): output tensor")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(TileGradient).NumInputs(1, 3).NumOutputs(1);
 

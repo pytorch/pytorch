@@ -6,7 +6,7 @@ configuration files required to depend on PyTorch. We call this distribution
 *LibTorch*, and you can download ZIP archives containing the latest LibTorch
 distribution on `our website <https://pytorch.org/get-started/locally/>`_. Below
 is a small example of writing a minimal application that depends on LibTorch
-and uses the ``at::Tensor`` class which comes with the PyTorch C++ API.
+and uses the ``torch::Tensor`` class which comes with the PyTorch C++ API.
 
 Minimal Example
 ---------------
@@ -37,7 +37,7 @@ this:
   target_link_libraries(example-app "${TORCH_LIBRARIES}")
   set_property(TARGET example-app PROPERTY CXX_STANDARD 11)
 
-The implementation of our example will simply create a new `at::Tensor` and
+The implementation of our example will simply create a new `torch::Tensor` and
 print it:
 
 .. code-block:: cpp
@@ -46,7 +46,7 @@ print it:
   #include <iostream>
 
   int main() {
-    at::Tensor tensor = torch::rand({2, 3});
+    torch::Tensor tensor = torch::rand({2, 3});
     std::cout << tensor << std::endl;
   }
 
@@ -118,7 +118,7 @@ should now merrily print the tensor (exact output subject to randomness):
 
 .. code-block:: sh
 
-  root@4b5a67132e81:/example-app/build# ./example-app model.pt
+  root@4b5a67132e81:/example-app/build# ./example-app
   0.2063  0.6593  0.0866
   0.0796  0.5841  0.1569
   [ Variable[CPUFloatType]{2,3} ]

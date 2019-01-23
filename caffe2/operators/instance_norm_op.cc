@@ -11,8 +11,10 @@ namespace caffe2 {
 template <typename T, typename Context>
 bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
-  auto* Y = Output(OUTPUT);
-  CAFFE_ENFORCE(Y != &X, "Can't run InstanceNorm NHWC in-place");
+
+  CAFFE_ENFORCE(
+      !IsInputOutputAlias(INPUT, OUTPUT),
+      "Can't run InstanceNorm NHWC in-place");
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
   const int N = X.dim32(0);
@@ -21,10 +23,10 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int C = X.dim32(3);
   const size_t offset = H * W * C;
 
-  CAFFE_ENFORCE_EQ(Input(SCALE).size(), C);
-  CAFFE_ENFORCE_EQ(Input(BIAS).size(), C);
+  CAFFE_ENFORCE_EQ(Input(SCALE).numel(), C);
+  CAFFE_ENFORCE_EQ(Input(BIAS).numel(), C);
 
-  Y->ResizeLike(X);
+  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
   ConstEigenVectorArrayMap<T> scale(Input(SCALE).template data<T>(), C);
@@ -63,7 +65,7 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
-  auto* Y = Output(OUTPUT);
+
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
   const int N = X.dim32(0);
@@ -71,10 +73,10 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int H = X.dim32(2);
   const int W = X.dim32(3);
 
-  CAFFE_ENFORCE_EQ(scale.size(), C);
-  CAFFE_ENFORCE_EQ(bias.size(), C);
+  CAFFE_ENFORCE_EQ(scale.numel(), C);
+  CAFFE_ENFORCE_EQ(bias.numel(), C);
 
-  Y->ResizeLike(X);
+  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
 

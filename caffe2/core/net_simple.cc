@@ -108,7 +108,7 @@ vector<float> SimpleNet::TEST_Benchmark(
       ".");
   Timer timer;
   auto millis = timer.MilliSeconds();
-  if (c10::FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
+  if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
     for (int i = 0; i < main_runs; ++i) {
       CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
     }
@@ -270,7 +270,7 @@ vector<float> SimpleNet::TEST_Benchmark(
   for (size_t i = 0; i < time_per_op.size(); ++i) {
     time_per_op[i] /= main_runs;
   }
-  if (c10::FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
+  if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
     time_per_op.insert(time_per_op.begin(), millis / main_runs);
   }
   return time_per_op;

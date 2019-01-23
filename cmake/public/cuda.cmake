@@ -1,11 +1,16 @@
 # ---[ cuda
 
+# Poor man's include guard
+if(TARGET caffe2::cudart)
+  return()
+endif()
+
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
 # Find CUDA.
-find_package(CUDA 7.0)
+find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
     "Caffe2: CUDA cannot be found. Depending on whether you are building "
@@ -42,11 +47,11 @@ if(CUDA_FOUND)
     message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
   message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION})
+  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION_STRING})
     # Force CUDA to be processed for again next time
     # TODO: I'm not sure if this counts as an implementation detail of
     # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION})
+    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
     unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
     # Not strictly necessary, but for good luck.
     unset(CUDA_VERSION CACHE)
@@ -141,6 +146,9 @@ if(CAFFE2_USE_CUDNN)
         "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
   endif()
   message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+  if(CUDNN_VERSION VERSION_LESS "7.0.0")
+    message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
+  endif()
 endif()
 
 # ---[ CUDA libraries wrapper
@@ -342,7 +350,7 @@ endforeach()
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # Debug and Release symbol support

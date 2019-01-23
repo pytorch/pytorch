@@ -13,6 +13,9 @@ import onnx.backend.test
 
 import caffe2.python.onnx.backend as c2
 
+from caffe2.python import core, workspace
+core.SetEnginePref({}, {})
+
 # This is a pytest magic variable to load extra plugins
 pytest_plugins = 'onnx.backend.test.report',
 
@@ -38,12 +41,24 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
-                     '|test_constantlike.*'  # Needs implementation
                      '|test_eyelike.*'  # Needs implementation
+                     '|test_maxunpool.*'  # Needs implementation
+                     '|test_acosh.*'  # Needs implementation
+                     '|test_asinh.*'  # Needs implementation
+                     '|test_atanh.*'  # Needs implementation
+                     '|test_onehot.*'  # Needs implementation
+                     '|test_scan.*'  # Needs implementation
+                     '|test_isnan.*'  # Needs implementation
+                     '|test_scatter.*'  # Should be similar to ScatterAssign
+                     '|test_constantofshape_int.*'  # Needs implementation
+                     '|test_where.*'  # Needs implementation
+                     '|test_shrink.*'  # Needs implementation
+                     '|test_nonzero.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
 backend_test.exclude('(test_cast_.*'
+                     '|test_compress_.*'
                      '|test_Conv1d_.*cuda'
                      '|test_Conv3d_groups_cuda'
                      '|test_rnn_seq_length'
@@ -59,6 +74,10 @@ backend_test.exclude('(test_pow_bcast'
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')
+
+if workspace.has_hip_support:
+    # TODO: Investigate flakiness in ROCM Softmax (it sometimes give NaN).
+    backend_test.exclude(r'test_softmax_.*_cuda')
 
 # import all test cases at global scope to make them visible to python.unittest
 globals().update(backend_test

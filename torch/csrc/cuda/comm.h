@@ -1,10 +1,8 @@
 #pragma once
 
-#ifdef USE_CUDA
-
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <vector>
@@ -22,7 +20,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
     int64_t dim = 0,
-    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams =
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
         c10::nullopt);
 
 at::Tensor gather(
@@ -30,5 +28,3 @@ at::Tensor gather(
     int64_t dim,
     c10::optional<int32_t> destination_index);
 }}
-
-#endif

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathMagma.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathMagma.cu"
 #else
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
@@ -59,45 +59,6 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
   return self;
 }
 
-
-void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
-  THArgCheck(!b_->is_empty() && b_->dim() == 2, 2, "b should be (non-empty) 2 dimensional");
-  THArgCheck(a_->size(0) == a_->size(1), 1, "A should be square");
-  THArgCheck(b_->size(0) == a_->size(0), 2, "A,b size incompatible");
-
-  int64_t n = a_->size(0);
-  int64_t nrhs = b_->size(1);
-
-  THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
-  THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
-  scalar_t *a_data = THCTensor_(data)(state, a);
-  scalar_t *b_data = THCTensor_(data)(state, b);
-
-  int *ipiv = th_magma_malloc_pinned<int>(n);
-
-  int info;
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgesv_gpu(n, nrhs, a_data, n, ipiv, b_data, n, &info);
-#else
-  magma_dgesv_gpu(n, nrhs, a_data, n, ipiv, b_data, n, &info);
-#endif
-
-  if (info < 0)
-    THError("MAGMA gesv : Argument %d : illegal value", -info);
-  else if (info > 0)
-    THError("MAGMA gesv : U(%d,%d) is zero, singular U.", info, info);
-
-  magma_free_pinned(ipiv);
-  THCTensor_(freeCopyTo)(state, a, ra_);
-  THCTensor_(freeCopyTo)(state, b, rb_);
-#else
-  THError(NoMagma(gesv));
-#endif
-}
-
 void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
                        const char *uplo, const char *trans, const char *diag)
 {
@@ -140,8 +101,8 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
   THArgCheck(!b_->is_empty() && b_->dim() == 2, 1, "b should be (non-empty) 2 dimensional");
-  THArgCheck(a_->size(0) == b_->size(0), 2, "Expected A and b to have same size "
-      "at dim 0, but they have incompatible sizes");
+  AT_CHECK(a_->size(0) == b_->size(0), "Expected A and b to have same size "
+      "at dim 0, but A has ", a_->size(0), " rows and B has ", b_->size(0), " rows");
   THArgCheck(a_->size(0) >= a_->size(1), 2, "Expected A with shape (m x n) to have "
       "m >= n. The case for m < n is not implemented yet.");
 
@@ -575,74 +536,6 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char
   THCTensor_(freeCopyTo)(state, input, ra_);
 #else
   THError(NoMagma(potri));
-#endif
-}
-
-void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be (non-empty) 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-  int64_t n = a->size(0);
-  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
-
-  THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  scalar_t *input_data = THCTensor_(data)(state, input);
-
-  int info;
-#if defined(THC_REAL_IS_FLOAT)
-  magma_spotrf_gpu(ul, n, input_data, n, &info);
-#else
-  magma_dpotrf_gpu(ul, n, input_data, n, &info);
-#endif
-
-  // check error value
-  if (info > 0)
-    THError("MAGMA potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
-  else if (info < 0)
-    THError("MAGMA potrf : Argument %d : illegal value", -info);
-
-  if (uplo[0] == 'U') {
-    THCTensor_(triu)(state, ra_, input, 0);
-  } else {
-    THCTensor_(tril)(state, ra_, input, 0);
-  }
-  THCTensor_(free)(state, input);
-#else
-  THError(NoMagma(potrf));
-#endif
-}
-
-void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-  int64_t n = a->size(0);
-  int64_t nrhs = b->size(1);
-  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
-
-  THCTensor *b_ = THCTensor_(newColumnMajor)(state, rb_, b);
-  scalar_t *b_data = THCTensor_(data)(state, b_);
-  THCTensor *a_ = THCTensor_(newColumnMajor)(state, a, a);
-  scalar_t *a_data = THCTensor_(data)(state, a_);
-
-  int info;
-#if defined(THC_REAL_IS_FLOAT)
-  magma_spotrs_gpu(ul, n, nrhs, a_data, n, b_data, n, &info);
-#else
-  magma_dpotrs_gpu(ul, n, nrhs, a_data, n, b_data, n, &info);
-#endif
-
-  // check error value
-  if (info < 0)
-    THError("MAGMA potrs : Argument %d : illegal value", -info);
-
-  THCTensor_(freeCopyTo)(state, b_, rb_);
-  THCTensor_(free)(state, a_);
-#else
-  THError(NoMagma(potrs));
 #endif
 }
 

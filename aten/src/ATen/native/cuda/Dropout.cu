@@ -1,9 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/TensorInfo.cuh"
-#include "curand_kernel.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <c10/macros/Macros.h>
+#include <curand_kernel.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -33,8 +34,8 @@ template <
           typename accscalar_t,
           typename IndexType,
           int ADims>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(256,8)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(256, 8)
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
@@ -51,7 +52,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
         idx,
         seeds.second,
         &state);
-  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
+  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;

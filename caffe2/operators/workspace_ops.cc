@@ -12,9 +12,8 @@ class GetAllBlobNamesOp final : public Operator<CPUContext> {
         ws_(ws) {}
 
   bool RunOnDevice() override {
-    auto* out = Output(0);
     const auto& blobs = include_shared_ ? ws_->Blobs() : ws_->LocalBlobs();
-    out->Resize(blobs.size());
+    auto* out = Output(0, {static_cast<int64_t>(blobs.size())}, at::dtype<std::string>());
     std::copy(
         blobs.begin(), blobs.end(), out->template mutable_data<std::string>());
     return true;

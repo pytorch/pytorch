@@ -41,7 +41,7 @@ class MPIBroadcastOp final : public Operator<Context> {
     auto* output = Output(0);
     // Make sure that output is already allocated.
     CAFFE_ENFORCE(
-        output->size() > 0,
+        output->numel() > 0,
         "Broadcast op uses in-place operation so the output "
         "should be already allocated.");
     MPI_CHECK(MPI_Bcast(
@@ -70,12 +70,11 @@ class MPIReduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     MPI_CHECK(MPI_Reduce(
         const_cast<T*>(input.template data<T>()),
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         MPI_SUM,
         root_,
@@ -98,15 +97,15 @@ class MPIAllgatherOp final : public Operator<Context> {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
     auto* output = Output(0);
-    vector<int64_t> output_dims = input.dims().vec();
+    vector<int64_t> output_dims = input.sizes().vec();
     output_dims[0] *= OperatorBase::Input<MPICommonWorldWrapper>(0).size();
     output->Resize(output_dims);
     MPI_CHECK(MPI_Allgather(
         const_cast<T*>(input.template data<T>()),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         comm));
     return true;
@@ -123,8 +122,7 @@ class MPIAllreduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     void* source;
     if (output->template mutable_data<T>() == input.template data<T>()) {
       // We are doing in-place call. Special case handling.
@@ -136,7 +134,7 @@ class MPIAllreduceOp final : public Operator<Context> {
     MPI_CHECK(MPI_Allreduce(
         source,
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         MPI_SUM,
         comm));

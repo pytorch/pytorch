@@ -23,7 +23,7 @@ static void QuitIfFeatureUnsupported(
         "on your machine, such as SIGILL 'illegal instructions' on Linux. "
         "As a result Caffe2 will preemptively quit. Please install or "
         "build a Caffe2 binary with the feature turned off.";
-    if (c10::FLAGS_caffe2_quit_on_unsupported_cpu_feature) {
+    if (FLAGS_caffe2_quit_on_unsupported_cpu_feature) {
       LOG(FATAL) << err_string;
     } else {
       LOG(ERROR) << err_string;

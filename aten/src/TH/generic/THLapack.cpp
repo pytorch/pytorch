@@ -1,10 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THLapack.cpp"
+#define TH_GENERIC_FILE "TH/generic/THLapack.cpp"
 #else
 
 
-TH_EXTERNC void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-TH_EXTERNC void sgesv_(int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 TH_EXTERNC void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
@@ -21,12 +19,8 @@ TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int
 TH_EXTERNC void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 TH_EXTERNC void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
-TH_EXTERNC void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
-TH_EXTERNC void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
-TH_EXTERNC void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-TH_EXTERNC void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -36,21 +30,6 @@ TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double 
 TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *rank, float *tol, float *work, int *info);
 TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
-
-/* Compute the solution to a real system of linear equations  A * X = B */
-void THLapack_(gesv)(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int* info)
-{
-#ifdef USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#else
-  sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#endif
-#else
-  THError("gesv : Lapack library not found in compile time\n");
-#endif
-  return;
-}
 
 /* Solve a triangular system of the form A * X = B  or A^T * X = B */
 void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int* info)
@@ -165,34 +144,6 @@ void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, in
 #endif
 #else
   THError("getri : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization */
-void THLapack_(potrf)(char uplo, int n, scalar_t *a, int lda, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotrf_(&uplo, &n, a, &lda, info);
-#else
-  spotrf_(&uplo, &n, a, &lda, info);
-#endif
-#else
-  THError("potrf : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
-void THLapack_(potrs)(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
-#else
-  spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
-#endif
-#else
-  THError("potrs: Lapack library not found in compile time\n");
 #endif
 }
 

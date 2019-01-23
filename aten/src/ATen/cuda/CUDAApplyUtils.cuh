@@ -1,9 +1,10 @@
 #pragma once
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/TensorUtils.h"
-#include "THC/THCAtomics.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/TensorUtils.h>
+#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <math.h>
 
@@ -198,8 +199,8 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to
@@ -247,8 +248,8 @@ template <typename Op,
           typename Offset>
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
 __device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, int n,
-                  const Op &op, IndexType linearIndex, Offset offset) {
+static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op,
+                  int n, IndexType linearIndex, Offset offset) {
   op(a.data[offset]);
 }
 };
@@ -271,8 +272,8 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
                                       IndexType totalElements, const Op op) {
@@ -355,8 +356,8 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims,
           int step>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
@@ -464,8 +465,8 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims,
           int step>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply3(detail::TensorInfo<scalar1, IndexType> a,
@@ -587,8 +588,8 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims, int DDims,
           int step>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,
@@ -635,7 +636,7 @@ inline dim3 getApplyBlock() {
 
 template <typename scalar, int step, typename Op>
 inline bool CUDA_tensor_apply1(at::Tensor a,
-                               Op op,
+                               const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite) {
   checkBackend("CUDA_tensor_apply1", {a}, Backend::CUDA);
   auto dim = a.dim();
@@ -760,7 +761,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   return true;
@@ -917,14 +918,14 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   return true;
@@ -1113,7 +1114,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -1121,7 +1122,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -1129,7 +1130,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldC, c);
+    at::_th_copy_ignoring_overlaps_(oldC, c);
     c = oldC;
   }
 
@@ -1357,28 +1358,28 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   if (oldC.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldC, c);
+    at::_th_copy_ignoring_overlaps_(oldC, c);
   }
 
   if (oldD.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldD, c);
+    at::_th_copy_ignoring_overlaps_(oldD, c);
   }
 
   return true;

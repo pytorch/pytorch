@@ -5,11 +5,11 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef CAFFE2_MOBILE
+#ifndef C10_MOBILE
 #error "mobile build state not defined"
 #endif
 
-#if CAFFE2_MOBILE
+#if C10_MOBILE
 
 #include "caffe2/core/logging.h"
 #include "caffe2/operators/conv_op_shared.h"
@@ -679,7 +679,7 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       Ydata += Y->size() / Y->dim32(0);
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&threadBuffer_);
@@ -695,6 +695,6 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
 } // namespace caffe2
 
-#endif // CAFFE2_MOBILE
+#endif // C10_MOBILE
 
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_MOBILE_OP_IMPL_H_

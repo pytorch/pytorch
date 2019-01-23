@@ -55,18 +55,34 @@ class FillerOp : public Operator<Context> {
     if (InputSize()) {
       auto shape = vector<int64_t>{};
       if (input_as_shape_) {
-        // Shape input must be in CPU context
-        auto& input = this->template Input<Tensor>(0, CPU);
-        CAFFE_ENFORCE_EQ(
-            input.ndim(),
-            1,
-            "When input_as_shape is true, the input must be a 1D tensor of "
-            "data type int64_t");
-        auto* shape_data = input.template data<int64_t>();
-        shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        if (this->InputIsTensorType(0, CPU)) {
+          // originally, shape input must be in CPU context
+          auto& input = this->template Input<Tensor>(0, CPU);
+          CAFFE_ENFORCE_EQ(
+              input.dim(),
+              1,
+              "When input_as_shape is true, the input must be a 1D tensor of "
+              "data type int64_t");
+          CAFFE_ENFORCE(input.numel() > 0);
+          auto* shape_data = input.template data<int64_t>();
+          shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
+        } else {
+          // in ONNX case, we allow shape to be in CUDA context
+          auto& input = Input(0);
+          CAFFE_ENFORCE_EQ(
+              input.dim(),
+              1,
+              "When input_as_shape is true, the input must be a 1D tensor of "
+              "data type int64_t");
+          CAFFE_ENFORCE(input.numel() > 0);
+          auto* shape_data = input.template data<int64_t>();
+          std::unique_ptr<int64_t[]> shape_data_copy = caffe2::make_unique<int64_t[]>(input.dim32(0));
+          context_.template CopyToCPU<int64_t>(input.dim32(0), shape_data, shape_data_copy.get());
+          shape.insert(shape.end(), shape_data_copy.get(), shape_data_copy.get() + input.dim32(0));
+        }
       } else {
         auto& input = Input(0);
-        shape.insert(shape.end(), input.dims().begin(), input.dims().end());
+        shape.insert(shape.end(), input.sizes().begin(), input.sizes().end());
       }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
@@ -109,12 +125,12 @@ class UniformFillOp final : public FillerOp<Context> {
     T min = min_;
     T max = max_;
     if (InputSize() == 3) {
-      CAFFE_ENFORCE_EQ(1, Input(1).size(), "min blob must be scalar");
-      CAFFE_ENFORCE_EQ(1, Input(2).size(), "max blob must be scalar");
+      CAFFE_ENFORCE_EQ(1, Input(1).numel(), "min blob must be scalar");
+      CAFFE_ENFORCE_EQ(1, Input(2).numel(), "max blob must be scalar");
       min = *Input(1).template data<T>();
       max = *Input(2).template data<T>();
       if (min > max) {
-        auto shape = output->dims().vec();
+        auto shape = output->sizes().vec();
         shape[0] = 0;
         output->Resize(shape);
         output->template mutable_data<T>();
@@ -122,7 +138,7 @@ class UniformFillOp final : public FillerOp<Context> {
       }
     }
     math::RandUniform<T, Context>(
-        output->size(),
+        output->numel(),
         min,
         max,
         output->template mutable_data<T>(),
@@ -188,10 +204,10 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
     if (InputSize() >= 2) {
       auto& avoid = Input(1);
       avoid_data = avoid.template data<T>();
-      avoid_size = avoid.size();
+      avoid_size = avoid.numel();
     }
     math::RandUniformUnique<T, Context>(
-        output->size(),
+        output->numel(),
         min,
         max,
         output->template mutable_data<T>(),
@@ -276,8 +292,8 @@ class ConstantFillOp final : public FillerOp<Context> {
   bool FillWithType(Tensor* output) {
     T value = this->template GetSingleArgument<T>("value", 0);
     auto* data = output->template mutable_data<T>();
-    if (output->size()) {
-      math::Set<T, Context>(output->size(), value, data, &context_);
+    if (output->numel()) {
+      math::Set<T, Context>(output->numel(), value, data, &context_);
     }
     return true;
   }
@@ -285,7 +301,7 @@ class ConstantFillOp final : public FillerOp<Context> {
   bool FillWithString(Tensor* output) {
     auto value = this->template GetSingleArgument<std::string>("value", "");
     auto* data = output->template mutable_data<std::string>();
-    for (int i = 0; i < output->size(); ++i) {
+    for (int i = 0; i < output->numel(); ++i) {
       data[i] = value;
     }
     return true;
@@ -364,22 +380,22 @@ class DiagonalFillOp final : public FillerOp<Context> {
 
  private:
   void VerifyOutputShape(Tensor* output) {
-    CAFFE_ENFORCE(output->ndim() >= 2, "Input shape must be >= 2D");
+    CAFFE_ENFORCE(output->dim() >= 2, "Input shape must be >= 2D");
   }
 
   int64_t GetStepSize(Tensor* output) {
     int64_t step;
-    if (output->ndim() == 2) {
-      step = output->dim(1) + 1;
+    if (output->dim() == 2) {
+      step = output->size(1) + 1;
     } else {
-      int64_t prev_i = output->dim(0);
-      for (auto i : output->dims()) {
+      int64_t prev_i = output->size(0);
+      for (auto i : output->sizes()) {
         if (i != prev_i) {
           CAFFE_THROW("All dimensions of input must be of equal length");
         }
       }
-      vector<int64_t> cumprod(output->ndim());
-      auto dims = output->dims();
+      vector<int64_t> cumprod(output->dim());
+      auto dims = output->sizes();
       std::partial_sum(
           dims.begin(),
           dims.end() - 1,
@@ -409,7 +425,7 @@ class GaussianFillOp final : public FillerOp<Context> {
 
   bool Fill(Tensor* output) override {
     math::RandGaussian<T, Context>(
-        output->size(),
+        output->numel(),
         mean_,
         std_,
         output->template mutable_data<T>(),
@@ -430,10 +446,10 @@ class XavierFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {}
 
   bool Fill(Tensor* output) override {
-    const int fan_in = output->size() / output->dim32(0);
+    const int fan_in = output->numel() / output->dim32(0);
     T scale = std::sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
-        output->size(),
+        output->numel(),
         -scale,
         scale,
         output->template mutable_data<T>(),
@@ -450,10 +466,10 @@ class MSRAFillOp final : public FillerOp<Context> {
       : FillerOp<Context>(operator_def, ws) {}
 
   bool Fill(Tensor* output) override {
-    const int fan_out = output->size() / output->dim32(1);
+    const int fan_out = output->numel() / output->dim32(1);
     T scale = std::sqrt(T(2) / fan_out);
     math::RandGaussian<T, Context>(
-        output->size(),
+        output->numel(),
         0.0,
         scale,
         output->template mutable_data<T>(),
@@ -483,18 +499,18 @@ class LengthsRangeFillOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
+
     auto* input_data = input.template data<int32_t>();
 
-    CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+    CAFFE_ENFORCE_EQ(input.dim(), 1, "Input must be a vector.");
 
-    auto len_sum = std::accumulate(input_data, input_data + input.size(), 0);
+    auto len_sum = std::accumulate(input_data, input_data + input.numel(), 0);
 
-    output->Resize(len_sum);
+    auto* output = Output(0, {len_sum}, at::dtype<int32_t>());
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (int i = 0; i < input.size(); ++i) {
+    for (int i = 0; i < input.numel(); ++i) {
       auto len = input_data[i];
       auto start = output_data + offset;
       std::iota(

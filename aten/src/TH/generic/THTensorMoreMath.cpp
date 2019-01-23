@@ -1,8 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMoreMath.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorMoreMath.cpp"
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <TH/THGenerator.hpp>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
@@ -28,7 +29,9 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
   if (t != result) {
     THTensor_(resizeAs)(result, t);
     if (beta != 0.0) {
-      THTensor_(copy)(result, t);
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::_copy_same_type_(result_wrap, t_wrap);
     }
   }
 
@@ -111,7 +114,9 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   } else {
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
-      THTensor_(copy)(values_, t0);
+      at::Tensor values__wrap = THTensor_wrap(values_);
+      at::Tensor t0_wrap = THTensor_wrap(t0);
+      at::_copy_same_type_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -192,7 +197,9 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   } else {
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
-      THTensor_(copy)(values_, t0);
+      at::Tensor values__wrap = THTensor_wrap(values_);
+      at::Tensor t0_wrap = THTensor_wrap(t0);
+      at::_copy_same_type_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -612,44 +619,9 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
 }
 
-
-void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
-{
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
-void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  size = (ptrdiff_t) ceil((double)(xmax - xmin) / step);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
@@ -702,6 +674,11 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
   REAL_SWAP(ARR(III), ARR(JJJ)); \
   LONG_SWAP(IDX(III), IDX(JJJ))
 
+/* Emulate NumPy behavior of putting NaNs
+ * at the end of an ascending list. */
+#define GT_OR_NAN(x, y) \
+  ((x != x && y == y) || (x > y))
+
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
   int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid, stack = 0, sz_right, sz_left;
@@ -717,15 +694,15 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(L+1), ARR(R))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(L), ARR(R))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L+1), ARR(L))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) < piv);
-      do { j = j-1; } while(ARR(j) > piv);
+      do { i = i+1; } while(GT_OR_NAN(piv, ARR(i)));
+      do { j = j-1; } while(GT_OR_NAN(ARR(j), piv));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -776,7 +753,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) > ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i),ARR(i+1))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -784,7 +761,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) < piv);
+      } while(j < elements && GT_OR_NAN(piv, ARR(j)));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
@@ -806,15 +783,15 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) < ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) < ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) < ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(R), ARR(L+1))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(R), ARR(L))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L), ARR(L+1))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) > piv);
-      do { j = j-1; } while(ARR(j) < piv);
+      do { i = i+1; } while(GT_OR_NAN(ARR(i), piv));
+      do { j = j-1; } while(GT_OR_NAN(piv, ARR(j)));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -865,7 +842,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) < ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i+1), ARR(i))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -873,7 +850,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) > piv);
+      } while(j < elements && GT_OR_NAN(ARR(j), piv));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
@@ -889,7 +866,9 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(rt_, t);
-  THTensor_(copy)(rt_, t);
+  at::Tensor rt__wrap = THTensor_wrap(rt_);
+  at::Tensor t_wrap = THTensor_wrap(t);
+  at::_copy_same_type_(rt__wrap, t_wrap);
   THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
@@ -1228,37 +1207,6 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   THLongTensor_free(tmpIndices);
 }
 
-void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
-{
-  int64_t t_size_0, t_size_1;
-  int64_t t_stride_0, t_stride_1;
-  int64_t r__stride_0, r__stride_1;
-  scalar_t *t_data, *r__data;
-  int64_t r, c;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  THTensor_(resizeAs)(r_, t);
-
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = r_->data<scalar_t>();
-  t_data = t->data<scalar_t>();
-
-  for(r = 0; r < t_size_0; r++)
-  {
-    int64_t sz = THMin(r+k+1, t_size_1);
-    for(c = THMax(0, r+k+1); c < t_size_1; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = 0;
-    for(c = 0; c < sz; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = t_data[r*t_stride_0+c*t_stride_1];
-  }
-}
-
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 {
   int64_t t_size_0, t_size_1;
@@ -1403,7 +1351,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         int64_t dimSize = inputs[j]->size(dimension);
         THTensor *nt = THTensor_(newWithTensor)(result);
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
-        THTensor_(copy)(nt, inputs[j]);
+        at::Tensor nt__wrap = THTensor_wrap(nt);
+        at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
+        at::_copy_same_type_(nt__wrap, inputs_wrap);
         c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }
@@ -1581,204 +1531,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 
-#if defined(TH_REAL_IS_BYTE) /* Byte only part */
-
-int THTensor_(logicalAndAll)(THTensor *tensor)
-{
-  scalar_t prod = 1;
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if(inOMP) {
-    serial_path = 1;
-  } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(scalar_t, tensor, &&:prod, prod = prod && *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-#else
-    serial_path = 1;
-#endif
-  if (serial_path) {
-    TH_TENSOR_APPLY(scalar_t, tensor, prod = prod && *tensor_data;);
-  }
-  return prod;
-}
-
-int THTensor_(logicalAnyAll)(THTensor *tensor)
-{
-  scalar_t sum = 0;
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if(inOMP) {
-    serial_path = 1;
-  } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(scalar_t, tensor, ||:sum, sum = sum || *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-#else
-    serial_path = 1;
-#endif
-  if (serial_path) {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum = sum || *tensor_data;);
-  }
-  return (bool)sum;
-}
-
-void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if (inOMP) {
-    serial_path = 1;
-  } else {
-    int r_Contig = THTensor_(isContiguous)(r_);
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    if(r_Contig && (tp != rp)){
-      ptrdiff_t iter = 0;
-      ptrdiff_t r_Size = THTensor_(nElement)(r_);
-      int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      #pragma omp parallel for if ( r_Size > TH_OMP_OVERHEAD_THRESHOLD)
-      for (iter = 0; iter < r_Size; iter++) {
-        int j;
-        int64_t quot;
-        int64_t rem = iter;
-        ptrdiff_t tBasicIndex = 0;
-
-        for(j = 0; j < r_Dim; ++j) {
-          if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
-          }
-        }
-        scalar_t *t_data = tp+tBasicIndex;
-        scalar_t *r__data = rp+iter;
-        *r__data = 1;
-        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
-          *r__data = *r__data && *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
-        }
-      }
-    } else {
-      serial_path = 1;
-    }
-  }
-#else
-  serial_path = 1;
-#endif
-
-  if(serial_path) {
-    // two implementations optimized for data locality
-    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
-      TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                           accreal prod = 1;
-                           int64_t i;
-                           for(i = 0; i < t_size; i++)
-                             prod = prod && t_data[i*t_stride];
-                           *r__data = (scalar_t)prod;);
-    } else {
-      THTensor_(fill)(r_, 1);
-      THTensor *temp_ = THTensor_(newWithTensor)(r_);
-      // r_.expand_as(t)
-      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
-      temp_->set_stride(dimension, 0);
-
-      TH_TENSOR_APPLY2(scalar_t, temp_, scalar_t, t, *temp__data = *temp__data && *t_data;);
-      c10::raw::intrusive_ptr::decref(temp_);
-    }
-  }
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if (inOMP) {
-    serial_path = 1;
-  } else {
-    int r_Contig = THTensor_(isContiguous)(r_);
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    if(r_Contig && (tp != rp)){
-      ptrdiff_t iter = 0;
-      ptrdiff_t r_Size = THTensor_(nElement)(r_);
-      int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      #pragma omp parallel for if ( r_Size > TH_OMP_OVERHEAD_THRESHOLD)
-      for (iter = 0; iter < r_Size; iter++) {
-        int j;
-        int64_t quot;
-        int64_t rem = iter;
-        ptrdiff_t tBasicIndex = 0;
-
-        for(j = 0; j < r_Dim; ++j) {
-          if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
-          }
-        }
-        scalar_t *t_data = tp+tBasicIndex;
-        scalar_t *r__data = rp+iter;
-        *r__data = 0;
-        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
-          *r__data = *r__data || *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
-        }
-      }
-    } else {
-      serial_path = 1;
-    }
-  }
-#else
-  serial_path = 1;
-#endif
-  if (serial_path) {
-    // two implementations optimized for data locality
-    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
-      TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                           accreal sum = 0;
-                           int64_t i;
-                           for(i = 0; i < t_size; i++)
-                             sum = sum || t_data[i*t_stride];
-                           *r__data = (scalar_t)sum;);
-    } else {
-      THTensor_(zero)(r_);
-      THTensor *temp_ = THTensor_(newWithTensor)(r_);
-      // r_.expand_as(t)
-      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
-      temp_->set_stride(dimension, 0);
-
-      TH_TENSOR_APPLY2(scalar_t, temp_, scalar_t, t, *temp__data = *temp__data || *t_data;);
-      c10::raw::intrusive_ptr::decref(temp_);
-    }
-  }
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-#endif /* Byte only part */
-
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
@@ -1944,9 +1696,9 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
-  #define DIM_REDUCE(reduce, transform) \
+  #define DIM_REDUCE(reduce, transform, init) \
     TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,      \
-                         accreal sum = 0;                   \
+                         accreal sum = init;                \
                          int64_t i;                         \
                          for(i = 0; i < t_size; i++) {      \
                            (reduce);                        \
@@ -1955,22 +1707,25 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
 
   if(value == 0) {
     DIM_REDUCE(sum += t_data[i*t_stride] != 0.0,
-               *r__data = sum);
+               *r__data = sum, 0);
   } else if (value == 1) {
     DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride]),
-               *r__data = sum);
+               *r__data = sum, 0);
   } else if (value == 2) {
     DIM_REDUCE(sum += t_data[i*t_stride] * t_data[i*t_stride],
-               *r__data = TH_MATH_NAME(sqrt)(sum));
+               *r__data = TH_MATH_NAME(sqrt)(sum), 0);
   } else if (value == 3) {
     DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride] * t_data[i*t_stride] * t_data[i*t_stride]),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3));
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
   } else if (value == INFINITY) {
     DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum);
+	       *r__data = sum, 0);
+  } else if (value == -INFINITY) {
+    DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
+	       *r__data = sum, INFINITY);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value));
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);
   }
 
   if (!keepdim) {
@@ -1996,6 +1751,10 @@ accreal THTensor_(normall)(THTensor *tensor, scalar_t value)
     return TH_MATH_NAME(pow)(sum, 1.0/3);
   } else if(value == INFINITY) {
     TH_TENSOR_APPLY(scalar_t, tensor, sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data)););
+    return sum;
+  } else if(value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY(scalar_t, tensor, sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data)););
     return sum;
   } else {
     TH_TENSOR_APPLY(scalar_t, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
@@ -2049,7 +1808,11 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
       )
     }
     else
-      THTensor_(copy)(rowR, rowS);
+    {
+      at::Tensor rowR_wrap = THTensor_wrap(rowR);
+      at::Tensor rowS_wrap = THTensor_wrap(rowS);
+      at::_copy_same_type_(rowR_wrap, rowS_wrap);
+    }
   }
 
   c10::raw::intrusive_ptr::decref(rowR);
@@ -2058,11 +1821,29 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
 {
-  scalar_t sum = 0;
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   sum += TH_MATH_NAME(pow)(
-                     TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-  return TH_MATH_NAME(pow)(sum, 1.0/value);
+  scalar_t sum;
+  if (value == INFINITY) {
+    sum = -1.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == 0.0) {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += (*tensor_data - *src_data != 0.0););
+    return sum;
+  } else {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += TH_MATH_NAME(pow)(
+                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
+    return TH_MATH_NAME(pow)(sum, 1.0/value);
+  }
 }
 
 accreal THTensor_(meanall)(THTensor *tensor)
@@ -2082,50 +1863,6 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
 accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
   return sqrt(THTensor_(varall)(tensor, biased));
-}
-
-void THTensor_(linspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, a);
-  } else {
-     TH_TENSOR_APPLY(scalar_t, r_,
-             *r__data = a + (b-a)/((scalar_t)(n-1))*i;
-             i++;
-           );
-  }
-}
-
-void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
-  } else {
-    TH_TENSOR_APPLY(scalar_t, r_,
-        *r__data = TH_MATH_NAME(pow)(10.0, a + i*(b-a)/((scalar_t)(n-1)));
-        i++;
-        );
-  }
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)

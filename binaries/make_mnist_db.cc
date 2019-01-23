@@ -83,8 +83,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   cols = swap_endian(cols);
 
   // leveldb
-  std::unique_ptr<db::DB> mnist_db(
-      db::CreateDB(c10::FLAGS_db, db_path, db::NEW));
+  std::unique_ptr<db::DB> mnist_db(db::CreateDB(FLAGS_db, db_path, db::NEW));
   std::unique_ptr<db::Transaction> transaction(mnist_db->NewTransaction());
   // Storing to db
   char label_value;
@@ -98,7 +97,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   TensorProto* data = protos.add_protos();
   TensorProto* label = protos.add_protos();
   data->set_data_type(TensorProto::BYTE);
-  if (c10::FLAGS_channel_first) {
+  if (FLAGS_channel_first) {
     data->add_dims(1);
     data->add_dims(rows);
     data->add_dims(cols);
@@ -139,9 +138,9 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   caffe2::convert_dataset(
-      c10::FLAGS_image_file.c_str(),
-      c10::FLAGS_label_file.c_str(),
-      c10::FLAGS_output_file.c_str(),
-      c10::FLAGS_data_limit);
+      FLAGS_image_file.c_str(),
+      FLAGS_label_file.c_str(),
+      FLAGS_output_file.c_str(),
+      FLAGS_data_limit);
   return 0;
 }

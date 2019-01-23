@@ -25,7 +25,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
 
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
-    if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }
@@ -85,8 +85,8 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;

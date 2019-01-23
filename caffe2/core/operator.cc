@@ -56,6 +56,16 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+OperatorBase::OperatorBase(
+    const c10::FunctionSchema& fn_schema,
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs)
+    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
+      ivalue_inputs_(inputs),
+      ivalue_outputs_(outputs) {
+  output_tensors_.resize(ivalue_outputs_.size());
+}
+
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
@@ -151,7 +161,7 @@ unique_ptr<OperatorBase> _CreateOperator(
     const auto op_def_engines = split(',', operator_def.engine());
     engines.insert(engines.end(), op_def_engines.begin(), op_def_engines.end());
   }
-  if (!c10::FLAGS_caffe2_disable_implicit_engine_preference &&
+  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
       g_per_op_engine_pref().count(device_type) &&
       g_per_op_engine_pref()[device_type].count(op_type)) {
     const auto& preferred_engines =
@@ -160,7 +170,7 @@ unique_ptr<OperatorBase> _CreateOperator(
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
-  if (!c10::FLAGS_caffe2_disable_implicit_engine_preference &&
+  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
       g_global_engine_pref().count(device_type)) {
     const auto& preferred_engines = g_global_engine_pref()[device_type];
     VLOG(2) << "Inserting global engine preference: " << preferred_engines;
@@ -174,11 +184,11 @@ unique_ptr<OperatorBase> _CreateOperator(
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
       if (engine.size() <=
-          (unsigned)c10::FLAGS_caffe2_operator_max_engine_name_length) {
+          (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
-        op->annotate_engine(engine.substr(
-            0, c10::FLAGS_caffe2_operator_max_engine_name_length));
+        op->annotate_engine(
+            engine.substr(0, FLAGS_caffe2_operator_max_engine_name_length));
       }
       return op;
     } else {
@@ -343,6 +353,15 @@ C10_DEFINE_REGISTRY(
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
+
+C10_DEFINE_REGISTRY(
+    FunctionSchemaOperatorRegistry,
+    OperatorBase,
+    const c10::FunctionSchema,
+    const std::vector<c10::IValue>&,
+    const std::vector<c10::IValue*>&);
+
+C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -686,6 +705,11 @@ std::set<std::string> GetRegisteredOperators() {
 
   // C10 operators
   for (const auto& name : C10OperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
+  // FunctionSchema registered operators
+  for (const auto& name : FunctionSchemaOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

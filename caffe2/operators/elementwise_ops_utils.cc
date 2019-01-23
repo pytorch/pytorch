@@ -6,38 +6,38 @@ namespace elementwise_ops_utils {
 std::tuple<size_t, size_t, size_t>
 ComputeLegacyBroadcastSizes(const Tensor& A, const Tensor& B, int axis) {
   CAFFE_ENFORCE_GE(
-      A.ndim(),
-      B.ndim(),
+      A.dim(),
+      B.dim(),
       "If you are doing broadcasting, input1 should have "
       "a smaller or equal number of dimensions.");
   if (axis == -1) {
-    axis = A.ndim() - B.ndim();
+    axis = A.dim() - B.dim();
   }
   CAFFE_ENFORCE(
-      axis >= 0 && axis <= A.ndim() - B.ndim(),
+      axis >= 0 && axis <= A.dim() - B.dim(),
       "Broadcast axis should be in the range of"
       "[0, A.ndim() - B.ndim()], but axis = ",
       axis);
 
   int b_dim_start = 0;
-  while (b_dim_start < B.ndim() && B.dim(b_dim_start) == 1) {
+  while (b_dim_start < B.dim() && B.size(b_dim_start) == 1) {
     ++b_dim_start;
   }
-  int b_dim_end = B.ndim() - 1;
-  while (b_dim_end >= b_dim_start && B.dim(b_dim_end) == 1) {
+  int b_dim_end = B.dim() - 1;
+  while (b_dim_end >= b_dim_start && B.size(b_dim_end) == 1) {
     --b_dim_end;
   }
   size_t pre = 1, n = 1, post = 1;
   for (int i = 0; i < axis + b_dim_start; ++i) {
-    pre *= A.dim(i);
+    pre *= A.size(i);
   }
   for (int i = b_dim_start; i <= b_dim_end; ++i) {
     CAFFE_ENFORCE_EQ(
-        A.dim(i + axis), B.dim(i), "Broadcast dimension mismatch.");
-    n *= B.dim(i);
+        A.size(i + axis), B.size(i), "Broadcast dimension mismatch.");
+    n *= B.size(i);
   }
-  for (int i = axis + b_dim_end + 1; i < A.ndim(); ++i) {
-    post *= A.dim(i);
+  for (int i = axis + b_dim_end + 1; i < A.dim(); ++i) {
+    post *= A.size(i);
   }
   return std::make_tuple(pre, n, post);
 }

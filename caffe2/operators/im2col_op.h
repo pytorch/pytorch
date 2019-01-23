@@ -46,8 +46,8 @@ class Im2ColOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* Y = Output(0);
-    CAFFE_ENFORCE(4 == X.ndim());
+
+    CAFFE_ENFORCE(4 == X.dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
@@ -76,11 +76,13 @@ class Im2ColOp final : public Operator<Context> {
 
     switch (order_) {
       case StorageOrder::NCHW: {
-        Y->Resize(
-            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
+        auto* Y = Output(
+            0,
+            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w},
+            at::dtype<T>());
 
-        const size_t dx = X.size() / N;
-        const size_t dy = Y->size() / N;
+        const size_t dx = X.numel() / N;
+        const size_t dy = Y->numel() / N;
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
@@ -104,11 +106,13 @@ class Im2ColOp final : public Operator<Context> {
         }
       }; break;
       case StorageOrder::NHWC: {
-        Y->Resize(
-            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
+        auto* Y = Output(
+            0,
+            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C},
+            at::dtype<T>());
 
-        const size_t dx = X.size() / N;
-        const size_t dy = Y->size() / N;
+        const size_t dx = X.numel() / N;
+        const size_t dy = Y->numel() / N;
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
@@ -188,9 +192,9 @@ class Col2ImOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto& Z = Input(1);
-    auto* Y = Output(0);
-    Y->ResizeLike(Z);
-    CAFFE_ENFORCE(4 == Y->ndim());
+
+    auto* Y = Output(0, Z.sizes(), at::dtype<T>());
+    CAFFE_ENFORCE(4 == Y->dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
@@ -216,10 +220,10 @@ class Col2ImOp final : public Operator<Context> {
     CAFFE_ENFORCE(W >= dkernel_w);
     const int out_h = (H + 2 * pad_ - dkernel_h) / stride_h_ + 1;
     const int out_w = (W + 2 * pad_ - dkernel_w) / stride_w_ + 1;
-    CAFFE_ENFORCE(X.size() == N * kernel_h_ * kernel_w_ * C * out_h * out_w);
+    CAFFE_ENFORCE(X.numel() == N * kernel_h_ * kernel_w_ * C * out_h * out_w);
 
-    const size_t dx = X.size() / N;
-    const size_t dy = Y->size() / N;
+    const size_t dx = X.numel() / N;
+    const size_t dy = Y->numel() / N;
 
     // could template-specialize this, but it's test code...
     switch (order_) {

@@ -5,7 +5,7 @@ namespace caffe2 {
 template <>
 bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  const auto N = X.size();
+  const auto N = X.numel();
   CAFFE_ENFORCE_GT(N, 0);
 
   const float* Xdata = X.data<float>();
@@ -31,8 +31,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = Output(0);
-    Y->Resize(NUM_STATS);
+    auto* Y = Output(0, {NUM_STATS}, at::dtype<float>());
     float* Ydata = Y->template mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTable.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
 void THNN_(LookupTable_accGradParameters)(
@@ -40,8 +40,8 @@ void THNN_(LookupTable_accGradParameters)(
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     cunn_LookupTable_accGradParametersKernelByFeature<scalar_t, accreal>
-    <<<grid, 
-       block, 
+    <<<grid,
+       block,
        sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
        stream>>>
       (THCIndexTensor_(data)(state, input),
@@ -76,14 +76,14 @@ void THNN_(LookupTable_accGradParameters)(
     thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
 
     thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       countIter, countIter + numel, origIndicesIter);
 
     // Sort; a stable sort is not required
     thrust::sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
@@ -106,7 +106,7 @@ void THNN_(LookupTable_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndices_ptr,
@@ -119,7 +119,7 @@ void THNN_(LookupTable_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       thrust::make_reverse_iterator(sortedIndices_ptr + numel),

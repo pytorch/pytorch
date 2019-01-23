@@ -135,7 +135,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
     // mutable_data calls are needed to allocate the tensors
     Y->template mutable_data<float>();
     if (!is_test_) {
-      A->Resize(Y->dims());
+      A->Resize(Y->sizes());
       A->template mutable_data<int>();
     }
     return true;
@@ -143,7 +143,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
 
   Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
   if (!is_test_) {
-    A->Resize(Y->dims());
+    A->Resize(Y->sizes());
   }
   int output_size = Y->size();
   int* argmax_data = is_test_ ? nullptr : A->template mutable_data<int>();
@@ -173,10 +173,10 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& A = Input(2); // argmaxes
   auto& dY = Input(3); // Gradient of net w.r.t. output of "forward" op
   // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-  // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->template mutable_data<float>(), &context_);

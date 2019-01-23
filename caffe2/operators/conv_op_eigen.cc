@@ -36,7 +36,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(FILTER);
   auto* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(4 == filter.ndim());
+  CAFFE_ENFORCE(4 == filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) == C);
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
@@ -70,7 +70,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
 
   Eigen::DSizes<TensorIndex, 2> pre_contract_dims;
   pre_contract_dims[1] = kernel_h() * kernel_w() * C;
-  pre_contract_dims[0] = Y->size() / M;
+  pre_contract_dims[0] = Y->numel() / M;
 
   Eigen::DSizes<TensorIndex, 2> kernel_dims;
   kernel_dims[0] = kernel_h() * kernel_w() * C;
@@ -104,12 +104,12 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
                  .reshape(Y_tensor.dimensions());
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(1 == bias.ndim());
+    CAFFE_ENFORCE(1 == bias.dim());
     CAFFE_ENFORCE(bias.dim32(0) == M);
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y_tensor.data(), static_cast<int64_t>(M), Y->size() / M);
+        Y_tensor.data(), static_cast<int64_t>(M), Y->numel() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }
@@ -130,7 +130,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
   auto& filter = Input(FILTER);
   auto* Y = Output(0);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  CAFFE_ENFORCE(4 == filter.ndim());
+  CAFFE_ENFORCE(4 == filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
@@ -164,7 +164,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
 
   Eigen::DSizes<TensorIndex, 2> pre_contract_dims;
   pre_contract_dims[1] = kernel_h() * kernel_w() * C;
-  pre_contract_dims[0] = Y->size() / M;
+  pre_contract_dims[0] = Y->numel() / M;
 
   Eigen::DSizes<TensorIndex, 2> kernel_dims;
   kernel_dims[0] = kernel_h() * kernel_w() * C;
@@ -197,14 +197,14 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(1 == bias.ndim());
+    CAFFE_ENFORCE(1 == bias.dim());
     CAFFE_ENFORCE(bias.dim32(0) == M);
     Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>> bias_tensor(
         const_cast<T*>(bias.template data<T>()), 1, 1, 1, M);
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y->template mutable_data<T>(), static_cast<int64_t>(M), Y->size() / M);
+        Y->template mutable_data<T>(), static_cast<int64_t>(M), Y->numel() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }

@@ -1,7 +1,7 @@
-#include "ATen/Config.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Config.h>
+#include <ATen/TensorUtils.h>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 #include <ostream>
 #include <sstream>
@@ -196,7 +196,7 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
 
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   AT_CHECK(
-    t.type().backend() == backend,
+    !t.defined() || t.type().backend() == backend,
     "Expected tensor to have ", toString(backend),
     " Backend, but got tensor with ", toString(t.type().backend()), " Backend ",
     "(while checking arguments for ", c, ")");

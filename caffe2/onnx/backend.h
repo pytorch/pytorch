@@ -157,7 +157,8 @@ class CAFFE2_API Caffe2Backend {
   void BuildTensorFillingOp(
       caffe2::OperatorDef* c2_op,
       const TensorProto& onnx_tensor,
-      const std::string& name = "");
+      const std::string& output_name = "",
+      const std::string& shape_name = "");
 
  private:
   using SpecialOpConverter =
@@ -191,6 +192,10 @@ class CAFFE2_API Caffe2Backend {
   Caffe2Ops CreateCast(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateConstant(OnnxNode* onnx_node, const ConversionContext& ctx);
+
+  Caffe2Ops CreateConstantOfShape(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
   Caffe2Ops CreateConvPoolOpBase(
       OnnxNode* onnx_node,
@@ -226,6 +231,10 @@ class CAFFE2_API Caffe2Backend {
   Caffe2Ops CreateSplit(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, const ConversionContext& ctx);
+
+  Caffe2Ops CreateRandomNormal(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
 
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,

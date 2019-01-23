@@ -41,6 +41,15 @@ bool IsIdentityPermutation(const int n, const int* perm) {
   return true;
 }
 
+bool CheckReduceDims(const int ndim, const int* X_dims, const int* Y_dims) {
+  for (int i = 0; i < ndim; ++i) {
+    if (X_dims[i] != Y_dims[i] && Y_dims[i] != 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool IsRowwiseReduce(
     const int ndim,
     const int* A_dims,
@@ -270,6 +279,18 @@ bool IsBothEndsBroadcastBinaryOp(
   return true;
 }
 
+bool IsBatchTranspose2D(const int ndim, const int* axes) {
+  if (ndim < 2) {
+    return false;
+  }
+  for (int i = 0; i < ndim - 2; ++i) {
+    if (axes[i] != i) {
+      return false;
+    }
+  }
+  return axes[ndim - 2] == ndim - 1 && axes[ndim - 1] == ndim - 2;
+}
+
 void ComputeTransposeAxesForReduceOp(
     const int num_dims,
     const int num_reduce_axes,
@@ -285,6 +306,22 @@ void ComputeTransposeAxesForReduceOp(
       ++q;
     } else {
       transpose_axes[p++] = i;
+    }
+  }
+}
+
+void ComputeTransposeAxesForReduceOp(
+    const int ndim,
+    const int* dims,
+    int* axes) {
+  const int d = ndim - std::count(dims, dims + ndim, 1);
+  int p = 0;
+  int q = d;
+  for (int i = 0; i < ndim; ++i) {
+    if (dims[i] == 1) {
+      axes[q++] = i;
+    } else {
+      axes[p++] = i;
     }
   }
 }

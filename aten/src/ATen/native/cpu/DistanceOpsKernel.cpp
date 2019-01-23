@@ -41,13 +41,13 @@ struct PDist {
   // TODO This is an inefficient way to compite sign, and can be much faster
   // using native SSE instructions that should be added to Vec256.
   static inline Vec sign(Vec val) {
-    return vec256::min(vec256::max(Vec(0), val.ceil()), Vec(1)) +
-      vec256::min(vec256::max(Vec(-1), val.floor()), Vec(0));
+    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   // Zero norm
   struct zdist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return vec256::min(diff.abs().ceil(), Vec(1)); }
+    static inline Vec map(const Vec& diff, const Vec& p) { return vec256::minimum(diff.abs().ceil(), Vec(1)); }
     static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
   };
@@ -85,11 +85,11 @@ struct PDist {
   // Info norm
   struct idist_calc {
     static inline Vec map(const Vec& diff, const Vec& p) { return diff; }
-    static inline Vec red(const Vec& agg, const Vec& up) { return vec256::max(agg, up); }
+    static inline Vec red(const Vec& agg, const Vec& up) { return vec256::maximum(agg, up); }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::min(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
@@ -149,7 +149,7 @@ struct PDist {
   }
 
   template <typename F>
-  inline static void backward_down_column(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size) {
+  inline static void backward_down_column(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
     for (const scalar_t * const self_end = self_i + m * n; self_i != self_end - m; self_i += m, res_i += m) {
 
       const Vec self_vec_i = Vec::loadu(self_i, count);
@@ -187,15 +187,15 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    at::parallel_for(0, m / Vec::size, internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t l, int64_t end) {
-      const scalar_t * self_l = self_start + l * Vec::size;
-      scalar_t * res_l = res_start + l * Vec::size;
+    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t l, int64_t end) {
+      const scalar_t * self_l = self_start + l * Vec::size();
+      scalar_t * res_l = res_start + l * Vec::size();
 
-      for (const scalar_t * const res_end = res_start + end * Vec::size; res_l != res_end; self_l += Vec::size, res_l += Vec::size) {
+      for (const scalar_t * const res_end = res_start + end * Vec::size(); res_l != res_end; self_l += Vec::size(), res_l += Vec::size()) {
         backward_down_column<F>(self_l, res_l, grad_start, dist_start, pvec, n, m, gs);
       }
     });
-    const int64_t remainder = m % Vec::size;
+    const int64_t remainder = m % Vec::size();
     if (remainder) {
       backward_down_column<F>(self_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, pvec, n, m, gs, remainder);
     }

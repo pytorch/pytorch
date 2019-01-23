@@ -33,15 +33,15 @@ int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
-      c10::FLAGS_input_db_type, c10::FLAGS_input_db, caffe2::db::READ));
+      FLAGS_input_db_type, FLAGS_input_db, caffe2::db::READ));
   std::unique_ptr<DB> out_db(caffe2::db::CreateDB(
-      c10::FLAGS_output_db_type, c10::FLAGS_output_db, caffe2::db::NEW));
+      FLAGS_output_db_type, FLAGS_output_db, caffe2::db::NEW));
   std::unique_ptr<Cursor> cursor(in_db->NewCursor());
   std::unique_ptr<Transaction> transaction(out_db->NewTransaction());
   int count = 0;
   for (; cursor->Valid(); cursor->Next()) {
     transaction->Put(cursor->key(), cursor->value());
-    if (++count % c10::FLAGS_batch_size == 0) {
+    if (++count % FLAGS_batch_size == 0) {
       transaction->Commit();
       LOG(INFO) << "Converted " << count << " items so far.";
     }

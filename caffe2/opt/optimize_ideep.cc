@@ -2,7 +2,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include "caffe2/ideep/ideep_utils.h"
 #endif
 
@@ -11,7 +11,7 @@ namespace opt {
 
 using namespace nom;
 
-#ifndef CAFFE2_USE_IDEEP
+#ifndef CAFFE2_USE_MKLDNN
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -53,6 +53,15 @@ caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
   return dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
 }
 
+bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
+  if (!repr::nn::is<repr::NeuralNetOperator>(nodeRef)) {
+    return false;
+  }
+  auto op = repr::nn::get<repr::NeuralNetOperator>(nodeRef);
+  auto opDef = getOpDef(*op);
+  return opDef.type() == typeName;
+}
+
 bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
   // We only want to fuse for IDEEP convs
   const auto& op = getOpDef(nnOp);
@@ -61,6 +70,34 @@ bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
 
 bool shouldFuseConv(const repr::Conv& conv) {
   return isOnIdeepDevice(conv) ? (conv.getGroup() <= 1) : false;
+}
+
+void removeStopGradientForInference(repr::NNModule *nn) {
+  auto isStopGradientNode = [](const repr::NNGraph::NodeRef& node) {
+    if (!repr::nn::is<repr::NeuralNetOperator>(node)) {
+      return false;
+    }
+    auto maybeStopGrad = repr::nn::get<repr::NeuralNetOperator>(node);
+    auto maybeStopGradDef = getOpDef(*maybeStopGrad);
+    return maybeStopGradDef.type() == "StopGradient";
+  };
+
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  for (int i = 0; i < allNodes.size(); ++i) {
+    auto node = allNodes[i];
+    if (!isStopGradientNode(node)) {
+      continue;
+    }
+
+    auto stopGradInput = repr::nn::getInputs(node).front();
+    auto stopGradOutput = repr::nn::getOutputs(node).front();
+    auto inputName = repr::nn::get<repr::Tensor>(stopGradInput)->getName();
+    auto outputName = repr::nn::get<repr::Tensor>(stopGradOutput)->getName();
+    if (inputName == outputName) {
+      nn->dataFlow.replaceNode(stopGradOutput, stopGradInput);
+      nn->dataFlow.deleteNode(node);
+    }
+  }
 }
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
@@ -245,11 +282,13 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    if (!repr::nn::is<repr::Sum>(sumNode)) {
+    // CAUTION: On IDEEP device, only element-wise Add operator is
+    // supported yet. It totally works as element-wise sum without scalar broadcast.
+    if (!repr::nn::is<repr::Sum>(sumNode) && !isOpType(sumNode, "Add")) {
       continue;
     }
 
-    auto sum = repr::nn::get<repr::Sum>(sumNode);
+    auto sum = repr::nn::get<repr::NeuralNetOperator>(sumNode);
     if (!isOnIdeepDevice(*sum)) {
       LOG(WARNING) << "Not a IDEEP operator";
       continue;
@@ -429,6 +468,8 @@ void OptimizeForIdeep(
     return;
   }
 
+  removeStopGradientForInference(nn);
+
   fuseConvBNAndAffChForIdeep(nn, ws);
 
   fuseConvSumForIdeep(nn, ws);
@@ -440,7 +481,7 @@ void OptimizeForIdeep(
   setPoolingInferenceMode(nn);
 }
 
-#endif // CAFFE2_USE_IDEEP
+#endif // CAFFE2_USE_MKLDNN
 
 } // namespace opt
 } // namespace caffe2

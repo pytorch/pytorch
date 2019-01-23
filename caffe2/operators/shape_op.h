@@ -19,19 +19,19 @@ class ShapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& data = Input(DATA);
-    auto* output = Output(0);
-    int numDims = data.ndim();
+
+    int numDims = data.dim();
     int numAxes = axes_.size();
     if (numAxes == 0) {
-      output->Resize(numDims);
+      auto* output = Output(0, {numDims}, at::dtype<int64_t>());
       int64_t* output_data = output->template mutable_data<int64_t>();
       context_.CopyBytesSameDevice(
-          numDims * sizeof(int64_t), data.dims().data(), output_data);
+          numDims * sizeof(int64_t), data.sizes().data(), output_data);
       return true;
     }
 
-    output->Resize(numAxes);
-    auto src = reinterpret_cast<const char*>(data.dims().data());
+    auto* output = Output(0, {numAxes}, at::dtype<int64_t>());
+    auto src = reinterpret_cast<const char*>(data.sizes().data());
     auto out = reinterpret_cast<char*>(output->template mutable_data<int64_t>());
     for (int i = 0; i < numAxes; i++) {
       auto axis = axes_[i];

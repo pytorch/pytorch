@@ -23,6 +23,10 @@ def parse_arguments(args):
 
 
 def set_declaration_defaults(declaration):
+    if 'schema_string' not in declaration:
+        declaration['schema_string'] = ''
+    if 'matches_jit_signature' not in declaration:
+        declaration['matches_jit_signature'] = False
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
@@ -30,8 +34,7 @@ def set_declaration_defaults(declaration):
     if 'backends' not in declaration:
         declaration['backends'] = ['CPU', 'CUDA']
     if 'api_name' not in declaration:
-        declaration['api_name'] = (declaration['python_name']
-                                   if 'python_name' in declaration else declaration['name'])
+        declaration['api_name'] = declaration['name']
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

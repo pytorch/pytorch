@@ -150,7 +150,7 @@ class TestCaffe2Backend(unittest.TestCase):
             torch_out = (torch_out,)
 
         caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        for i, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
@@ -189,8 +189,22 @@ class TestCaffe2Backend(unittest.TestCase):
                                 use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
-        model = nn.Linear(1, 1)
-        input = torch.randn(1, 1, requires_grad=True)
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.many_fc = nn.Sequential(
+                    nn.Linear(4, 5, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(5, 6, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(6, 7, bias=True),
+                )
+
+            def forward(self, input):
+                return self.many_fc(input)
+
+        model = MyModel()
+        input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_lstm_cell(self):
@@ -575,6 +589,16 @@ class TestCaffe2Backend(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_erf(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, input):
+                return input.erf()
+        input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
     def test_trigonometry(self):
         def test_func(name):
             class MyModel(torch.nn.Module):
@@ -747,6 +771,12 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_upsample(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = nn.Upsample(scale_factor=2, mode='nearest')
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -796,6 +826,15 @@ class TestCaffe2Backend(unittest.TestCase):
             dims = [2] * (i - 2) + [3, 4]
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return (torch.randn(1, 2, 3, 4) + x).shape
+        self.run_model_test(MyModule(), train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
@@ -943,6 +982,43 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_model_test(WhereMethod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_data_dependent_zeros_factory(self):
+        class ZerosFactory(torch.nn.Module):
+            def forward(self, input):
+                return torch.cat([input, torch.zeros(input.size(0), 1).type_as(input)], dim=1)
+
+        x = torch.zeros(3, 4)
+        self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_implicit_expand(self):
+        class ImplicitExpandExportMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ImplicitExpandExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_reduce_sum(self):
+        class ReduceSumNegativeIndices(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_group_norm(self):
+        c = torch.randn(BATCH_SIZE, 6, 224)
+        model = nn.GroupNorm(3, 6)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    def test_rsub(self):
+        class RsubModel(torch.nn.Module):
+            def forward(self, x):
+                return 1 - x
+
+        x = torch.randn(1, 2)
+        self.run_model_test(RsubModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

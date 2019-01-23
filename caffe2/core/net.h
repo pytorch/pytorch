@@ -131,6 +131,8 @@ class CAFFE2_API ExecutorHelper {
  public:
   ExecutorHelper() {}
   virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
+  virtual std::vector<OperatorBase*> GetOperators() const;
+  virtual int GetNumWorkers() const;
   virtual ~ExecutorHelper() {}
 };
 

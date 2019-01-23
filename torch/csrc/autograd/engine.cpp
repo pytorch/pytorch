@@ -1,14 +1,15 @@
-#include "torch/csrc/autograd/engine.h"
+#include <torch/csrc/autograd/engine.h>
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -25,11 +26,6 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
-
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <THC/THC.h>
-#endif
 
 namespace torch { namespace autograd {
 
@@ -69,9 +65,16 @@ struct FunctionTask {
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+// Empty FunctionTask are first.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    if (!t1.fn) {
+      return false;
+    } else if (!t2.fn) {
+      return true;
+    } else {
+      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    }
   }
 };
 
@@ -200,9 +203,24 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
+// TODO: Engine is not written in a way that it can deal with anything that's
+// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::DeviceGuard guard(device);
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  at::OptionalDeviceGuard guard;
+  if (device != -1) {
+    if (at::hasCUDA()) {
+      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+    }
+    if (at::hasHIP()) {
+      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    }
+  }
   worker_device = device;
   thread_main(nullptr);
 }
@@ -283,7 +301,7 @@ static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
+static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
@@ -326,7 +344,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(grads[i], metadata.shape());
+      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
@@ -358,6 +376,18 @@ static variable_list call_function(FunctionTask& task) {
   variable_list outputs;
 
   if(has_post_hooks){
+    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
+    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
+    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
+    // refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
   }else{
@@ -373,7 +403,7 @@ static variable_list call_function(FunctionTask& task) {
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+    return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
 }
@@ -406,7 +436,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
@@ -602,14 +632,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = 0;
-#ifdef USE_CUDA
-  // check for case of compiled with CUDA but no available devices
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
-    cudaGetLastError();
-    num_devices = 0;
-  }
-#endif
+  int num_devices = at::getNumGPUs();
   // One for CPU, plus one for every GPU device
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
@@ -629,7 +652,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     Function *output = output_edge.function.get();
     auto & info = exec_info[output];
     if (!info.captures)
-      info.captures.reset(new std::vector<ExecInfo::Capture>());
+      info.captures = make_unique<std::vector<ExecInfo::Capture>>();
     info.captures->emplace_back(output_edge.input_nr, output_idx++);
   }
   captured_vars.resize(output_idx);

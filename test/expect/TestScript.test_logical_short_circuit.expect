@@ -1,12 +1,12 @@
-graph(%t : Dynamic) {
+graph(%t : Tensor) {
   %1 : bool = prim::Constant[value=1]()
   %2 : bool = prim::Constant[value=0]()
   %c1.1 : int = prim::Constant[value=1]()
-  %c1.2 : int = prim::Constant[value=0]()
+  %4 : int = prim::Constant[value=0]()
   %5 : bool = prim::If(%2)
     block0() {
-      %6 : Dynamic = aten::select(%t, %c1.2, %c1.1)
-      %7 : bool = prim::TensorToBool(%6)
+      %6 : Tensor = aten::select(%t, %4, %c1.1)
+      %7 : bool = prim::Bool(%6)
       -> (%7)
     }
     block1() {
@@ -22,15 +22,15 @@ graph(%t : Dynamic) {
           -> (%1)
         }
         block1() {
-          %10 : Dynamic = aten::select(%t, %c1.2, %c1.1)
-          %11 : bool = prim::TensorToBool(%10)
+          %10 : Tensor = aten::select(%t, %4, %c1.1)
+          %11 : bool = prim::Bool(%10)
           -> (%11)
         }
       -> (%9)
     }
   %c1 : int = prim::If(%8)
     block0() {
-      -> (%c1.2)
+      -> (%4)
     }
     block1() {
       -> (%c1.1)

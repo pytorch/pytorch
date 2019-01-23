@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 
 namespace {
@@ -31,7 +31,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_backward", [&]() {
     kl_div_backward_kernel<scalar_t>(grad_input, target, grad_expand);
   });
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     return grad_input / input.numel();
   }
   return grad_input;

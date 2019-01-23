@@ -23,7 +23,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/workspace.h"
 
-#if CAFFE2_ANDROID
+#if C10_ANDROID
 #ifndef SYS_gettid
 #define SYS_gettid __NR_gettid
 #endif
@@ -421,7 +421,7 @@ bool printStackTracesOnFatalSignal() {
 
 namespace internal {
 bool Caffe2InitFatalSignalHandler(int*, char***) {
-  if (c10::FLAGS_caffe2_print_stacktraces) {
+  if (FLAGS_caffe2_print_stacktraces) {
     setPrintStackTracesOnFatalSignal(true);
   }
   return true;
