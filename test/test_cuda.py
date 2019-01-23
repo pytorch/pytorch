@@ -9,7 +9,6 @@ import os
 from contextlib import contextmanager
 import threading
 import queue
-import time
 
 import torch
 import torch.cuda
@@ -1678,36 +1677,76 @@ class TestCuda(TestCase):
         self.assertGreater(start_event.elapsed_time(event), 0)
 
     @staticmethod
-    def _stream_synchronize(spin_time=50000000):
+    def _stream_synchronize(self, spin_time=50000000):
         s = torch.cuda.current_stream()
+        e_tik = torch.cuda.Event(enable_timing=True)
+        e_tok = torch.cuda.Event(enable_timing=True)
+
+        torch.cuda._sleep(1)
+        e_tik.record(s)
+
         torch.cuda._sleep(spin_time)
+        e_tok.record(s)
         s.synchronize()
 
-    @staticmethod
-    def _event_synchronize(spin_time=50000000):
-        s = torch.cuda.current_stream()
-        torch.cuda._sleep(spin_time)
-        e = s.record_event()
-        e.synchronize()
+        self.assertTrue(s.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception is otherwise.
+        return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_wait(spin_time=50000000):
+    def _event_synchronize(self, spin_time=50000000):
+        s = torch.cuda.current_stream()
+        e_tik = torch.cuda.Event(enable_timing=True)
+        e_tok = torch.cuda.Event(enable_timing=True)
+
+        torch.cuda._sleep(1)
+        e_tik.record(s)
+
+        torch.cuda._sleep(spin_time)
+        s.record_event(e_tok)
+        e_tok.synchronize()
+
+        self.assertTrue(s.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception is otherwise.
+        return e_tik.elapsed_time(e_tok)
+
+    @staticmethod
+    def _event_wait(self, spin_time=50000000):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
+
+        e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
+        e_tok = torch.cuda.Event(blocking=True, enable_timing=True)
+        torch.cuda._sleep(1)
+        e_tik.record(s0)
+
         torch.cuda._sleep(spin_time - 10)
-        e = torch.cuda.Event(blocking=True)
-        e.record()
-        e.wait(s1)
+        e_sync = torch.cuda.Event(blocking=True)
+        e_sync.record()
+        e_sync.wait(s1)
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10)
         s1.synchronize()
+        s1.record_event(e_tok)
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+        self.assertTrue(e_sync.query())
+
+        # not necessary to check e_tik and e_tok, as elapsed_time would throw
+        # exception is otherwise.
+        return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _test_stream_event_nogil(sync_func, p2c, c2p):
+    def _test_stream_event_nogil(self, sync_func, p2c, c2p):
         with torch.cuda.device('cuda:1'):
             c2p.put(0)
             p2c.get()
-            sync_func(50000000)
+            c2p.put(sync_func(self, 50000000))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
@@ -1718,34 +1757,38 @@ class TestCuda(TestCase):
             p2c = queue.Queue()
             c2p = queue.Queue()
 
+            e_tik = torch.cuda.Event(enable_timing=True)
+            e_tok = torch.cuda.Event(enable_timing=True)
+
             t = threading.Thread(
                 target=TestCuda._test_stream_event_nogil,
-                args=(sync_func, p2c, c2p))
+                args=(self, sync_func, p2c, c2p))
             t.daemon = True
             t.start()
 
             c2p.get()
-            tik = time.time()
             with torch.cuda.device('cuda:0'):
+                torch.cuda._sleep(1)
+                e_tik.record()
+
                 p2c.put(0)
-                sync_func(50000000)
+                parent_time = sync_func(self, 50000000)
+                child_time = c2p.get()
 
-            t.join()
-            tok = time.time()
+                torch.cuda._sleep(1)
+                e_tok.record()
+                e_tok.synchronize()
+                total_time = e_tik.elapsed_time(e_tok)
 
+            print (parent_time, child_time, total_time)
             # Without GIL, the two 50ms synchronization can overlap, and hence
             # the expected execution time should be only a little bit higher
-            # than 50ms and well below 100ms.
-            #
-            # However, sometimes the execution time can fall slightly below 50ms
-            # (maybe due to timing inaccuracy in torch.cuda._sleep?). To avoid
-            # this false alarm, 5 ms room is added to the lower bound.
-            self.assertGreater(tok - tik, 0.045)
-            # If GIL is enforced, the execution time should be a little higher
-            # than 100ms in theory. But, again due to the timing inaccuracy, it
-            # may go below 100ms. Therefore, we set upper bound to 95ms to avoid
-            # false negative.
-            self.assertLess(tok - tik, 0.095)
+            # than 50ms and well below 100ms. However, the real spin time of
+            # torch.cuda._sleep(50 ms) varies (I have seen 45ms). Hence, using
+            # absolute wall clock time is not reliable. This test uses relative
+            # comparisons, checking if the sum of synchronization time in parent
+            # and child is greater than the real execution time by least 20ms
+            self.assertGreater(parent_time + child_time, total_time + 20)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
