@@ -670,7 +670,7 @@ def _try_get_dispatched_fn(fn):
 
 
 def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__self__'):
+    if not hasattr(fn, '__self__') or not isinstance(fn, ScriptModule):
         # Only allow overloads for bound methods
         return None
     overloads = fn.__self__._overloads.get(fn.__name__, None)
