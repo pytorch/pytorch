@@ -362,6 +362,7 @@ Value* emitBuiltinCall(
     // if true, emitBuiltinCall will throw an exception if this builtin does not
     // exist, otherwise it will return nullptr if the builtin is not found.
     bool required) {
+  //TODO: modify this to support named tuple
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
