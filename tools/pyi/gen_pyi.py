@@ -7,6 +7,7 @@ import collections
 import yaml
 import types
 import re
+import argparse
 
 from ..autograd.utils import CodeTemplate, write
 
@@ -468,14 +469,14 @@ def gen_pyi(declarations, out):
 def main():
     parser = argparse.ArgumentParser(
         description='Generate type stubs for PyTorch')
-    parser.add_argument('declarations', metavar='DECL',
+    parser.add_argument('--declarations-path', metavar='DECL',
                         default='torch/share/ATen/Declarations.yaml',
                         help='path to Declarations.yaml')
-    parser.add_argument('out', metavar='OUT',
+    parser.add_argument('--out', metavar='OUT',
                         default='.',
                         help='path to output directory')
     args = parser.parse_args()
-    gen_autograd(args.declarations, args.out)
+    gen_pyi(args.declarations, args.out)
 
 
 if __name__ == '__main__':

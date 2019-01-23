@@ -732,7 +732,7 @@ if (BUILD_PYTHON)
     OUTPUT
     "${TORCH_SRC_DIR}/torch/__init__.pyi"
     COMMAND
-    ${PYCMD} tools/pyi/gen_pyi.py
+    ${PYCMD} -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
