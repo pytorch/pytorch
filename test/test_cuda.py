@@ -1733,8 +1733,9 @@ class TestCuda(TestCase):
             t.join()
             tok = time.time()
 
-            self.assertGreater(tok - tik, 0.05)
-            self.assertLess(tok - tik, 0.1)
+            # the 5 ms room helps to avoid false alarm due to timing inaccuracy
+            self.assertGreater(tok - tik, 0.045)
+            self.assertLess(tok - tik, 0.095)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
