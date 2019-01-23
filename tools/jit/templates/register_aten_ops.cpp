@@ -2,12 +2,12 @@
 #include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/jit/interned_strings.h"
 
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/core/interned_strings.h>
 
 #include <algorithm>
 #include <array>
