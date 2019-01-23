@@ -1733,9 +1733,19 @@ class TestCuda(TestCase):
             t.join()
             tok = time.time()
 
-            # the 5 ms room helps to avoid false alarm due to timing inaccuracy
+            # Without GIL, the two 50ms synchronization can overlap, and hence
+            # the expected execution time should be only a little bit higher
+            # than 50ms and well below 100ms.
+            #
+            # However, sometimes the execution time can fall slightly below 50ms
+            # (maybe due to timing inaccuracy in torch.cuda._sleep?). To avoid
+            # this false alarm, 5 ms room is added to the lower bound.
             self.assertGreater(tok - tik, 0.045)
-            self.assertLess(tok - tik, 0.095)
+            # If GIL is enforced, the execution time should be a little higher
+            # than 100ms in theory. But, again due to the timing inaccuracy, it
+            # may go below 100ms. Therefore, we set upper bound to 80ms to avoid
+            # false negative.
+            self.assertLess(tok - tik, 0.08)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
