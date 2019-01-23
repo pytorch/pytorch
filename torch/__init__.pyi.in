@@ -1,8 +1,19 @@
+# ${generated_comment}
+
 from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload
+from torch._six import inf
 
 import builtins
-import math
-import pickle  # ???
+
+# These identifiers are reexported from other modules.  These modules
+# are not mypy-clean yet, so in order to use this stub file usefully
+# from mypy you will need to specify --follow-imports=silent.
+# Not all is lost: these imports still enable IDEs like PyCharm to offer
+# autocomplete.
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
+from .serialization import save, load
+from ._tensor_str import set_printoptions
+from .functional import *
 
 class dtype: ...
 # See https://github.com/python/mypy/issues/4146 for why this workaround
@@ -14,7 +25,7 @@ class layout: ...
 strided : layout = ...
 
 class device:
-   def __init__(self, device: Union['_device', str, None]=None) -> None: ...
+   def __init__(self, device: Union[builtins.int, str, None]=None) -> None: ...
 
 _device = device
 
@@ -39,6 +50,9 @@ class set_grad_enabled():
     def __enter__(self) -> None: ...
     def __exit__(self, *args) -> None: ...
 
+# TODO: One downside of doing it this way, is direct use of
+# torch.tensor.Tensor doesn't get type annotations.  Nobody
+# should really do that, so maybe this is not so bad.
 class Tensor:
     dtype: _dtype = ...
     shape: Size = ...
@@ -46,10 +60,20 @@ class Tensor:
     requires_grad: bool = ...
     grad: Optional['Tensor'] = ...
 
-    {tensor_methods}
+    ${tensor_method_hints}
 
-{functions}
+${function_hints}
 
-{legacy_classes}
+${legacy_class_hints}
 
-{dtype_classes}
+${dtype_class_hints}
+
+# Pure Python functions defined in torch/__init__.py
+
+def typename(obj) -> str: ...
+def is_tensor(obj) -> bool: ...
+def is_storage(obj) -> bool: ...
+def set_default_tensor_type(type) -> None: ...  # ick, what a bad legacy API
+def set_default_dtype(d : _dtype) -> None: ...
+def manager_path() -> str: ...
+def compiled_with_cxx11_abi() -> bool: ...

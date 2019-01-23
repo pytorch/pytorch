@@ -313,7 +313,7 @@ def do_gen_pyi():
         'set_flush_denormal': ['def set_flush_denormal(mode: bool) -> bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
-        'clamp': ["def clamp(self, min: builtins.float=-math.inf, max: builtins.float=math.inf,"
+        'clamp': ["def clamp(self, min: builtins.float=-inf, max: builtins.float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> builtins.int: ...'],
@@ -334,7 +334,7 @@ def do_gen_pyi():
             if isinstance(fn, types.BuiltinFunctionType):
                 if fname in fns:
                     unsorted_function_hints[fname] += generate_type_hints(fname, fns[fname])
-                elif fname not in type_hints and ("\n" in docstr or not fn.__qualname__.startswith("PyCapsule")):
+                elif fname not in unsorted_function_hints and ("\n" in docstr or not fn.__qualname__.startswith("PyCapsule")):
                     # if we have annotated them manually, assume that we can skip them here without worrying too much
                     # the second part (filter single line line docstring of PyCapsule functions)
                     # is intended to filter out pollution (e.g. merge_type_from_type_comment)
@@ -375,9 +375,9 @@ def do_gen_pyi():
                      format(type_to_python('IntList'), type_to_python('Scalar'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # clamp has no default values in the Declarations
-        'clamp': ["def clamp(self, min: builtins.float=-math.inf, max: builtins.float =math.inf,"
+        'clamp': ["def clamp(self, min: builtins.float=-inf, max: builtins.float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
-        'clamp_': ["def clamp_(self, min: builtins.float=-math.inf, max: builtins.float =math.inf) -> Tensor: ..."],
+        'clamp_': ["def clamp_(self, min: builtins.float=-inf, max: builtins.float=inf) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, builtins.float, builtins.int])"
                         " -> None: ...".format(INDICES)],
@@ -425,7 +425,7 @@ def do_gen_pyi():
             # put them directly in __init__.pyi.in
 
     tensor_method_hints = []
-    for fname, hints in sorted(unsorted_tensor_methods.items()):
+    for fname, hints in sorted(unsorted_tensor_method_hints.items()):
         hints = [re.sub(r"\bTensor\b", r"'Tensor'", h) for h in hints]
         if len(hints) > 1:
             tensor_method_hints += ['@overload\n' + h for h in hints]
@@ -440,6 +440,7 @@ def do_gen_pyi():
     for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
               'ShortStorage', 'CharStorage', 'ByteStorage'):
         legacy_class_hints.append('class {}(Storage): ...'.format(c))
+
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
               'ShortTensor', 'CharTensor', 'ByteTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))

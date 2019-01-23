@@ -20,6 +20,7 @@
 
 import itertools
 import sys
+import builtins
 
 
 PY2 = sys.version_info[0] == 2
@@ -48,7 +49,7 @@ else:
 if PY2:
     FileNotFoundError = IOError
 else:
-    FileNotFoundError = FileNotFoundError
+    FileNotFoundError = builtins.FileNotFoundError
 
 
 if PY2:
@@ -71,11 +72,10 @@ def with_metaclass(meta, *bases):
 
 # A portable way of referring to the generator version of map
 # in both Python 2 and Python 3.
-# TODO: Move this into an appropriate utility library.
 if hasattr(itertools, 'imap'):
-    imap = itertools.imap
+    imap = itertools.imap  # type: ignore
 else:
-    imap = map
+    imap = map  # type: ignore
 
 
 if PY3:

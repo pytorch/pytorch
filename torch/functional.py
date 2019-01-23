@@ -33,7 +33,6 @@ __all__ = [
 ]
 
 
-@annotate(ret=List[torch.Tensor], tensors=torch.Tensor)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
@@ -56,8 +55,6 @@ def broadcast_tensors(*tensors):
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
-@annotate(ret=List[torch.Tensor], tensor=torch.Tensor,
-          split_size_or_sections=Union[List[int], int], dim=int)
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks.
 
@@ -127,9 +124,6 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-@annotate(ret=torch.Tensor,
-          equation=str,
-          operands=torch.Tensor)
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
@@ -204,7 +198,6 @@ Examples::
     return torch._C._VariableFunctions.einsum(equation, operands)
 
 
-@annotate(ret=torch.Tensor, tensor=torch.Tensor)
 def isfinite(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
@@ -231,7 +224,6 @@ def isfinite(tensor):
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
-@annotate(ret=torch.Tensor, tensor=torch.Tensor)
 def isinf(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 
@@ -524,7 +516,6 @@ def argmin(input, dim=None, keepdim=False):
     return torch._argmin(input, dim, keepdim)
 
 
-@annotate(ret=torch.Tensor, a=torch.Tensor, b=torch.Tensor, dim=Union[int, List[int], Tuple[int, ...]])
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
