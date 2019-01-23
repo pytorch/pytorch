@@ -107,7 +107,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = os.path.join('test', 'generated_type_hints_smoketest.py')
+        fn = os.path.join(os.getcwd(), 'test', 'generated_type_hints_smoketest.py')
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
         try:
