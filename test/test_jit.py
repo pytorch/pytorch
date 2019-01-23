@@ -9562,6 +9562,13 @@ a")
         with self.assertRaisesRegex(RuntimeError, "could not find key"):
             missing_index({'item': 20, 'other_item': 120})
 
+        code = dedent('''
+            def literal():
+                return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        self.assertEqual({10: 1.2, 11: 1.3}, cu.literal())
+
     def test_view_write(self):
         def fn(x, y):
             l = []

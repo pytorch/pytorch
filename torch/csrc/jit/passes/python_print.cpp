@@ -474,7 +474,7 @@ struct PythonPrintPass {
       const char* end = "}") {
     stmt << begin;
     auto delimiter = "";
-    for (size_t i = 0; i < key_value_pairs.size(); ++i) {
+    for (size_t i = 0; i < key_value_pairs.size(); i += 2) {
       stmt << delimiter;
       auto key = key_value_pairs[i];
       auto value = key_value_pairs[i + 1];
