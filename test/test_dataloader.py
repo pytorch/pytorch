@@ -49,7 +49,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 11.0
+JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
 
 
 class TestDatasetRandomSplit(TestCase):
