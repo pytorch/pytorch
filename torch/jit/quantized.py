@@ -197,7 +197,7 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
         return _VF.quantized_gru_cell(
             input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
