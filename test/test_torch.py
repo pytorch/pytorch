@@ -25,7 +25,7 @@ from torch import multiprocessing as mp
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests
+    IS_SANDCASTLE, load_tests, brute_pdist
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1128,28 +1128,28 @@ class _TestTorchMixin(object):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @skipIfRocm
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_pdist_scipy(self):
-        from scipy.spatial.distance import pdist
+    def test_pdist_norm(self):
+        def test_pdist_single(shape, device, p, dtype, trans):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            if trans:
+                x.transpose_(-2, -1)
+            actual = torch.pdist(x, p=p)
+            expected = brute_pdist(x, p=p)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(torch.allclose(expected, actual))
+
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
-                        x = torch.randn(shape, device=device)
-                        if trans:
-                            x.transpose_(0, 1)
-                        actual = torch.pdist(x, p=p)
-                        # pdist doesn't handle 0 or inf norm properly
-                        if p == 0:
-                            expected = pdist(x.cpu(), 'hamming') * x.shape[1]
-                        elif p == float('inf'):
-                            expected = pdist(x.cpu(), lambda a, b: np.abs(a - b).max())
-                        else:
-                            expected = pdist(x.cpu(), 'minkowski', p=p)
-                        self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+                        for dtype in [torch.float32, torch.float64]:
+                            test_pdist_single(shape, device, p, dtype, trans)
+
+            # do a simplified comparison with big inputs, see:
+            # https://github.com/pytorch/pytorch/issues/15511
+            for dtype in [torch.float32, torch.float64]:
+                test_pdist_single((1000, 2), device, 2, dtype, False)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
