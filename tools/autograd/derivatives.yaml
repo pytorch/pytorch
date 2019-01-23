@@ -451,7 +451,7 @@
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 
-- name: logsumexp(Tensor self, int64_t dim, bool keepdim)
+- name: logsumexp(Tensor self, IntList dim, bool keepdim)
   self: logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)

@@ -196,10 +196,6 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
   }
 }
 
-Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.max(dim, keepdim));
-}
-
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_contiguous() && min.is_contiguous() && min_indices.is_contiguous()) {
@@ -237,10 +233,6 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
       return _min_out_cpu(min, min_indices, self, dim, keepdim);
     }
   }
-}
-
-Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.min(dim, keepdim));
 }
 
 // argmax and argmin
