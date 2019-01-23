@@ -605,7 +605,7 @@ struct CAFFE2_API TupleType : public Type {
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_, OptNameList)
+  TupleType(std::vector<TypePtr> elements_, OptNameList names)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_))
   , names(std::move(names)) {
