@@ -595,6 +595,9 @@ struct CAFFE2_API TupleType : public Type {
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
+  bool hasNames() const {
+    return names.has_value();
+  }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
