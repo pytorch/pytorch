@@ -568,7 +568,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # worker failures.
             failed_workers = []
             for worker_id, w in enumerate(self.workers):
-                if self.worker_activity[worker_id] and not w.is_alive:
+                if self.worker_activity[worker_id] and not w.is_alive():
                     failed_workers.append(w)
                     _utils.signal_handling._remove_worker_pid(id(self), w.pid)
                     self.index_queues[worker_id].close()

@@ -413,7 +413,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
         # 2 is the magical per-worker prefetch number...
         # FIXME: change this after the number becomes configurable.
         if is_iterable_dataset:
-            assert len(ds) > (error_it + 2 + 1)
+            assert len(ds) * num_workers > (error_it + 2 + 1)
         else:
             assert len(loader) > (error_it + 2 + 1) * num_workers
     else:
