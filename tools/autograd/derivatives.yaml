@@ -479,7 +479,7 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -791,7 +791,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
-  self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)
+  self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
@@ -1067,10 +1067,10 @@
   self: adaptive_avg_pool3d_backward(grad, self)
 
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
-  self: adaptive_max_pool2d_backward(grad, self, indices)
+  self: adaptive_max_pool2d_backward(grad, self, result1)
 
 - name: adaptive_max_pool3d(Tensor self, IntList output_size)
-  self: adaptive_max_pool3d_backward(grad, self, indices)
+  self: adaptive_max_pool3d_backward(grad, self, result1)
 
 - name: avg_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
@@ -1079,16 +1079,16 @@
   self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
 - name: fractional_max_pool2d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
-  self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
+  self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, result1)
 
 - name: fractional_max_pool3d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
   self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, indices)
 
 - name: max_pool2d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
-  self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+  self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
 
 - name: max_pool3d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
-  self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+  self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
 
 - name: max_unpool2d(Tensor self, Tensor indices, IntList output_size)
   self: max_unpool2d_backward(grad, self, indices, output_size)

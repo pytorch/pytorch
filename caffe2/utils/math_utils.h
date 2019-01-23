@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIP__)
 #define MATH_UTILS_DECL inline __host__ __device__
 #else
 #define MATH_UTILS_DECL inline
@@ -63,6 +63,9 @@ CAFFE2_API int GetIndexFromDims(const int n, const int* dims, const int* index);
 
 // Checks if the input permutation is an identity permutation;
 CAFFE2_API bool IsIdentityPermutation(const int n, const int* perm);
+
+CAFFE2_API bool
+CheckReduceDims(const int ndim, const int* X_dims, const int* Y_dims);
 
 CAFFE2_API bool IsRowwiseReduce(
     const int ndim,
@@ -128,6 +131,9 @@ CAFFE2_API void ComputeTransposeAxesForReduceOp(
     const int num_reduce_axes,
     const int* reduce_axes,
     int* transpose_axes);
+
+CAFFE2_API void
+ComputeTransposeAxesForReduceOp(const int ndim, const int* dims, int* axes);
 
 CAFFE2_API void ComputeTransposedStrides(
     const int ndim,
