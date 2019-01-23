@@ -11,66 +11,6 @@ except ImportError:
     from yaml import Loader
 
 
-# [temp translations]
-# We're currently incrementally moving from the custom func schema to the
-# JIT signature schema incrementally. This will reduce overall complexity
-# and increase compliance between these components. So for now we do simple
-# type translations to continue to emit the legacy func schema for further
-# processing by downstream tools. This will helps us avoid having to prematurely
-# change all downstream tools to detect these new types.
-def temp_type_translations(typ):
-    # Enables Tensor[] by translating to legacy TensorList. See [temp translations]
-    if typ == 'Tensor[]':
-        return 'TensorList'
-    # Enables int[] by translating to legacy IntList. See [temp translations]
-    if typ == 'int[]':
-        return 'IntList'
-    # Enables int by translating to legacy int64_t. See [temp translations]
-    if typ == 'int':
-        return 'int64_t'
-    # Enables float by translating to legacy double. See [temp translations]
-    if typ == 'float':
-        return 'double'
-    return typ
-
-
-def parse_default(s):
-    if s == 'True':
-        return True
-    elif s == 'False':
-        return False
-    elif s == 'true':
-        raise RuntimeError("Please use True and not true. "
-                    "See [temp translations] for details.")
-    elif s == 'false':
-        raise RuntimeError("Please use False and not false. "
-                    "See [temp translations] for details.")
-    elif s == 'nullptr':
-        return s
-    # Enables default argument [] by translating to legacy {}.
-    # See [temp translations]
-    elif s == '[]':
-        return '{}'
-    # Enables lists by translating to legacy {.*}.
-    # See [temp translations]
-    elif re.match(r'\[.*\]', s):
-        return "{" + s[1:-1] + "}"
-    elif s == 'None':
-        return 'c10::nullopt'
-    # The JIT signature schema uses Mean, but in particular C++ needs
-    # the legacy Reduction::Mean. So we'll continue emiting that until
-    # we change this at either a JIT schema or C++ level.
-    elif s == 'Mean':
-        return 'Reduction::Mean'
-    try:
-        return int(s)
-    except Exception:
-        try:
-            return float(s)
-        except Exception:
-            return s
-
-
 def sanitize_type(typ):
     if typ == 'Generator*':
         return 'Generator *'
@@ -82,6 +22,103 @@ def sanitize_types(types):
     if types[0] == '(' and types[-1] == ')':
         return [sanitize_type(x.strip()) for x in types[1:-1].split(',')]
     return [sanitize_type(types)]
+
+
+# [temp translations]
+# We're currently incrementally moving from the custom func schema to the
+# JIT signature schema incrementally. This will reduce overall complexity
+# and increase compliance between these components. So for now we do simple
+# type translations to continue to emit the legacy func schema for further
+# processing by downstream tools. This will helps us avoid having to prematurely
+# change all downstream tools to detect these new types.
+def type_argument_translations(arg):
+    type_and_name = [a.strip() for a in arg.rsplit(' ', 1)]
+    name = ''
+    if len(type_and_name) > 1:
+        name = type_and_name[1]
+    t = type_and_name[0]
+    name = name.split('=')
+    default = None
+    size = None  # Only applies to int[\d+] and Tensor[\d+] arguments
+    if len(name) > 1:
+        default = name[1]
+    name = name[0]
+
+    # This enables "Generator? x = None and translates to legacy
+    # "Generator* x = nullptr". See [temp translations].
+    if t == 'Generator?' and default == 'None':
+        t = 'Generator*'
+        default = 'nullptr'
+    # Enables Generator? by translating to legacy Generator*.
+    elif t == "Generator?":
+        t = 'Generator*'
+    # Enables Tensor[] by translating to legacy TensorList.
+    elif t == 'Tensor[]':
+        t = 'TensorList'
+    # Enables int[] by translating to legacy IntList.
+    elif t == 'int[]':
+        t = 'IntList'
+    # Enables int by translating to legacy int64_t.
+    elif t == 'int':
+        t = 'int64_t'
+    elif t == 'int?':
+        t = 'int64_t?'
+    # Enables float by translating to legacy double.
+    elif t == 'float':
+        t ='double'
+    # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
+    elif re.match(r'int\[(\d+)\]', t):
+        match = re.match(r'int\[(\d+)\]', t)
+        t = 'IntList'
+        size = int(match.group(1))
+
+    t = sanitize_types(t)
+    assert len(t) == 1
+    t = t[0]
+
+    if not default:
+        pass
+    # This enables Tensor? x=None and translates to legacy
+    # "Tensor? x={}". See [temp translations].
+    elif t.startswith('Tensor?') and default == 'None':
+        default = "{}"
+    elif default == 'True':
+        default = True
+    elif default == 'False':
+        default = False
+    elif default == 'true':
+        raise RuntimeError("Please use True and not true. "
+                           "See [temp translations] for details.")
+    elif default == 'false':
+        raise RuntimeError("Please use False and not false. "
+                           "See [temp translations] for details.")
+    # Enables default argument [] by translating to legacy {}.
+    # See [temp translations]
+    elif default == '[]':
+        default = '{}'
+    # Enables lists by translating to legacy {.*}.
+    # See [temp translations]
+    elif re.match(r'\[.*\]', default):
+        default = "{" + default[1:-1] + "}"
+    elif default == 'None':
+        default = 'c10::nullopt'
+    # The JIT signature schema uses Mean, but in particular C++ needs
+    # the legacy Reduction::Mean. So we'll continue emiting that until
+    # we change this at either a JIT schema or C++ level.
+    elif default == 'Mean':
+        default = 'Reduction::Mean'
+    else:
+        try:
+            default = int(default)
+        except ValueError:
+            try:
+                default = float(default)
+            except ValueError:
+                pass
+
+
+    t, annotation = get_annotation(t)
+    return t, name, default, size, annotation
 
 
 def get_annotation(t):
@@ -111,55 +148,38 @@ def parse_arguments(args, func_decl, declaration, func_return):
             kwarg_only = True
             continue
 
-        t, name = type_and_name
-        default = None
+        t, name, default, size, annotation = type_argument_translations(arg)
 
-        # Enables Generator? by translating to legacy Generator*. See [temp translations]
-        if t == 'Generator?':
-            t = 'Generator*'
-
-        if '=' in name:
-            ns = name.split('=', 1)
-            # This enables Tensor? x=None and translates to legacy
-            # "Tensor? x={}". See [temp translations].
-            if t.startswith('Tensor?') and ns[1] == 'None':
-                ns[1] = "[]"  # Will translate to {} via parse_default
-            # This enables "Generator? x = None and translates to legacy
-            # "Generator* x = nullptr". See [temp translations].
-            if t == 'Generator*' and ns[1] == 'None':
-                ns[1] = 'nullptr'
-            name, default = ns[0], parse_default(ns[1])
-
-        t, annotation = get_annotation(t)
-
-        typ = sanitize_types(t)
-        assert len(typ) == 1
-        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
-        # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
-        match = re.match(r'int\[(\d+)\]', argument_dict['type'])
-        if match:
-            argument_dict['type'] = 'IntList'
-            argument_dict['size'] = int(match.group(1))
-        argument_dict['type'] = temp_type_translations(argument_dict['type'])
+        argument_dict = {'type': t.rstrip('?'), 'name': name, 'is_nullable': t.endswith('?'), 'annotation': annotation}
+        if size:
+            argument_dict['size'] = size
         if default is not None:
             argument_dict['default'] = default
         if kwarg_only:
             argument_dict['kwarg_only'] = True
-
-        argument_dict['annotation'] = annotation
         arguments.append(argument_dict)
-    
+
     is_out_fn = False
     arguments_out = []
     arguments_other = []
     for argument in arguments:
-        if argument['type'] == "Tensor" and argument['annotation'] and re.match(r'^(.*!)$', argument['annotation']) and argument.get('kwarg_only'):
+        if argument['type'] == "Tensor" and \
+                argument['annotation'] and \
+                re.match(r'^(.*!)$', argument['annotation']) and \
+                argument.get('kwarg_only'):
             argument['output'] = True
             argument['kwarg_only'] = False
             arguments_out.append(argument)
             is_out_fn = True
         else:
             arguments_other.append(argument)
+
+    arguments = arguments_out + arguments_other
+
+    if is_out_fn:
+        declaration['name'] += "_out"
+
+    # Sanity checks
 
     # TODO: convention is that the ith-argument correspond to the i-th return, but it would
     # be better if we just named everything and matched by name.
@@ -181,9 +201,7 @@ def parse_arguments(args, func_decl, declaration, func_return):
     if not is_out_fn:
         assert len(arguments_out) == 0, "func {} is not marked as output yet contains output keyword arguments"
 
-    arguments = arguments_out + arguments_other
-
-    # Explicit check for void is a hack and should disappear after a more
+    # Explicit checking for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
     if inplace and len(func_return) > 0 and func_return[0]['type'] != "void":
         found_self = False
@@ -198,8 +216,6 @@ def parse_arguments(args, func_decl, declaration, func_return):
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
 
-    if is_out_fn:
-        declaration['name'] += "_out"
     return arguments
 
 
@@ -212,29 +228,24 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     multiple_args = len(return_decl.split(', ')) > 1
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
-        type_and_maybe_name = [a.strip() for a in arg.rsplit(' ', 1)]
+        t, name, default, size, annotation = type_argument_translations(arg)
         # See Note [field_name versus name]
         field_name = None
-        if len(type_and_maybe_name) == 1:
-            t = type_and_maybe_name[0]
-            t, annotation = get_annotation(t)
+        if name:
+            field_name = name
+
+        if not name:
             if t == "Tensor" and inplace:
-                assert annotation and annotation.endswith("!"), "Return Tensor of function \"{}\" flagged as inplace needs to be annotated as mutable".format(func_decl['func'])
+                assert annotation and annotation.endswith("!"), \
+                        "Return Tensor of function \"{}\" flagged as inplace needs to be annotated as mutable".format(func_decl['func'])
                 name = 'self'
             else:
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
-        else:
-            t, name = type_and_maybe_name
-            field_name = name
-            t, annotation = get_annotation(t)
 
-        typ = sanitize_type(t)
-        argument_dict = {'type': typ, 'name': name}
-        if field_name is not None:
-            argument_dict['field_name'] = field_name
+        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
         argument_dict['output'] = True
-        argument_dict['type'] = temp_type_translations(argument_dict['type'])
-        argument_dict['annotation'] = annotation
+        if field_name:
+            argument_dict['field_name'] = name
 
         arguments.append(argument_dict)
     return arguments
