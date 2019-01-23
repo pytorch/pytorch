@@ -17,8 +17,6 @@ import shutil
 import sys
 import common_utils as common
 
-from test_pytorch_common import skipIfCI
-
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -300,7 +298,6 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
 
-    @skipIfCI
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full_like(x, 2), x)
@@ -488,12 +485,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4)
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
 
-    @skipIfCI
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.zeros_like(x), x)
 
-    @skipIfCI
     def test_ones_like(self):
         x = torch.randn(6, 10, requires_grad=True)
         self.assertONNX(lambda x: torch.ones_like(x), x)
@@ -514,6 +509,10 @@ class TestOperators(TestCase):
     def test_reducemin(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.min(x), x)
+
+    def test_erf(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: x.erf(), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

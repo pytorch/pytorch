@@ -3,6 +3,10 @@
 
 #include <ATen/Config.h>
 
+#if AT_NNPACK_ENABLED()
+#include "nnpack.h"
+#endif
+
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
@@ -28,6 +32,7 @@ struct ConvParams {
   bool use_cudnn(const at::Tensor& input) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
+  bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -141,6 +146,22 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
          input.ndimension() == 4; // must be in NCHW format
+#endif
+  return false;
+}
+auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
+#if AT_NNPACK_ENABLED()
+  return at::_nnpack_available() &&
+         input.type().backend() == at::Backend::CPU &&
+         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         !is_strided() && // doesn't support strides
+         !is_dilated() && // or dilation
+         !transposed &&   // or transposed tensors
+         input.ndimension() == 4 // must be in NCHW format
+#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+         && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
+#endif
+     ;
 #endif
   return false;
 }
@@ -444,11 +465,18 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
-        /* CPU implementation has specialized MM kernels
-           for non-dilated case here */
-        return at::thnn_conv2d(
-            input, weight, kernel_size, bias,
-            stride, padding);
+        if (params.use_nnpack(input)) {
+#if AT_NNPACK_ENABLED()
+          return at::_nnpack_spatial_convolution(
+              input, weight, bias, padding);
+#endif
+        } else {
+          /* CPU implementation has specialized MM kernels
+             for non-dilated case here */
+          return at::thnn_conv2d(
+              input, weight, kernel_size, bias,
+              stride, padding);
+        }
       }
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
       return at::thnn_conv_dilated3d(

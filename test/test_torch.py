@@ -18,8 +18,8 @@ import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
-from torch._six import inf, nan, string_classes
-from itertools import product, combinations
+from torch._six import inf, nan, string_classes, istuple
+from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -377,6 +377,86 @@ class _TestTorchMixin(object):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
+
+    def test_logical_any(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
+
+            self.assertEqual(
+                torch.tensor(0, dtype=torch.uint8, device=device),
+                x.any())
+
+            self.assertEqual(
+                torch.zeros([1, 3, 400], dtype=torch.uint8, device=device),
+                x.any(0, keepdim=True))
+
+            self.assertEqual(
+                torch.zeros([2, 1, 400], dtype=torch.uint8, device=device),
+                x.any(1, keepdim=True))
+
+            self.assertEqual(
+                torch.zeros([2, 3, 1], dtype=torch.uint8, device=device),
+                x.any(2, keepdim=True))
+
+            # set the last element to 0
+            x[-1][-1][-1] = 1
+
+            self.assertEqual(
+                torch.tensor(1, dtype=torch.uint8, device=device),
+                x.any())
+
+            y = torch.zeros([1, 3, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(0, keepdim=True))
+
+            y = torch.zeros([2, 1, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(1, keepdim=True))
+
+            y = torch.zeros([2, 3, 1], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(2, keepdim=True))
+
+    def test_logical_all(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.ones([2, 3, 400], dtype=torch.uint8, device=device)
+
+            self.assertEqual(
+                torch.tensor(1, dtype=torch.uint8, device=device),
+                x.all())
+
+            self.assertEqual(
+                torch.ones([1, 3, 400], dtype=torch.uint8, device=device),
+                x.all(0, keepdim=True))
+
+            self.assertEqual(
+                torch.ones([2, 1, 400], dtype=torch.uint8, device=device),
+                x.all(1, keepdim=True))
+
+            self.assertEqual(
+                torch.ones([2, 3, 1], dtype=torch.uint8, device=device),
+                x.all(2, keepdim=True))
+
+            # set the last element to 0
+            x[-1][-1][-1] = 0
+
+            self.assertEqual(
+                torch.tensor(0, dtype=torch.uint8, device=device),
+                x.all())
+
+            y = torch.ones([1, 3, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(0, keepdim=True))
+
+            y = torch.ones([2, 1, 400], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(1, keepdim=True))
+
+            y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(2, keepdim=True))
 
     def test_allclose(self):
         x = torch.tensor([1.0, 2.0, 3.0])
@@ -982,7 +1062,7 @@ class _TestTorchMixin(object):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not isinstance(ans, tuple) else ans[0]
+                return ans if not istuple(ans) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)
@@ -1129,18 +1209,27 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
     def test_pdist_norm(self):
+        def test_pdist_single(shape, device, p, dtype, trans):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            if trans:
+                x.transpose_(-2, -1)
+            actual = torch.pdist(x, p=p)
+            expected = brute_pdist(x, p=p)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(torch.allclose(expected, actual))
+
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1), (2, 3, 4)]:
+            for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
-                        x = torch.randn(shape, device=device)
-                        if trans:
-                            x.transpose_(-2, -1)
-                        actual = torch.pdist(x, p=p)
-                        expected = brute_pdist(x, p=p)
-                        self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        for dtype in [torch.float32, torch.float64]:
+                            test_pdist_single(shape, device, p, dtype, trans)
+
+            # do a simplified comparison with big inputs, see:
+            # https://github.com/pytorch/pytorch/issues/15511
+            for dtype in [torch.float32, torch.float64]:
+                test_pdist_single((1000, 2), device, 2, dtype, False)
 
 
     def test_cdist_empty(self):
@@ -2093,6 +2182,14 @@ class _TestTorchMixin(object):
             self._test_dim_ops(
                 lambda t, d: t.std(d, unbiased=unbiased),
                 lambda n, d: n.std(d, ddof=1 if unbiased else 0),
+                use_integral=False)
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_var_dim(self):
+        for unbiased in [False, True]:
+            self._test_dim_ops(
+                lambda t, d: t.var(d, unbiased=unbiased),
+                lambda n, d: n.var(d, ddof=1 if unbiased else 0),
                 use_integral=False)
 
     def test_sum_out(self):
@@ -6857,6 +6954,32 @@ class _TestTorchMixin(object):
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
+    def test_namedtuple_return(self):
+        a = torch.randn(5, 5)
+
+        # test max
+        ret = a.max(dim=0)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
+        # test svd
+        ret = a.svd()
+        self.assertEqual(ret.U, ret[0])
+        self.assertEqual(ret.S, ret[1])
+        self.assertEqual(ret.V, ret[2])
+        ret1 = torch.svd(a, out=tuple(ret))
+        self.assertEqual(ret1.U, ret1[0])
+        self.assertEqual(ret1.S, ret1[1])
+        self.assertEqual(ret1.V, ret1[2])
+        self.assertEqual(ret1.U, ret[0])
+        self.assertEqual(ret1.S, ret[1])
+        self.assertEqual(ret1.V, ret[2])
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
@@ -9723,6 +9846,63 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(a.data.type(), a_copy.data.type())
         self.assertEqual(b.type(), b_copy.type())
         self.assertEqual(b.data.type(), b_copy.type())
+
+    def test_cartesian_prod(self):
+        a = torch.tensor([1])
+        b = torch.tensor([1, 2, 3])
+        c = torch.tensor([1, 2])
+        prod = torch.cartesian_prod(a, b, c)
+        expected = torch.tensor(list(product([a], b, c)))
+        self.assertEqual(expected, prod)
+
+        # test 0 size input
+        d = torch.empty(0, dtype=b.dtype)
+        prod = torch.cartesian_prod(a, b, c, d)
+        expected = torch.empty(0, 4, dtype=b.dtype)
+        self.assertEqual(expected, prod)
+
+        # test single input
+        prod = torch.cartesian_prod(b)
+        self.assertEqual(b, prod)
+
+    def test_combinations(self):
+        a = torch.tensor([1, 2, 3])
+
+        c = torch.combinations(a, r=1)
+        expected = torch.tensor(list(combinations(a, r=1)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=1, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=1)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a)
+        expected = torch.tensor(list(combinations(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=2)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=3)
+        expected = torch.tensor(list(combinations(a, r=3)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=4)
+        expected = torch.empty(0, 4, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=5)
+        expected = torch.empty(0, 5, dtype=a.dtype)
+        self.assertEqual(c, expected)
+
+        # test empty imput
+        a = torch.empty(0)
+        c1 = torch.combinations(a)
+        c2 = torch.combinations(a, with_replacement=True)
+        expected = torch.empty(0, 2, dtype=a.dtype)
+        self.assertEqual(c1, expected)
+        self.assertEqual(c2, expected)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
