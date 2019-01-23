@@ -61,7 +61,7 @@ def get_all_examples():
     This function grabs (hopefully all) examples from the torch documentation
     strings and puts them in one nonsensical module returned as a string.
     """
-    blacklist = {"load", "save", "_np"}
+    blacklist = {"_np"}
     allexamples = ""
 
     example_file_lines = [
@@ -69,6 +69,7 @@ def get_all_examples():
         "import torch.nn.functional as F",
         "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
         "import numpy  # type: ignore",
+        "import io  # type: ignore",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
