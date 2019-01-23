@@ -348,10 +348,32 @@ def synchronize():
     return torch._C._cuda_synchronize()
 
 
-def current_stream():
-    r"""Returns a currently selected :class:`Stream`."""
+def current_stream(device=None):
+    r"""Returns the currently selected :class:`Stream` for a given device.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            the currently selected :class:`Stream` for the current device, given
+            by :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
+    """
     _lazy_init()
-    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
+    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream(
+        _get_device_index(device, optional=True)))
+
+
+def default_stream(device=None):
+    r"""Returns the default :class:`Stream` for a given device.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            the default :class:`Stream` for the current device, given by
+            :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
+    """
+    _lazy_init()
+    return torch.cuda.Stream(_cdata=torch._C._cuda_getDefaultStream(
+        _get_device_index(device, optional=True)))
 
 
 def current_blas_handle():

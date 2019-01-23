@@ -4410,35 +4410,6 @@ a")
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
 
-    def test_script_unique_none(self):
-        def test_unique_inverse(a):
-            b, c = torch.unique(a, return_inverse=True)
-            return b + 1
-
-        def test_unique_inverse_nonedim(a):
-            b, c = torch.unique(a, return_inverse=True, dim=None)
-            return b + 1
-
-        def test_unique_noinverse(a):
-            b = torch.unique(a)
-            return b + 1
-
-        def test_unique_noinverse_nonedim(a):
-            b = torch.unique(a, dim=None)
-            return b + 1
-
-        a = torch.rand(5, 6, 7)
-
-        self.checkTrace(test_unique_inverse, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_inverse_nonedim, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_noinverse, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_noinverse_nonedim, [a], inputs_require_grads=False)
-        self.checkScript(test_unique_inverse, [a])
-        self.checkScript(test_unique_inverse_nonedim, [a])
-        # TODO: scripting unique when return_inverse = False is not supported yet
-        # self.checkScript(test_unique_noinverse, [a])
-        # self.checkScript(test_unique_noinverse_nonedim, [a])
-
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
