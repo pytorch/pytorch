@@ -8,6 +8,8 @@
 
 #include <caffe2/core/common.h>
 
+#include <c10/util/Optional.h>
+
 #include <memory>
 #include <iostream>
 #include <type_traits>
@@ -541,10 +543,11 @@ private:
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
+using OptNameList = c10::optional<std::vector<std::string>>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types) {
-    return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
+  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(names))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
@@ -571,6 +574,7 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
+      if (names) ss << names.value()[i] << "=";
       ss << elements()[i]->str();
     }
     ss << ")";
@@ -582,6 +586,7 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
+      if (names) ss << names.value()[i] << "=";
       ss << elements()[i]->python_str();
     }
     ss << "]";
@@ -600,9 +605,10 @@ struct CAFFE2_API TupleType : public Type {
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_)
+  TupleType(std::vector<TypePtr> elements_, OptNameList)
   : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_)) {
+  , elements_(std::move(elements_))
+  , names(std::move(names)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
@@ -624,6 +630,7 @@ private:
   }
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
+  OptNameList names;
 };
 
 struct NumberType;
