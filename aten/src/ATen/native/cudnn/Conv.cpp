@@ -95,14 +95,23 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <unordered_map>
 
 // Note [chooseAlgorithm doesn't respect mathType]
-// You might be wondering, why not call cudnnSetConvolutionMathType in the 
-// convolution descriptor (cdesc) setter, before calling chooseAlgorithm...
+// You might be wondering, why are we calling cudnnSetConvolutionMathType after
+// calling chooseAlgorithm...
 // Turns out, the mathType returned by the chooseAlgorithm can be different 
 // from what we set in the descriptor and hence, we have to explicitly update it 
 // after the chooseAlgorithm has found the best pair of algorithm+mathType. 
 // Otherwise, even though we'll be calling cudnnConvolutionForward with the 
 // fastest algorithm, under the hood, cudnn will run it with the slower kernel 
 // since it sees fastest algorithm combination with a sub optimal mathType.
+
+// Note [cudnnSetConvolutionMathType cannot be called in descriptor]
+// When cudnnSetConvolutionMathType is called before cudnnGetConvolutionForwardAlgorithm_v7, 
+// cudnnGet finds an algorithm based on the mathType set by cudnnSetConvolutionMathType.
+// That is, if we call cudnnSetConvolutionMathType in the setter of the descriptor 
+// (to have some default values, e.g. CUDNN_TENSOR_OP when fp16), cudnnGet*_v7 returns 
+// algo1 with CUDNN_TENSOR_OP math type, instead of not caring about what was set by 
+// cudnnSetConvolutionMathType before it (and returning algo1 with CUDNN_DEFAULT_MATH 
+// which is performant). A bug has been filed internally at NVIDIA.
 
 namespace at { namespace native {
 
@@ -669,6 +678,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
 
   if (args.params.deterministic && !benchmark) {
     algoPerf->algo = search::DEFAULT_ALGO;
+    // Note [cudnnSetConvolutionMathType cannot be called in descriptor]
     if (dataType == CUDNN_DATA_HALF) {
       algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
@@ -704,6 +714,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
       *algoPerf = perfResults;
   } else {
       algoPerf->algo = search::DEFAULT_ALGO;
+      // Note [cudnnSetConvolutionMathType cannot be called in descriptor]
       if (dataType == CUDNN_DATA_HALF) {
         algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
       } else {
@@ -731,6 +742,7 @@ Workspace chooseAlgorithm(
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
     algoPerf->algo = search::DEFAULT_ALGO;
+    // Note [cudnnSetConvolutionMathType cannot be called in descriptor]
     if (dataType == CUDNN_DATA_HALF) {
       algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
