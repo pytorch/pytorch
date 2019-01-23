@@ -556,13 +556,22 @@ struct CAFFE2_API TupleType : public Type {
   bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const TypePtr a, const TypePtr b) {
       return *a == *b;
-    });
+    }) && compare_names(rhs);
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if (Type::isSubtypeOf(rhs))
+      return true;
+    if(rhs->kind() != kind())
+      return false;
+    // unnamed tuple is not a subtype of nametuple
+    if (!hasNames() && rhs->cast<TupleType>()->hasNames())
+      return false;
+    // namedtuple may be a subtype of unnamed tuple
+    bool names_match = !rhs->cast<TupleType>()->hasNames() || compare_names(*rhs);
     // co-variant rules for tuples
-    return compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
-    }) || Type::isSubtypeOf(rhs);
+    });
   }
   bool requires_grad() const override {
     return std::any_of(elements_.begin(), elements_.end(),
@@ -632,6 +641,23 @@ private:
     }
     return true;
   }
+
+  bool compare_names(const Type& rhs) const {
+    if(rhs.kind() != kind())
+      return false;
+    if (!hasNames() && !rhs.cast<TupleType>()->hasNames())
+      return true;
+    const auto & l_names = names();
+    const auto & r_names = rhs.cast<TupleType>()->names();
+    if(l_names.size() != r_names.size())
+      return false;
+    for(size_t i = 0; i < l_names.size(); ++i) {
+      if(l_names[i] != r_names[i])
+        return false;
+    }
+    return true;
+  }
+
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
   OptNameList names_;
