@@ -436,6 +436,10 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+if (MSVC AND NOT TORCH_STATIC)
+  install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
@@ -598,13 +602,16 @@ if (BUILD_PYTHON)
 
   set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-  set(TORCH_PYTHON_LINK_FLAGS)
+  set(TORCH_PYTHON_LINK_FLAGS "")
 
   if (MSVC)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    if (NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+    endif()
   elseif (APPLE)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
   else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -617,6 +624,7 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
@@ -628,7 +636,6 @@ if (BUILD_PYTHON)
     if(MSVC)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
       list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES "${NVTOOLEXT_HOME}/include")
-      list(APPEND TORCH_PYTHON_LINK_FLAGS " /FORCE:UNRESOLVED")
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
@@ -663,6 +670,7 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
@@ -711,8 +719,8 @@ if (BUILD_PYTHON)
 
   target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
-  if (TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if (NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
 
   install(TARGETS torch_python

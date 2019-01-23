@@ -69,6 +69,8 @@ class RNNBase(Module):
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
                 w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
                 b_ih = Parameter(torch.Tensor(gate_size))
+                # Second bias vector included for CuDNN compatibility. Only one
+                # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
                 layer_params = (w_ih, w_hh, b_ih, b_hh)
 
@@ -308,6 +310,18 @@ class RNN(RNNBase):
           Like *output*, the layers can be separated using
           ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
+    Shape:
+        - Input1: :math:`(L, N, H_{in})` tensor containing input features where
+          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.
+        - Input2: :math:`(S, N, H_{out})` tensor
+          containing the initial hidden state for each element in the batch.
+          :math:`H_{out}=\text{hidden\_size}`
+          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
             of shape `(hidden_size * input_size)` for `k = 0`. Otherwise, the shape is
@@ -525,6 +539,18 @@ class GRU(RNNBase):
           Like *output*, the layers can be separated using
           ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
+    Shape:
+        - Input1: :math:`(L, N, H_{in})` tensor containing input features where
+          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.
+        - Input2: :math:`(S, N, H_{out})` tensor
+          containing the initial hidden state for each element in the batch.
+          :math:`H_{out}=\text{hidden\_size}`
+          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
             (W_ir|W_iz|W_in), of shape `(3*hidden_size x input_size)`
@@ -630,6 +656,15 @@ class RNNCell(RNNCellBase):
 
     Outputs: h'
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
+          for each element in the batch
+
+    Shape:
+        - Input1: :math:`(N, H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`
+        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
+          state for each element in the batch where :math:`H_{out}` = `hidden_size`
+          Defaults to zero if not provided.
+        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
           for each element in the batch
 
     Attributes:
@@ -800,6 +835,15 @@ class GRUCell(RNNCellBase):
 
     Outputs: h'
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
+          for each element in the batch
+
+    Shape:
+        - Input1: :math:`(N, H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`
+        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
+          state for each element in the batch where :math:`H_{out}` = `hidden_size`
+          Defaults to zero if not provided.
+        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
           for each element in the batch
 
     Attributes:

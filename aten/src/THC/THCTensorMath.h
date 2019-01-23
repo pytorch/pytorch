@@ -49,8 +49,4 @@
 #include <THC/generic/THCTensorTopK.h>
 #include <THC/THCGenerateAllTypes.h>
 
-THC_API int THCudaByteTensor_logicalAnyAll(THCState *state, THCudaByteTensor *self);
-
-THC_API void THCudaByteTensor_logicalAny(THCState *state, THCudaByteTensor *self, THCudaByteTensor *src, int dimension, int keepdim);
-
 #endif

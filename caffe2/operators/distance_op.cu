@@ -316,7 +316,7 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   // Auxiliary arrays, one allocation of memory
-  aux_.Resize(2 * N);
+  ReinitializeTensor(&aux_, {2 * N}, at::dtype<float>().device(CUDA));
   float* aux_data = aux_.mutable_data<float>();
   float* x2 = aux_data;
   float* y2 = aux_data + N;
@@ -371,7 +371,7 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   auto* dY_data = dY->template mutable_data<float>();
 
   // one memory allocation, a few arrays
-  aux_.Resize(6 * N);
+  ReinitializeTensor(&aux_, {6 * N}, at::dtype<float>().device(CUDA));
   float* aux_data = aux_.mutable_data<float>();
   float* xn = aux_data;
   float* yn = aux_data + N;

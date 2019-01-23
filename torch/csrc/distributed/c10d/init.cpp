@@ -138,7 +138,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, bool>());
+      .def(py::init<const std::string&, int, int, bool>());
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, ::c10d::Store&>());
