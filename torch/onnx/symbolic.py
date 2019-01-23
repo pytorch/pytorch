@@ -1497,8 +1497,16 @@ def flatten(g, input, start_dim, end_dim) :
     if end_dim < 0 :
         end_dim = len(input_dims) + end_dim
 
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1 and end_dim == len(input_dims)-1 :
+        return g.op("Flatten", input, axis_i=start_dim)
+    
+    if start_dim == 0 and end_dim == len(input_dims)-2 :
+        return g.op("Flatten", input, axis_i=end_dim+1)
+
+    # use Reshape for cases where the output shape is not 2D 
     output_dims = []
-    for i in range(0,len(input_dims)):
+    for i in range(0, len(input_dims)):
         if start_dim < i and end_dim >= i:
             output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
         else :
