@@ -40,7 +40,7 @@ Operation createPythonOperation(const Node* op_) {
       num_inputs++;
   }
 
-  JIT_ASSERT(op->outputs().size() == 1);
+  AT_ASSERT(op->outputs().size() == 1);
 
   return [=](Stack& stack) {
     AutoGIL gil;

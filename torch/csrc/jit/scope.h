@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/macros/Macros.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/interned_strings.h>
 
 #include <memory>

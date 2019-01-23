@@ -57,7 +57,7 @@ struct NamedValue {
   }
 
   const std::string& name() const {
-    JIT_ASSERT(name_);
+    AT_ASSERT(name_);
     return *name_;
   }
 

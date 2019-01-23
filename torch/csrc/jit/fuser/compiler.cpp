@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -174,7 +174,7 @@ int64_t registerFusion(const Node* fusion_group) {
   // be a valid spec (must have had upfrontCompilation run on it).
   const auto key = store(graph);
   const auto maybe_retrieved_spec = retrieve(key);
-  JIT_ASSERT(maybe_retrieved_spec);
+  AT_ASSERT(maybe_retrieved_spec);
   upfrontCompilation(**maybe_retrieved_spec);
 
   return key;

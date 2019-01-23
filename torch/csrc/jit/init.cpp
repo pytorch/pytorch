@@ -145,7 +145,7 @@ void initJITBindings(PyObject* module) {
                 with_grad,
                 evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
             auto graph_inputs = graph->inputs();
-            JIT_ASSERT(spec.size() == graph_inputs.size());
+            AT_ASSERT(spec.size() == graph_inputs.size());
             for (size_t i = 0; i < graph_inputs.size(); ++i) {
               graph_inputs[i]->setType(spec.at(i));
             }

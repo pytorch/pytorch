@@ -56,7 +56,7 @@ class DeadCodeEliminator {
       return;
     }
 
-    JIT_ASSERT(node->owningBlock()->return_node() == node);
+    AT_ASSERT(node->owningBlock()->return_node() == node);
     auto outerNode = node->owningBlock()->owningNode();
     if (outerNode == nullptr || outerNode->kind() == prim::Reverse) {
       // If there's no outer node, we're looking at the graph's top-level
@@ -82,7 +82,7 @@ class DeadCodeEliminator {
       // the loop body.
       liveValues_.insert(loop.nextCond());
     } else {
-      JIT_ASSERT(outerNode->outputs().size() == node->inputs().size());
+      AT_ASSERT(outerNode->outputs().size() == node->inputs().size());
       for (size_t i = 0; i < outerNode->outputs().size(); i++) {
         auto innerOutput = node->inputs()[i];
         auto outerOutput = outerNode->outputs()[i];

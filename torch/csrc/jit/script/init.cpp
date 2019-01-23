@@ -139,7 +139,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for (auto& i : matched_schema->inputs)
       new_node->addInput(i);
 
-    JIT_ASSERT(matched_schema->return_types.size() == 1);
+    AT_ASSERT(matched_schema->return_types.size() == 1);
     Value* output =
         new_node->addOutput()->setType(matched_schema->return_types.at(0));
     return std::make_shared<SimpleValue>(output);

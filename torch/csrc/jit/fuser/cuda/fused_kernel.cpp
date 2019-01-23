@@ -48,7 +48,7 @@ static void getMajorMinor(
   TORCH_NVRTC_CHECK(nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
-  JIT_ASSERT(nvrtc_major >= 6);
+  AT_ASSERT(nvrtc_major >= 6);
 
   // Major and minor is determined by device properties and
   // possibly "downcompiled" to a lower (compatible) compute architecture

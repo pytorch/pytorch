@@ -1,7 +1,7 @@
 #pragma once
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
@@ -57,7 +57,7 @@ struct Method {
         optimize(optimize),
         member_inputs(std::move(initial_members)),
         method_creator(std::move(method_creator)) {
-    JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
+    AT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
     for (at::Tensor* member : member_inputs) {
       member_input_index[member] = i++;
@@ -151,7 +151,7 @@ struct Method {
           ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(retval);
     }
-    JIT_ASSERT(retval->inputs().size() == inputs.size());
+    AT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i = 0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
@@ -162,10 +162,10 @@ struct Method {
     at::ArrayRef<Value*> output_values = retval->outputs();
     // patch this to still work if we are returning a tuple of multiple values
     if (output_values.at(0)->type()->kind() == TupleType::Kind) {
-      JIT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
+      AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
       output_values = output_values.at(0)->node()->inputs();
     }
-    JIT_ASSERT(output_values.size() == outputs.size());
+    AT_ASSERT(output_values.size() == outputs.size());
     for (size_t i = 0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
@@ -193,7 +193,7 @@ struct Method {
   }
 
   std::string pretty_print_schema() const {
-    JIT_ASSERT(schema);
+    AT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
     return ss.str();
@@ -405,7 +405,7 @@ struct Module {
       const std::string& name,
       std::shared_ptr<Graph> graph,
       std::vector<at::Tensor*> member_inputs) {
-    JIT_ASSERT(graph);
+    AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
         name,

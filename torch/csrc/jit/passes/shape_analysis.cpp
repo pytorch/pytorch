@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -148,12 +148,12 @@ class ShapePropagator {
       ArrayRef<Value*> lhs,
       ArrayRef<Value*> rhs,
       ArrayRef<Value*> outputs) {
-    JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+    AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
     bool changed = false;
     for (size_t i = 0; i < lhs.size(); ++i) {
       auto old_output_type = outputs[i]->type();
       auto new_type = unifyTypes(lhs[i]->type(), rhs[i]->type());
-      JIT_ASSERT(new_type);
+      AT_ASSERT(new_type);
       outputs[i]->setType(*new_type);
       if (*old_output_type != *outputs[i]->type())
         changed = true;
@@ -269,7 +269,7 @@ class ShapePropagator {
     // preceded by schema checking.
     op(stack);
 
-    JIT_ASSERT(stack.size() == node->outputs().size());
+    AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
@@ -408,7 +408,7 @@ class ShapePropagator {
       }
       case prim::TupleUnpack: {
         auto tuple_type = node->input()->type()->cast<TupleType>();
-        JIT_ASSERT(
+        AT_ASSERT(
             tuple_type &&
             tuple_type->elements().size() == node->outputs().size());
         auto elems = tuple_type->elements();
@@ -470,7 +470,7 @@ class ShapePropagator {
   }
 
   static c10::optional<size_t> determineListSize(Value* list) {
-    JIT_ASSERT(list->type()->cast<ListType>());
+    AT_ASSERT(list->type()->cast<ListType>());
     if (auto shape = constant_as<std::vector<int64_t>>(list)) {
       return shape->size();
     }
@@ -500,7 +500,7 @@ class ShapePropagator {
       if (tensor_types.size() == 1) {
         return tensor_types[0];
       }
-      JIT_ASSERT(!tensor_types.empty());
+      AT_ASSERT(!tensor_types.empty());
       auto any_type = tensor_types[arg_for_type];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
@@ -1108,9 +1108,9 @@ class ShapePropagator {
           return false;
         } else {
           auto outputs = node->outputs();
-          JIT_ASSERT(types.size() == outputs.size());
+          AT_ASSERT(types.size() == outputs.size());
           for (size_t i = 0; i < types.size(); ++i) {
-            JIT_ASSERT(outputs[i]->type()->isSubtypeOf(DynamicType::get()));
+            AT_ASSERT(outputs[i]->type()->isSubtypeOf(DynamicType::get()));
             outputs[i]->setType(types[i]);
           }
           return true;

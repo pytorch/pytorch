@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/interned_strings.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>

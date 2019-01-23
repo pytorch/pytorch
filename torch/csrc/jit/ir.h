@@ -129,7 +129,7 @@ struct Value {
     setType(CompleteTensorType::create(output));
   }
   const TypePtr& type() const {
-    JIT_ASSERT(type_ != nullptr);
+    AT_ASSERT(type_ != nullptr);
     return type_;
   }
   bool requires_grad() const {
@@ -322,19 +322,19 @@ struct Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    JIT_ASSERT(inputs_.size() == 1);
+    AT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   Value* output() {
-    JIT_ASSERT(outputs_.size() == 1);
+    AT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* output() const {
-    JIT_ASSERT(outputs_.size() == 1);
+    AT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* input() const {
-    JIT_ASSERT(inputs_.size() == 1);
+    AT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
@@ -550,7 +550,7 @@ struct Node {
   }
   template <typename T>
   T* expect() {
-    JIT_ASSERTM(
+    AT_CHECK(
         T::Kind == kind(),
         "expected a ",
         T::Kind.toDisplayString(),
@@ -588,21 +588,21 @@ struct Node {
     }
   }
   bool hasAttribute(Symbol name) const {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     return findAttr(name, false) != values_.end();
   }
   bool hasAttributeS(const std::string& name) const {
     return hasAttribute(Symbol::attr(name));
   }
   AttributeKind kindOf(Symbol name) const {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     return (*findAttr(name, true))->kind();
   }
   AttributeKind kindOfS(const std::string& name) const {
     return kindOf(Symbol::attr(name));
   }
   Node* removeAttribute(Symbol name) {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     values_.erase(findAttr(name, true));
     return this;
   }
@@ -657,7 +657,7 @@ struct Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    JIT_ASSERT(!v.defined() || !v.is_variable());
+    AT_ASSERT(!v.defined() || !v.is_variable());
     return setAttr<TensorAttr>(name, std::forward<TensorAttr::ConstructorType>(v));
   }
   const TensorAttr::ValueType& t(Symbol name) const {
@@ -666,7 +666,7 @@ struct Node {
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
     for (auto& t : v) {
-      JIT_ASSERT(!t.defined() || !t.is_variable());
+      AT_ASSERT(!t.defined() || !t.is_variable());
     }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
@@ -681,7 +681,7 @@ struct Node {
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     auto it = findAttr(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     if (it == values_.end()) {
@@ -693,7 +693,7 @@ struct Node {
   }
   template <typename T>
   typename T::ValueType& getAttr(Symbol name) const {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
@@ -707,25 +707,25 @@ struct Node {
   // a big pile of messages.
   std::vector<AVPtr> values_;
   std::vector<AVPtr>::iterator findAttr(Symbol name, bool required) {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
     if (required && it == values_.end()) {
       throw AttributeError(name, false);
     }
-    JIT_ASSERT(!required || it != values_.end());
+    AT_ASSERT(!required || it != values_.end());
     return it;
   }
   std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required) const {
-    JIT_ASSERT(name.is_attr());
+    AT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
     if (required && it == values_.end()) {
       throw AttributeError(name, false);
     }
-    JIT_ASSERT(!required || it != values_.end());
+    AT_ASSERT(!required || it != values_.end());
     return it;
   }
 
@@ -745,7 +745,7 @@ struct Node {
 
   bool inBlockList() const {
     if (next() == nullptr) {
-      JIT_ASSERT(prev() == nullptr);
+      AT_ASSERT(prev() == nullptr);
     }
     return next() != nullptr;
   }
@@ -833,13 +833,13 @@ struct Block {
     output_->removeInput(i);
   }
   Node* appendNode(Node* n) {
-    JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
     return n;
   }
 
   Node* prependNode(Node* n) {
-    JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertAfter(output_);
     return n;
   }
@@ -1050,21 +1050,21 @@ struct Graph {
   // initialized to insert at the end of the top level block
   // can be changed with setInsertPoint()
   Node* insertNode(Node* n) {
-    JIT_ASSERT(
+    AT_ASSERT(
         insert_before_->inBlockList() &&
         "insert point node is no longer in a block list");
     return n->insertBefore(insert_before_);
   }
   // set where nodes are inserted to append to the end of this block
   void setInsertPoint(Block* b) {
-    JIT_ASSERT(b->owningGraph() == this);
+    AT_ASSERT(b->owningGraph() == this);
     insert_before_ = b->return_node();
   }
   // set where nodes are inserted to insert _before_ this node
   // for implementation simplicity we only support inserting before a node for
   // now
   void setInsertPoint(Node* n) {
-    JIT_ASSERT(n->owningGraph() == this && n->inBlockList());
+    AT_ASSERT(n->owningGraph() == this && n->inBlockList());
     insert_before_ = n;
   }
   Node* insertPoint() {
@@ -1133,7 +1133,7 @@ inline Value::Value(Node* node_, size_t offset_)
 }
 
 inline Value* Value::setType(TypePtr type) {
-  JIT_ASSERT(type);
+  AT_ASSERT(type);
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->schema_ = nullptr;
