@@ -3,7 +3,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>

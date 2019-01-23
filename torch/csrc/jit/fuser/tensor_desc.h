@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <algorithm>
@@ -41,7 +41,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
 
-  TensorDesc(const CompleteTensorTypePtr& type)
+  TensorDesc(const c10::CompleteTensorTypePtr& type)
       : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression

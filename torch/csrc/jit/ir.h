@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
-#include <torch/csrc/jit/type.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
@@ -17,6 +16,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -58,6 +58,22 @@ using ::c10::ivalue::IntList;
 using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;
+
+#define C10_USING(T) using ::c10::T;
+C10_FORALL_TYPES(C10_USING)
+#undef C10_USING
+
+#define C10_USING(T) using ::c10::T##Ptr;
+C10_FORALL_TYPES(C10_USING)
+#undef C10_USING
+
+using ::c10::Type;
+using ::c10::TypeEnv;
+using ::c10::TypePtr;
+
+using ::c10::getTypePtr;
+using ::c10::MatchTypeReturn;
+using ::c10::TypeKind;
 
 namespace prim {
 using namespace ::c10::prim;

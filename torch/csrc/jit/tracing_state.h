@@ -6,7 +6,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -93,7 +93,7 @@ struct ArgumentStash {
       const std::string& arg_name,
       size_t idx,
       const Variable& var,
-      const TypePtr& type = nullptr);
+      const c10::TypePtr& type = nullptr);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;

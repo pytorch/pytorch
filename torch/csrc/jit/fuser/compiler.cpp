@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/codegen.h>
@@ -10,7 +11,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/type.h>
 #include "torch/csrc/jit/fuser/interface.h"
 
 #include <atomic>
