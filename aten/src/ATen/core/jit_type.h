@@ -574,7 +574,6 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      if (hasNames()) ss << names()[i] << "=";
       ss << elements()[i]->str();
     }
     ss << ")";
@@ -586,7 +585,6 @@ struct CAFFE2_API TupleType : public Type {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      if (hasNames()) ss << names()[i] << "=";
       ss << elements()[i]->python_str();
     }
     ss << "]";
