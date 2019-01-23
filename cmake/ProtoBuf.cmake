@@ -63,6 +63,9 @@ macro(custom_protobuf_find)
   if (NOT TARGET protobuf::libprotobuf)
     add_library(protobuf::libprotobuf ALIAS libprotobuf)
     add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
+    # There is link error when cross compiling protoc on mobile:
+    # https://github.com/protocolbuffers/protobuf/issues/2719
+    # And protoc is very unlikely needed for mobile builds.
     if (NOT (ANDROID OR IOS))
       add_executable(protobuf::protoc ALIAS protoc)
     endif()
@@ -80,6 +83,9 @@ if (ANDROID OR IOS)
         "change in the future, and you will need to specify "
         "-DBUILD_CUSTOM_PROTOBUF=ON explicitly.")
   endif()
+  # There is link error when cross compiling protoc on mobile:
+  # https://github.com/protocolbuffers/protobuf/issues/2719
+  # And protoc is very unlikely needed for mobile builds.
   set(__caffe2_protobuf_BUILD_PROTOC_BINARIES ${protobuf_BUILD_PROTOC_BINARIES})
   set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
   custom_protobuf_find()
