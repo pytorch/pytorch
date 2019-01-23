@@ -150,7 +150,6 @@ __device__ int binarySearchForMultinomial(T* cumdist,
     start = size - 1;
   }
 
-  T curVal = cumdist[start];
   while(start >= 1 && THCNumerics<T>::eq(dist[start], 0)) start--;
 
   return start;

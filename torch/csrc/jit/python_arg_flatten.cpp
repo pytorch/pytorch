@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/utils/six.h>
 
 #include <torch/csrc/autograd/grad_mode.h>
 
@@ -31,7 +32,7 @@ py::object cast_handle_sequence(std::vector<py::handle> objs) {
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
   auto& structure = args.desc.structure;
-  if (PyTuple_Check(obj)) {
+  if (six::isTuple(obj)) {
     structure.push_back(D::TupleOpen);
     for (auto item : py::reinterpret_borrow<py::tuple>(obj))
       flatten_rec(item.ptr(), args);

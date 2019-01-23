@@ -92,10 +92,10 @@ private:
   c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
 
  public:
-  KernelRegistrationBuilder()
+  constexpr KernelRegistrationBuilder()
       : KernelRegistrationBuilder(c10::nullopt, c10::nullopt) {}
 
-  KernelRegistrationBuilder(
+  constexpr KernelRegistrationBuilder(
       c10::optional<KernelFunction*> kernel,
       c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key)
       : kernel_(std::move(kernel)), dispatch_key_(std::move(dispatch_key)) {}
@@ -117,7 +117,7 @@ private:
    * @return "this" for method chaining
    */
   template<KernelFunction* kernel_func>
-  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
     static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Tried to define kernel twice in same op registration");
     return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT>(kernel_func, std::move(dispatch_key_));
   }
@@ -128,7 +128,7 @@ private:
    * @return "this" for method chaining
    */
   template<typename Schema::signature::func_type* kernel_func>
-  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
     return std::move(*this).template kernel<&Schema::signature::template wrap_kernel<kernel_func>>();
   }
 
@@ -137,7 +137,7 @@ private:
    * @param dispatch_key dispatch key to register the function to
    * @return "this" for method chaining
    */
-  KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
+  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
     static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
     return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(kernel_), std::move(dispatch_key));
   }
