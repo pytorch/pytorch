@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/dispatch/OpSchema.h>
 #include <ATen/core/dispatch/DeviceId.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
@@ -37,7 +38,7 @@ struct GivenTensorFill final {
    static constexpr size_t num_outputs() {return 1;}
 
    static c10::DeviceTypeId dispatch_key(
-      c10::ArrayRef<c10::IValue> args) {
+      const Stack* stack) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -66,7 +67,7 @@ struct ConstantFill final {
        "value"}};
 
   static c10::DeviceTypeId dispatch_key(
-      c10::ArrayRef<c10::IValue> args) {
+      const Stack* stack) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -95,7 +96,7 @@ struct UniformFill final {
        "max"}};
 
   static c10::DeviceTypeId dispatch_key(
-      c10::ArrayRef<c10::IValue> args) {
+      const Stack* stack) {
     return c10::DeviceTypeId::CPU;
   }
 };
