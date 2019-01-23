@@ -86,7 +86,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_TORCH_MOBILE "Build libtorch for mobile" ON)
+option(BUILD_TORCH_MOBILE "Build libtorch for mobile" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
