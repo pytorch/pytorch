@@ -25,14 +25,14 @@ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
-static inline int64_t last_pow2(int64_t n) {
+static inline int last_pow2(int n) {
   n |= (n >>  1);
   n |= (n >>  2);
   n |= (n >>  4);
   n |= (n >>  8);
   n |= (n >> 16);
   n |= (n >> 32);
-  return n - (n >> 1);
+  return std::max(1, n - (n >> 1));
 }
 
 struct ReduceConfig {
@@ -552,6 +552,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
   }
+
   config.set_block_dimension(dim0, dim1);
 
   int block_width = config.block_width;
