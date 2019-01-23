@@ -72,7 +72,7 @@ tensor filled with values from a unit normal distribution by writing:
 .. code-block:: cpp
 
   torch::Tensor tensor = torch::randn({3, 4, 5});
-  assert(tensor.sizes() == torch::IntList{3, 4, 5})
+  assert(tensor.sizes() == torch::IntList{3, 4, 5});
 
 Notice how we use ``tensor.sizes()`` to get back an ``IntList`` containing the
 sizes we passed to the tensor. You can also write ``tensor.size(i)`` to access
@@ -162,7 +162,7 @@ device 1:
     torch::TensorOptions()
       .dtype(torch::kFloat32)
       .layout(torch::kStrided)
-      .device({torch::kCUDA, 1})
+      .device(torch::kCUDA, 1)
       .requires_grad(true);
 
 
@@ -173,15 +173,13 @@ properties:
 
 .. code-block:: cpp
 
-  torch::Tensor tensor = torch::full(/*value=*/123, {3, 4}, options);
+  torch::Tensor tensor = torch::full({3, 4}, /*value=*/123, options);
 
   assert(tensor.dtype() == torch::kFloat32);
   assert(tensor.layout() == torch::kStrided);
   assert(tensor.device().type() == torch::kCUDA); // or device().is_cuda()
   assert(tensor.device().index() == 1);
-  assert(tensor.requires_grad())
-
-  assert(tensor.options() == options)
+  assert(tensor.requires_grad());
 
 Now, you may be thinking: do I really need to specify each axis for every new
 tensor I create? Fortunately, the answer is "no", as **every axis has a default
@@ -199,7 +197,7 @@ defaulted:
 
 .. code-block:: cpp
 
-  auto options = torch::TensorOptions().device({torch::kCUDA, 1}).requires_grad(true);
+  auto options = torch::TensorOptions().device(torch::kCUDA, 1).requires_grad(true);
 
 In fact, we can even omit all axes to get an entirely defaulted
 ``TensorOptions`` object:
@@ -291,7 +289,7 @@ with the equivalent call in C++:
 
 .. code-block:: cpp
 
-  torch::randn({3, 4}, torch::dtype(torch::kFloat32).device({torch::kCUDA, 1}).requires_grad(true))
+  torch::randn({3, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA, 1).requires_grad(true))
 
 Pretty close!
 

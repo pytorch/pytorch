@@ -19,8 +19,9 @@ class PixelShuffle(Module):
         upscale_factor (int): factor to increase spatial resolution by
 
     Shape:
-        - Input: :math:`(N, C \times \text{upscale_factor}^2, H, W)`
-        - Output: :math:`(N, C, H \times \text{upscale_factor}, W \times \text{upscale_factor})`
+        - Input: :math:`(N, L, H_{in}, W_{in})` where :math:`L=C \times \text{upscale\_factor}^2`
+        - Output: :math:`(N, C, H_{out}, W_{out})` where :math:`H \times \text{upscale\_factor}`
+          and :math:`W \times \text{upscale\_factor}`
 
     Examples::
 

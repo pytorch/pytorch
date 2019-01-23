@@ -37,7 +37,9 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
 
         if prefetch:
             code.append(
-                "        _mm_prefetch((&ip_next_T0[%d]), _MM_HINT_T0);" % (regid)
+                "        _mm_prefetch(\n"
+                "            reinterpret_cast<const char*>(&ip_next_T0[%d]), _MM_HINT_T0);"
+                % (regid)
             )
         else:
             code.append(
@@ -178,7 +180,10 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         else:
             assert False
 
-        code.append("          _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);")
+        code.append(
+            "          _mm_prefetch(\n"
+            "              reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);"
+        )
 
         return code
 
@@ -330,7 +335,7 @@ code.append("//// BY {}".format(sys.argv[0]))
 code.append("//// DO NOT MODIFY!!!")
 code.append("//// --------------------------\n")
 
-code.append("#include <ATen/core/Half.h>")
+code.append("#include <c10/util/Half.h>")
 code.append("#include <c10/util/Logging.h>")
 code.append("#include <immintrin.h>")
 code.append("#include <cassert>\n")
