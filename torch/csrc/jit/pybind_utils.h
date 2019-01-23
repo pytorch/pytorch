@@ -111,8 +111,12 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
-inline IValue createGenericDict(py::handle obj, const TypePtr& key_type, const TypePtr& value_type) {
-  std::unordered_map<IValue, IValue> elems;
+inline IValue createGenericDict(
+    py::handle obj,
+    const TypePtr& key_type,
+    const TypePtr& value_type) {
+  at::ivalue::DictUnorderedMap<IValue, IValue> elems;
+  elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems[toIValue(key, key_type)] = toIValue(obj[key], value_type);
   }
@@ -197,17 +201,8 @@ inline IValue toIValue(
     }
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
-      switch (dict_type->getKeyType()->kind()) {
-        case TypeKind::IntType:
-        case TypeKind::FloatType:
-        case TypeKind::StringType:
-          return createGenericDict(obj, dict_type->getKeyType(), dict_type->getValueType());
-        default:
-          AT_ERROR(
-              "Cannot create dict for key type ",
-              dict_type->getKeyType()->str(),
-              ", only int, float, and string keys are supported");
-      }
+      return createGenericDict(
+          obj, dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       const auto& elem_type = type->expect<OptionalType>()->getElementType();

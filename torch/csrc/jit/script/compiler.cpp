@@ -2265,12 +2265,7 @@ struct to_ir {
 
         JIT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        std::unordered_map<Value*, Value*> value_ptrs;
-        for (size_t i = 0; i < keys.size(); ++i) {
-          value_ptrs[keys[i]] = values[i];
-        }
-
-        return graph->insertNode(graph->createDict(key_type, value_type, value_ptrs))->output();
+        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
@@ -2501,9 +2496,10 @@ struct to_ir {
   Value* emitDictIndex(
       const SourceRange& loc,
       Value* dict_val,
-      Value* idx_val) {
+      Value* key_val) {
     auto dict_type = dict_val->type()->cast<DictType>();
-    return graph->insertNode(graph->createDictIndex(dict_val, idx_val))
+    JIT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
 
@@ -2574,7 +2570,8 @@ struct to_ir {
       return emitDictIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
-          << "Indexing only supported on lists, tensors, and tuples";
+          << "Indexing only supported on lists, dictionaries, "
+             "tensors, and tuples";
     }
   }
 };

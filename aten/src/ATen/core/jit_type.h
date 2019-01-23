@@ -518,7 +518,17 @@ struct DictType : public Type {
   static const TypeKind Kind = TypeKind::DictType;
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
-    return DictTypePtr(new DictType(key, value));
+    switch (key->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+        return DictTypePtr(new DictType(key, value));
+      default:
+        AT_ERROR(
+            "Cannot create dict for key type ",
+            key->str(),
+            ", only int, float, and string keys are supported");
+    }
   }
 
   std::string str() const override {

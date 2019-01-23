@@ -11,19 +11,9 @@
 
 #include <ATen/core/Tensor.h>
 
-
 namespace c10 {
 struct IValue;
-}
 
-namespace std {
-template<>
-struct hash<c10::IValue> {
-  size_t operator()(const c10::IValue& ivalue) const;
-};
-} // namespace std
-
-namespace c10 {
 namespace ivalue {
 
 template <typename T>
@@ -75,27 +65,40 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   }
 };
 
+struct DictHash {
+  size_t operator()(const IValue& ivalue) const;
+};
+
+struct DictEqualTo {
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
+};
 template <typename Key, typename Value>
-struct C10_EXPORT Dict : c10::intrusive_ptr_target {
+using DictUnorderedMap =
+  std::unordered_map<Key, Value, DictHash, DictEqualTo>;
+
+  template <typename Key, typename Value>
+struct CAFFE2_API Dict : c10::intrusive_ptr_target {
  private:
-  std::unordered_map<Key, Value> elements_;
+   DictUnorderedMap<Key, Value> elements_;
 
  public:
-  Dict(std::unordered_map<Key, Value> elements_) : elements_(std::move(elements_)) {}
-  static c10::intrusive_ptr<Dict<Key, Value>> create(std::unordered_map<Key, Value> elements_) {
+  Dict(DictUnorderedMap<Key, Value> elements_)
+      : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<Dict<Key, Value>> create(
+      DictUnorderedMap<Key, Value> elements_) {
     return c10::make_intrusive<Dict<Key, Value>>(std::move(elements_));
   }
-  const std::unordered_map<Key, Value>& elements() const {
+  const DictUnorderedMap<Key, Value>& elements() const {
     return elements_;
   }
-  operator const std::unordered_map<Key, Value>&() const {
+  operator const DictUnorderedMap<Key, Value>&() const {
     return elements();
   }
 
-  std::unordered_map<Key, Value>& elements() {
+  DictUnorderedMap<Key, Value>& elements() {
     return elements_;
   }
-  operator std::unordered_map<Key, Value>&() {
+  operator DictUnorderedMap<Key, Value>&() {
     return elements();
   }
 };
@@ -202,22 +205,6 @@ struct CAFFE2_API IValue final {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
-  }
-
-
-  inline bool operator==(const IValue& other) const {
-    if (tag != other.tag) {
-      throw std::runtime_error("Can't compare IValues with different tags");
-    }
-    if (isInt()) {
-      return toInt() == other.toInt();
-    } else if (isString()) {
-      return toStringRef() == other.toStringRef();
-    } else if (isDouble()) {
-        return toDouble() == other.toDouble();
-    } else {
-      throw std::runtime_error("Can't compare IValues with this tag");
-    }
   }
 
   // Accessors for subtypes are arranged together below
@@ -352,7 +339,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
-  const std::unordered_map<IValue, IValue>& toGenericDictRef() const;
+  const ivalue::DictUnorderedMap<IValue, IValue> & toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -422,7 +409,7 @@ struct CAFFE2_API IValue final {
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
-  IValue(std::unordered_map<IValue, IValue> v);
+  IValue(ivalue::DictUnorderedMap<IValue, IValue> v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
     AT_ASSERT(isGenericDict());
@@ -818,7 +805,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::unordered_map<IValue, IValue> v)
+inline IValue::IValue(ivalue::DictUnorderedMap<IValue, IValue> v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
@@ -846,7 +833,8 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-inline const std::unordered_map<IValue, IValue>& IValue::toGenericDictRef() const {
+inline const c10::ivalue::DictUnorderedMap<IValue, IValue>& IValue::
+    toGenericDictRef() const {
   return toGenericDict()->elements();
 }
 
@@ -893,8 +881,7 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
 }
 } // namespace c10
 
-inline size_t std::hash<c10::IValue>::operator()(
-    const c10::IValue& ivalue) const {
+inline size_t at::ivalue::DictHash::operator()(const c10::IValue& ivalue) const {
   if (ivalue.isInt()) {
     return std::hash<int>()(ivalue.toInt());
   } else if (ivalue.isString()) {
@@ -903,5 +890,19 @@ inline size_t std::hash<c10::IValue>::operator()(
     return std::hash<int>()(ivalue.toDouble());
   } else {
     throw std::runtime_error("Can't hash IValues with this tag");
+  }
+}
+
+inline bool at::ivalue::DictEqualTo::operator()(
+    const c10::IValue& lhs,
+    const c10::IValue& rhs) const {
+  if (lhs.isInt()) {
+    return lhs.toInt() == rhs.toInt();
+  } else if (lhs.isString()) {
+    return lhs.toStringRef() == rhs.toStringRef();
+  } else if (lhs.isDouble()) {
+    return lhs.toDouble() == rhs.toDouble();
+  } else {
+    throw std::runtime_error("Can't compare IValues with this tag");
   }
 }

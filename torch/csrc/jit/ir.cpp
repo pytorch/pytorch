@@ -1221,23 +1221,26 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
 Node* Graph::createDict(
     const TypePtr& key_type,
     const TypePtr& value_type,
-    std::unordered_map<Value*, Value*>& values) {
-
+    at::ArrayRef<Value*> keys,
+    at::ArrayRef<Value*> values) {
+  JIT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
-  for (auto v : values) {
-    JIT_ASSERT(v.first->type()->isSubtypeOf(key_type));
-    JIT_ASSERT(v.second->type()->isSubtypeOf(value_type));
+  for (size_t i = 0; i < keys.size(); ++i) {
+    JIT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    JIT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
-    n->addInput(v.first) ;
-    n->addInput(v.second);
+    n->addInput(keys[i]) ;
+    n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
   return n;
 }
 
 Node* Graph::createDictIndex(Value* dict, Value* index) {
-  auto n = create(prim::DictIndex, {dict, index});
   auto dict_type = dict->type()->expect<DictType>();
+  JIT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+
+  auto n = create(prim::DictIndex, {dict, index});
   n->output()->setType(dict_type->getValueType());
   return n;
 }

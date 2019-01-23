@@ -9559,7 +9559,7 @@ a")
             # type: (Dict[str, int]) -> int
             return x['dne']
 
-        with self.assertRaisesRegex(RuntimeError, "could not find key"):
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
             missing_index({'item': 20, 'other_item': 120})
 
         code = dedent('''

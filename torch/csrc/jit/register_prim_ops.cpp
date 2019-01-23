@@ -797,7 +797,7 @@ RegisterOperators reg({
           throw std::runtime_error("DictConstruct must have an even number of inputs");
         }
         return [=](Stack& stack) {
-          std::unordered_map<IValue, IValue> vals;
+          c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
           for (size_t i = 0; i < num_inputs; i += 2) {
             auto val = pop(stack);
             auto key = pop(stack);
@@ -817,7 +817,7 @@ RegisterOperators reg({
             const auto& elems = dict->elements();
             auto value = elems.find(index);
             if (value == elems.end()) {
-              AT_ERROR("DictIndex could not find key '", index, "'");
+              AT_ERROR("KeyError: '", index, "'");
             }
             push(stack, value->second);
             return 0;
