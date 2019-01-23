@@ -9563,11 +9563,22 @@ a")
             missing_index({'item': 20, 'other_item': 120})
 
         code = dedent('''
-            def literal():
-                return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
+            def literal1():
+                return torch.jit.annotate(Dict[int, float], {})
+            def literal2():
+                return torch.jit.annotate(Dict[int, float], {10: 1.2})
         ''')
         cu = torch.jit.CompilationUnit(code)
-        self.assertEqual({10: 1.2, 11: 1.3}, cu.literal())
+        self.assertEqual({}, cu.literal1())
+        self.assertEqual({10: 1.2}, cu.literal2())
+
+        with self.disableModuleHook():
+            # Iteration order isn't defined, so import-export jitter may occur
+            cu = torch.jit.CompilationUnit(dedent('''
+                def literal3():
+                    return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
+            '''))
+            self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
 
     def test_view_write(self):
         def fn(x, y):
