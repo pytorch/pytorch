@@ -4,18 +4,18 @@
 
 #include <tuple>
 
-// Type determination rules for mixed-type operations.
+// Promotion and casting rules for mixed-type operations.
 //
-// The result type is computed using the operands with the following precedence:
+// Type promotion works similar to NumPy type promotion. Operands with a higher
+// category (i.e. integral, floating or complex) have precedence over other
+// operands and tensors have precedence over scalar operands within the same
+// category. The "resultType" function applies the promotion logic according to
+// these two rules.
 //
-// 1) Tensors with dim 1 or higher
-// 2) Tensors with dim 0 that aren't wrapped numbers (e.g. `tensor(5)`)
-// 3) Tensors with dim 0 that are wrapped numbers (e.g. `5`)
-//
-// So if there are any tensors of dim 1 or higher, then 0-dim tensors do not
-// affect the result type. This behavior was chosen to preserve backwards
-// compatibility and is *likely to change* in the near future.
-// (See https://github.com/pytorch/pytorch/issues/9515)
+// Only typecasts that do not demote the type kind are allowed ("same_kind" in
+// NumPy). Thus, an operand can be downcasted into another type within the
+// same category but never to a lower category. The "castOperands" applies this
+// rule.
 //
 // If you are converting a function to support mixed types, also change
 // the backward function to go back to the original type.
@@ -70,26 +70,39 @@ Scalar castToType(ScalarType type, Scalar arg) {
 
 } // namespace detail
 
-// Returns the result type from given mixed type Tensors.
+// Applies type promotion to a list of operands according to PyTorch promotion
+// rules.
 //
-// Fails if Tensor backends differ.
+// The exact algorithm is to successively apply "promoteTypes" to the operands
+// with the highest category and the highest priority in that category.
 //
-// Scalars need to b represented as 0-dim tensors with is_wrapped_number=true
-// in order to be regarded as non-tensor numbers per the order rules above.
+// The order for categories is: complex, floating, integral
+// The order for priorities is: ScalarType, Tensor, Scalar/bool
+//
+// Examples:
+//  - resultType(float_tensor, int_tensor) -> float
+//      because promotTypes(Int, Float) is float
+//  - resultType(float_scalar, int_tensor) -> float
+//      because the scalar is the only operands with the highest category
+//  - resultType(long_scalar,  int_tensor) -> int
+//      because tensor has higher priority than scalar
 CAFFE2_API ScalarType resultType(ArrayRef<ScalarTypeSource> inputs);
 
-// Tries to cast mixed-type operands to output type. If the output type
-// is not provided, operands will be casted into resultType.
+// Casts mixed type operands to either the target type or the result of
+// "resultType" if no target type is provided.
 //
-// Returned Tensor and Scalars share the same scalar type if the casting is
-// successful.
+// When a "dtype" is provided, each operand will be checked against
+// "canCastSameKind" and an exception will be thrown if the cast would result
+// in a category demotion (e.g. floating to integral). This casting checks
+// prevents coercing operands to a lower precision. Operands can still lose
+// range and, in the case of integral types, overflow when downcasted.
 //
-// e.g.
-//   Tensor op(Tensor& out, Tensor self, Tensor other, Scalar alpha) {
-//     std::tie(self, other, alpha) =
-//         castOperands(out.scalar_type(), self, other, alpha)
-//     ...
-//   }
+// When a dtype is not provided, the final type of operands will be determined
+// with the "resultType" function. Since "promoteTypes" always results in the
+// highest category of the operands, this would never lead to a casting error.
+//
+// This interface is suited to pass an optional dtype parameter from a native
+// function implementation.
 template<typename... T>
 static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T... args) {
   SmallVector<ScalarTypeSource, 4> type_sources = {std::forward<T>(args)...};
@@ -109,15 +122,9 @@ static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T..
   return std::make_tuple(detail::castToType<T>(*dtype, std::forward<T>(args))...);
 }
 
-// Promotes mixed-type operands to result type.
-//
-// Returned Tensor and Scalars share the same scalar type.
-//
-// e.g.
-//   Tensor op(Tensor self, Tensor other, Scalar alpha) {
-//     std::tie(self, other, alpha) = castOperandsToResultType(self, other, alpha)
-//     ...
-//   }
+// Alternative to "castOperands", for cases when there is no target dtype to
+// use. Returns the operands casted into the output of applying "resultType"
+// on them.
 template<typename... T>
 static inline std::tuple<T...> castOperandsToResultType(T... args) {
   return castOperands<T...>(c10::nullopt, std::forward<T>(args)...);

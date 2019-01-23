@@ -119,21 +119,23 @@ Type& TensorIterator::compute_common_type() {
 
   SmallVector<ScalarTypeSource, 4> result_type_input;
   for (auto& op : operands_) {
-    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      // resultType doesn't support with wrapped number hack
-      // unwrap back to a scalar
-      result_type_input.push_back(op.tensor.item());
-      scalar_backend = backend;
-    } else {
-      result_type_input.push_back(op.tensor);
-      if (backend == Backend::Undefined) {
-        backend = op.tensor.type().backend();
-      } else if (backend != op.tensor.type().backend()) {
-        AT_ERROR(
-            "Cannot run operations between backends ",
-            backend,
-            " and ",
-            op.tensor.type().backend());
+    if (op.tensor.defined()) {
+      if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+        // resultType doesn't support with wrapped number hack
+        // unwrap back to a scalar
+        result_type_input.push_back(op.tensor.item());
+        scalar_backend = backend;
+      } else {
+        result_type_input.push_back(op.tensor);
+        if (backend == Backend::Undefined) {
+          backend = op.tensor.type().backend();
+        } else if (backend != op.tensor.type().backend()) {
+          AT_ERROR(
+              "Cannot run operations between backends ",
+              backend,
+              " and ",
+              op.tensor.type().backend());
+        }
       }
     }
   }

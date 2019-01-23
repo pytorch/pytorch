@@ -4,8 +4,18 @@
 
 namespace at {
 
-// Holder for an object that contributes scalar type to an operation,
-// e.g. resultType.
+// A variant abstraction for things with a ScalarType, allowing functions like
+// resultType to work with scalar/tensor/type at the same time.
+//
+// e.g.
+//   int f(ScalarTypeSource... args);
+//   result = f(tensor1, tensor2, scalar, 3.0)
+//
+// Supports the following types:
+// - ScalarType: Yields the ScalarType itself
+// - bool: Byte
+// - Scalar: Long, Double or ComplexDouble (Python scalar types)
+// - Tensor: the dtype of the tensor
 class ScalarTypeSource final {
  public:
   ScalarTypeSource() {}
