@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/interned_strings.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
@@ -17,7 +18,7 @@ enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs };
 static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {
       "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs"};
-  JIT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
+  AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
   return names[int(kind)];
 }
 

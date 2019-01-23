@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/generic_if.h>
@@ -19,6 +18,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <atomic>
