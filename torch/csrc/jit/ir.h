@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
-#include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
@@ -17,6 +16,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -43,6 +43,21 @@ namespace jit {
 using ::c10::Symbol;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+
+using ::c10::ivalue::List;
+using ::c10::ivalue::Shared;
+
+using ::c10::IValue;
+using ::c10::ivalue::Future;
+using ::c10::ivalue::Tuple;
+
+using ::c10::ivalue::BoolList;
+using ::c10::ivalue::DoubleList;
+using ::c10::ivalue::GenericList;
+using ::c10::ivalue::IntList;
+using ::c10::ivalue::TensorList;
+
+using ::c10::ivalue::ConstantString;
 
 namespace prim {
 using namespace ::c10::prim;

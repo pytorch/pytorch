@@ -6,7 +6,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
 #include <ATen/core/interned_strings.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/pybind.h>

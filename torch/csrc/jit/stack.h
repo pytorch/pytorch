@@ -1,11 +1,12 @@
 #pragma once
 #include <ATen/ATen.h>
 
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 
 namespace torch {
 namespace jit {
 
+using c10::IValue;
 using Stack = std::vector<IValue>;
 using Operation = std::function<int(Stack&)>;
 

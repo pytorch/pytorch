@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/stack.h>

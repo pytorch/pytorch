@@ -61,7 +61,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ivalue.h"
+#include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 
