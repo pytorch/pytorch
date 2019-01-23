@@ -461,6 +461,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           return &c10::cuda::CUDACachingAllocator::raw_delete;
         }
     }
+    return nullptr;
   }
 
  private:
