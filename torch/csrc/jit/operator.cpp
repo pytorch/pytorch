@@ -192,7 +192,6 @@ struct SchemaParser {
     c10::optional<int32_t> N;
     c10::optional<IValue> default_value;
     c10::optional<std::string> alias_set;
-    c10::optional<std::string> field_name;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
@@ -206,12 +205,11 @@ struct SchemaParser {
       alias_info = std::move(container);
     }
     if (is_return) {
-      // optionally named return values
+      // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
         name = L.next().text();
-        field_name = name;
       } else {
-        name = "ret" + std::to_string(idx);
+        name = "";
       }
     } else {
       name = L.expect(TK_IDENT).text();
@@ -225,8 +223,7 @@ struct SchemaParser {
         N,
         std::move(default_value),
         !is_return && kwarg_only,
-        std::move(alias_info),
-        std::move(field_name));
+        std::move(alias_info));
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch (L.cur().kind) {

@@ -18,15 +18,13 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      c10::optional<std::string> field_name = c10::nullopt)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : DynamicType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        field_name_(std::move(field_name)) {
+        alias_info_(std::move(alias_info)) {
           if (default_value_ && default_value_->isTensor()) {
             auto t = default_value_->toTensor();
             AT_ASSERT(!t.defined() || t.is_variable());
@@ -34,9 +32,6 @@ struct Argument {
         }
   const std::string& name() const {
     return name_;
-  }
-  const c10::optional<std::string>& field_name() const {
-    return field_name_;
   }
   TypePtr type() const {
     return type_;
@@ -67,7 +62,6 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
-  c10::optional<std::string> field_name_;
 };
 
 struct FunctionSchema {

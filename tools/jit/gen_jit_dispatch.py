@@ -442,7 +442,7 @@ def signature(decl):
         ret_list = jit_type_of(decl['returns'][0])
     else:
         def type_maybe_field(r):
-            return jit_type_of(r) + (' ' + r['field_name'] if 'field_name' in r else '')
+            return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)

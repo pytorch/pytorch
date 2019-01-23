@@ -307,11 +307,11 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // Codegen does not support return of namedtuples with undefined field names.
   // Therefore, either all or none returns has field names.
   bool return_has_field_names = std::all_of(returns.begin(), returns.end(),
-    [&](const Argument& r) { return r.field_name().has_value(); });
+    [&](const Argument& r) { return r.name().length() > 0; });
   c10::OptNameList return_field_names = c10::nullopt;
   if (return_has_field_names) {
     return_field_names = fmap(returns, [&](const Argument& r) {
-      return r.field_name().value();
+      return r.name();
     });
   }
   return MatchedSchema{std::move(positional_inputs), std::move(return_types), std::move(return_field_names)};

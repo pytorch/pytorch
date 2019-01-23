@@ -8185,9 +8185,6 @@ a")
         def f(x):
             return x.max(dim=1).indices + torch.max(x, dim=1).indices
 
-        sf = torch.jit.script(f)
-        self.assertExpectedGraph(sf.graph)
-
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
         with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
