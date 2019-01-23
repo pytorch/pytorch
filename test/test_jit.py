@@ -8192,12 +8192,12 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
             @torch.jit.script
-            def g(x):
+            def g1(x):
                 return x.max(dim=1).unknown_symbol
 
         with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
             @torch.jit.script
-            def g(x):
+            def g2(x):
                 print((x, x, x).__doc__)
                 return x
 
