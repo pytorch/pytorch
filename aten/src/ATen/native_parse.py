@@ -35,16 +35,24 @@ def temp_type_translations(typ):
 
 
 def parse_default(s):
-    if s.lower() == 'true':
+    if s == 'True':
         return True
-    elif s.lower() == 'false':
+    elif s == 'False':
         return False
+    elif s == 'true':
+        raise RuntimeError("Please use True and not true. "
+                    "See [temp translations] for details.")
+    elif s == 'false':
+        raise RuntimeError("Please use False and not false. "
+                    "See [temp translations] for details.")
     elif s == 'nullptr':
         return s
     # Enables default argument [] by translating to legacy {}.
     # See [temp translations]
     elif s == '[]':
         return '{}'
+    # Enables lists by translating to legacy {.*}.
+    # See [temp translations]
     elif re.match(r'\[.*\]', s):
         return "{" + s[1:-1] + "}"
     elif s == 'None':
@@ -152,7 +160,6 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
     # Explicit check for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
     if inplace and len(func_return) > 0 and func_return[0]['type'] != "void":
-        print("ASF")
         found_self = False
         for arg_idx, argument in enumerate(arguments):
             if argument['name'] == "self" and inplace:
@@ -163,8 +170,6 @@ def parse_arguments(args, func_decl, func_name, func_return, inplace):
                         "Inplace function annotations of function {} need to match between input and correponding output.".format(func_decl['func'])
                 assert argument['name'] == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
-                print("func_return[" + str(arg_idx) + "]")
-                print(func_return[arg_idx])
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
     return arguments
 

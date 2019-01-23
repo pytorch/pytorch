@@ -1287,10 +1287,10 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
+- func: max(Tensor self, int64_t dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
+- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=False) -> (Tensor values, Tensor indices)
 
 - func: max_values(Tensor self, int dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
@@ -4103,7 +4103,7 @@
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
-- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride={}, int[2] padding=0, int[2] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
 
 - func: max_pool2d_with_indices_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
