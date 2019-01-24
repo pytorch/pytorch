@@ -1771,13 +1771,14 @@ class TestCuda(TestCase):
                 e_tok.synchronize()
                 total_time = e_tik.elapsed_time(e_tok)
 
-            # Without GIL, the two 50ms synchronization can overlap, and hence
-            # the expected execution time should be only a little bit higher
-            # than 50ms and well below 100ms (assuming 1 cycle is 1 nano sec).
-            # However, relying on absolute execution time is not reliable as it
-            # may vary. Therefore, this test uses relative comparisons, checking
-            # if the sum of synchronization time in parent and child is greater
-            # than the real execution time by least 40%.
+            # Without GIL, synchronizations in parent and child threads can
+            # overlap. The total execution time should be a little bit longer
+            # than spinning fifty million cycles and much shorter than twice of
+            # that. However, testing absolute execution time is not reliable as
+            # it may vary on different hardware in different environments.
+            # Therefore, this test uses relative comparisons, checking if the
+            # sum of parent and child threads execution time is greater than the
+            # real execution time by least 40%.
             self.assertGreater(parent_time + child_time, total_time * 1.4)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
