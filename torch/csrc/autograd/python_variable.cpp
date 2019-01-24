@@ -251,7 +251,8 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());
   if (typeOpt) {
        auto& sparseType = at::globalContext().getNonVariableType(backend, var.type().scalarType());
-       gradIsSparse = grad.type() == sparseType;
+       auto& gradType = at::globalContext().getNonVariableType(grad.type().backend(), grad.type().scalarType());
+       gradIsSparse = gradType == sparseType;
   }
 
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
