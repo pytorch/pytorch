@@ -171,11 +171,11 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # be better if we just named everything and matched by name.
     for arg_idx, argument in enumerate(arguments_out):
         assert argument['annotation'] == func_return[arg_idx]['annotation'], \
-                "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, " \
-                "the ith-argument needs to correspond to the i-th return.".format(name)
+            "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, " \
+            "the ith-argument needs to correspond to the i-th return.".format(name)
 
-    assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors as can be passed " \
-            "as output.".format(name)
+    assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors " \
+        "as can be passed as output.".format(name)
 
     if name.endswith('_out'):
         raise RuntimeError("Native function {} may not be suffixed with _out as we transistion to a unified schema. "
@@ -187,7 +187,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                            "(which usually manifests itself as the result variable being undefined.) "
                            "The culprit was: {}".format(name))
     if not is_out_fn:
-        assert len(arguments_out) == 0, "func {} is not marked as output yet contains output keyword arguments".format(name)
+        assert len(arguments_out) == 0, "func {} is not marked as output yet contains output " \
+            "keyword arguments".format(name)
 
     # Explicit checking for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
@@ -200,8 +201,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                     "as mutable.".format(name)
                 found_self = True
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
-                        "Inplace function annotations of function {} need to match between " \
-                        "input and correponding output.".format(name)
+                    "Inplace function annotations of function {} need to match between " \
+                    "input and correponding output.".format(name)
                 assert argument['name'] == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
@@ -226,8 +227,8 @@ def parse_return_arguments(return_decl, inplace, func_decl):
         else:
             if t == "Tensor" and inplace:
                 assert annotation and annotation.endswith("!"), \
-                        "Return Tensor of function \"{}\" flagged as inplace needs to be " \
-                        "annotated as mutable".format(func_decl['func'])
+                    "Return Tensor of function \"{}\" flagged as inplace needs to be " \
+                    "annotated as mutable".format(func_decl['func'])
                 argument_dict['name'] = 'self'
             else:
                 argument_dict['name'] = 'result' if not multiple_args else 'result' + str(arg_idx)
