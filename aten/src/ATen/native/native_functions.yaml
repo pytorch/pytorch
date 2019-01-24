@@ -438,7 +438,8 @@
   matches_jit_signature: True
   variants: function
 
-- func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor[](a)
+- func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -1745,11 +1746,9 @@
     CUDA: _round_out_cuda
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: relu(Tensor self) -> Tensor
@@ -1961,7 +1960,8 @@
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
-- func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor[](a)
+- func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -2846,7 +2846,8 @@
   variants: function, method
   device_guard: False
 
-- func: unbind(Tensor(a) self, int dim=0) -> Tensor[](a)
+- func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
+  matches_jit_signature: True
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
@@ -4086,7 +4087,6 @@
   python_module: nn
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
   python_module: nn
 
@@ -4098,7 +4098,6 @@
   python_module: nn
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
   python_module: nn
 

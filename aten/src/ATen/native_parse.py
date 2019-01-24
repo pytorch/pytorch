@@ -31,10 +31,10 @@ def type_argument_translations(arg):
         default = name[1]
     name = name[0]
 
-    match = re.match(r'(Tensor.*)\((.+)\)', t)
+    match = re.match(r'(Tensor.*)\((.+)\)(.*)', t)
     annotation = None
     if match:
-        t = match.group(1)
+        t = match.group(1) + match.group(3)
         annotation = match.group(2)
 
     # This enables "Generator? x = None and translates to legacy
