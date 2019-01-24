@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/utils/functional.h>
@@ -31,8 +31,8 @@ bool tensorListEqual(
 // This function may be too conservative for general use.
 // Do NOT support g/gs attributes.
 bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
-  JIT_ASSERT(lhs != nullptr);
-  JIT_ASSERT(rhs != nullptr);
+  AT_ASSERT(lhs != nullptr);
+  AT_ASSERT(rhs != nullptr);
   // One has attributes, the other does not.
   if (lhs->hasAttributes() != rhs->hasAttributes())
     return false;
@@ -88,7 +88,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 } // anonymous namespace
 
 size_t HashNode::operator()(const Node* k) const {
-  JIT_ASSERT(k != nullptr);
+  AT_ASSERT(k != nullptr);
   return get_hash(
       k->kind(),
       fmap(k->outputs(), [](const Value* v) { return v->type()->kind(); }),
