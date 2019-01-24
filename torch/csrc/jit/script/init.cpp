@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function_schema.h>
@@ -310,14 +311,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
     return "boolean dispatch";
   }
 
-  std::vector<NamedValue> removeIndex(
-      at::ArrayRef<NamedValue> arr,
-      size_t index) {
-    auto sliced = arr.vec();
-    sliced.erase(sliced.begin() + index);
-    return sliced;
-  }
-
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Method& caller,
@@ -356,6 +349,48 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 
  private:
   py::dict dispatched_fn_;
+};
+
+struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
+  OverloadedFunctionValue(py::list functions)
+      : possible_functions_(std::move(functions)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    std::stringstream err;
+    auto possible_functions =
+        py::cast<std::vector<py::object>>(possible_functions_);
+
+    for (const py::object& fn : possible_functions) {
+      auto& method = py::cast<Method&>(fn);
+      auto match = tryMatchSchema(
+          method.getSchema(),
+          loc,
+          *caller.graph().get(),
+          c10::nullopt,
+          inputs,
+          attributes,
+          err,
+          true);
+      if (match) {
+        return MethodValue(nullptr, method)
+            .call(loc, caller, inputs, attributes, n_binders);
+      }
+    }
+    throw ErrorReport(loc) << "Could not find any matching overloads\n"
+                           << err.str();
+  }
+
+ private:
+  py::list possible_functions_;
 };
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -443,6 +478,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
+  }
+  py::object overloads =
+      py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
+  if (!overloads.is_none()) {
+    return std::make_shared<OverloadedFunctionValue>(std::move(overloads));
   }
   return std::make_shared<PythonValue>(obj);
 }
