@@ -685,9 +685,9 @@ def emit_body(declaration):
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         if pre_call_block:
-            call = pre_call_block + call
+            call = '#ifdef DEBUG' + '\n' + pre_call_block + '#endif' + '\n' + call
         if post_call_block:
-            call += '\n' + post_call_block
+            call += '\n' + '#ifdef DEBUG' + '\n' + post_call_block + '#endif' + '\n'
         return call
 
     def tie_return_values():
