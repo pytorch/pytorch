@@ -183,16 +183,13 @@ Example::
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
 
-<<<<<<< HEAD
+
 
 There are 2 scenarios in which you can annotate:
 
 1. Function Argument Type annotation
 
 By default, all parameters to a TorchScript function are assumed to be Tensor
-=======
-By default, all parameters to a TorchScript function are assumed to be Tensor
->>>>>>> 0cb24098c74f8ebed81ec08b83bf6cb5ab3903f5
 because this is the most common type used in modules. To specify that an
 argument to a TorchScript function is another type, it is possible to use
 MyPy-style type annotations using the types listed above:
