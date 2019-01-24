@@ -1,8 +1,8 @@
 #pragma once
 #include <c10/macros/Macros.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <ATen/core/interned_strings.h>
 
 #include <memory>
 
@@ -18,6 +18,7 @@ namespace jit {
 // will always be valid as long as Graph is alive.
 struct Scope;
 using ScopePtr = c10::intrusive_ptr<Scope>;
+using c10::Symbol;
 
 struct TORCH_API Scope : public c10::intrusive_ptr_target {
  private:
