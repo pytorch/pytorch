@@ -23,13 +23,11 @@ struct DispatchTableEntry final {
 
 namespace details {
 /// Kernel implementations in a thread-safe hash table.
-template <class Key>
 class ThreadsafeOperatorTable_ final {
  public:
-  template <class Key_>
-  void emplace(Key_&& key, const DispatchTableEntry& value) {
-    bool res = map_.write([&](ska::flat_hash_map<Key, DispatchTableEntry>& map) -> bool {
-      auto result = map.emplace(std::forward<Key>(key), value);
+  void emplace(TensorTypeId key, const DispatchTableEntry& value) {
+    bool res = map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
+      auto result = map.emplace(key, value);
       return result.second;
     });
     if (!res) {
@@ -37,9 +35,9 @@ class ThreadsafeOperatorTable_ final {
     }
   }
 
-  void erase(const Key& key) {
+  void erase(TensorTypeId key) {
     auto num_removed =
-        map_.write([&](ska::flat_hash_map<Key, DispatchTableEntry>& map) -> size_t {
+        map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> size_t {
           return map.erase(key);
         });
     assert(num_removed <= 1); // This is not a multi-map
@@ -48,8 +46,8 @@ class ThreadsafeOperatorTable_ final {
     }
   }
 
-  const DispatchTableEntry* lookup(const Key& key) const {
-    return map_.read([&](const ska::flat_hash_map<Key, DispatchTableEntry>& map) -> const DispatchTableEntry* {
+  const DispatchTableEntry* lookup(TensorTypeId key) const {
+    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> const DispatchTableEntry* {
       auto found = map.find(key);
       if (found != map.end()) {
         return &found->second;
@@ -60,7 +58,7 @@ class ThreadsafeOperatorTable_ final {
   }
 
  private:
-  LeftRight<ska::flat_hash_map<Key, DispatchTableEntry>> map_;
+  LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
 };
 } // namespace details
 
@@ -127,9 +125,7 @@ class DispatchTable final {
 
  private:
 
-  details::ThreadsafeOperatorTable_<
-      TensorTypeId>
-      kernels_;
+  details::ThreadsafeOperatorTable_ kernels_;
 };
 
 } // namespace c10
