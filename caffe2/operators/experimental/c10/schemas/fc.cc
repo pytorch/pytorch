@@ -29,11 +29,8 @@ struct AxisWParameter final {
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(ops::FullyConnected::State);
-
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::FullyConnected,
-    ops::FullyConnected::State,
     C10FC_DontUseThisOpYet,
     ParameterHelper<AxisParameter>,
     ParameterHelper<AxisWParameter>)

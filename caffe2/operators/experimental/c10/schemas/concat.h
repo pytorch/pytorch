@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/dispatch/OpSchema.h>
 #include <ATen/core/dispatch/DeviceId.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
@@ -26,7 +27,7 @@ struct Concat final {
       {"inputs", "output", "split_info_output", "add", "add_axis"}};
 
   static c10::DeviceTypeId dispatch_key(
-      at::ArrayRef<IValue> arguments) {
+      const Stack* arguments) {
     return c10::DeviceTypeId::CPU;
   }
 };
