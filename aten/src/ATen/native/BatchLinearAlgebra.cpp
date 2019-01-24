@@ -177,10 +177,8 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
   Tensor solution_tmp, lu_tmp;
   std::tie(solution_tmp, lu_tmp) = at::_gesv_helper(self, A);
-  solution.resize_as_(solution_tmp);
-  solution.copy_(solution_tmp);
-  lu.resize_as_(lu_tmp);
-  lu.copy_(lu_tmp);
+  solution.resize_as_(solution_tmp).copy_(solution_tmp);
+  lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
