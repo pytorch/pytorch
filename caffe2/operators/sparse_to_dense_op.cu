@@ -45,10 +45,10 @@ namespace caffe2 {
     const int output_first_dim =
         GetOutputFirstDim(sparse_indices_vec, sparse_indices_len);
 
-    auto shape = sparse_values.dims().vec();
+    auto shape = sparse_values.sizes().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
     math::Set<TData>(output->size(), TData(0), output_data, &context_);

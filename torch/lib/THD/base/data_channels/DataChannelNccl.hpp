@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../DataChannel.hpp"
-#include "DataChannelUtils.hpp"
+#include <THD/base/DataChannel.hpp>
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
 #include <nccl.h>
 

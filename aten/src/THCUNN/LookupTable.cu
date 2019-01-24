@@ -1,11 +1,11 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCThrustAllocator.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/unique.h>
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
-#include "../THC/THCTensorMathReduce.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 #ifdef __HIP_PLATFORM_HCC__
 const int WARP_SIZE = 64;
@@ -70,17 +70,25 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
+#ifdef __HIP_PLATFORM_HCC__
+        unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
+        int first_remaining_peer = __ffsll(matchmask) - 1;
+#else
         unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
-
         int first_remaining_peer = __ffs(matchmask) - 1;
+#endif
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
+#ifdef __HIP_PLATFORM_HCC__
+            first_remaining_peer = __ffsll(matchmask) - 1;
+#else
             first_remaining_peer = __ffs(matchmask) - 1;
-            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+#endif
+	    my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)
@@ -227,5 +235,5 @@ void calculate_norms_and_renorm(DType *weights,
 
 }
 
-#include "generic/LookupTable.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTable.cu>
+#include <THC/THCGenerateFloatTypes.h>

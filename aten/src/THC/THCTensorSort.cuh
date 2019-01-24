@@ -1,31 +1,31 @@
 #ifndef THC_TENSORSORT_CUH
 #define THC_TENSORSORT_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCSortUtils.cuh"
-#include "THCTensorCopy.h"
-#include "THCTensorTypeUtils.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorTypeUtils.cuh>
 
-#include "THCThrustAllocator.cuh"
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #if CUDA_VERSION >= 7000 || defined(__HIP_PLATFORM_HCC__)
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct ThrustGTOp {
   __device__ bool operator()(const T& lhs, const T& rhs) const {
-    return THCNumerics<T>::gt(lhs, rhs);
+    return (handleNaN && THCNumerics<T>::isnan(lhs) && !THCNumerics<T>::isnan(rhs)) || THCNumerics<T>::gt(lhs, rhs);
   }
 };
 
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct ThrustLTOp {
   __device__ bool operator()(const T& lhs, const T& rhs) const {
-    return THCNumerics<T>::lt(lhs, rhs);
+    return (handleNaN && THCNumerics<T>::isnan(rhs) && !THCNumerics<T>::isnan(lhs)) || THCNumerics<T>::lt(lhs, rhs);
   }
 };
 

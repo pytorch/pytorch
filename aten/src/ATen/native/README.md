@@ -23,7 +23,7 @@ Every native function must have an entry in
 `native_functions.yaml`.  The format can be summarized as:
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
   variants: function, method
   dispatch:
     CPU: func_cpu
@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -56,21 +56,20 @@ signature.
     - `IndexTensor` (a.k.a. `IntTensor`)
   These type names were inherited from TH, and may be renamed soon, so
   don't commit them to memory.
-- `TensorList`.  A `TensorList` argument translates into a C++ argument of type `ArrayRef<Tensor>`
+- `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
-- `IntList`.  `IntList` accepts an optional length specifier, e.g., `IntList[2]`, which
+- `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
-- `int64_t`. There is no `int`; ATen policy is to use `int64_t` in the API anywhere you would
-  have ordinarily passed an `int` or `size_t`.
-- `double`. There is no `float`; ATen policy is to use `double` anywhere you would have used `float`.
+- `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
+- `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
-  floating point types, and zero dimensional tensors. `int64_t` and `double` can only bind to the
-  corresponding Python numerical types. However, you probably don't want to use `Scalar`. It's
-  really used for binding to TH/THC code "real" types where the Python APIs you are binding to are
-  actually different types. `double` and `int64_t` argument types should suffice for most algorithms.
-- `Generator*`, the state for a random number generator,
+  floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
+  numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
+  to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
+  `float` and `int` argument types should suffice for most algorithms.
+- `Generator?`, the state for a random number generator,
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
@@ -81,25 +80,26 @@ signature.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
+- `?` is trailing question mark that annotate an argument to be an optional type, grep for
+  `optional` to find some example usages. In general, most functions will not need to use
+  this, but there are some cases that we want to use optional for the different types:
+    - You want to pass in a `None` to a ATen function/method from Python, and handles the
+      None type in the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
+      can take `None` for its `min` and `max` parameter, and do dispatch to different
+      backend if one of the parameters is `None`. Optional type can accept a `None` type
+      (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
+    - You want a default value which is fine in Python but would cause ambiguity in C++.
+      For example, `norm(Tensor self, Scalar p=2, int dim, bool keepdim=False)` would
+      cause ambiguity in C++ since it default args must be adjacent and `p` could not
+      have a default value when `dim` does not. Therefore, we need to make `p` as a
+      optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
+    - You want a value to default to the same value as another argument (this cannot be
+      expressed in C++ default arguments).
 
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
 factory while another is not.
-
-**Return types.** These types are permissible as ReturnType:
-
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
-  respectively (unless the operation is in-place, in which case the return type
-  is `Tensor&`.
-- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
-  the C++ `std::tuple<Tensor, Tensor>`.
-
-If you need a type that is not listed in this list, it may be possible to extend ATen's
-code generation to support it.  ATen's philosophy on types to support is that it supports
-only simple, universal types, as well as a handful of fundamental Tensor structures
-(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
-bound to ATen (in practice, C++ and Python.)
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
@@ -116,15 +116,53 @@ are applied when those positional arguments are not specified.
 
 Here are the supported default values:
 
-* Numbers (e.g., `0` or `5.0` for `int64_t`, `double` and `IntList`
-  with an explicit length (e.g., `IntList[2]`)--in the case of IntList,
-  a number is replicated to fill the length (e.g., `IntList[2] x=2`
-  is equivalent to `IntList[2] x={2,2}`.
-* Lists of numbers (e.g., `{0, 0}`) for `IntList`.
-* Booleans (e.g., `true`) for `bool`.
-* Empty initializer lists (e.g., `{}`) for `Tensor` (this implicitly changes
+* Numbers (e.g., `0` or `5.0` for `int`, `float` and `int[]`
+  with an explicit length (e.g., `int[2]`)--in the case of `int[]`
+  a number is replicated to fill the length (e.g., `int[2] x=2`
+  is equivalent to `int[2] x=[2,2]`.
+* Lists of numbers (e.g., `[0, 0]`) for `IntList`.
+* Booleans (e.g., `True`) for `bool`.
+* Empty initializer lists (e.g., `[]`) for `Tensor` (this implicitly changes
   a `Tensor` argument to accept undefined tensors).
-* `nullptr` for pointer types (e.g., `Generator*`)
+* `None` for pointer types (e.g., `Generator?`)
+
+**Returns.** The following are permissible on Return:
+
+Non-tuple return:
+```
+ReturnType [retarg0]
+```
+
+Tuple return:
+```
+(ReturnType [retarg0], ReturnType [retarg1], ...)
+```
+
+The following are permissible on ReturnType:
+- `Tensor` and `Tensor[]`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+  respectively (unless the operation is in-place, in which case the return type
+  is `Tensor&`.
+- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
+  the C++ `std::tuple<Tensor, Tensor>`.
+
+If you need a type that is not listed in this list, it may be possible to extend ATen's
+code generation to support it.  ATen's philosophy on types to support is that it supports
+only simple, universal types, as well as a handful of fundamental Tensor structures
+(e.g., `Tensor` and `Generator?`), because these types can be easily ported to any language
+bound to ATen (in practice, C++ and Python.)
+
+Return also supports specifying (optional) return argument names. These serve
+two functions:
+
+- They let you easily write derivatives in terms of return arguments in
+  `tools/autograd/derivatives.yaml`
+
+- They correspond to the named field the output can be referred to from
+  Python.  (This means that changing a return argument name is
+  BC-breaking, be careful!)
+
+Note that argument type modifiers such as defaults and optional are not currently supported on Return.
+
 
 The declarations also support the following attributes:
 
@@ -143,7 +181,7 @@ this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
 By default, ATen generates only the function variant for a native function.
-When should you also generate a method variant?  Tensor operations as methods
+When should you also generate a method variant? Tensor operations as methods
 are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
@@ -163,29 +201,41 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
-### `python_default_init`
+### `device_guard`
 
 ```
-python_default_init:
-  argument_name: initializing_expression
+device_guard: False
 ```
 
-A map from argument names to default initializing expressions written in C++. Such default
-expressions will only be used in Python API (in the C++ API, these arguments are
-mandatory).
+By default, ATen code generation will generate a DeviceGuard invocation,
+which will ensure that kernel code will run with the current device set
+to match the device of the first Tensor argument (or first tensor of
+the first Tensor[] argument, if the function takes a list of tensors).
+For the most part, this means kernel authors do not have to worry about
+setting devices.
 
-There are a few situations where you might like to use this functionality:
+However, in some cases, setting the device is unnecessary, because,
+e.g., you call a function already manages device guard setting, or
+you're a function that simply does not interact with any devices. In
+that case, code generation of the device guard can be disabled by adding
+`device_guard: False` to your function definition.
 
-- You want a default value which is fine in Python but would cause ambiguity in C++.
-  For example, `norm(Tensor self, real p=2, int64_t dim=1)` would cause ambiguity
-  with long tensors in C++. Therefore, we need to make `p=2` a python only default
-  initialization value.
+**Note.** We are considering eliminating automatic generation of DeviceGuard,
+in which case this field would go away. If you have an opinion on the
+matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
-- You want a value to default to the same value as another argument (this cannot
-  be expressed in C++ default arguments).
+### `matches_jit_signature`
 
-If you grep for `python_default_init`, you can find examples of this being used;
-in general, most functions will not need to use this.
+```
+matches_jit_signature: True
+```
+
+This will verify that the func syntax follows the JIT signature schema. This
+is a temporary attribute and doesn't need to be set by developers outside the
+core team. Remove it if you trigger asserts and add @cpuhrsch to your PR. It
+serves as a means of tracking an ongoing schema unification with the goal of
+aligning func syntax with other components of PyTorch in order to reduce
+overall complexity and assert coverage of all functions by each component.
 
 ## Writing an implementation in C++
 
@@ -213,7 +263,7 @@ you will have to write an entry correlating them together in
 `tools/autograd/derivatives.yaml`.
 
 However, in some situations, you can write a function in ATen and it
-will be automatically differentiated!  This can be the case if the function implementation
+will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
 
@@ -290,7 +340,8 @@ Tensor& s_add_(Tensor& self, const Tensor& other) {
 
 By default, `Tensor` arguments to ATen functions are always defined, unless
 you explicitly specified that an undefined tensor was permissible by writing
-`Tensor?` or `Tensor x={}`.
+`Tensor?` or `Tensor? x=[]`, the latter one is needed when you have to assign
+a default value in C++ (e.g. in the middle of other parameters with default values).
 
 The rules for returning undefined Tensors are a bit more subtle, but there
 is only one case you have to remember:

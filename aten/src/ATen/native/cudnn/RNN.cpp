@@ -375,7 +375,7 @@ namespace {
       case CUDNN_RNN_TANH:
         return 2;
       default:
-        AT_ERROR("unknown cuDNN RNN mode %d", mode);
+        AT_ERROR("unknown cuDNN RNN mode ", mode);
     }
   }
 
@@ -1120,7 +1120,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-      cuda::getCurrentCUDAStream().synchronize_with(*event);
+      event->block(cuda::getCurrentCUDAStream());
     }
   }
 

@@ -11,6 +11,7 @@ namespace caffe2 {
 namespace utils {
 
 // A sub tensor view
+// TODO: Remove???
 template <class T>
 class ConstTensorView {
  public:
@@ -50,6 +51,17 @@ CAFFE2_API ERMatXf ComputeAllAnchors(
     int height,
     int width,
     float feat_stride);
+
+// Like ComputeAllAnchors, but instead of computing anchors for every single
+// spatial location, only computes anchors for the already sorted and filtered
+// positions after NMS is applied to avoid unnecessary computation.
+// `order` is a raveled array of sorted indices in (A, H, W) format.
+CAFFE2_API ERArrXXf ComputeSortedAnchors(
+    const Eigen::Map<const ERArrXXf>& anchors,
+    int height,
+    int width,
+    float feat_stride,
+    const vector<int>& order);
 
 } // namespace utils
 
@@ -101,7 +113,7 @@ class GenerateProposalsOp final : public Operator<Context> {
   // out_probs: n
   void ProposalsForOneImage(
       const Eigen::Array3f& im_info,
-      const Eigen::Map<const ERMatXf>& all_anchors,
+      const Eigen::Map<const ERArrXXf>& anchors,
       const utils::ConstTensorView<float>& bbox_deltas_tensor,
       const utils::ConstTensorView<float>& scores_tensor,
       ERArrXXf* out_boxes,
@@ -133,6 +145,33 @@ class GenerateProposalsOp final : public Operator<Context> {
   // tolerance for backward compatibility. Set to negative value for
   // no clipping.
   float clip_angle_thresh_{1.0};
+
+  // Scratch space required by the CUDA version
+  // CUB buffers
+  Tensor dev_cub_sort_buffer_{Context::GetDeviceType()};
+  Tensor dev_cub_select_buffer_{Context::GetDeviceType()};
+  Tensor dev_image_offset_{Context::GetDeviceType()};
+  Tensor dev_conv_layer_indexes_{Context::GetDeviceType()};
+  Tensor dev_sorted_conv_layer_indexes_{Context::GetDeviceType()};
+  Tensor dev_sorted_scores_{Context::GetDeviceType()};
+  Tensor dev_boxes_{Context::GetDeviceType()};
+  Tensor dev_boxes_keep_flags_{Context::GetDeviceType()};
+
+  // prenms proposals (raw proposals minus empty boxes)
+  Tensor dev_image_prenms_boxes_{Context::GetDeviceType()};
+  Tensor dev_image_prenms_scores_{Context::GetDeviceType()};
+  Tensor dev_prenms_nboxes_{Context::GetDeviceType()};
+  Tensor host_prenms_nboxes_{CPU};
+
+  Tensor dev_image_boxes_keep_list_{Context::GetDeviceType()};
+
+  // Tensors used by NMS
+  Tensor dev_nms_mask_{Context::GetDeviceType()};
+  Tensor host_nms_mask_{CPU};
+
+  // Buffer for output
+  Tensor dev_postnms_rois_{Context::GetDeviceType()};
+  Tensor dev_postnms_rois_probs_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

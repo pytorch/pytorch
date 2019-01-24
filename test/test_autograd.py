@@ -10,16 +10,18 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul, itemgetter
 from functools import reduce, wraps
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
+from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
                           prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
                           random_fullrank_matrix_distinct_singular_value, load_tests)
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -201,6 +203,16 @@ class TestAutograd(TestCase):
         # Accumulate out-of-place when create_graph is False
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
+
+    def test_sum_to_with_empty_dim_grad(self):
+        a = torch.rand(4, 0, requires_grad=True)
+        b = torch.rand(4, 1, requires_grad=True)
+        c = a + b
+        assert c.shape == (4, 0)
+        c.sum().backward()
+
+        self.assertEqual(b.grad, torch.zeros(4, 1))
+        self.assertEqual(a.grad, torch.zeros(4, 0))
 
     def test_hessian_vector(self):
         x = torch.randn(2, 2, requires_grad=True)
@@ -581,6 +593,22 @@ class TestAutograd(TestCase):
         x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
+
+    @skipIfRocm
+    def test_sparse_mm_backward(self):
+        size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        z = sparse.mm(dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+        z = dense.addmm(sparse, dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
 
     @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
@@ -1448,19 +1476,24 @@ class TestAutograd(TestCase):
         gradcheck_input_size = 10
 
         # device, input_length
-        tests = [('cpu', 150)]
+        tests = [('cpu', 150, False),
+                 ('cpu', 150, True)]
         if torch.cuda.is_available():
-            tests += [('cuda', 50),
-                      ('cuda', 150)]
+            tests += [('cuda', 50, False),
+                      ('cuda', 150, False),
+                      ('cuda', 50, True),
+                      ('cuda', 150, True)]
 
-        for device, input_length in tests:
+        for device, input_length, vary_lengths in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
             tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
                                        device=device)
-            input_lengths = [input_length for _ in range(batch_size)]
-            target_lengths = [target_length for _ in range(batch_size)]
+            input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
+                              if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
+            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -2026,18 +2059,23 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        root = torch.tril(torch.rand(S, S)).requires_grad_()
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.cholesky(x, upper)
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
 
-        run_test(upper=True)
-        run_test(upper=False)
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
 
     @skipIfNoLapack
     def test_trtrs(self):
@@ -2187,6 +2225,23 @@ class TestAutograd(TestCase):
     def test_pow_scalar_base(self):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
+
+    # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    @skipIfRocm
+    def test_pdist_large(self):
+        def func(x):
+            return torch.pdist(x, p=2)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+            # is currently limited to smaller sizes (see issue above); this is just testing
+            # a floor.
+            shape = (1000, 1)
+            x = torch.randn(shape, device=device).requires_grad_()
+            output = torch.pdist(x, p=2)
+            # just run a single backward, as gradcheck/gradgradcheck is expensive here
+            output.sum().backward()
 
     @skipIfNoLapack
     def test_pinverse(self):
@@ -2683,6 +2738,44 @@ class TestAutograd(TestCase):
         gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
         gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
+    def test_gradcheck_sparse_input(self):
+        def fn(sparse):
+            return torch.sparse.sum(sparse)
+
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+
+    @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
+    def test_multi_device_reentrant_autograd(self):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.cuda()
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.cuda()
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            branch2 = checkpoint(fn_on_gpu, inp)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty FunctionTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2798,14 +2891,14 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-                # need to record this because methods can change the szie (e.g. unsqueeze)
+                # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                    if not isinstance(output_tensor, torch.Tensor) and not isinstance(output_tensor, tuple):
+                    if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
@@ -2896,7 +2989,7 @@ def add_test(
 
         setattr(TestAutograd, test_name, do_test)
 
-for test in method_tests:
+for test in method_tests():
     add_test(*test)
 
 if __name__ == '__main__':

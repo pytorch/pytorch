@@ -99,9 +99,9 @@ template <typename T>
 bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
   const auto& A = Input(0);
   const auto& B = Input(1);
-  auto* C = Output(0);
-  CAFFE_ENFORCE(&B != C, "In-place is not allowed.");
-  C->ResizeLike(B);
+
+  CAFFE_ENFORCE(!IsInputOutputAlias(1, 0), "In-place is not allowed.");
+  auto* C = Output(0, B.sizes(), at::dtype<T>());
   const T* Adata = A.template data<T>();
   auto* Cdata = C->template mutable_data<T>();
   if (B.numel() == 1) {

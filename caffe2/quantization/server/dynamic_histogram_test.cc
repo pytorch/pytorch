@@ -16,7 +16,7 @@ TEST(DynamicHistogram, HistSimilar) {
   normal_distribution<float> distribution;
 
   constexpr int n = 65536;
-  array<float, n> data; //make_array<float>(n);
+  array<float, n> data; // make_array<float>(n);
 
   for (int i = 0; i < n; ++i) {
     data[i] = distribution(generator);
@@ -52,7 +52,7 @@ TEST(DynamicHistogram, HistSimilar) {
   vector<float> errors(dynamic_hist.size());
   for (auto i = 0; i < dynamic_hist.size(); ++i) {
     ss.str("");
-    const Histogram *dynamic_hist_result = dynamic_hist[i]->Finalize();
+    const Histogram* dynamic_hist_result = dynamic_hist[i]->Finalize();
     for (auto j = 0; j < nbins; ++j) {
       ss << (*dynamic_hist_result->GetHistogram())[j] << " ";
     }
@@ -62,7 +62,7 @@ TEST(DynamicHistogram, HistSimilar) {
     float error = 0.0;
     for (int j = 0; j < nbins; ++j) {
       float e = (float)(*static_hist.GetHistogram())[j] -
-                (*dynamic_hist_result->GetHistogram())[j];
+          (*dynamic_hist_result->GetHistogram())[j];
       error += e * e;
     }
     error /= n;

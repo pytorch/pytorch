@@ -11,7 +11,7 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   auto& indices = Input(INDICES);
   auto& boundaries = Input(BOUNDARIES);
   auto& lengths = Input(LENGTHS);
-  auto* output = Output(O);
+
   CAFFE_ENFORCE_EQ(lengths.dim(), 1);
   CAFFE_ENFORCE_EQ(indices.dim(), 1);
   CAFFE_ENFORCE_EQ(boundaries.dim(), 1);
@@ -34,7 +34,7 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(length_sum, boundaries.numel());
 
   int64_t lower_bound = 0;
-  output->Resize(batch_size, output_dim);
+  auto* output = Output(O, {batch_size, output_dim}, at::dtype<int32_t>());
   auto* output_data = output->template mutable_data<int32_t>();
 
   for (int64_t i = 0; i < batch_size; i++) {

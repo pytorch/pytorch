@@ -1,6 +1,6 @@
 #include "caffe2/utils/proto_utils.h"
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 
 #include <fcntl.h>
 #include <cerrno>
@@ -120,7 +120,13 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 }  // namespace
 
 C10_EXPORT string ProtoDebugString(const MessageLite& proto) {
-  return proto.SerializeAsString();
+  string serialized = proto.SerializeAsString();
+  for (char& c : serialized) {
+    if (c < 0x20 || c >= 0x7f) {
+      c = '?';
+    }
+  }
+  return serialized;
 }
 
 C10_EXPORT bool ParseProtoFromLargeString(

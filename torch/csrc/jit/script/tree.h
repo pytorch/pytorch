@@ -1,10 +1,10 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <vector>
-#include <functional>
 
-#include "torch/csrc/jit/script/lexer.h"
+#include <torch/csrc/jit/script/lexer.h>
 
 namespace torch {
 namespace jit {
@@ -52,7 +52,8 @@ struct Tree : std::enable_shared_from_this<Tree> {
   const TreeRef& tree(size_t i) const {
     return trees().at(i);
   }
-  virtual TreeRef map(std::function<TreeRef(TreeRef)> fn) {
+  virtual TreeRef map(const std::function<TreeRef(TreeRef)>& fn) {
+    (void)fn;
     return shared_from_this();
   }
   template <typename... Args>
@@ -71,8 +72,12 @@ struct Tree : std::enable_shared_from_this<Tree> {
   void matchNumSubtrees(int k, size_t expected_subtrees) {
     return matchNumSubtreesD(k, "unknown", 0, expected_subtrees, false);
   }
-  void matchNumSubtreesD(int k, const char* filename, int lineno,
-                         size_t expected_subtrees, bool allow_more) {
+  void matchNumSubtreesD(
+      int k,
+      const char* filename,
+      int lineno,
+      size_t expected_subtrees,
+      bool allow_more) {
     if (kind() != k) {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
@@ -83,8 +88,9 @@ struct Tree : std::enable_shared_from_this<Tree> {
     if (trees().size() < expected_subtrees ||
         (!allow_more && trees().size() != expected_subtrees)) {
       std::stringstream ss;
-      ss << filename << ":" << lineno << ": expected at least " << expected_subtrees
-         << " subtrees, but found only " << trees().size() << "\n";
+      ss << filename << ":" << lineno << ": expected at least "
+         << expected_subtrees << " subtrees, but found only " << trees().size()
+         << "\n";
       range().highlight(ss);
       throw std::runtime_error(ss.str());
     }
@@ -110,7 +116,7 @@ struct String : public Tree {
 };
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
-  for (auto t : others) {
+  for (const auto& t : others) {
     if (t->isAtom())
       continue;
     size_t s = std::min(c.start(), t->range().start());
@@ -121,7 +127,8 @@ static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
 }
 
 struct Compound : public Tree {
-  Compound(int kind, SourceRange range) : Tree(kind), range_(std::move(range)) {}
+  Compound(int kind, SourceRange range)
+      : Tree(kind), range_(std::move(range)) {}
   Compound(int kind, const SourceRange& range_, TreeList&& trees_)
       : Tree(kind),
         range_(mergeRanges(range_, trees_)),
@@ -129,20 +136,23 @@ struct Compound : public Tree {
   const TreeList& trees() const override {
     return trees_;
   }
-  static TreeRef
-  create(int kind, const SourceRange& range_, TreeList&& trees_) {
+  static TreeRef create(
+      int kind,
+      const SourceRange& range_,
+      TreeList&& trees_) {
     return std::make_shared<Compound>(kind, range_, std::move(trees_));
   }
   bool isAtom() const override {
     return false;
   }
-  TreeRef map(std::function<TreeRef(TreeRef)> fn) override {
+  TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
     TreeList trees_;
     for (auto& t : trees()) {
       trees_.push_back(fn(t));
     }
     return Compound::create(kind(), range(), std::move(trees_));
   }
+
   const SourceRange& range() const override {
     return range_;
   }
@@ -170,7 +180,7 @@ struct pretty_tree {
         break;
       default:
         out << "(" << kindToString(t->kind());
-        for (auto e : t->trees()) {
+        for (const auto& e : t->trees()) {
           out << " " << get_flat(e);
         }
         out << ")";
@@ -187,7 +197,7 @@ struct pretty_tree {
     }
     std::string k = kindToString(t->kind());
     out << "(" << k;
-    for (auto e : t->trees()) {
+    for (const auto& e : t->trees()) {
       out << "\n" << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
@@ -200,7 +210,7 @@ static inline std::ostream& operator<<(std::ostream& out, pretty_tree t_) {
   return out << std::endl;
 }
 
-static inline std::ostream& operator<<(std::ostream& out, TreeRef t) {
+static inline std::ostream& operator<<(std::ostream& out, const TreeRef& t) {
   return out << pretty_tree(t);
 }
 

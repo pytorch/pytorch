@@ -1,9 +1,9 @@
-#include "DataChannelNccl.hpp"
-#include "../Cuda.hpp"
-#include "DataChannelUtils.hpp"
+#include <THD/base/data_channels/DataChannelNccl.hpp>
+#include <THD/base/Cuda.hpp>
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <THC/THC.h>
 #include <cuda.h>
@@ -149,7 +149,7 @@ void DataChannelNccl::destroy() {
   _destroySockets();
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   /**
    * Destroy the CUDA and NCCL resources
@@ -174,7 +174,7 @@ void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
       // Devices used for this group ID
       auto devices = getDevicesList(_groupDevices[groupId][i]);
       // Guard GPU device
-      at::cuda::CUDAGuard gpuGuard;
+      at::cuda::OptionalCUDAGuard gpuGuard;
       // Destroy the CUDA events
       size_t idx = 0;
       for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
@@ -284,7 +284,7 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   broadcastUniqueNcclId(&ncclId);
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
@@ -409,15 +409,16 @@ void DataChannelNccl::allReduce(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
-    auto stream = THCState_getCurrentStream(THDGetCudaState());
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
 
     NCCL_CHECK(ncclAllReduce(
         data[i].data_ptr(),
@@ -427,9 +428,15 @@ void DataChannelNccl::allReduce(
         ncclOp[operation],
         (*comms)[i],
         stream));
-    THCudaCheck(cudaEventRecord((*events)[i], stream));
   }
   NCCL_CHECK(ncclGroupEnd());
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
+    THCudaCheck(cudaEventRecord((*events)[i], stream));
+  }
 
   cudaFreeMutexLock.unlock();
 }
@@ -458,15 +465,16 @@ void DataChannelNccl::allGather(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.set_index(input[i].get_device());
-    auto stream = THCState_getCurrentStream(THDGetCudaState());
+    auto device = input[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
 
     NCCL_CHECK(ncclAllGather(
         input[i].data_ptr(),
@@ -475,9 +483,15 @@ void DataChannelNccl::allGather(
         _getNcclDataType(input[i].type().scalarType()),
         (*comms)[i],
         stream));
-    THCudaCheck(cudaEventRecord((*events)[i], stream));
   }
   NCCL_CHECK(ncclGroupEnd());
+
+  for (size_t i = 0; i < input.size(); ++i) {
+    auto device = input[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
+    THCudaCheck(cudaEventRecord((*events)[i], stream));
+  }
 
   cudaFreeMutexLock.unlock();
 }
@@ -508,15 +522,16 @@ void DataChannelNccl::reduce(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
-    auto stream = THCState_getCurrentStream(THDGetCudaState());
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
 
     NCCL_CHECK(ncclReduce(
         data[i].data_ptr(),
@@ -527,9 +542,15 @@ void DataChannelNccl::reduce(
         dstRank * data.size(),
         (*comms)[i],
         stream));
-    THCudaCheck(cudaEventRecord((*events)[i], stream));
   }
   NCCL_CHECK(ncclGroupEnd());
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
+    THCudaCheck(cudaEventRecord((*events)[i], stream));
+  }
 
   cudaFreeMutexLock.unlock();
 }
@@ -560,15 +581,16 @@ void DataChannelNccl::broadcast(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
-    auto stream = THCState_getCurrentStream(THDGetCudaState());
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
 
     NCCL_CHECK(ncclBcast(
         data[i].data_ptr(),
@@ -577,9 +599,15 @@ void DataChannelNccl::broadcast(
         srcRank * data.size(),
         (*comms)[i],
         stream));
-    THCudaCheck(cudaEventRecord((*events)[i], stream));
   }
   NCCL_CHECK(ncclGroupEnd());
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    auto device = data[i].get_device();
+    gpuGuard.set_index(device);
+    auto stream = THCState_getCurrentStreamOnDevice(THDGetCudaState(), device);
+    THCudaCheck(cudaEventRecord((*events)[i], stream));
+  }
 
   cudaFreeMutexLock.unlock();
 }

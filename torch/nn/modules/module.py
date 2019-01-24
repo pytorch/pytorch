@@ -50,7 +50,7 @@ class Module(object):
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
     `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
-    dictionary with keys follow the naming convention of state dict. See
+    dictionary with keys that follow the naming convention of state dict. See
     ``_load_from_state_dict`` on how to use this information in loading.
 
     If new parameters/buffers are added/removed from a module, this number shall
@@ -103,7 +103,10 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if not isinstance(name, torch._six.string_classes):
+        if '_buffers' not in self.__dict__:
+            raise AttributeError(
+                "cannot assign buffer before Module.__init__() call")
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -398,6 +401,16 @@ class Module(object):
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
+
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
+
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
@@ -639,8 +652,8 @@ class Module(object):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is provided as :attr`local_metadata`.
-        For state dicts without metadata, :attr`local_metadata` is empty.
+        module in input :attr:`state_dict` is provided as :attr:`local_metadata`.
+        For state dicts without metadata, :attr:`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
 

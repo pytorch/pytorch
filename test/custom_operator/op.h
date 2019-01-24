@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <vector>
+#include <string>
 
 // clang-format off
 #  if defined(_WIN32)
@@ -19,3 +20,5 @@ CUSTOM_OP_API std::vector<torch::Tensor> custom_op(
     torch::Tensor tensor,
     double scalar,
     int64_t repeat);
+
+CUSTOM_OP_API int64_t custom_op2(std::string s1, std::string s2);

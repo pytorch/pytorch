@@ -8,7 +8,7 @@ import hypothesis.strategies as st
 import os
 import unittest
 
-from caffe2.python import core, workspace
+from caffe2.python import core, utils, workspace
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
@@ -54,7 +54,7 @@ class TestPooling(hu.HypothesisTestCase):
             batch_size, size, size, input_channels).astype(np.float32)
 
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -105,7 +105,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = X.transpose((0, 2, 1))
+            X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
@@ -145,7 +145,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = X.transpose((0, 4, 1, 2, 3))
+            X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
@@ -178,7 +178,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = X.transpose((0, 4, 1, 2, 3))
+            X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
@@ -209,7 +209,7 @@ class TestPooling(hu.HypothesisTestCase):
             batch_size, size, size, input_channels).astype(np.float32)
 
         # transpose due to order = NCHW
-        X = X.transpose((0, 3, 1, 2))
+        X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
@@ -298,7 +298,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
@@ -329,11 +329,129 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(op_type=st.sampled_from(["MaxPool", "MaxPoolND"]),
+           dim=st.integers(1, 3),
+           N=st.integers(1, 3),
+           C=st.integers(1, 3),
+           D=st.integers(3, 5),
+           H=st.integers(3, 5),
+           W=st.integers(3, 5),
+           kernel=st.integers(1, 3),
+           stride=st.integers(1, 3),
+           pad=st.integers(0, 2),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    def test_max_pool_grad(
+            self, op_type, dim, N, C, D, H, W, kernel, stride, pad, order,
+            engine, gc, dc):
+        assume(pad < kernel)
+        assume(dim > 1 or engine == "")
+        if hiputl.run_in_hip(gc, dc):
+            if dim != 2:
+                assume(engine != "CUDNN")
+            elif engine == "CUDNN":
+                assume(order == "NCHW")
+
+        if op_type.endswith("ND"):
+            op_type = op_type.replace("N", str(dim))
+
+        op = core.CreateOperator(
+            op_type,
+            ["X"],
+            ["Y"],
+            kernels=[kernel] * dim,
+            strides=[stride] * dim,
+            pads=[pad] * dim * 2,
+            order=order,
+            engine=engine,
+        )
+
+        if dim == 1:
+            size = W
+            dims = [N, C, W]
+            axes = [0, 2, 1]
+        elif dim == 2:
+            size = H * W
+            dims = [N, C, H, W]
+            axes = [0, 2, 3, 1]
+        else:
+            size = D * H * W
+            dims = [N, C, D, H, W]
+            axes = [0, 2, 3, 4, 1]
+
+        X = np.zeros((N * C, size)).astype(np.float32)
+        for i in range(N * C):
+            X[i, :] = np.arange(size, dtype=np.float32) / size
+            np.random.shuffle(X[i, :])
+        X = X.reshape(dims)
+        if order == "NHWC":
+            X = np.transpose(X, axes)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], threshold=0.05, stepsize=0.005)
+
+    @given(op_type=st.sampled_from(["AveragePool", "AveragePoolND"]),
+           dim=st.integers(1, 3),
+           N=st.integers(1, 3),
+           C=st.integers(1, 3),
+           D=st.integers(3, 5),
+           H=st.integers(3, 5),
+           W=st.integers(3, 5),
+           kernel=st.integers(1, 3),
+           stride=st.integers(1, 3),
+           pad=st.integers(0, 2),
+           count_include_pad=st.booleans(),
+           order=st.sampled_from(["NCHW", "NHWC"]),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    def test_avg_pool_count_include_pad(
+            self, op_type, dim, N, C, D, H, W, kernel, stride, pad,
+            count_include_pad, order, engine, gc, dc):
+        assume(pad < kernel)
+        if hiputl.run_in_hip(gc, dc):
+            if dim != 2:
+                assume(engine != "CUDNN")
+            elif engine == "CUDNN":
+                assume(order == "NCHW")
+
+        if op_type.endswith("ND"):
+            op_type = op_type.replace("N", str(dim))
+
+        op = core.CreateOperator(
+            op_type,
+            ["X"],
+            ["Y"],
+            kernels=[kernel] * dim,
+            strides=[stride] * dim,
+            pads=[pad] * dim * 2,
+            count_include_pad=count_include_pad,
+            order=order,
+            engine=engine,
+        )
+
+        if dim == 1:
+            dims = [N, C, W]
+            axes = [0, 2, 1]
+        elif dim == 2:
+            dims = [N, C, H, W]
+            axes = [0, 2, 3, 1]
+        else:
+            dims = [N, C, D, H, W]
+            axes = [0, 2, 3, 4, 1]
+        X = np.random.randn(*dims).astype(np.float32)
+        if order == "NHWC":
+            X = np.transpose(X, axes)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
 
 if __name__ == "__main__":

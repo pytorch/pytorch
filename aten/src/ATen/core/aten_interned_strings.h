@@ -42,6 +42,8 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _cholesky_helper) \
+_(aten, _cholesky_solve_helper) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, _convolution_nogroup) \
@@ -81,8 +83,6 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
-_(aten, _gesv_single) \
-_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _inverse_helper) \
@@ -118,6 +118,7 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_addmm) \
 _(aten, _sparse_coo_tensor_with_dims) \
 _(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
@@ -127,6 +128,7 @@ _(aten, _sparse_div_zerodim) \
 _(aten, _sparse_mul) \
 _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
+_(aten, _sparse_sum) \
 _(aten, _sqrt) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
@@ -137,8 +139,6 @@ _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
-_(aten, _th_all) \
-_(aten, _th_any) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_clamp) \
@@ -150,7 +150,6 @@ _(aten, _th_max) \
 _(aten, _th_median) \
 _(aten, _th_min) \
 _(aten, _th_mode) \
-_(aten, _th_norm) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -195,6 +194,8 @@ _(aten, addcmul) \
 _(aten, addmm) \
 _(aten, addmv) \
 _(aten, addr) \
+_(aten, affine_grid_generator) \
+_(aten, affine_grid_generator_backward) \
 _(aten, alias) \
 _(aten, all) \
 _(aten, allclose) \
@@ -232,18 +233,21 @@ _(aten, broadcast_tensors) \
 _(aten, btrifact) \
 _(aten, btrifact_with_info) \
 _(aten, btrisolve) \
+_(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, combinations) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
@@ -259,6 +263,7 @@ _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
+_(aten, cosine_similarity) \
 _(aten, cross) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \
@@ -518,7 +523,6 @@ _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, potri) \
-_(aten, potrs) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
@@ -621,6 +625,7 @@ _(aten, sub) \
 _(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
+_(aten, sum_to_size) \
 _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
@@ -678,6 +683,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, upsample_bicubic2d) \
+_(aten, upsample_bicubic2d_backward) \
+_(aten, upsample_bicubic2d_forward) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \

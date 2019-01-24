@@ -9,8 +9,8 @@ namespace caffe2 {
 template <>
 bool LpNormOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* norm = Output(0);
-  norm->Resize(1);
+
+  auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
   const float size = average_ ? (float)X.numel() : 1.0f;
   CAFFE_ENFORCE_GT(size, 0);
@@ -32,10 +32,10 @@ template <>
 bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dnorm = Input(1);
-  auto* dX = Output(0);
+
   CAFFE_ENFORCE_EQ(dnorm.dim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   const float size = average_ ? (float)X.numel() : 1.0f;
   if (p_ == 1) {
     EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())

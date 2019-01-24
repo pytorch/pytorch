@@ -37,7 +37,7 @@ class SignalTest {
   }
 
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -56,7 +56,9 @@ class SignalTest {
     std::shared_ptr<::c10d::ProcessGroup::Work> work;
     while (true) {
       work = pg.allreduce(tensors);
-      if (!work->wait()) {
+      try {
+        work->wait();
+      } catch (const std::exception& e) {
         break;
       }
       sem_.post();
@@ -120,7 +122,7 @@ class CollectiveTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -171,9 +173,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
 
   // Wait for work to complete
   for (auto i = 0; i < size; i++) {
-    if (!work[i]->wait()) {
-      throw work[i]->exception();
-    }
+    work[i]->wait();
   }
 
   // Verify outputs
@@ -203,10 +203,11 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
-        at::DeviceGuard deviceGuard;
+        // This won't work if we ever support sparse CUDA
+        at::OptionalDeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          if (b == at::Backend::CUDA) { // NB:wouldn't work with sparse
-            deviceGuard.set_device(at::Device(at::kCUDA, l));
+          if (b == at::Backend::CUDA) {
+            deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
           inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
         }
@@ -224,9 +225,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
 
       // Wait for work to complete
       for (auto i = 0; i < size; i++) {
-        if (!work[i]->wait()) {
-          throw work[i]->exception();
-        }
+        work[i]->wait();
       }
 
       // Verify outputs
@@ -259,9 +258,7 @@ void testBarrier(const std::string& path) {
 
   // Wait for work to complete
   for (auto i = 0; i < size; i++) {
-    if (!work[i]->wait()) {
-      throw work[i]->exception();
-    }
+    work[i]->wait();
   }
 }
 
@@ -269,15 +266,21 @@ int main(int argc, char** argv) {
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
-    auto& ex = work->exception();
-    std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
+    }
   }
 
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGKILL);
-    auto& ex = work->exception();
-    std::cout << "SIGKILL test got: " << ex.what() << std::endl;
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
+    }
   }
 
   {

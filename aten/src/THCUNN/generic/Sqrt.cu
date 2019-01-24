@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/Sqrt.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/Sqrt.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Sqrt_updateOutput)(
            THCState *state,

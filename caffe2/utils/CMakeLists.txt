@@ -1,17 +1,19 @@
 list(APPEND Caffe2_CPU_SRCS
-  utils/proto_convert.cc
-  utils/proto_wrap.cc
-  utils/proto_utils.cc
-  utils/murmur_hash3.cc
-  utils/smart_tensor_printer.cc
-  utils/signal_handler.cc
-  utils/string_utils.cc
-  utils/threadpool/ThreadPool.cc
-  utils/cpuid.cc
   utils/bench_utils.cc
+  utils/cpuid.cc
+  utils/math/elementwise.cc
+  utils/math/reduce.cc
   utils/math_cpu.cc
   utils/math_utils.cc
-  utils/thread_name.cc)
+  utils/murmur_hash3.cc
+  utils/proto_convert.cc
+  utils/proto_utils.cc
+  utils/proto_wrap.cc
+  utils/signal_handler.cc
+  utils/smart_tensor_printer.cc
+  utils/string_utils.cc
+  utils/thread_name.cc
+  utils/threadpool/ThreadPool.cc)
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
@@ -24,11 +26,15 @@ if (NOT MSVC)
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
+        utils/math/elementwise.cu
+        utils/math/reduce.cu
         utils/math_gpu.cu
         )
 
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
-        utils/hip/math_hip.cc
+        utils/math/hip/elementwise.hip
+        utils/math/hip/reduce.hip
+        utils/hip/math_gpu.hip
         )
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
@@ -47,8 +53,8 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         )
 
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
-        utils/hip/math_hip_test.cc
-        utils/hip/math_blas_hip_test.cc
+        utils/hip/math_gpu_test.cc
+        utils/hip/math_blas_gpu_test.cc
         )
 
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead

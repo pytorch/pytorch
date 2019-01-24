@@ -27,14 +27,12 @@ matrix:
         install: pip install mypy mypy-extensions
         script: mypy @mypy-files.txt
       - env: CPP_DOC_CHECK
-        install: sudo apt-get install -y doxygen
+        python: "3.6"
+        install:
+          - sudo apt-get install -y doxygen
+          - pip install -r requirements.txt
         script: cd docs/cpp/source && ./check-doxygen.sh
       - env: CLANG_TIDY
         python: "3.6"
-        addons:
-          apt:
-            sources:
-              - ubuntu-toolchain-r-test
-              - llvm-toolchain-trusty
-            packages: clang-tidy
         script: tools/run-clang-tidy-in-ci.sh
+

@@ -47,20 +47,20 @@ class GroupNormOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* Y = Output(OUTPUT);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     T* mu_data = nullptr;
     T* rsig_data = nullptr;
     if (OutputSize() == 3) {
-      auto* mu = Output(MU);
-      auto* rsig = Output(INV_SIGMA);
-      mu->Resize(N, G);
-      rsig->Resize(N, G);
+      auto* mu = Output(MU, {N, G}, at::dtype<T>());
+      auto* rsig = Output(INV_SIGMA, {N, G}, at::dtype<T>());
       mu_data = mu->template mutable_data<T>();
       rsig_data = rsig->template mutable_data<T>();
     } else {
-      mu_.Resize(N, G);
-      rsig_.Resize(N, G);
+      ReinitializeTensor(
+          &mu_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      ReinitializeTensor(
+          &rsig_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
       mu_data = mu_.template mutable_data<T>();
       rsig_data = rsig_.template mutable_data<T>();
     }
@@ -90,24 +90,26 @@ class GroupNormOp final : public Operator<Context> {
       T* mu,
       T* rsig) {
     const int C = G * D;
-    scale_.Resize(N, C);
-    bias_.Resize(N, C);
+    ReinitializeTensor(
+        &scale_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &bias_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* scale_data = scale_.template mutable_data<T>();
     T* bias_data = bias_.template mutable_data<T>();
     if (order_ == StorageOrder::NCHW) {
-      const std::array<int, 2> dims = {N * G, D * HxW};
-      const int axis = 1;
+      const std::array<int, 2> X_dims = {N * G, D * HxW};
+      const std::array<int, 2> Y_dims = {N * G, 1};
       math::Moments<T, Context>(
-          2, dims.data(), 1, &axis, X, mu, rsig, &context_);
+          2, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
       ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
       GroupNormForwardNCHW(N, C, HxW, X, scale_data, bias_data, Y);
     } else {
-      const std::array<int, 4> dims = {N, HxW, G, D};
-      const std::array<int, 2> axes = {1, 3};
+      const std::array<int, 4> X_dims = {N, HxW, G, D};
+      const std::array<int, 4> Y_dims = {N, 1, G, 1};
       math::Moments<T, Context>(
-          4, dims.data(), 2, axes.data(), X, mu, rsig, &context_);
+          4, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
       ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
@@ -177,10 +179,10 @@ class GroupNormOp final : public Operator<Context> {
   const StorageOrder order_;
   const bool is_test_;
 
-  Tensor mu_{Context::GetDeviceType()};
-  Tensor rsig_{Context::GetDeviceType()};
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
+  Tensor mu_;
+  Tensor rsig_;
+  Tensor scale_;
+  Tensor bias_;
 
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
@@ -220,12 +222,10 @@ class GroupNormGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* dX = Output(INPUT_GRAD);
-    auto* dgamma = Output(GAMMA_GRAD);
-    auto* dbeta = Output(BETA_GRAD);
-    dX->ResizeLike(X);
-    dgamma->ResizeLike(gamma);
-    dbeta->ResizeLike(beta);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    auto* dgamma = Output(GAMMA_GRAD, gamma.sizes(), at::dtype<T>());
+    auto* dbeta = Output(BETA_GRAD, beta.sizes(), at::dtype<T>());
     return RunOnDeviceImpl(
         N,
         G,
@@ -259,8 +259,8 @@ class GroupNormGradientOp final : public Operator<Context> {
   const int group_;
   const StorageOrder order_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
 
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta

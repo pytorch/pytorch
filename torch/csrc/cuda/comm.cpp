@@ -1,7 +1,5 @@
 #include <torch/csrc/cuda/comm.h>
 
-#ifdef USE_CUDA
-
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -11,12 +9,24 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
-#include "c10/util/Optional.h"
-#include "torch/csrc/autograd/variable.h"
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
 #include <vector>
+
+
+// The following code is used to ensure torch is linked against caffe2_gpu.
+#ifdef _MSC_VER
+namespace {
+#pragma optimize("", off)
+  int warp_size() {
+    return at::cuda::warp_size();
+  }
+#pragma optimize("", on)
+}
+#endif
 
 namespace torch { namespace cuda {
 using namespace at;
@@ -43,7 +53,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::CUDAGuard _device_guard;
+  at::cuda::OptionalCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
@@ -187,7 +197,7 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::cuda::CUDAGuard cuda_guard;
+  at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {
@@ -197,7 +207,7 @@ std::vector<at::Tensor> scatter(
           chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(*(*streams)[chunk]);
+      cuda_guard.reset_stream(*(*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
@@ -244,5 +254,3 @@ at::Tensor gather(
   return result;
 }
 }} // namespace torch::cuda
-
-#endif

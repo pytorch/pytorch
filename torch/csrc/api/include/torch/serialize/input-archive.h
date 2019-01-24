@@ -1,5 +1,10 @@
 #pragma once
 
+#include <c10/util/Optional.h>
+#include <c10/core/Device.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
+
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -24,7 +29,7 @@ namespace serialize {
 /// A recursive representation of tensors that can be deserialized from a file
 /// or stream. In most cases, users should not have to interact with this class,
 /// and should instead use `torch::load`.
-class InputArchive final {
+class TORCH_API InputArchive final {
  public:
   /// Default-constructs the `InputArchive`.
   InputArchive();
@@ -50,12 +55,16 @@ class InputArchive final {
   void read(const std::string& key, InputArchive& archive);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
-  /// file at `filename`.
-  void load_from(const std::string& filename);
+  /// file at `filename`. Storage are remapped using device option. If device
+  /// is not specified, the module is loaded to the original device.
+  void load_from(const std::string& filename,
+      c10::optional<torch::Device> device = c10::nullopt);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
-  /// given `stream`.
-  void load_from(std::istream& stream);
+  /// given `stream`. Storage are remapped using device option. If device
+  /// is not specified, the module is loaded to the original device.
+  void load_from(std::istream& stream,
+      c10::optional<torch::Device> device = c10::nullopt);
 
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and

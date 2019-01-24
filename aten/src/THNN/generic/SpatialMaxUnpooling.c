@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialMaxUnpooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialMaxUnpooling.c"
 #else
 
 static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(scalar_t *input_p, scalar_t *output_p,

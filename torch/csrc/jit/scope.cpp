@@ -1,23 +1,19 @@
-#include "ir.h"
+#include <torch/csrc/jit/ir.h>
 
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/operator.h>
 
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/pretty_print.h"
-
+#include <algorithm>
 #include <iostream>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
-#include <stack>
-#include <sstream>
-#include <algorithm>
-#include <string>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);
@@ -56,4 +52,5 @@ std::string Scope::namesFromRoot(const std::string& separator) const {
   return out;
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

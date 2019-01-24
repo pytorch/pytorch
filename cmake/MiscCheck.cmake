@@ -171,41 +171,52 @@ CHECK_CXX_SOURCE_COMPILES(
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
-  # Currently MSVC seems to have a symbol not found error while linking (related
-  # to source file order?). As a result we will currently disable the perfkernel
-  # in msvc.
   # Also see CMakeLists.txt under caffe2/perfkernels.
-  if (NOT MSVC)
-    set(CAFFE2_PERF_WITH_AVX 1)
-    set(CAFFE2_PERF_WITH_AVX2 1)
-  endif()
+  set(CAFFE2_PERF_WITH_AVX 1)
+  set(CAFFE2_PERF_WITH_AVX2 1)
 endif()
 cmake_pop_check_state()
 
-# ---[ Check if the compiler has AVX512F support.
+# ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
 if (MSVC)
-  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__")
+  # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
+  # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
+  # But, we chose not to do that not to rely on hidden options.
+  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
 else()
-  set(CMAKE_REQUIRED_FLAGS "-mavx512f")
+  # We only consider the case where all of avx512f, avx512dq, and avx512vl are
+  # supported.
+  # Platforms where avx512f is supported by not avx512dq and avx512vl as of
+  # Jan 15 2019 : linux_manywheel_2.7mu_cpu_build and
+  # linux_conda_3.7_cu100_build
+  set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
 endif()
 CHECK_CXX_SOURCE_COMPILES(
     "#if defined(_MSC_VER)
      #include <intrin.h>
      #else
-     #include <x86intrin.h>
+     #include <immintrin.h>
      #endif
+     // check avx512f
      __m512 addConstant(__m512 arg) {
        return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
+     }
+     // check avx512dq
+     __m512 andConstant(__m512 arg) {
+       return _mm512_and_ps(arg, _mm512_set1_ps(1.f));
      }
      int main() {
        __m512i a = _mm512_set1_epi32(1);
        __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
+       ymm = _mm256_abs_epi64(ymm); // check avx512vl
        __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
        __m512i r = _mm512_andnot_si512(a, a);
-       }" CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+     }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
+  # Also see CMakeLists.txt under caffe2/perfkernels.
+  set(CAFFE2_PERF_WITH_AVX512 1)
 endif()
 cmake_pop_check_state()
 

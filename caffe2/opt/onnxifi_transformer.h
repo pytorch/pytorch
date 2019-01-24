@@ -18,9 +18,19 @@ namespace onnx {
 class OnnxExporter;
 }
 
-class CAFFE2_API OnnxifiTransformer {
+struct OnnxifiTransformerOptions {
+  // Run shape inference
+  bool infer_shapes{false};
+  // Dump onnx model for debugging
+  bool debug{false};
+  // Pass serialized onnx model if true, otherwise pass serialized c2 model
+  bool use_onnx{true};
+};
+
+class CAFFE2_API OnnxifiTransformer final {
  public:
-  explicit OnnxifiTransformer(bool infer_shapes, bool debug);
+  explicit OnnxifiTransformer(const OnnxifiTransformerOptions& opts);
+  ~OnnxifiTransformer();
 
   void Transform(
       Workspace* ws,
@@ -41,17 +51,23 @@ class CAFFE2_API OnnxifiTransformer {
  private:
   // Since we create new tensors during the conversion process, we actually need
   // into inject them into the original workspace
-  caffe2::NetDef SubnetToOnnxifiOp(
+  caffe2::NetDef SubnetToOnnxifiOpViaOnnx(
       const caffe2::NetDef& net,
       const std::unordered_set<std::string>& weights_in_ws,
       Workspace* ws,
       onnx::OnnxExporter* exporter,
       std::unordered_map<std::string, TensorShape>* shape_hints);
 
+  // Convert a cutoff subgraph net to an Onnxifi op
+  caffe2::NetDef SubnetToOnnxifiOpViaC2(
+      const caffe2::NetDef& net,
+      const std::unordered_set<std::string>& weights_in_ws,
+      const std::unordered_map<std::string, TensorShape>& shape_hints);
+
+  // We already have all the ops and external inputs and outputs!
   OperatorDef BuildOnnxifiOp(
       const std::string& onnx_model_str,
-      const std::unordered_map<std::string, std::vector<int>>&
-          output_size_hints,
+      const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const caffe2::NetDef& net);
 
@@ -60,17 +76,32 @@ class CAFFE2_API OnnxifiTransformer {
       NetDef* pred_net,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
 
-  // Run shape inference
-  bool infer_shapes_{false};
+  // Transform by passing C2 proto to backend
+  NetDef TransformViaC2(
+      NetDef* pred_net,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_map<std::string, TensorShape>& shape_hints);
 
-  // Dump onnx model for debugging
-  bool debug_{false};
+  // Transform by passing ONNX proto to backend
+  NetDef TransformViaOnnx(
+      Workspace* ws,
+      NetDef* pred_net,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blacklisted_ops,
+      std::unordered_map<std::string, TensorShape>* shape_hints);
+
+  // Options
+  OnnxifiTransformerOptions opts_;
 
   // Pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
 
   // Number of backends
   size_t num_backends_{0};
+
+  // backend idx
+  int idx_{0};
 
   // Backned IDs
   std::vector<onnxBackendID> backend_ids_;

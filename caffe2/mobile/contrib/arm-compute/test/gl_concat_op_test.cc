@@ -16,14 +16,18 @@ TEST(OPENGLOperatorTest, Concat) {
     int H = 8;
     int W = 8;
     for (int i = 0; i < Cs.size(); ++i) {
-      PopulateCPUBlob(&ws, true, std::string("cpu_X") + caffe2::to_string(i), {batchSize, Cs[i], H, W});
+      PopulateCPUBlob(
+          &ws,
+          true,
+          std::string("cpu_X") + c10::to_string(i),
+          {batchSize, Cs[i], H, W});
     }
 
   NetDef cpu_net;
   {
     OperatorDef* def = AddOp(&cpu_net, "Concat", {}, {"ref_Y", "cpu_dummy"});
       for (int i = 0; i < Cs.size(); ++i ) {
-        def->add_input(std::string("cpu_X") + caffe2::to_string(i));
+        def->add_input(std::string("cpu_X") + c10::to_string(i));
       }
   }
 
@@ -33,7 +37,7 @@ TEST(OPENGLOperatorTest, Concat) {
     OperatorDef* def = AddOp(&gpu_net, "Concat", {}, {"gpu_Y", "gpu_dummy"});
     MAKE_OPENGL_OPERATOR(def);
     for (int i = 0; i < Cs.size(); ++i ) {
-      def->add_input(std::string("cpu_X") + caffe2::to_string(i));
+      def->add_input(std::string("cpu_X") + c10::to_string(i));
     }
   }
 
