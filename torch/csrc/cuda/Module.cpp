@@ -234,7 +234,7 @@ static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = at::cuda::THCCachingAllocator_getCudaFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -255,7 +255,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module)
 
 PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = at::cuda::THCCachingAllocator_getCudaFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -264,7 +264,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THCCachingAllocator_emptyCache();
+  at::cuda::THCCachingAllocator_emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -274,7 +274,7 @@ PyObject * THCPModule_memoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_allocated = THCCachingAllocator_currentMemoryAllocated(device);
+  auto memory_allocated = at::cuda::THCCachingAllocator_currentMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -284,7 +284,7 @@ PyObject * THCPModule_maxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_allocated = THCCachingAllocator_maxMemoryAllocated(device);
+  auto max_memory_allocated = at::cuda::THCCachingAllocator_maxMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(max_memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -294,7 +294,7 @@ PyObject * THCPModule_resetMaxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryAllocated(device);
+  at::cuda::THCCachingAllocator_resetMaxMemoryAllocated(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -304,7 +304,7 @@ PyObject * THCPModule_memoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_cached = THCCachingAllocator_currentMemoryCached(device);
+  auto memory_cached = at::cuda::THCCachingAllocator_currentMemoryCached(device);
   return PyLong_FromUnsignedLongLong(memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -314,7 +314,7 @@ PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_cached = THCCachingAllocator_maxMemoryCached(device);
+  auto max_memory_cached = at::cuda::THCCachingAllocator_maxMemoryCached(device);
   return PyLong_FromUnsignedLongLong(max_memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -324,7 +324,7 @@ PyObject * THCPModule_resetMaxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryCached(device);
+  at::cuda::THCCachingAllocator_resetMaxMemoryCached(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
