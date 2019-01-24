@@ -4,13 +4,13 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/utils/functional.h>
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/symbolic_script.h"
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <memory>
@@ -613,7 +613,7 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor")) {
-      JIT_ASSERT(grads.size() == 1);
+      AT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::avg_pool2d_backward,
@@ -634,7 +634,7 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)")) {
-      JIT_ASSERT(grads.size() == 2);
+      AT_ASSERT(grads.size() == 2);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::max_pool2d_with_indices_backward,
@@ -673,7 +673,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      AT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0],
               tuple_outputs[1],
               nullptr,
@@ -702,7 +702,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      AT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0],
               tuple_outputs[1],
               tuple_outputs[2],
@@ -735,7 +735,7 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::log_softmax(Tensor self, int dim) -> Tensor")) {
-      JIT_ASSERT(grads.size() == 1);
+      AT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::_log_softmax_backward_data,
@@ -866,7 +866,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
         linearGradientForNode(node, fmap(node->outputs(), get_grad));
     LowerSimpleTuples(reverse_block);
 
-    JIT_ASSERT(grad_inputs.size() == node->inputs().size());
+    AT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad())
         continue;
@@ -938,7 +938,7 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   Block* reverse_block = rev_info.reverse_block;
 
   for (Node* top_node : reverse_block->nodes()) {
-    JIT_ASSERT(
+    AT_ASSERT(
         top_node->kind() == prim::GradOf ||
         top_node->kind() == prim::AutogradAdd ||
         top_node->kind() == prim::Undefined);
@@ -1151,7 +1151,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(
+  AT_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
       "graph.use_count() == 1, but found %d",

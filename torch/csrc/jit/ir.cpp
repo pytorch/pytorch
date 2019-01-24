@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/ir.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
@@ -302,7 +302,7 @@ static void checkSameDevice(const Node* node) {
         has_device = true;
         device = type->device();
       } else {
-        JIT_ASSERT(device == type->device());
+        AT_ASSERT(device == type->device());
       }
     }
   };
@@ -340,10 +340,10 @@ void Node::lint() const {
     for (auto input : inputs_) {
       // WARNING: O(n^2)
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      JIT_ASSERT(
+      AT_ASSERT(
           std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) !=
           input->uses_.end());
-      JIT_ASSERT(graph_->all_nodes.count(this) == 1);
+      AT_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;
     }
   }
@@ -354,20 +354,20 @@ void Node::lint() const {
       // Use invariants
       // - Use is consistent with inputs
       // - Every user node is live (checked in Graph)
-      JIT_ASSERT(use.user->inputs_[use.offset] == o);
+      AT_ASSERT(use.user->inputs_[use.offset] == o);
       i++;
     }
   }
 
   // Node subclass invariants
   IR_IF(this, Constant)
-  JIT_ASSERT(inputs_.size() == 0);
+  AT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(Return)
   // Return uses is zero
-  JIT_ASSERT(outputs().size() == 0);
+  AT_ASSERT(outputs().size() == 0);
   IR_ELSEIF(Param)
   // Param inputs is zero
-  JIT_ASSERT(inputs_.size() == 0);
+  AT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
   // Python operator cconv is correct
   size_t n_scalars = 0, n_tensors = 0;
@@ -377,12 +377,12 @@ void Node::lint() const {
     } else if (c == 'd') {
       n_tensors++;
     } else {
-      JIT_ASSERT(0);
+      AT_ASSERT(0);
     }
-    JIT_ASSERT(static_cast<bool>(value->pyobj));
+    AT_ASSERT(static_cast<bool>(value->pyobj));
   }
-  JIT_ASSERT(n_scalars == value->scalar_args.size());
-  JIT_ASSERT(n_tensors == inputs_.size());
+  AT_ASSERT(n_scalars == value->scalar_args.size());
+  AT_ASSERT(n_tensors == inputs_.size());
   IR_ELSEIF(Eval)
   // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
@@ -419,11 +419,11 @@ void Graph::lint() const {
       return nodes.count(n) > 0 || (parent && parent->contains(n));
     }
     void insert(const Value* v) {
-      JIT_ASSERT(!contains(v));
+      AT_ASSERT(!contains(v));
       values.insert(v);
     }
     void insert(const Node* n) {
-      JIT_ASSERT(!contains(n));
+      AT_ASSERT(!contains(n));
       nodes.insert(n);
     }
     std::unique_ptr<LintScope> parent;
@@ -449,22 +449,22 @@ void Graph::lint() const {
     void check_value(const Value* v) {
       scope->insert(v);
       auto b2 = seen_uniques.insert(v->unique());
-      JIT_ASSERT(b2.second); // insertion took place
-      JIT_ASSERT(v->unique() < g.next_unique_);
+      AT_ASSERT(b2.second); // insertion took place
+      AT_ASSERT(v->unique() < g.next_unique_);
 
       for (auto use : v->uses()) {
-        JIT_ASSERT(!scope->contains(use.user));
-        JIT_ASSERT(g.all_nodes.count(use.user) == 1);
+        AT_ASSERT(!scope->contains(use.user));
+        AT_ASSERT(g.all_nodes.count(use.user) == 1);
         anticipated_uses[use.user]++; // int default constructs to 0
       }
     }
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, input->unique(), " not in scope");
+          AT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
-      JIT_ASSERT(
+      AT_ASSERT(
           anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
@@ -476,33 +476,33 @@ void Graph::lint() const {
       }
       size_t i = 0;
       for (auto o : n->outputs()) {
-        JIT_ASSERT(o->node() == n);
-        JIT_ASSERT(i++ == o->offset_);
+        AT_ASSERT(o->node() == n);
+        AT_ASSERT(i++ == o->offset_);
         check_value(o);
       }
       n->lint();
     }
     void check_block(const Block* b) {
       // Check topological ordering
-      JIT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
+      AT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
       auto curNode = *b->nodes().begin();
       while (curNode != b->return_node()) {
-        JIT_ASSERT(curNode->isBefore(curNode->next()));
+        AT_ASSERT(curNode->isBefore(curNode->next()));
         curNode = curNode->next();
       }
 
       for (auto input : b->inputs()) {
         check_value(input);
-        JIT_ASSERT(input->node()->kind_ == prim::Param);
+        AT_ASSERT(input->node()->kind_ == prim::Param);
       }
 
       for (auto n : b->nodes()) {
-        JIT_ASSERT(n->kind_ != prim::Param);
-        JIT_ASSERT(n->kind_ != prim::Return);
+        AT_ASSERT(n->kind_ != prim::Param);
+        AT_ASSERT(n->kind_ != prim::Return);
         check_node(n);
       }
 
-      JIT_ASSERT(b->output_->kind() == prim::Return);
+      AT_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
 
       // all_nodes
@@ -516,9 +516,9 @@ void Graph::lint() const {
       node_set output_set{b->output_};
       // TODO: Make a more type safe std::includes wrapper which disallows use
       // on non-ordered containers
-      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
-      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
-      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
+      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
+      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
+      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
 
       sum_set.insert(ALL_OF(nodes_set));
       sum_set.insert(ALL_OF(inputs_set));
@@ -530,9 +530,9 @@ void Graph::lint() const {
 
       check_block(g.block_);
       for (auto kv : anticipated_uses) {
-        JIT_ASSERT(kv.second == -1);
+        AT_ASSERT(kv.second == -1);
       }
-      JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
+      AT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
     }
   };
   LintImpl(*this).check_graph();
@@ -690,7 +690,7 @@ Value* Value::copyMetadata(Value* from) {
 }
 
 void Value::replaceFirstUseWith(Value* newValue) {
-  JIT_ASSERT(owningGraph() == newValue->owningGraph());
+  AT_ASSERT(owningGraph() == newValue->owningGraph());
   auto u = uses()[0];
   u.user->inputs_[u.offset] = newValue;
   newValue->uses_.push_back(u);
@@ -869,8 +869,8 @@ Node::Node(Graph* graph_, NodeKind kind_)
 }
 
 void Node::eraseOutput(size_t i) {
-  JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().empty());
+  AT_ASSERT(i < outputs_.size());
+  AT_ASSERT(outputs_[i]->uses().empty());
   schema_ = nullptr;
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
@@ -887,7 +887,7 @@ Block* Node::addBlock() {
 }
 
 void Node::eraseBlock(size_t i) {
-  JIT_ASSERT(i < blocks_.size());
+  AT_ASSERT(i < blocks_.size());
   schema_ = nullptr;
   Block* n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
@@ -913,7 +913,7 @@ void Node::cloneFrom(Node* s) {
 }
 
 void Node::replaceAllUsesWith(Node* n) {
-  JIT_ASSERT(outputs().size() == n->outputs().size());
+  AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
   for (size_t i = 0; i < nOutputs; i++) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
@@ -921,7 +921,7 @@ void Node::replaceAllUsesWith(Node* n) {
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
-  JIT_ASSERT(graph_ == value->owningGraph());
+  AT_ASSERT(graph_ == value->owningGraph());
   schema_ = nullptr;
   // First we update the offsets for all existing inputs that will reside
   // after the one we're inserting. Concretely, these are the inputs at
@@ -940,7 +940,7 @@ Value* Node::insertInput(size_t i, Value* value) {
 }
 
 Value* Node::addInput(Value* value) {
-  JIT_ASSERT(graph_ == value->owningGraph());
+  AT_ASSERT(graph_ == value->owningGraph());
   schema_ = nullptr;
   value->uses_.emplace_back(this, inputs_.size());
   inputs_.push_back(value);
@@ -948,7 +948,7 @@ Value* Node::addInput(Value* value) {
 }
 
 Value* Node::replaceInput(size_t i, Value* newValue) {
-  JIT_ASSERT(newValue->owningGraph() == graph_);
+  AT_ASSERT(newValue->owningGraph() == graph_);
   schema_ = nullptr;
   Value* old = dropInput(i);
   inputs_[i] = newValue;
@@ -957,8 +957,8 @@ Value* Node::replaceInput(size_t i, Value* newValue) {
 }
 
 void Node::replaceInputWith(Value* from, Value* to) {
-  JIT_ASSERT(from->owningGraph() == graph_);
-  JIT_ASSERT(to->owningGraph() == graph_);
+  AT_ASSERT(from->owningGraph() == graph_);
+  AT_ASSERT(to->owningGraph() == graph_);
   schema_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
@@ -993,7 +993,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
       return this->topo_position_ > n->topo_position_;
     }
 
-    JIT_ASSERT(this == n);
+    AT_ASSERT(this == n);
     return false;
   }
 
@@ -1001,7 +1001,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
   // until we find the first common block.
   auto lhs = this;
   while (lhs) {
-    JIT_ASSERT(lhs->owningBlock());
+    AT_ASSERT(lhs->owningBlock());
 
     auto rhs = n;
     while (rhs) {
@@ -1018,7 +1018,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
     lhs = lhs->owningBlock()->owningNode();
   }
   // should never reach here, since both nodes are ultimately in the same graph
-  JIT_ASSERT(false);
+  AT_ASSERT(false);
 }
 
 bool Node::isBefore(const Node* n) const {
@@ -1030,14 +1030,14 @@ bool Node::isAfter(const Node* n) const {
 }
 
 Node* Node::insertBefore(Node* n) {
-  JIT_ASSERT(n->inBlockList());
+  AT_ASSERT(n->inBlockList());
   insertAfter(n->prev());
   return this;
 }
 
 Node* Node::insertAfter(Node* n) {
-  JIT_ASSERT(!inBlockList() && n->inBlockList());
-  JIT_ASSERT(n->owningBlock());
+  AT_ASSERT(!inBlockList() && n->inBlockList());
+  AT_ASSERT(n->owningBlock());
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
@@ -1082,12 +1082,12 @@ use_list::iterator Node::findUseForInput(size_t i) {
   // O(N) on the use list, but unless we get nodes with +100 uses
   // vector traversal still is probably faster than linked list
   auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
-  JIT_ASSERT(use_it != input_uses.end());
+  AT_ASSERT(use_it != input_uses.end());
   return use_it;
 }
 
 Value* Node::dropInput(size_t i) {
-  JIT_ASSERT(i < inputs_.size());
+  AT_ASSERT(i < inputs_.size());
   auto input_node = inputs_[i];
   auto use_it = findUseForInput(i);
   input_node->uses_.erase(use_it);
@@ -1096,7 +1096,7 @@ Value* Node::dropInput(size_t i) {
 }
 
 void Node::removeFromList() {
-  JIT_ASSERT(inBlockList());
+  AT_ASSERT(inBlockList());
   this->owning_block_ = nullptr;
   Node* next = this->next();
   Node* prev = this->prev();
@@ -1203,7 +1203,7 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
@@ -1277,20 +1277,20 @@ Graph::~Graph() {
 
 void Graph::freeNode(Node* n) {
   auto it = all_nodes.find(n);
-  JIT_ASSERT(it != all_nodes.end());
+  AT_ASSERT(it != all_nodes.end());
   delete *it;
   all_nodes.erase(it);
 }
 void Graph::freeValue(Value* v) {
   v->setUniqueName("");
   auto it = all_values.find(v);
-  JIT_ASSERT(it != all_values.end());
+  AT_ASSERT(it != all_values.end());
   delete *it;
   all_values.erase(it);
 }
 void Graph::freeBlock(Block* b) {
   auto it = all_blocks.find(b);
-  JIT_ASSERT(it != all_blocks.end());
+  AT_ASSERT(it != all_blocks.end());
   delete *it;
   all_blocks.erase(it);
 }
@@ -1311,7 +1311,7 @@ std::vector<Value*> inlineCallTo(
     bool unpack_outputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
-  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
     value_map[callee.inputs()[i]] = inputs[i];
   }
