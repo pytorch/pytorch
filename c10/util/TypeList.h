@@ -7,6 +7,7 @@ namespace c10 { namespace guts { namespace typelist {
 
 namespace detail {
 template<class... T> struct false_t : std::false_type {};
+template<template<class> class... T> struct false_higher_t : std::false_type {};
 }
 
 /**
@@ -245,6 +246,22 @@ template<> struct reverse<typelist<>> final {
   using type = typelist<>;
 };
 template<class TypeList> using reverse_t = typename reverse<TypeList>::type;
+
+
+template<class TypeList, template<class> class Condition, class Enable = void> struct find_if final {
+  static_assert(detail::false_t<TypeList>::value, "In typelist::find_if<TypeList, Condition>, the TypeList argument must be typelist<...>.");
+};
+template<template<class> class Condition> struct find_if<typelist<>, Condition, void> final {
+  static_assert(detail::false_higher_t<Condition>::value, "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
+};
+template<class Head, class... Tail, template<class> class Condition>
+struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<Condition<Head>::value>> final {
+  static constexpr size_t value = 0;
+};
+template<class Head, class... Tail, template<class> class Condition>
+struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<!Condition<Head>::value>> final {
+  static constexpr size_t value = 1 + find_if<typelist<Tail...>, Condition>::value;
+};
 
 
 

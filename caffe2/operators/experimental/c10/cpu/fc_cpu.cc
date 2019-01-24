@@ -131,15 +131,5 @@ namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
     .withState<caffe2::State>()
     .kernel<&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .dispatchKey(CPUTensorId());
 } // namespace c10

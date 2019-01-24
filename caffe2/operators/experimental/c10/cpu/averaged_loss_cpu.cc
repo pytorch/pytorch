@@ -50,8 +50,5 @@ namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::AveragedLoss)
     .withState<caffe2::State>()
     .kernel<&caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<float>()}});
+    .dispatchKey(CPUTensorId());
 } // namespace c10

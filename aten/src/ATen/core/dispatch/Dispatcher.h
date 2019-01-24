@@ -59,7 +59,7 @@ public:
   /**
    * Register an operator to the dispatch table for some operator schema.
    */
-  static void registerKernel(typename Schema::dispatch::dispatch_key_type dispatch_key, KernelFunction* kernel_func, KernelStateCreatorFunction* state_creator_func) {
+  static void registerKernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelStateCreatorFunction* state_creator_func) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
     return dispatch_table_for_this_op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, state_creator_func});
   }
@@ -67,7 +67,7 @@ public:
   /**
    * Remove an operator from the dispatch table for some operator schema.
    */
-  static void deregisterKernel(const typename Schema::dispatch::dispatch_key_type& dispatch_key) {
+  static void deregisterKernel(TensorTypeId dispatch_key) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
     return dispatch_table_for_this_op.deregisterKernel(dispatch_key);
   }

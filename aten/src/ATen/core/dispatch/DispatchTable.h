@@ -90,7 +90,7 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected
    */
   void registerKernel(
-      typename Schema::dispatch::dispatch_key_type dispatch_key,
+      TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
     kernels_.emplace(std::move(dispatch_key), kernel);
   }
@@ -103,8 +103,7 @@ class DispatchTable final {
   // TODO: This isn't going to work so well when we get more complicated
   // override patterns! In this case, an operator will show up in multiple
   // slots, and erasing them one-by-one is probably not such a good idea.
-  void deregisterKernel(
-      const typename Schema::dispatch::dispatch_key_type& dispatch_key) {
+  void deregisterKernel(TensorTypeId dispatch_key) {
     kernels_.erase(dispatch_key);
   }
 
@@ -128,9 +127,8 @@ class DispatchTable final {
 
  private:
 
-
   details::ThreadsafeOperatorTable_<
-      typename Schema::dispatch::dispatch_key_type>
+      TensorTypeId>
       kernels_;
 };
 

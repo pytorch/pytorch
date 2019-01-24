@@ -37,9 +37,9 @@ struct GivenTensorFill final {
 
    static constexpr size_t num_outputs() {return 1;}
 
-   static c10::DeviceTypeId dispatch_key(
+   static TensorTypeId dispatch_key(
       const Stack* stack) {
-    return c10::DeviceTypeId::CPU;
+    return CPUTensorId();
   }
 };
 
@@ -66,9 +66,9 @@ struct ConstantFill final {
        "dtype",
        "value"}};
 
-  static c10::DeviceTypeId dispatch_key(
+  static TensorTypeId dispatch_key(
       const Stack* stack) {
-    return c10::DeviceTypeId::CPU;
+    return CPUTensorId();
   }
 };
 
@@ -95,9 +95,9 @@ struct UniformFill final {
        "min",
        "max"}};
 
-  static c10::DeviceTypeId dispatch_key(
+  static TensorTypeId dispatch_key(
       const Stack* stack) {
-    return c10::DeviceTypeId::CPU;
+    return CPUTensorId();
   }
 };
 

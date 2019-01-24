@@ -75,12 +75,5 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SigmoidCrossEntropyWithLogits)
     .kernel<&caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl>()
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .dispatchKey(CPUTensorId());
 } // namespace c10

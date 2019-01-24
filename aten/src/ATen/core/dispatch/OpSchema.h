@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/dispatch/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
@@ -41,53 +40,6 @@ template <class Arg>
 using is_tensor_arg = std::
     is_same<at::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
-inline DeviceTypeId to_device_type_id(DeviceType device_type) {
-  switch (device_type) {
-    case DeviceType::CPU:
-      return DeviceTypeId::CPU;
-    case DeviceType::CUDA:
-      return DeviceTypeId::CUDA;
-    default:
-      return DeviceTypeId::UNDEFINED;
-  }
-}
-
-inline TensorParameterDispatchKey tensor_to_dispatch_key(const at::Tensor& tensor) {
-  return TensorParameterDispatchKey{
-      to_device_type_id(tensor.device().type()),
-      LayoutId(0),
-      tensor.dtype().id()};
-}
-
-template<size_t index, size_t offset, class ParameterTypes, class Enable = void> struct get_ith_tensor_arg_ {
-  static_assert(!std::is_same<ParameterTypes, ParameterTypes>::value, "Index out of bounds");
-};
-template<size_t index, size_t offset, class Head, class... Tail>
-struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index == 0 && is_tensor_arg<Head>::value>> {
-  static at::Tensor call(ArrayRef<IValue> args) {
-    if (!args[offset].isTensor()) {
-      throw std::runtime_error("Expected argument " + guts::to_string(offset) + " to be of type Tensor but found different type.");
-    }
-    return args[offset].toTensor();
-  }
-};
-template<size_t index, size_t offset, class Head, class... Tail>
-struct get_ith_tensor_arg_<index, offset, guts::typelist::typelist<Head, Tail...>, guts::enable_if_t<index != 0 || !is_tensor_arg<Head>::value>> {
-  static at::Tensor call(ArrayRef<IValue> args) {
-    return get_ith_tensor_arg_<(is_tensor_arg<Head>::value ? (index-1) : index), offset + 1, guts::typelist::typelist<Tail...>>::call(args);
-  }
-};
-template<class ParameterTypes, size_t index> at::Tensor get_ith_tensor_arg(ArrayRef<IValue> args) {
-  return get_ith_tensor_arg_<index, 0, ParameterTypes>::call(args);
-}
-
-// Extract type ids for all tensors from an array of tensors
-template<class OpSchemaDef, size_t... indices>
-guts::array<TensorParameterDispatchKey, OpSchemaDef::num_dispatch_args()> getDispatchTypeIds__(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
-  using ParameterTypes = typename guts::function_traits<typename OpSchemaDef::Signature>::parameter_types;
-  return {tensor_to_dispatch_key(get_ith_tensor_arg<ParameterTypes, indices>(args))...};
-}
-
 /**
  * Extract the type ids of all tensors in a variadic list of arguments
  *
@@ -96,11 +48,11 @@ guts::array<TensorParameterDispatchKey, OpSchemaDef::num_dispatch_args()> getDis
  * @return guts::array<TensorParameterDispatchKey, n>, where n is the number of tensor arguments (is_tensor_arg) in the class
  */
 template<class OpSchemaDef>
-guts::array<TensorParameterDispatchKey, OpSchemaDef::num_dispatch_args()> getDispatchTypeIds_(ArrayRef<IValue> args) {
-  return getDispatchTypeIds__<OpSchemaDef>(args, guts::make_index_sequence<OpSchemaDef::num_dispatch_args()>());
+TensorTypeId getDispatchKey_(ArrayRef<IValue> args) {
+  using ParameterTypes = typename guts::function_traits<typename OpSchemaDef::Signature>::parameter_types;
+  static constexpr size_t index_of_first_tensor_arg = guts::typelist::find_if<ParameterTypes, is_tensor_arg>::value;
+  return args[index_of_first_tensor_arg].toTensor().type_id(); // TODO Possible without copying the Tensor holder?
 }
-
-// TODO Test getDispatchTypeIds_
 
 /**
  * If T is a struct with a type field Signature, provides the member constant
@@ -305,13 +257,8 @@ template<class OpSchemaDef>
 class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
 
-  // TODO Static assert that dispatch_key_type has operator<<(ostream, _) defined for debug output.
-  // TODO Use an ADL-based debugString(DispatchKey) function instead of operator<< for debug printing.
-
 public:
-  using dispatch_key_type = DispatchKey<OpSchemaDef::num_dispatch_args()>;
-
-  static inline dispatch_key_type dispatch_key(const Stack* stack) {
+  static inline TensorTypeId dispatch_key(const Stack* stack) {
     /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;
@@ -319,9 +266,7 @@ public:
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");*/
-    return dispatch_key_type {
-      details::getDispatchTypeIds_<OpSchemaDef>(torch::jit::last(*stack, signature::num_args))
-    };
+    return details::getDispatchKey_<OpSchemaDef>(torch::jit::last(*stack, signature::num_args));
   }
 };
 
@@ -333,23 +278,15 @@ class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<has_function_dispatch_k
   static_assert(guts::is_function_type<decltype(OpSchemaDef::dispatch_key)>::value, "Operator schema defines dispatch_key member, but it isn't a function.");
 
   using dispatch_key_traits = guts::function_traits<decltype(OpSchemaDef::dispatch_key)>;
+  static_assert(std::is_same<TensorTypeId, typename dispatch_key_traits::return_type>::value,
+    "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected it to return a TensorTypeId");
 
-public:
-  using dispatch_key_type = typename dispatch_key_traits::return_type;
-
-private:
-
-  static_assert(guts::is_equality_comparable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have the equality operator defined. Please define it.");
-  static_assert(guts::is_hashable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have an overload for std::hash. Please define it.");
-
-  static_assert(std::is_same<
-    guts::typelist::typelist<const Stack*>,
-    typename dispatch_key_traits::parameter_types
-    >::value, "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type const Stack*.");
+  static_assert(std::is_same<guts::typelist::typelist<const Stack*>,typename dispatch_key_traits::parameter_types>::value,
+    "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type const Stack*.");
 
 public:
 
-  static inline dispatch_key_type dispatch_key(const Stack* stack) {
+  static inline TensorTypeId dispatch_key(const Stack* stack) {
     /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;

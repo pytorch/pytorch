@@ -34,7 +34,7 @@ public:
    * @param kernel The concrete function implementation to register
    * @param dispatch_key  The dispatch key to register the function to
    */
-  KernelRegistrar(typename Schema::dispatch::dispatch_key_type dispatch_key, KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
+  KernelRegistrar(TensorTypeId dispatch_key, KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
   : dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
     Dispatcher<OpSchemaDef>::registerKernel(dispatch_key_, kernel, state_creator);
   }
@@ -54,7 +54,7 @@ public:
   }
 
 private:
-  const typename Schema::dispatch::dispatch_key_type dispatch_key_;
+  const TensorTypeId dispatch_key_;
   bool owns_registration_;
 
   C10_DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
@@ -99,7 +99,7 @@ private:
     return guts::make_unique<State>();
   }
 
-  c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
+  c10::optional<TensorTypeId> dispatch_key_;
   KernelFunction* kernel_;
   KernelStateCreatorFunction* state_creator_;
 
@@ -108,7 +108,7 @@ private:
       : KernelRegistrationBuilder(c10::nullopt, nullptr, &defaultStateCreator) {}
 
   constexpr KernelRegistrationBuilder(
-      c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key,
+      c10::optional<TensorTypeId> dispatch_key,
       KernelFunction* kernel,
       KernelStateCreatorFunction* state_creator)
       : dispatch_key_(std::move(dispatch_key)), kernel_(kernel), state_creator_(state_creator)  {}
@@ -129,7 +129,7 @@ private:
    * @param dispatch_key dispatch key to register the function to
    * @return "this" for method chaining
    */
-  constexpr KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
+  constexpr KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(TensorTypeId dispatch_key) && {
     static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
     return KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(dispatch_key), kernel_, state_creator_);
   }
