@@ -6,11 +6,8 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-<<<<<<< HEAD
 #include <torch/csrc/jit/script/sugared_value.h>
-=======
 #include <torch/csrc/jit/script/module.h>
->>>>>>> 31de19f21087852d038580b34a48d46c53b7952a
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function_schema.h>
