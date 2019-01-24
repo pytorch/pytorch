@@ -303,7 +303,7 @@ If :attr:`mat1` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 :attr:`alpha` and :attr:`beta` are scaling factors on matrix-vector product between
-:attr:`mat1` and :attr`mat2` and the added matrix :attr:`mat` respectively.
+:attr:`mat1` and :attr:`mat2` and the added matrix :attr:`mat` respectively.
 
 .. math::
     \text{out} = \beta\ \text{mat} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
@@ -604,7 +604,7 @@ in :attr:`input`.
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
 shape as :attr:`input`.
 
-:attr:`out` can have integral ``dtype``, but :attr`input` must have floating
+:attr:`out` can have integral ``dtype``, but :attr:`input` must have floating
 point ``dtype``.
 
 Args:
@@ -1522,6 +1522,9 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
+.. note:: Since eigenvalues and eigenvectors might be complex, backward pass is supported only
+for :func:`torch.symeig`
+
 Args:
     a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -1993,7 +1996,7 @@ Example::
 
 add_docstr(torch.gesv,
            r"""
-torch.gesv(B, A) -> (Tensor, Tensor)
+torch.gesv(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
@@ -2200,6 +2203,17 @@ Example::
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
+""")
+
+add_docstr(torch.is_floating_point,
+           r"""
+is_floating_point(tensor) -> (bool)
+
+Returns True if the data type of :attr:`tensor` is a floating point data type i.e.,
+one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+
+Args:
+    tensor (Tensor): the PyTorch tensor to test
 """)
 
 add_docstr(torch.kthvalue,
@@ -2482,7 +2496,7 @@ the output tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
+    dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     out (Tensor, optional): the output tensor
 
@@ -2635,9 +2649,10 @@ Example::
 
 .. function:: max(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the maximum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-maximum value found (argmax).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the maximum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each maximum value found
+(argmax).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2659,7 +2674,7 @@ Example::
             [ 1.5717, -0.9207,  0.1297, -1.8768],
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
-    (tensor([ 0.8475,  1.1949,  1.5717,  1.0036]), tensor([ 3,  0,  0,  1]))
+    torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
 .. function:: max(input, other, out=None) -> Tensor
 
@@ -3023,8 +3038,8 @@ Example::
 
 .. function:: mul(input, other, out=None)
 
-Each element of the tensor :attr:`input` is multiplied by each element of the
-Tensor :attr:`other`. The resulting tensor is returned.
+Each element of the tensor :attr:`input` is multiplied by the corresponding
+element of the Tensor :attr:`other`. The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
@@ -3415,7 +3430,7 @@ Args:
 
 add_docstr(torch.ormqr,
            r"""
-ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
+ormqr(a, tau, mat, left=True, transpose=False) -> Tensor
 
 Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
 formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
@@ -4527,8 +4542,9 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
-`U, S, V = torch.svd(A)` returns the singular value decomposition of a
-real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
+``svd(A)`` returns a namedtuple ``(U, S, V)`` which the singular value
+decomposition of a input real matrix `A` of size `(n x m)` such that
+:math:`A = USV^T`.
 
 `U` is of shape :math:`(n \times n)`.
 
@@ -4622,8 +4638,12 @@ only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
-Note: Irrespective of the original strides, the returned matrix `V` will
-be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+.. note:: Irrespective of the original strides, the returned matrix `V` will
+          be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+
+.. note:: Extra care needs to be taken when backward through outputs. Such
+          operation is really only stable when all eigenvalues are distinct.
+          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
 
 Args:
     input (Tensor): the input symmetric matrix
@@ -4940,8 +4960,8 @@ add_docstr(torch.tril,
            r"""
 tril(input, diagonal=0, out=None) -> Tensor
 
-Returns the lower triangular part of the matrix (2-D tensor) :attr:`input`,
-the other elements of the result tensor :attr:`out` are set to 0.
+Returns the lower triangular part of the matrix (2-D tensor) or batch of matrices
+:attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
 
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
@@ -5045,8 +5065,8 @@ add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
 
-Returns the upper triangular part of the matrix (2-D tensor) :attr:`input`,
-the other elements of the result tensor :attr:`out` are set to 0.
+Returns the upper triangular part of a matrix (2-D tensor) or batch of matrices
+:attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
 
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
@@ -5090,19 +5110,19 @@ Example::
             [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
             [ 0.4333,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
             [-0.9888,  1.0679, -1.3337, -1.6556,  0.4798,  0.2830]])
-    >>> torch.tril(b, diagonal=1)
-    tensor([[ 0.5876, -0.0794,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.2447,  0.9556, -1.2919,  0.0000,  0.0000,  0.0000],
-            [ 0.4333,  0.3146,  0.6576, -1.0432,  0.0000,  0.0000],
-            [-0.9888,  1.0679, -1.3337, -1.6556,  0.4798,  0.0000]])
-    >>> torch.tril(b, diagonal=-1)
-    tensor([[ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.2447,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [ 0.4333,  0.3146,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
+    >>> torch.triu(b, diagonal=1)
+    tensor([[ 0.0000, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
+            [ 0.0000,  0.0000, -1.2919,  1.3378, -0.1768, -1.0857],
+            [ 0.0000,  0.0000,  0.0000, -1.0432,  0.9348, -0.4410],
+            [ 0.0000,  0.0000,  0.0000,  0.0000,  0.4798,  0.2830]])
+    >>> torch.triu(b, diagonal=-1)
+    tensor([[ 0.5876, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
+            [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
+            [ 0.0000,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
+            [ 0.0000,  0.0000, -1.3337, -1.6556,  0.4798,  0.2830]])
 """)
 
-# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# docstr is split in two parts to avoid format mis-capturing :math: braces '{}'
 # as common args.
 add_docstr(torch.triu_indices,
            r"""
@@ -5522,7 +5542,7 @@ full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
 ``torch.full_like(input, fill_value)`` is equivalent to
-``torch.full_like(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
+``torch.full(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
     {input}
@@ -6248,4 +6268,48 @@ Example::
     >>>                            [4, 5, 6],
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
+
+
+add_docstr(torch.combinations,
+           r"""
+combinations(tensor, r=2, with_replacement=False) -> seq
+
+Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
+python's `itertools.combinations` when `with_replacement` is set to `False`, and
+`itertools.combinations_with_replacement` when `with_replacement` is set to `True`.
+
+Arguments:
+    tensor (Tensor): 1D vector.
+    r (int, optional): number of elements to combine
+    with_replacement (boolean, optional): whether to allow duplication in combination
+
+Returns:
+    Tensor: A tensor equivalent to converting all the input tensors into lists, do
+    `itertools.combinations` or `itertools.combinations_with_replacement` on these
+    lists, and finally convert the resulting list into tensor.
+
+Example::
+
+    >>> a = [1, 2, 3]
+    >>> list(itertools.combinations(a, r=2))
+    [(1, 2), (1, 3), (2, 3)]
+    >>> list(itertools.combinations(a, r=3))
+    [(1, 2, 3)]
+    >>> list(itertools.combinations_with_replacement(a, r=2))
+    [(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)]
+    >>> tensor_a = torch.tensor(a)
+    >>> torch.combinations(tensor_a)
+    tensor([[1, 2],
+            [1, 3],
+            [2, 3]])
+    >>> torch.combinations(tensor_a, r=3)
+    tensor([[1, 2, 3]])
+    >>> torch.combinations(tensor_a, with_replacement=True)
+    tensor([[1, 1],
+            [1, 2],
+            [1, 3],
+            [2, 2],
+            [2, 3],
+            [3, 3]])
 """)

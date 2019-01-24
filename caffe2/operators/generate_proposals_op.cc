@@ -345,8 +345,6 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
-
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
@@ -413,5 +411,4 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposals);
 // For backward compatibility
 SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
-} // namespace
 } // namespace caffe2

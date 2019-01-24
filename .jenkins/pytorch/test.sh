@@ -76,6 +76,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
+  # ROCm CI is using Caffe2 docker images, which doesn't have several packages
+  # needed in testing. We install them here.
+  pip install -q psutil librosa>=0.6.2 --user
 fi
 
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then

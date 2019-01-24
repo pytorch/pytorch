@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
 from torch.autograd import Variable, Function, detect_anomaly
@@ -569,8 +569,14 @@ def method_tests():
         ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
+        ('tril', (S, M, M), NO_ARGS, 'batched'),
+        ('tril', (S, M, M), (2,), 'batched_idx'),
+        ('tril', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('triu', (M, M), NO_ARGS),
         ('triu', (M, M), (2,), 'idx'),
+        ('triu', (S, M, M), NO_ARGS, 'batched'),
+        ('triu', (S, M, M), (2,), 'batched_idx'),
+        ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('trace', (M, M), NO_ARGS),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
@@ -821,7 +827,8 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         elif isinstance(arg, torch.Tensor):
             if arg.dtype == torch.float:
                 arg = arg.double()
-            v = maybe_non_contig(arg).detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
+            v = maybe_non_contig(arg).detach().clone()
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):
@@ -938,12 +945,12 @@ tri_tests_args = [
 ]
 
 tri_large_tests_args = [
-    (1, 268435455),
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
     # they pass.
     #
+    # (1, 268435455),
     # (5000, 5000),
     # (10000, 10000),
     # (268435455, 1),
@@ -981,7 +988,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if isinstance(args, tuple):
+    if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

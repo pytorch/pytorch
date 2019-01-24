@@ -63,6 +63,9 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -178,7 +181,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -324,7 +330,8 @@ class TestCase(expecttest.TestCase):
             #        needed for inplace operations done on `x`, e.g., copy_().
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
-            x = x.detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
+            x = x.detach().clone()
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
@@ -731,7 +738,7 @@ def brute_pdist(inp, p=2):
     k = n * (n - 1) // 2
     if k == 0:
         # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
     square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
     unroll = square.view(square.shape[:-2] + (n * n,))
     inds = torch.ones(k, dtype=torch.int)
@@ -806,6 +813,7 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
+    'test_conv_double_backward',
     'test_conv_double_backward_groups',
     'test_Conv3d_dilated',
     'test_Conv3d_stride_padding',

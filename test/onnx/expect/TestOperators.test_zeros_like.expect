@@ -1,20 +1,23 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
     input: "0"
     output: "1"
-    op_type: "ConstantLike"
-    attribute {
-      name: "dtype"
-      i: 1
-      type: INT
-    }
+    op_type: "Shape"
+  }
+  node {
+    input: "1"
+    output: "2"
+    op_type: "ConstantOfShape"
     attribute {
       name: "value"
-      f: 0
-      type: FLOAT
+      t {
+        data_type: 1
+        raw_data: "\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   name: "torch-jit-export"
@@ -35,7 +38,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1

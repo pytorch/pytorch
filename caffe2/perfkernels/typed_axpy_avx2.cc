@@ -1,6 +1,6 @@
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
 
-#include <ATen/core/Half.h>
+#include <c10/util/Half.h>
 #include <emmintrin.h>
 #include <immintrin.h>
 
