@@ -20,22 +20,10 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
-#include <algorithm>
-#include <atomic>
-#include <cstdint>
 #include <functional>
 #include <iostream>
-#include <memory>
 #include <unordered_set>
 #include <vector>
-
-namespace torch {
-namespace autograd {
-
-struct Function;
-
-}
-} // namespace torch
 
 namespace torch {
 namespace jit {
@@ -117,8 +105,6 @@ struct Use {
     return user == b.user && offset == b.offset;
   }
 };
-
-class AliasDb;
 
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -829,8 +815,10 @@ struct Node {
 struct Block {
   friend struct Node;
   friend struct Graph;
+
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
   TORCH_API Block(Graph* graph_, Node* node_);
+
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -862,6 +850,19 @@ struct Block {
   const Node* param_node() const {
     return input_;
   }
+  Graph* owningGraph() {
+    return graph_;
+  }
+  const Graph* owningGraph() const {
+    return graph_;
+  }
+  Node* owningNode() {
+    return owning_node_;
+  }
+  const Node* owningNode() const {
+    return owning_node_;
+  }
+
   Value* addInput(std::string name = "") {
     Value* v = input_->addOutput();
     v->setUniqueName(std::move(name));
@@ -886,28 +887,16 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+
   Node* appendNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
     return n;
   }
-
   Node* prependNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertAfter(output_);
     return n;
-  }
-  Graph* owningGraph() {
-    return graph_;
-  }
-  const Graph* owningGraph() const {
-    return graph_;
-  }
-  Node* owningNode() {
-    return owning_node_;
-  }
-  const Node* owningNode() const {
-    return owning_node_;
   }
   // clone all inputs, nodes, and outputs from src and append them
   // to the inputs, nodes, and outputs of this block
@@ -1008,6 +997,10 @@ struct Graph {
   const Node* return_node() const {
     return block_->return_node();
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+    return unique_names_;
+  }
+
   void push_scope(const std::string& scope_name) {
     current_scope_ = current_scope_->push(Symbol::scope(scope_name));
   }
@@ -1020,6 +1013,7 @@ struct Graph {
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
   }
+
   Value* addInput(std::string name = "") {
     return block_->addInput(std::move(name));
   }
@@ -1029,15 +1023,11 @@ struct Graph {
   void eraseInput(size_t i) {
     block_->eraseInput(i);
   }
-  void eraseOutput(size_t i) {
-    block_->eraseOutput(i);
-  }
-  const std::unordered_map<std::string, Value*>& uniqueNames() const {
-    return unique_names_;
-  }
-
   size_t registerOutput(Value* n) {
     return block_->registerOutput(n);
+  }
+  void eraseOutput(size_t i) {
+    block_->eraseOutput(i);
   }
 
   TORCH_API Node* create(NodeKind kind, size_t num_outputs = 1);
