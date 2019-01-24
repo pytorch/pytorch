@@ -64,6 +64,7 @@ def type_argument_translations(arg):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntList'
         size = int(match.group(1))
+    # Enables bool[x] by translating to legacy std::array<bool,x>. See [temp translations]
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
