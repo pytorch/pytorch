@@ -1,7 +1,7 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/ir.h>
