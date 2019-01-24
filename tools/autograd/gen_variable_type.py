@@ -800,9 +800,9 @@ def unpack_args(env, declaration):
             ))
 
             if dynamic_type == 'TensorList':
-                unpacked_tensorlists.append(arg['name'])
+                unpacked_tensorlists.append(arg['name'] + '_')
             elif dynamic_type != 'SparseTensorRef':
-                unpacked_tensors.append(arg['name'])
+                unpacked_tensors.append(arg['name'] + '_')
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's stll getting the non-variable from the variable
