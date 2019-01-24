@@ -201,8 +201,7 @@ protected:
       const std::shared_ptr<Graph>& graph,
       THPObjectPtr func_ptr,
       std::string& cconv) const override {
-    Node* node = graph->insertNode(
-        graph->createPythonOp(std::move(func_ptr), cconv, {}));
+    Node* node = PythonValue::getPythonOp(graph, std::move(func_ptr), cconv);
     auto python_op = static_cast<PythonOp*>(node);
     python_op->ignore_on_export = true;
     return node;

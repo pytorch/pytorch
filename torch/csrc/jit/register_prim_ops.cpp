@@ -504,7 +504,10 @@ RegisterOperators reg({
           return [](Stack& stack) {
             throw JITException(
                 "This Python function annotated to be ignored"
-                " and cannot be executed");
+                " and cannot be and has not been included in the exported"
+                " binary, meaning that it cannot be executed now."
+                " Make sure that ignored operations are never executed after"
+                " import");
             return 0;
           };
         }),
