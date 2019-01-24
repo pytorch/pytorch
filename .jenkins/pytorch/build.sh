@@ -179,6 +179,7 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
+  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
 
   # Install clang-7 clang++-7 for xla
@@ -189,8 +190,7 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   # XLA build requires Bazel
   wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
-  ./bazel-*.sh --user
-  export PATH="$PATH:$HOME/bin"
+  sudo ./bazel-*.sh
   BAZEL="$(which bazel)"
   if [ -z "${BAZEL}" ]; then
     echo "Unable to find bazel..."
