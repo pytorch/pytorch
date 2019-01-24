@@ -657,6 +657,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
+    FIFTY_MIL_CYCLES = 50000000
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
@@ -1580,7 +1581,8 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
-            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            # spin for about 50 ms on device1
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
 
         self.assertTrue(s0.query())
         self.assertFalse(s1.query())
@@ -1677,7 +1679,7 @@ class TestCuda(TestCase):
         self.assertGreater(start_event.elapsed_time(event), 0)
 
     @staticmethod
-    def _stream_synchronize(self, spin_time_cycles=50000000):
+    def _stream_synchronize(self, spin_time_cycles):
         s = torch.cuda.current_stream()
         e_tik = torch.cuda.Event(enable_timing=True)
         e_tok = torch.cuda.Event(enable_timing=True)
@@ -1694,7 +1696,7 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_synchronize(self, spin_time_cycles=50000000):
+    def _event_synchronize(self, spin_time_cycles):
         s = torch.cuda.current_stream()
         e_tik = torch.cuda.Event(enable_timing=True)
         e_tok = torch.cuda.Event(enable_timing=True)
@@ -1711,7 +1713,7 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_wait(self, spin_time_cycles=50000000):
+    def _event_wait(self, spin_time_cycles):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
         e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
@@ -1740,7 +1742,7 @@ class TestCuda(TestCase):
         with torch.cuda.device('cuda:1'):
             c2p.put(0)
             p2c.get()
-            c2p.put(sync_func(self, 50000000))
+            c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipIfRocm
@@ -1763,7 +1765,7 @@ class TestCuda(TestCase):
             with torch.cuda.device('cuda:0'):
                 e_tik.record()
                 p2c.put(0)
-                parent_time = sync_func(self, 50000000)
+                parent_time = sync_func(self, TestCuda.FIFTY_MIL_CYCLES)
                 child_time = c2p.get()
                 e_tok.record()
                 e_tok.synchronize()
@@ -1786,7 +1788,8 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
-            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            # spin for about 50 ms on device1
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             e0 = torch.cuda.Event()
             s0.record_event(e0)
 
@@ -1815,7 +1818,8 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
-            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+            # spin for about 50 ms on device1
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             e1 = s1.record_event()
 
         self.assertTrue(e0.query())
@@ -1853,13 +1857,14 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e0 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(10)  # spin for about 50 ms on device1
+            torch.cuda._sleep(10)
             s0.record_event(e0)
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
             e1 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(30000000)  # spin for about 50 ms on device1
+            # spin for about 50 ms on device1
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             s1.record_event(e1)
 
         e0.synchronize()
@@ -1875,7 +1880,8 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e2 = torch.cuda.Event(enable_timing=True)
-            torch.cuda._sleep(30000000)  # spin for about 50 ms on device1
+            # spin for about 50 ms on device1
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             s0.record_event(e2)
             s0.synchronize()
 
