@@ -117,6 +117,24 @@ TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
+# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+# values temporarily and pass the values to the return variables outside of the
+# `at::AutoNonVariableTypeMode` guard block.
+DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+auto tmp = ([&]() {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  return ${base_type_call};
+})();
+${return_values} = ${rhs_value};
+""")
+
+DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+{
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${base_type_call};
+}
+""")
+
 SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
@@ -586,14 +604,26 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            call = CALL_VIA_DERIVED.substitute(combined)
-            if not modifies_arguments:
-                call, extra_wrapping_stmts = wrap_output(call)
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
+            # the baseType operations still dispatch to non-Variable type, even if the arguments passed
+            # in are now Variables.
+            # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if not modifies_arguments and not returns_void:
+                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call,
+                    return_values=tie_return_values(),
+                    rhs_value=rhs_value)
+            else:
+                call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not modifies_arguments and not returns_void:
-            call = '{} = {}'.format(tie_return_values(), call)
-        call = call + ';'
+            if not modifies_arguments and not returns_void:
+                call = '{} = {}'.format(tie_return_values(), call)
+            call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         return call

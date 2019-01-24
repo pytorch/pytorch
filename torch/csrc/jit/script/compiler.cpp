@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
@@ -435,8 +435,8 @@ struct Environment {
     //          inputs: loop_counter, lcd0, lcd1, ...
     //         outputs: loop_condition, lcd0, lcd1, ...
     // captured_inputs: lcd0, lcd1, ...
-    JIT_ASSERT(b->inputs().size() == b->outputs().size());
-    JIT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
+    AT_ASSERT(b->inputs().size() == b->outputs().size());
+    AT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
     for (size_t i = b->inputs().size() - 1; i > 0; i--) {
       // nothing changed along this loop
       if (b->inputs()[i] == b->outputs()[i]) {
@@ -520,7 +520,7 @@ struct to_ir {
         graph(method.graph()),
         resolver(std::move(resolver_)),
         environment_stack(nullptr) {
-    JIT_ASSERT(resolver);
+    AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
@@ -724,7 +724,7 @@ struct to_ir {
           << expected_annotation_size << ")!";
     }
     if (self) {
-      JIT_ASSERT(it != end);
+      AT_ASSERT(it != end);
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
@@ -750,7 +750,7 @@ struct to_ir {
       const FunctionSchema& schema,
       Block* block) {
     // rewrites ensure there is always a return statement in program
-    JIT_ASSERT(def_stack_.back().merged_return_type_);
+    AT_ASSERT(def_stack_.back().merged_return_type_);
     // outputs
     Value* result = environment_stack->getVar("$return", range);
     block->registerOutput(result);
@@ -865,7 +865,7 @@ struct to_ir {
             << result->type()->python_str();
       }
     }
-    JIT_ASSERT(result_type);
+    AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
     environment_stack->setVar(stmt.range(), "$return", result);
   }
@@ -1608,7 +1608,7 @@ struct to_ir {
       //     list.set_item(get_item(idx).add_(value))
       // similar to how Python handles things.
       const auto listType = sliceable->type()->cast<ListType>();
-      JIT_ASSERT(listType != nullptr);
+      AT_ASSERT(listType != nullptr);
 
       bool isTensorList =
           listType->getElementType()->isSubtypeOf(DynamicType::get());
@@ -2122,7 +2122,7 @@ struct to_ir {
     Stack stack;
     stack.push_back(*maybe_constant_input);
     op(stack);
-    JIT_ASSERT(stack.size() == 1);
+    AT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], tree->range());
   }
 
@@ -2349,10 +2349,10 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      JIT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
       args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
     } else {
-      JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
     }
 
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
@@ -2479,8 +2479,8 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    JIT_ASSERT(subscript_exprs.size() == 1);
-    JIT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
+    AT_ASSERT(subscript_exprs.size() == 1);
+    AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     c10::optional<int64_t> maybe_dim;
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
@@ -2586,7 +2586,7 @@ struct to_ir {
       const SourceRange& loc,
       Value* gatherable,
       const List<Expr>& subscript_exprs) {
-    JIT_ASSERT(subscript_exprs.size() == 1);
+    AT_ASSERT(subscript_exprs.size() == 1);
 
     if (gatherable->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
@@ -2614,14 +2614,14 @@ void defineMethodsInModule(
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
     const SugaredValuePtr& self) {
-  JIT_ASSERT(definitions.size() == resolvers.size());
+  AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
   std::unordered_map<std::string, Method*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
-    JIT_ASSERT(resolver);
+    AT_ASSERT(resolver);
     if (!self) {
       // if self is defined, then these are methods and do not go into the
       // global namespace otherwise, they get defined together so we add them to
@@ -2638,7 +2638,7 @@ void defineMethodsInModule(
       };
     }
     auto creator = [def, resolver, self](Method& method) {
-      JIT_ASSERT(resolver);
+      AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
     Method& method = m->create_method(name, creator);

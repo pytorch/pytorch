@@ -747,6 +747,11 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
 
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+       list(APPEND HIP_CXX_FLAGS -g)
+       list(APPEND HIP_CXX_FLAGS -O0)
+    endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.

@@ -11,6 +11,29 @@ except ImportError:
     from yaml import Loader
 
 
+# [temp translations]
+# We're currently incrementally moving from the custom func schema to the
+# JIT signature schema incrementally. This will reduce overall complexity
+# and increase compliance between these components. So for now we do simple
+# type translations to continue to emit the legacy func schema for further
+# processing by downstream tools. This will helps us avoid having to prematurely
+# change all downstream tools to detect these new types.
+def temp_type_translations(typ):
+    # Enables Tensor[] by translating to legacy TensorList. See [temp translations]
+    if typ == 'Tensor[]':
+        return 'TensorList'
+    # Enables int[] by translating to legacy IntList. See [temp translations]
+    if typ == 'int[]':
+        return 'IntList'
+    # Enables int by translating to legacy int64_t. See [temp translations]
+    if typ == 'int':
+        return 'int64_t'
+    # Enables float by translating to legacy double. See [temp translations]
+    if typ == 'float':
+        return 'double'
+    return typ
+
+
 def parse_default(s):
     if s.lower() == 'true':
         return True
@@ -18,12 +41,19 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
-    elif s == '{}':
+    # Enables default argument [] by translating to legacy {}.
+    # See [temp translations]
+    elif s == '[]':
         return '{}'
-    elif re.match(r'{.*}', s):
-        return s
+    elif re.match(r'\[.*\]', s):
+        return "{" + s[1:-1] + "}"
     elif s == 'None':
         return 'c10::nullopt'
+    # The JIT signature schema uses Mean, but in particular C++ needs
+    # the legacy Reduction::Mean. So we'll continue emiting that until
+    # we change this at either a JIT schema or C++ level.
+    elif s == 'Mean':
+        return 'Reduction::Mean'
     try:
         return int(s)
     except Exception:
@@ -71,17 +101,31 @@ def parse_arguments(args, func_decl, func_name, func_return):
         t, name = type_and_name
         default = None
 
+        # Enables Generator? by translating to legacy Generator*. See [temp translations]
+        if t == 'Generator?':
+            t = 'Generator*'
+
         if '=' in name:
             ns = name.split('=', 1)
+            # This enables Tensor? x=None and translates to legacy
+            # "Tensor? x={}". See [temp translations].
+            if t == 'Tensor?' and ns[1] == 'None':
+                ns[1] = "[]"  # Will translate to {} via parse_default
+            # This enables "Generator? x = None and translates to legacy
+            # "Generator* x = nullptr". See [temp translations].
+            if t == 'Generator*' and ns[1] == 'None':
+                ns[1] = 'nullptr'
             name, default = ns[0], parse_default(ns[1])
 
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
-        match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
+        # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
+        match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
             argument_dict['size'] = int(match.group(1))
+        argument_dict['type'] = temp_type_translations(argument_dict['type'])
         if default is not None:
             argument_dict['default'] = default
         # TODO: convention is that the ith-argument correspond to the i-th return, but it would
@@ -105,6 +149,8 @@ def parse_return_arguments(return_decl, inplace):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         type_and_maybe_name = [a.strip() for a in arg.rsplit(' ', 1)]
+        # See Note [field_name versus name]
+        field_name = None
         if len(type_and_maybe_name) == 1:
             t = type_and_maybe_name[0]
             if inplace:
@@ -113,10 +159,14 @@ def parse_return_arguments(return_decl, inplace):
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
         else:
             t, name = type_and_maybe_name
+            field_name = name
 
         typ = sanitize_type(t)
         argument_dict = {'type': typ, 'name': name}
+        if field_name is not None:
+            argument_dict['field_name'] = field_name
         argument_dict['output'] = True
+        argument_dict['type'] = temp_type_translations(argument_dict['type'])
 
         arguments.append(argument_dict)
     return arguments
@@ -132,6 +182,13 @@ def has_sparse_dispatches(dispatches):
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
+
+
+def propagate_field_names(output_arguments, return_arguments):
+    if output_arguments:
+        for i, r in enumerate(return_arguments):
+            if 'field_name' in r:
+                output_arguments[i]['field_name'] = r['field_name']
 
 
 def run(paths):
@@ -152,6 +209,7 @@ def run(paths):
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'])
                 arguments = parse_arguments(arguments, func, declaration['name'], return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
+                propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)

@@ -10,8 +10,7 @@
 
 namespace c10 {
 
-// TODO Use folly::Function for perf
-using KernelFunction = std::function<IValue(ArrayRef<IValue>)>;
+using KernelFunction = IValue(ArrayRef<IValue>);
 
 namespace details {
 
@@ -128,49 +127,32 @@ struct ivalue_to_arg_type<ArrayRef<T>> {
   }
 };
 
-template<class ReturnType, class ParamTypes, class FuncType> struct _wrapKernel {};
-template<class ReturnType, class... ParamTypes, class FuncType> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, FuncType> {
+template<class ReturnType, class ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel {};
+template<class ReturnType, class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, FuncType, kernel> {
   using parameter_types = guts::typelist::typelist<ParamTypes...>;
 
   template<size_t... indices>
-  static KernelFunction call(FuncType* kernel, guts::index_sequence<indices...>) {
-    return [kernel] (ArrayRef<IValue> args) -> IValue {
-      if (args.size() != sizeof...(ParamTypes)) {
-        throw std::runtime_error("Wrong number of arguments for operator call");
-      }
-      return return_type_to_ivalue(
-        (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...)
-      );
-    };
+  static IValue call(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
+    if (args.size() != sizeof...(ParamTypes)) {
+      throw std::runtime_error("Wrong number of arguments for operator call");
+    }
+    return return_type_to_ivalue(
+      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...)
+    );
   }
 };
-template<class... ParamTypes, class FuncType> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, FuncType> {
+template<class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, FuncType, kernel> {
   using parameter_types = guts::typelist::typelist<ParamTypes...>;
 
   template<size_t... indices>
-  static KernelFunction call(FuncType* kernel, guts::index_sequence<indices...>) {
-    return [kernel] (ArrayRef<IValue> args) -> IValue {
-      if (args.size() != sizeof...(ParamTypes)) {
-        throw std::runtime_error("Wrong number of arguments for operator call");
-      }
-      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
-      return IValue();
-    };
+  static IValue call(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
+    if (args.size() != sizeof...(ParamTypes)) {
+      throw std::runtime_error("Wrong number of arguments for operator call");
+    }
+    (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
+    return IValue();
   }
 };
-
-template<class SignatureTraits>
-KernelFunction wrapKernel(typename SignatureTraits::func_type* kernel) {
-  using return_type = typename SignatureTraits::return_type;
-  using parameter_types = typename SignatureTraits::parameter_types;
-  using func_type = typename SignatureTraits::func_type;
-  constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
-
-  return _wrapKernel<return_type, parameter_types, func_type>::call(
-    kernel,
-    guts::make_index_sequence<num_parameters>()
-  );
-}
 
 /**
  * Wrapper class around a user-provided schema definition some useful information about the schema.
@@ -207,8 +189,10 @@ public:
 
   static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
 
-  static KernelFunction wrap_kernel(func_type* kernel) {
-    return details::wrapKernel<signature_traits>(kernel);
+  template<func_type* kernel>
+  static IValue wrap_kernel(ArrayRef<IValue> args) {
+    constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
+    return details::_wrapKernel<return_type, parameter_types, func_type, kernel>::call(args, guts::make_index_sequence<num_parameters>());
   }
 
 private:

@@ -648,6 +648,21 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
 
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_shared_storage_on_cuda(self):
+        whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
+        m = torch.jit.ScriptModule()
+        m.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
+        m.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+        m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertTrue(m2.p0.is_cuda)
+        self.assertTrue(m2.b0.is_cuda)
+        self.assertTrue(m2.p0.is_shared())
+        self.assertTrue(m2.b0.is_shared())
+        self.assertEqual(m2.b0.storage().data_ptr(), m2.p0.storage().data_ptr())
+
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
@@ -1719,6 +1734,20 @@ class TestJit(JitTestCase):
         graph_str = str(constant_prop.graph)
         self.assertTrue(graph_str.count("prim::None") == 0)
 
+    def test_constant_prop_if_inline(self):
+        @torch.jit.script
+        def constant_prop():
+            cond = True
+            a = 1
+            if cond:
+                a = 1 * 2
+            else:
+                a = 1 // 0
+            return a
+
+        # testing that 1 // 0 error is not thrownn
+        self.run_pass('constant_propagation', constant_prop.graph)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
@@ -1759,16 +1788,49 @@ class TestJit(JitTestCase):
 
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
-        def constant_prop():
+        def constant_prop(cond, iter):
+            # type: (bool, int) -> int
             b = 0
             while True:
-                b = 1
+                print("stays")
+            for _ in range(2):
+                print("stays")
+            for _ in range(iter):
+                print("stays")
+            while cond:
+                print("stays")
             while False:
-                b = 2
+                print("removed")
+            for _i in range(0):
+                print("removed")
+            for _i in range(-4):
+                print("removed")
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = canonical(constant_prop.graph)
+        self.assertTrue(graph.count("removed") == 0)
+        self.assertTrue(graph.count("stays") == 1)  # constant gets pooled
+        self.assertTrue(graph.count("prim::Print") == 4)
+
+    def test_constant_prop_remove_output(self):
+        @torch.jit.script
+        def constant_prop(iter):
+            # type: (int) -> None
+            a = 1
+            b = 1
+            c = 1
+            for i in range(iter):
+                if False:
+                    a = 10
+                if i == 5:
+                    b = 2
+                    c = 3
+            print(a, b, c)
+
+        graph = constant_prop.graph
+        self.run_pass('constant_propagation', graph)
+        self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
     def test_trace_detach(self):
         def foo(x, w):
@@ -9521,6 +9583,48 @@ a")
                     if bool(x < 3):
                         return 4
                 return 5
+
+    def test_overloading(self):
+        @torch._jit_internal.weak_module
+        class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
+            def __init__(self):
+                super(W, self).__init__()
+
+            @torch._jit_internal.weak_script_method
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            def forward(self, x):
+                # manually do argument switching
+                if isinstance(x, tuple):
+                    return self.forward_tuple(x)
+                else:
+                    return self.forward_tensor(x)
+
+            @torch._jit_internal.weak_script_method
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x) + self.weak((x, x))
+
+        s = S()
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20 + 5 + x)
+
+        w = W()
+        self.assertEqual(w((x, x)), x + 5)
+        self.assertEqual(w((x)), x + 20)
 
     def test_select_after_chunk(self):
         def foo(x):

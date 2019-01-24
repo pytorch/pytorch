@@ -74,7 +74,7 @@ void add_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Add)
-    .kernel(&caffe2::add_op_cpu_impl<float>)
+    .kernel<&caffe2::add_op_cpu_impl<float>>()
     .dispatchKey(c10::DispatchKey<2>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
