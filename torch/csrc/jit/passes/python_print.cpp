@@ -796,9 +796,14 @@ struct PythonPrintPass {
         }
       } break;
       case prim::DictConstruct: {
-        stmt << "annotate(" << node->output()->type()->python_str() << ", ";
-        printDict(stmt, node->inputs());
-        stmt << ")";
+        auto dict_type = node->output()->type()->expect<DictType>();
+        if (node->inputs().size() == 0 &&
+            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            !dict_type->getValueType()->isSubtypeOf(DynamicType::get())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+        } else {
+          printDict(stmt, node->inputs());
+        }
       } break;
       case prim::DictIndex: {
         stmt << "(" << useOf(node->inputs().at(0)) << ")["
