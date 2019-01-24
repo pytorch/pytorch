@@ -237,7 +237,7 @@ void broadcast(
   int64_t numel = tensors[0].numel();
 
   std::lock_guard<std::mutex> free_mutex(
-      *(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
   const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
@@ -284,7 +284,7 @@ void reduce(
   ncclDataType_t data_type = _get_data_type(inputs[0].type());
 
   const auto count = inputs[0].numel();
-  std::lock_guard<std::mutex> lock(*(at::cuda::THCCachingAllocator_getCudaFreeMutex()));
+  std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
   auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
