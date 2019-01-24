@@ -1,4 +1,4 @@
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
@@ -15,8 +15,10 @@
 #include <unordered_set>
 #include <vector>
 
-namespace at {
+namespace c10 {
 namespace cuda {
+
+namespace CUDACachingAllocator {
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -536,30 +538,30 @@ struct CudaCachingAllocator : public Allocator {
 
 CudaCachingAllocator device_allocator;
 
-Allocator* THCCachingAllocator_get(void)
+Allocator* get(void)
 {
   return &device_allocator;
 }
 
-void THCCachingAllocator_emptyCache(void) {
+void emptyCache(void) {
   caching_allocator.emptyCache();
 }
 
-void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
   caching_allocator.cacheInfo(dev_id, cachedAndFree, largestBlock);
 }
 
-void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
+void* getBaseAllocation(void *ptr, size_t *size)
 {
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-void THCCachingAllocator_recordStream(void *ptr, cuda::CUDAStream stream)
+void recordStream(void *ptr, cuda::CUDAStream stream)
 {
   caching_allocator.recordStream(ptr, stream);
 }
 
-std::mutex* THCCachingAllocator_getCudaFreeMutex()
+std::mutex* getFreeMutex()
 {
   return &caching_allocator.cuda_free_mutex;
 }
@@ -570,42 +572,42 @@ static inline void assertValidDevice(int device) {
   AT_ASSERTM(0 <= device && device < device_count, "Invalid device argument.");
 }
 
-uint64_t THCCachingAllocator_currentMemoryAllocated(int device)
+uint64_t currentMemoryAllocated(int device)
 {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).amount_allocated;
 }
 
-uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
+uint64_t maxMemoryAllocated(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_allocated;
 }
 
-void THCCachingAllocator_resetMaxMemoryAllocated(int device) {
+void resetMaxMemoryAllocated(int device) {
   assertValidDevice(device);
   DeviceStats& stats = caching_allocator.get_stats_for_device(device);
   stats.max_amount_allocated = stats.amount_allocated;
 }
 
-uint64_t THCCachingAllocator_currentMemoryCached(int device)
+uint64_t currentMemoryCached(int device)
 {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).amount_cached;
 }
 
-uint64_t THCCachingAllocator_maxMemoryCached(int device) {
+uint64_t maxMemoryCached(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_cached;
 }
 
-void THCCachingAllocator_resetMaxMemoryCached(int device) {
+void resetMaxMemoryCached(int device) {
   assertValidDevice(device);
   DeviceStats& stats = caching_allocator.get_stats_for_device(device);
   stats.max_amount_cached = stats.amount_cached;
 }
 
 //
-// In CUDA IPC, sender sends a tensor to receiver, THCCaching_CUDAIpcDevptr
+// In CUDA IPC, sender sends a tensor to receiver, getIpcDevPtr
 // is called by the receiving process to map the CUDA memory from the sending
 // process into its own address space.
 //
@@ -625,7 +627,7 @@ namespace {
   std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 }
 
-AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
+std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   std::lock_guard<std::mutex> lock(IpcMutex);
 
   auto iter = ipcMemHandle_to_devptr.find(handle);
@@ -658,4 +660,6 @@ AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   return sp;
 }
 
-}} // namespace at::cuda
+} // namespace CUDACachingAllocator
+
+}} // namespace c10::cuda
