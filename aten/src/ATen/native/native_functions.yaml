@@ -266,6 +266,7 @@
   variants: function
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -514,6 +515,7 @@
   matches_jit_signature: True
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
 
 - func: conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor
   matches_jit_signature: True
@@ -626,6 +628,7 @@
     CUDA: cudnn_convolution_backward_input
 
 - func: cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward
 
@@ -647,6 +650,7 @@
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_transpose_backward
 
@@ -736,6 +740,7 @@
   variants: function, method
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
 
 - func: div(Tensor self, Tensor other) -> Tensor
@@ -910,6 +915,7 @@
     CUDA: _expm1_out_cuda
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
+  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
@@ -1411,6 +1417,7 @@
   matches_jit_signature: True
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
@@ -1433,6 +1440,7 @@
     CUDA: miopen_convolution_backward_input
 
 - func: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_backward
 
@@ -1454,6 +1462,7 @@
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_transpose_backward
 
@@ -1528,6 +1537,7 @@
     SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -1538,6 +1548,7 @@
     CUDA: batch_norm_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
@@ -1556,6 +1567,7 @@
   variants: function
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int[2] padding) -> Tensor
@@ -1595,6 +1607,7 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
+  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
@@ -1732,9 +1745,11 @@
     CUDA: _round_out_cuda
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: relu(Tensor self) -> Tensor
@@ -1791,6 +1806,7 @@
     CUDA: _rsqrt_out_cuda
 
 - func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -1871,6 +1887,7 @@
   device_guard: False
 
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -1954,10 +1971,12 @@
   device_guard: False
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: squeeze(Tensor(a) self, int dim) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -2096,6 +2115,7 @@
   matches_jit_signature: True
 
 - func: t(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   device_guard: False
   variants: function, method
 
@@ -2159,6 +2179,7 @@
   variants: function
 
 - func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -2235,6 +2256,7 @@
   matches_jit_signature: True
 
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
+  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -2749,6 +2771,7 @@
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _indices_sparse
@@ -2757,6 +2780,7 @@
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _values_sparse
@@ -2777,6 +2801,7 @@
   device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: indices_sparse
@@ -2785,6 +2810,7 @@
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: values_sparse
@@ -3012,6 +3038,7 @@
   variants: method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   device_guard: False
 
@@ -3776,6 +3803,7 @@
   variants: method, function
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
+  matches_jit_signature: True
   variants: method
   device_guard: False
 
@@ -3811,6 +3839,7 @@
   matches_jit_signature: True
 
 - func: alias(Tensor(a) self) -> Tensor(a)
+  matches_jit_signature: True
   variants: method, function
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) output) -> Tensor(a!)
@@ -4057,6 +4086,7 @@
   python_module: nn
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
   python_module: nn
 
@@ -4068,6 +4098,7 @@
   python_module: nn
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  matches_jit_signature: True
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
   python_module: nn
 
