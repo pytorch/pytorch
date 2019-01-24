@@ -1581,7 +1581,6 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
-            # spin for about 50 ms on device1
             torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
 
         self.assertTrue(s0.query())
@@ -1789,7 +1788,6 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
-            # spin for about 50 ms on device1
             torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             e0 = torch.cuda.Event()
             s0.record_event(e0)
@@ -1819,7 +1817,6 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
-            # spin for about 50 ms on device1
             torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             e1 = s1.record_event()
 
@@ -1864,7 +1861,6 @@ class TestCuda(TestCase):
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
             e1 = torch.cuda.Event(enable_timing=True)
-            # spin for about 50 ms on device1
             torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             s1.record_event(e1)
 
@@ -1881,7 +1877,6 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e2 = torch.cuda.Event(enable_timing=True)
-            # spin for about 50 ms on device1
             torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             s0.record_event(e2)
             s0.synchronize()
