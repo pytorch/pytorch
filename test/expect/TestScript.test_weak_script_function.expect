@@ -8,7 +8,7 @@ graph(%x.1 : Tensor) {
   %x.3 : Tensor = ^not_a_script_fn()(%x.1)
   %8 : Tensor = aten::norm(%x.3, %5)
   %9 : Tensor = aten::gt(%8, %5)
-  %10 : bool = prim::TensorToBool(%9)
+  %10 : bool = prim::Bool(%9)
   %x.4 : Tensor = prim::If(%10)
     block0() {
       %x.2 : Tensor = aten::add(%x.3, %4, %6)

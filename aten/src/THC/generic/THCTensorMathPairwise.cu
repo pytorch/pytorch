@@ -187,7 +187,6 @@ void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
-    THCTensor_(resizeAs)(state, self_, src_);
 
     if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);

@@ -27,9 +27,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
           it->output()->replaceAllUsesWith(r);
         }
       } break;
-      case prim::TensorToBool:
-      case prim::BoolToTensor:
-      case prim::TensorToNum:
+      case prim::Bool:
+      case prim::Float:
+      case prim::Int:
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);

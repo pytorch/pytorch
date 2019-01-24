@@ -1814,6 +1814,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
+    def test_btriunpack(self):
+        _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
+
+    @skipIfRocm
     def test_dim_reduction(self):
         _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
 
@@ -2118,6 +2122,9 @@ class TestCuda(TestCase):
                 x = torch.randn(3, 1, device='cuda')
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
+
+    def test_triu_tril(self):
+        _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
 
 
 def load_ignore_file():

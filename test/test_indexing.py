@@ -45,6 +45,12 @@ class TestIndexing(TestCase):
         v = torch.tensor([1.])
         self.assertEqual(v[v == 0], torch.tensor([]))
 
+    def test_byte_mask_accumulate(self):
+        mask = torch.zeros(size=(10, ), dtype=torch.uint8)
+        y = torch.ones(size=(10, 10))
+        y.index_put_((mask, ), y[mask], accumulate=True)
+        self.assertEqual(y, torch.ones(size=(10, 10)))
+
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
         # note: these broadcast together and are transposed to the first dim

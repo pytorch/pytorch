@@ -843,7 +843,7 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_norm(self, device):
         # full reduction
-        x = torch.randn(5, device=device)
+        x = torch.randn(25, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
@@ -851,7 +851,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
 
         # one dimension
-        x = torch.randn(5, 5, device=device)
+        x = torch.randn(25, 25, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
@@ -865,6 +865,9 @@ class _TestTorchMixin(object):
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+
+        # larger tensor sanity check
+        self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @skipIfNoLapack
@@ -1396,6 +1399,14 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    def test_threshold(self):
+        for dtype in torch.testing.get_all_dtypes():
+            if dtype != torch.uint8 and dtype != torch.float16:
+                # 100 is wide enough to use AVX2 instructions for all types
+                x = torch.randn(100).sign().to(dtype=dtype)
+                y = torch.threshold(x, 0, 0)
+                self.assertTrue(y.le(0).any())
+
     def test_reciprocal(self):
         a = torch.randn(100, 89)
         res_div = 1 / a
@@ -1610,6 +1621,24 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_btrisolve(self):
         self._test_btrisolve(self, lambda t: t)
+
+    @staticmethod
+    def _test_btriunpack(self, cast):
+        def run_test(shape, cast):
+            a = cast(torch.randn(*shape))
+            a_lu, p = torch.btrifact(a.reshape(-1, shape[-1], shape[-1]))
+            a_lu = a_lu.reshape_as(a)
+            p = p.reshape(a.shape[:-1])
+            p_ref, l_ref, u_ref = torch.btriunpack(a_lu, p)
+            self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
+
+        run_test((5, 3, 3), cast)
+        run_test((7, 3, 5, 5), cast)
+        run_test((7, 5, 3, 3, 3), cast)
+
+    @skipIfNoLapack
+    def test_btriunpack(self):
+        self._test_btriunpack(self, lambda t: t)
 
     def test_bmm(self):
         num_batches = 10
@@ -3484,10 +3513,14 @@ class _TestTorchMixin(object):
         SIZE = 4
         if order == 'descending':
             def check_order(a, b):
-                return a >= b
+                # `a != a` because we put NaNs
+                # at the end of ascending sorted lists,
+                # and the beginning of descending ones.
+                return a != a or a >= b
         elif order == 'ascending':
             def check_order(a, b):
-                return a <= b
+                # see above
+                return b != b or a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -3561,6 +3594,17 @@ class _TestTorchMixin(object):
 
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+
+        # Test sorting with NaNs
+        x = torch.rand(SIZE, SIZE)
+        x[1][2] = float('NaN')
+        x[3][0] = float('NaN')
+        torch.sort(x, out=(res2val, res2ind))
+        self.assertIsOrdered('ascending', x, res2val, res2ind,
+                             'random with NaNs')
+        torch.sort(x, out=(res2val, res2ind), descending=True)
+        self.assertIsOrdered('descending', x, res2val, res2ind,
+                             'random with NaNs')
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensordot(self):
@@ -3750,19 +3794,90 @@ class _TestTorchMixin(object):
         # input unchanged
         self.assertEqual(x, x0, 0)
 
-    def test_tril(self):
-        x = torch.rand(SIZE, SIZE)
-        res1 = torch.tril(x)
-        res2 = torch.Tensor()
-        torch.tril(x, out=res2)
-        self.assertEqual(res1, res2, 0)
+    @staticmethod
+    def _test_triu_tril(self, cast):
+        def gen_mask(shape, diagonal, cast, upper):
+            mask = torch.zeros(*shape[-2:]).byte()
+            for i in range(shape[-2]):
+                for j in range(shape[-1]):
+                    cond = j - i < diagonal if upper else j - i > diagonal
+                    if cond:
+                        mask[i, j] = 1
+            return cast(mask.expand(*shape))
 
-    def test_triu(self):
-        x = torch.rand(SIZE, SIZE)
-        res1 = torch.triu(x)
-        res2 = torch.Tensor()
-        torch.triu(x, out=res2)
-        self.assertEqual(res1, res2, 0)
+        torch_functions = {True: torch.triu, False: torch.tril}
+        if TEST_NUMPY:
+            numpy_functions = {True: np.triu, False: np.tril}
+
+        def run_test(shape, cast, diagonal):
+            x_cpu = torch.randn(*shape)
+            x = cast(x_cpu)
+
+            for upper in [True, False]:
+                # normal test with mask
+                torch_tri_func = torch_functions[upper]
+                res1 = torch_tri_func(x, diagonal=diagonal)
+                res2 = cast(torch.Tensor())
+                torch_tri_func(x, diagonal=diagonal, out=res2)
+                exp_mask = gen_mask(shape, diagonal, cast, upper)
+                expected = torch.where(exp_mask, torch.tensor(0).type_as(x), x)
+                self.assertEqual(res1, res2, 0)
+                self.assertEqual(expected, res1, 0)
+
+                # non-contiguous and expanded tensors test
+                if not (0 in shape or 1 in shape):
+                    for s in range(-len(shape), -1):
+                        # non-contiguous tensors
+                        x_nc = x.clone().transpose(s, s + 1)
+                        exp_mask = gen_mask(x_nc.size(), diagonal, cast, upper)
+                        assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
+                        exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
+                        self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
+                        if upper:
+                            self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
+                        else:
+                            self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
+
+                        # any 3-dimensional tensor should be fine
+                        if len(shape) <= 3 or s == -2:
+                            self.assertFalse(x_nc.is_contiguous(),
+                                             "x_nc should remain non-contiguous")
+                        elif s < -3:
+                            self.assertTrue(x_nc.is_contiguous(),
+                                            "x_nc should become contiguous")
+
+                    # expanded tensors
+                    expanded_size = (x.size(0),) + x.size()
+                    x_expanded = x.clone().expand(*expanded_size)
+                    assert 0 in x_expanded.stride(), "x intentionally has 0 in its stride"
+                    output = torch_tri_func(x_expanded, diagonal)
+                    self.assertEqual(output, expected.expand(expanded_size), 0)
+                    self.assertTrue(0 in x_expanded.stride(),
+                                    "geometry of x_expanded should be the same")
+                    if upper:
+                        self.assertEqual(output, x_expanded.triu_(diagonal), 0)
+                    else:
+                        self.assertEqual(output, x_expanded.tril_(diagonal), 0)
+
+                if not TEST_NUMPY:
+                    continue
+
+                # numpy test
+                numpy_tri_func = numpy_functions[upper]
+                self.assertEqual(numpy_tri_func(x_cpu.numpy(), diagonal), res1.cpu().numpy())
+
+        diagonals = [-2, -1, 0, 1, 2]
+        shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
+                  (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
+                  (3, 7), (5, 3, 7), (7, 5, 3, 7),  # thin matrices
+                  (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
+                  (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
+                  (1, 3), (5, 1, 3), (7, 5, 1, 3)]  # very thin matrices
+        for s, d in product(shapes, diagonals):
+            run_test(s, cast, d)
+
+    def test_triu_tril(self):
+        self._test_triu_tril(self, lambda t: t)
 
     def test_cat(self):
         SIZE = 10
@@ -9321,6 +9436,30 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             torch.tensor([1, 2, 3, 4, 5], dtype=torch.int8, device=device))
         self.assertEqual(
             torch.tensor([1, 9, 0, 0, 5], device=device), byte_counts)
+        # test non-contiguous inputs and weights
+        inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device)
+        weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
+        print(inputs[:, 1])
+        print(weights[:, 1])
+        for i in [0, 1]:
+            assert not inputs[:, i].is_contiguous(), "Inputs are supposed to be non-contiguous"
+            assert not weights[:, i].is_contiguous(), "Weights are supposed to be non-contiguous"
+        # inputs are non-contiguous but weights are contiguous
+        self.assertEqual(inputs[:, 0].bincount(), torch.tensor([1, 1, 1, 2]))
+        # inputs and weights are non-contiguous
+        print(inputs[:, 1].bincount(weights[:, 1]))
+        self.assertEqual(inputs[:, 1].bincount(weights[:, 1]), torch.tensor([1, 9, 0, 0, 5]))
+        # weights are non-contiguous but inputs are contiguous
+        self.assertEqual(inputs[:, 1].contiguous().bincount(weights[:, 1]),
+                         torch.tensor([1, 9, 0, 0, 5]))
+
+        # test bincount on non-contiguous slices
+        all0s = torch.zeros((32, 2), dtype=torch.int64, device=device)
+        self.assertEqual(all0s[:, 0].bincount(), torch.tensor([32]))
+
+        all1s = torch.ones((32, 2), dtype=torch.int64, device=device)
+        self.assertEqual(all1s[:, 0].bincount(), torch.tensor([0, 32]))
+
         # test large number of bins - global memory use
         big_exp = torch.zeros(10000000, device=device)
         big_exp[-1] = 50.0

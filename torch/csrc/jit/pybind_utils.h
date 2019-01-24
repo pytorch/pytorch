@@ -287,6 +287,8 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
+  } else if (ivalue.isDevice()) {
+    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -406,7 +408,7 @@ inline py::object invokeScriptMethodFromPython(
     AutoNoGIL no_gil_guard;
     method.run(stack);
   }
-  return createPyObjectForStack(std::move(stack));
+  return toPyObject(std::move(stack.back()));
 }
 
 inline py::object invokeOperatorFromPython(

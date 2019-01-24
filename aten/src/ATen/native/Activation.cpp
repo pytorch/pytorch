@@ -168,8 +168,8 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
     AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_cpu", [&] {
       prelu_cpu_kernel_multi_weights<scalar_t>(
@@ -295,8 +295,8 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
     AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_backward_cpu", [&] {
       prelu_cpu_backward_kernel_multi_weights<scalar_t>(

@@ -144,9 +144,9 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor & ex
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
-  Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
+  Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
-  return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+  return grad * args.digamma_().sum(-1);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
@@ -670,22 +670,15 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
     L = L.transpose(-1, -2);
   }
 
-  auto batch_tril = [](const Tensor & A) -> Tensor {
-    int64_t n = A.size(-1);
-    auto indices = at::ones({n, n}, A.options().dtype(at::kByte));
-    indices = indices.triu(1).expand_as(A);
-    return at::where(indices, at::zeros({}, A.options()), A);
-  };
-
-  auto phi = [&batch_tril](const Tensor & A) -> Tensor {
-    auto B = A.dim() == 2 ? A.tril() : batch_tril(A);
+  auto phi = [](const Tensor & A) -> Tensor {
+    auto B = A.tril();
     B = B - 0.5 * at::diag_embed(B.diagonal(0, -1, -2), 0, -2, -1);
     return B;
   };
 
   // make sure not to double-count variation, since
   // only half of output matrix is unique
-  auto Lbar = grad.dim() == 2 ? grad.tril() : batch_tril(grad);
+  auto Lbar = grad.tril();
 
   auto P = phi(at::matmul(L, Lbar));
   Tensor S;
