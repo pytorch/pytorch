@@ -177,8 +177,14 @@ fi
 # Test XLA build
 if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
-  # Bazel dependencies
+  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
+  sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
   sudo apt-get -qq update
+
+  # Install clang-7 clang++-7 for xla
+  sudo apt-get -qq install clang-7 clang++-7
+
+  # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
   wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
@@ -204,9 +210,8 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   fi
 
   bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
-  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  export CC=/usr/bin/gcc CXX=/usr/bin/g++
   pushd xla
+  export CC=clang-7 CXX=clang++-7
   # Use cloud cache to build when available.
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 
