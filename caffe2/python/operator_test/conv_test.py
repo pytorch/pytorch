@@ -97,6 +97,8 @@ class TestConvolution(serial.SerializedTestCase):
         assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         if group != 1 and order == "NHWC":
             dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+        # Group conv not implemented with EIGEN engine.
+        assume(group == 1 or engine != "EIGEN")
 
         input_channels *= group
         output_channels *= group
