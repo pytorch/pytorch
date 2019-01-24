@@ -89,8 +89,8 @@ DONT_REQUIRE_DERIVATIVE = {
 #
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_STORAGE = {
-    # These functions are expected to change storage pointer of input tensor
-    '_th_set_',
+    # These functions are expected to change storage pointer of input tensors
+    '_th_set_', '_cudnn_rnn_flatten_weight',
     # TODO: Fix these functions to update input tensor in-place
     'tril_', 'triu_',
 }
