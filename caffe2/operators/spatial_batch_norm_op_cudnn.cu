@@ -7,6 +7,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/cudnn_wrappers.h"
+#include "caffe2/operators/spatial_batch_norm_op_gpu_impl.cuh"
 #include "caffe2/utils/math.h"
 
 #if CUDNN_VERSION_MIN(5, 0, 0)
