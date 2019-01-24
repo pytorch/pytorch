@@ -40,9 +40,9 @@ struct Function;
 namespace torch {
 namespace jit {
 
-using ::c10::Symbol;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::Symbol;
 
 using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
@@ -192,8 +192,9 @@ struct Value {
   }
   TORCH_API Value* setUniqueName(const std::string& name);
   std::string uniqueName() const {
-    if (hasUniqueName())
+    if (hasUniqueName()) {
       return unique_name_;
+    }
     return std::to_string(unique());
   }
   TORCH_API std::string uniqueNameBase() const;
@@ -356,8 +357,9 @@ struct Node {
   }
   bool hasUses() const {
     for (auto o : outputs()) {
-      if (!o->uses().empty())
+      if (!o->uses().empty()) {
         return true;
+      }
     }
     return false;
   }
@@ -393,8 +395,9 @@ struct Node {
 
   template <typename T>
   c10::optional<T> get(Symbol name) const {
-    if (auto v = get(name))
+    if (auto v = get(name)) {
       return v->template to<T>();
+    }
     return c10::nullopt;
   }
 
@@ -589,8 +592,9 @@ struct Node {
   // TODO: Make this const correct
   template <typename T>
   T* cast() {
-    if (T::Kind == kind())
+    if (T::Kind == kind()) {
       return static_cast<T*>(this);
+    }
     return nullptr;
   }
   template <typename T>
@@ -610,8 +614,9 @@ struct Node {
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
   const FunctionSchema& schema() const {
-    if (!schema_)
+    if (!schema_) {
       findSchema();
+    }
     return *schema_;
   }
   const FunctionSchema* maybeSchema() const;
@@ -628,7 +633,7 @@ struct Node {
   // Methods for accessing attributes
   void copyAttributes(const Node& rhs) {
     values_.clear();
-    for (auto& i : rhs.values_) {
+    for (const AVPtr& i : rhs.values_) {
       values_.push_back(i->clone());
     }
   }
@@ -663,24 +668,26 @@ struct Node {
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
-    for (auto& a : values_)
+    for (const AVPtr& a : values_) {
       names.push_back(a->name);
+    }
     return names;
   }
   std::vector<const char*> attributeNamesS() const {
     std::vector<const char*> names;
-    for (auto& a : values_)
+    for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
+    }
     return names;
   }
 
-#define CREATE_ACCESSOR(Kind, method)                              \
+#define CREATE_ACCESSOR(Kind, method)                           \
   Node* method##_(Symbol name, Kind##Attr::ConstructorType v) { \
-    return setAttr<Kind##Attr>(                                        \
-        name, std::forward<Kind##Attr::ConstructorType>(v));       \
-  }                                                                \
-  const Kind##Attr::ValueType& method(Symbol name) const {         \
-    return getAttr<Kind##Attr>(name);                                  \
+    return setAttr<Kind##Attr>(                                 \
+        name, std::forward<Kind##Attr::ConstructorType>(v));    \
+  }                                                             \
+  const Kind##Attr::ValueType& method(Symbol name) const {      \
+    return getAttr<Kind##Attr>(name);                           \
   }
 
   CREATE_ACCESSOR(Float, f)
@@ -703,14 +710,15 @@ struct Node {
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
     AT_ASSERT(!v.defined() || !v.is_variable());
-    return setAttr<TensorAttr>(name, std::forward<TensorAttr::ConstructorType>(v));
+    return setAttr<TensorAttr>(
+        name, std::forward<TensorAttr::ConstructorType>(v));
   }
   const TensorAttr::ValueType& t(Symbol name) const {
     return getAttr<TensorAttr>(name);
   }
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
-    for (auto& t : v) {
+    for (const at::Tensor& t : v) {
       AT_ASSERT(!t.defined() || !t.is_variable());
     }
     return setAttr<TensorsAttr>(
@@ -762,7 +770,8 @@ struct Node {
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
-  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required) const {
+  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required)
+      const {
     AT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
@@ -970,21 +979,21 @@ struct Graph {
     return block_->inputs();
   }
   at::ArrayRef<const Value*> inputs() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.inputs();
   }
   at::ArrayRef<Value*> outputs() {
     return block_->outputs();
   }
   at::ArrayRef<const Value*> outputs() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.outputs();
   }
   graph_node_list nodes() {
     return block_->nodes();
   }
   const_graph_node_list nodes() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.nodes();
   }
   Node* param_node() {
@@ -1281,7 +1290,7 @@ inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
     pyobj_list&& scalar_args) {
-  auto op = allocPythonOp(this);
+  PythonOp* op = allocPythonOp(this);
   return op->init(std::move(pyobj), cconv, std::move(scalar_args));
 }
 

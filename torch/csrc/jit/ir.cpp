@@ -34,7 +34,7 @@ static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 // https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
 
-void printValueRef(std::ostream& out, const Value* n) {
+static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
 }
 
@@ -47,11 +47,14 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 }
 
 template <typename T>
-std::ostream& printValueRefs(std::ostream& out, const at::ArrayRef<T>& nodes) {
+static std::ostream& printValueRefs(
+    std::ostream& out,
+    const at::ArrayRef<T>& nodes) {
   size_t i = 0;
   for (auto n : nodes) {
-    if (i++ > 0)
+    if (i++ > 0) {
       out << ", ";
+    }
     printValueRef(out, n);
   }
   return out;
@@ -78,6 +81,7 @@ struct const_value_list_with_types {
       bool use_newlines = false)
       : values(values), use_newlines(use_newlines) {}
 };
+
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   size_t i = 0;
   for (auto n : l.values) {
@@ -101,8 +105,9 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "[";
   int i = 0;
   for (auto& item : items) {
-    if (i++ > 0)
+    if (i++ > 0) {
       out << ", ";
+    }
     out << item;
   }
   out << "]";
@@ -184,10 +189,12 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   auto names = attributeNames();
   int i = 0;
   for (auto name : names) {
-    if (ignore_subgraph && name == attr::Subgraph)
+    if (ignore_subgraph && name == attr::Subgraph) {
       continue;
-    if (i++ > 0)
+    }
+    if (i++ > 0) {
       out << ", ";
+    }
     // TODO: debugging mode to see the qualifier.  We definitely
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
@@ -200,8 +207,9 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (size_t i = 0; i < level; ++i)
+  for (size_t i = 0; i < level; ++i) {
     out << "  ";
+  }
   return out;
 }
 
@@ -464,8 +472,7 @@ void Graph::lint() const {
           AT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
-      AT_ASSERT(
-          anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+      AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
@@ -571,8 +578,9 @@ void Block::cloneFrom(Block* src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value* v) {
     auto it = local_map.find(v);
-    if (it != local_map.end())
+    if (it != local_map.end()) {
       return it->second;
+    }
     return value_map(v);
   };
 
@@ -652,8 +660,9 @@ Value* Value::setUniqueName(const std::string& name) {
   }
 
   // allow "" to clear the uniquename
-  if (name == "")
+  if (name == "") {
     return this;
+  }
 
   // if someone else has this name, then rename the other value
   auto old_owner_of_name = names.find(name);
@@ -684,8 +693,9 @@ Value* Value::setUniqueName(const std::string& name) {
 
 Value* Value::copyMetadata(Value* from) {
   setType(from->type());
-  if (from->hasUniqueName())
+  if (from->hasUniqueName()) {
     setUniqueName(from->uniqueName());
+  }
   return this;
 }
 
@@ -726,11 +736,13 @@ Value* Node::namedInput(Symbol name) const {
 bool Node::matches(
     const char* signature_literal,
     at::ArrayRef<Symbol> const_inputs) const {
-  if (!sig(signature_literal).matches(this))
+  if (!sig(signature_literal).matches(this)) {
     return false;
+  }
   for (Symbol s : const_inputs) {
-    if (!is_constant(s))
+    if (!is_constant(s)) {
       return false;
+    }
   }
   return true;
 }
@@ -895,20 +907,24 @@ void Node::eraseBlock(size_t i) {
 }
 
 void Node::destroy() {
-  while (!outputs().empty())
+  while (!outputs().empty()) {
     eraseOutput(outputs().size() - 1);
-  while (!blocks().empty())
+  }
+  while (!blocks().empty()) {
     eraseBlock(blocks().size() - 1);
+  }
   removeAllInputs();
-  if (inBlockList())
+  if (inBlockList()) {
     removeFromList();
+  }
   graph_->freeNode(this);
 }
 
 void Node::cloneFrom(Node* s) {
   setSourceLocation(s->getSourceLocation());
-  if (s->scope_ && !s->scope_->isBlank())
+  if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
+  }
   copyAttributes(*s);
 }
 
@@ -962,8 +978,9 @@ void Node::replaceInputWith(Value* from, Value* to) {
   schema_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
-    if (input == from)
+    if (input == from) {
       replaceInput(i, to);
+    }
     i++;
   }
 }
@@ -1072,8 +1089,9 @@ void Node::removeInput(size_t i) {
 
 void Node::removeAllInputs() {
   schema_ = nullptr;
-  for (size_t i = 0; i < inputs().size(); ++i)
+  for (size_t i = 0; i < inputs().size(); ++i) {
     dropInput(i);
+  }
   inputs_.clear();
 }
 
@@ -1130,8 +1148,9 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++)
+  for (size_t i = 0; i < num_outputs; i++) {
     n->addOutput();
+  }
   return n;
 }
 
@@ -1140,8 +1159,9 @@ Node* Graph::create(
     ArrayRef<Value*> inputs,
     size_t num_outputs) {
   auto n = create(kind, num_outputs);
-  for (auto i : inputs)
+  for (auto i : inputs) {
     n->addInput(i);
+  }
   return n;
 }
 
@@ -1267,12 +1287,15 @@ std::string Graph::toString() const {
 }
 
 Graph::~Graph() {
-  for (const Node* n : all_nodes)
+  for (const Node* n : all_nodes) {
     delete n;
-  for (const Value* v : all_values)
+  }
+  for (const Value* v : all_values) {
     delete v;
-  for (const Block* b : all_blocks)
+  }
+  for (const Block* b : all_blocks) {
     delete b;
+  }
 }
 
 void Graph::freeNode(Node* n) {
@@ -1298,8 +1321,9 @@ void Graph::freeBlock(Block* b) {
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
-  if (v->node()->kind() == prim::TupleConstruct)
+  if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();
+  }
   auto& g = *v->owningGraph();
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
