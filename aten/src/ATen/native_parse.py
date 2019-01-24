@@ -31,6 +31,12 @@ def type_argument_translations(arg):
         default = name[1]
     name = name[0]
 
+    match = re.match(r'(Tensor.*)\((.+)\)', t)
+    annotation = None
+    if match:
+        t = match.group(1)
+        annotation = match.group(2)
+
     # This enables "Generator? x = None and translates to legacy
     # "Generator* x = nullptr". See [temp translations].
     if t == 'Generator?' and default == 'None':
@@ -58,6 +64,9 @@ def type_argument_translations(arg):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntList'
         size = int(match.group(1))
+    elif re.match(r'bool\[(\d+)\]', t):
+        match = re.match(r'bool\[(\d+)\]', t)
+        t = 'std::array<bool,{}>'.format(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -102,12 +111,6 @@ def type_argument_translations(arg):
                 default = float(default)
             except ValueError:
                 pass
-
-    match = re.match(r'(Tensor.*)\((.+)\)', t)
-    annotation = None
-    if match:
-        t = match.group(1)
-        annotation = match.group(2)
 
     return t, name, default, size, annotation
 

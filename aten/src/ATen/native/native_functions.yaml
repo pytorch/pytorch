@@ -265,7 +265,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: as_strided(Tensor self, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+- func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -437,7 +437,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
+- func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor[](a)
   variants: function, method
   device_guard: False
 
@@ -735,7 +735,7 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: diagonal(Tensor self, int offset=0, int dim1=0, int dim2=1) -> Tensor
+- func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
 
 - func: div(Tensor self, Tensor other) -> Tensor
@@ -909,7 +909,7 @@
     CPU: _expm1_out_cpu
     CUDA: _expm1_out_cuda
 
-- func: expand(Tensor self, int[] size, *, bool implicit=False) -> Tensor
+- func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
@@ -1527,7 +1527,7 @@
     SparseCPU: narrow_copy_sparse
     SparseCUDA: narrow_copy_sparse
 
-- func: narrow(Tensor self, int dim, int start, int length) -> Tensor
+- func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -1594,7 +1594,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: permute(Tensor self, int[] dims) -> Tensor
+- func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
@@ -1790,7 +1790,7 @@
     CPU: _rsqrt_out_cpu
     CUDA: _rsqrt_out_cuda
 
-- func: select(Tensor self, int dim, int index) -> Tensor
+- func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -1870,7 +1870,7 @@
   variants: function, method
   device_guard: False
 
-- func: slice(Tensor self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor
+- func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -1944,7 +1944,7 @@
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
-- func: split(Tensor self, int split_size, int dim=0) -> Tensor[]
+- func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor[](a)
   variants: function, method
   device_guard: False
 
@@ -1953,11 +1953,11 @@
   variants: function, method
   device_guard: False
 
-- func: squeeze(Tensor self) -> Tensor
+- func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
   device_guard: False
 
-- func: squeeze(Tensor self, int dim) -> Tensor
+- func: squeeze(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -2095,7 +2095,7 @@
 - func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: t(Tensor self) -> Tensor
+- func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
   variants: function, method
 
@@ -2158,7 +2158,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: transpose(Tensor self, int dim0, int dim1) -> Tensor
+- func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -2234,7 +2234,7 @@
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
 
-- func: unsqueeze(Tensor self, int dim) -> Tensor
+- func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
   device_guard: False
 
@@ -2748,7 +2748,7 @@
   device_guard: False
 
 
-- func: _indices(Tensor self) -> Tensor
+- func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU: _indices_sparse
@@ -2756,7 +2756,7 @@
   requires_tensor: True
   device_guard: False
 
-- func: _values(Tensor self) -> Tensor
+- func: _values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU: _values_sparse
@@ -2776,7 +2776,7 @@
   requires_tensor: True
   device_guard: False
 
-- func: indices(Tensor self) -> Tensor
+- func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU: indices_sparse
@@ -2784,7 +2784,7 @@
   requires_tensor: True
   device_guard: False
 
-- func: values(Tensor self) -> Tensor
+- func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
     SparseCPU: values_sparse
@@ -2820,7 +2820,7 @@
   variants: function, method
   device_guard: False
 
-- func: unbind(Tensor self, int dim=0) -> Tensor[]
+- func: unbind(Tensor(a) self, int dim=0) -> Tensor[](a)
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
@@ -3011,7 +3011,7 @@
   matches_jit_signature: True
   variants: method
 
-- func: view(Tensor self, int[] size) -> Tensor
+- func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
   device_guard: False
 
@@ -3775,7 +3775,7 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: unfold(Tensor self, int dimension, int size, int step) -> Tensor
+- func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
   device_guard: False
 
@@ -3810,7 +3810,7 @@
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   matches_jit_signature: True
 
-- func: alias(Tensor self) -> Tensor
+- func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) output) -> Tensor(a!)
