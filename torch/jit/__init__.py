@@ -669,6 +669,16 @@ def _try_get_dispatched_fn(fn):
     return _jit_internal.boolean_dispatched.get(fn)
 
 
+def _try_get_overloaded_fn(fn):
+    if not hasattr(fn, '__self__') or not isinstance(fn.__self__, ScriptModule):
+        # Only allow overloads for bound methods
+        return None
+    overloads = fn.__self__._overloads.get(fn.__name__, None)
+    if overloads is None:
+        return None
+    return [getattr(fn.__self__, overload) for overload in overloads]
+
+
 def _try_compile_weak_script(fn):
     entry = _jit_internal.compiled_weak_fns.get(fn)
     if entry is None:
@@ -941,6 +951,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         original_init = getattr(cls, '__init__', lambda self: None)
         super_constants = getattr(super(cls), '_constants_set', set())
         cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1187,6 +1198,9 @@ if _enabled:
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+
+            # Copy overloads
+            self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
 
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
