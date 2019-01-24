@@ -44,11 +44,13 @@ def get_cmake_command():
     cmake_command = 'cmake'
     if IS_WINDOWS:
         return cmake_command
-    cmake3, cmake = which('cmake'), which('cmake')
-    if cmake3 is not None and cmake is not None:
-        bare_version = cmake_version(cmake)
-        if bare_version < StrictVersion("3.5.0") and cmake_version(cmake3) > bare_version:
-            cmake_command = 'cmake3'
+    cmake3 = which('cmake3')
+    if cmake3 is not None:
+        cmake = which('cmake')
+        if cmake is not None:
+            bare_version = cmake_version(cmake)
+            if bare_version < StrictVersion("3.5.0") and cmake_version(cmake3) > bare_version:
+                cmake_command = 'cmake3'
     return cmake_command
 
 def cmake_defines(lst, **kwargs):
