@@ -182,17 +182,17 @@ struct PDist {
   }
 
   static void apply_cdist(Tensor& result, const Tensor& x1, const Tensor& x2, const scalar_t p) {
-      if (p == 0.0) {
-          run_cdist_parallel<zdist_calc>(result, x1, x2, p);
-      } else if (p == 1.0) {
-          run_cdist_parallel<odist_calc>(result, x1, x2, p);
-      } else if (p == 2.0) {
-          run_cdist_parallel<tdist_calc>(result, x1, x2, p);
-      } else if (std::isinf(p)) {
-          run_cdist_parallel<idist_calc>(result, x1, x2, p);
-      } else {
-          run_cdist_parallel<pdist_calc>(result, x1, x2, p);
-      }
+    if (p == 0.0) {
+      run_cdist_parallel<zdist_calc>(result, x1, x2, p);
+    } else if (p == 1.0) {
+      run_cdist_parallel<odist_calc>(result, x1, x2, p);
+    } else if (p == 2.0) {
+      run_cdist_parallel<tdist_calc>(result, x1, x2, p);
+    } else if (std::isinf(p)) {
+      run_cdist_parallel<idist_calc>(result, x1, x2, p);
+    } else {
+      run_cdist_parallel<pdist_calc>(result, x1, x2, p);
+    }
   }
 
   // This does a backward pass down a Vec column of the input
