@@ -86,7 +86,7 @@ public:
     }
 
     if (result.copied) {
-      atensor.reorder_to(outPtr);
+      atensor.to_public(outPtr);
     }
 
     return result;
@@ -144,7 +144,7 @@ public:
         if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
           tensor->resize(adims, type);
         }
-        tensor->reorder_from(adims, type,
+        tensor->feed_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
 #else
