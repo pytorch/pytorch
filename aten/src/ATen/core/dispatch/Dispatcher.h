@@ -4,6 +4,17 @@
 
 namespace c10 {
 
+/**
+ * This class represents an operator kernel, i.e. an operator *after* it was
+ * dispatched to a certain device. You can use it to call the kernel.
+ *
+ * You can keep this OpKernel instance around to avoid future dispatch
+ * when you know it'd dispatch to the same kernel anyhow.
+ *
+ * Also, keeping around the OpKernel instance will keep around a local cache
+ * that is used by some kernels to get better performance when they're called
+ * multiple times (mostly Caffe2 kernels do that).
+ */
 class OpKernel final {
 public:
   explicit OpKernel(KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
@@ -14,6 +25,9 @@ public:
   OpKernel(const OpKernel&) = delete;
   OpKernel& operator=(const OpKernel&) = delete;
 
+  /**
+   * Call the operator kernel with the given arguments.
+   */
   IValue call(ArrayRef<IValue> args) {
     if (state_.get() == nullptr) {
       state_ = (*state_creator_)();
@@ -22,6 +36,8 @@ public:
   }
 
 private:
+  // The kernel function is a global C function, not a std::function.
+  // That is, ownership is not an issue.
   KernelFunction* kernel_;
 
   KernelStateCreatorFunction* state_creator_;

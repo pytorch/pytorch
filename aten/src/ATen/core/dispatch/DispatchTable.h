@@ -33,9 +33,7 @@ class ThreadsafeOperatorTable_ final {
       return result.second;
     });
     if (!res) {
-      std::ostringstream msg;
-      msg << "Tried to register conflicting kernels to the dispatcher: " << key;
-      throw std::logic_error(msg.str());
+      AT_ERROR("Tried to register conflicting kernels to the dispatcher: ", key);
     }
   }
 
@@ -46,8 +44,7 @@ class ThreadsafeOperatorTable_ final {
         });
     assert(num_removed <= 1); // This is not a multi-map
     if (num_removed == 0) {
-      throw std::logic_error(
-          "Tried to deregister a kernel that isn't registered.");
+      AT_ERROR("Tried to deregister a kernel that isn't registered.");
     }
   }
 
@@ -124,9 +121,7 @@ class DispatchTable final {
      if (found == nullptr) {
        // TODO Better error message - include op name and dispatch key (i.e.
        // argument types)
-       throw std::logic_error(
-           std::string() + "Didn't find kernel to dispatch to for operator '" +
-           Schema::metadata::name() + "'");
+       AT_ERROR("Didn't find kernel to dispatch to for operator '", Schema::metadata::name(), "'");
      }
      return *found;
    }
