@@ -4237,7 +4237,7 @@ class TestNN(NNTestCase):
             res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
-        with self.assertRaises(RuntimeError): 
+        with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, list(float(i) for i in target_lengths))
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, list(float(i) for i in input_lengths), target_lengths)
