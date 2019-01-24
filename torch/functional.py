@@ -3,9 +3,11 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
+from torch._utils import annotate
 from itertools import product
 import math
 import warnings
+from typing import Optional, Tuple, List, Union
 
 __all__ = [
     'argmax',
@@ -29,6 +31,7 @@ __all__ = [
 ]
 
 
+@annotate(ret=List[torch.Tensor], tensors=torch.Tensor)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
@@ -51,6 +54,8 @@ def broadcast_tensors(*tensors):
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
+@annotate(ret=List[torch.Tensor], tensor=torch.Tensor,
+          split_size_or_sections=Union[List[int], int], dim=int)
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks.
 
@@ -76,6 +81,10 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
+@annotate(ret=Tuple[torch.Tensor, torch.Tensor],
+          A=torch.Tensor,
+          info=Optional[torch.Tensor],
+          pivot=bool)
 def btrifact(A, info=None, pivot=True):
     r"""Batch LU factorization.
 
@@ -123,6 +132,9 @@ def btrifact(A, info=None, pivot=True):
     return A.btrifact(info, pivot)
 
 
+@annotate(ret=Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
+          LU_data=torch.Tensor, LU_pivots=torch.Tensor,
+          unpack_data=bool, unpack_pivots=bool)
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
@@ -167,6 +179,9 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+@annotate(ret=torch.Tensor,
+          equation=str,
+          operands=torch.Tensor)
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
