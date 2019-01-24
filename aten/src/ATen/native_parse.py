@@ -11,19 +11,6 @@ except ImportError:
     from yaml import Loader
 
 
-def sanitize_type(typ):
-    if typ == 'Generator*':
-        return 'Generator *'
-    return typ
-
-
-def sanitize_types(types):
-    # split tuples into constituent list
-    if types[0] == '(' and types[-1] == ')':
-        return [sanitize_type(x.strip()) for x in types[1:-1].split(',')]
-    return [sanitize_type(types)]
-
-
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
 # JIT signature schema incrementally. This will reduce overall complexity
@@ -65,16 +52,16 @@ def type_argument_translations(arg):
         t = 'int64_t?'
     # Enables float by translating to legacy double.
     elif t == 'float':
-        t ='double'
+        t = 'double'
     # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntList'
         size = int(match.group(1))
 
-    t = sanitize_types(t)
-    assert len(t) == 1
-    t = t[0]
+    # Legacy type sanitization. TODO: Do we really need this?
+    if t == 'Generator*':
+        t = 'Generator *'
 
     if not default:
         pass
@@ -115,7 +102,6 @@ def type_argument_translations(arg):
                 default = float(default)
             except ValueError:
                 pass
-
 
     t, annotation = get_annotation(t)
     return t, name, default, size, annotation
@@ -185,9 +171,11 @@ def parse_arguments(args, func_decl, declaration, func_return):
     # be better if we just named everything and matched by name.
     for arg_idx, argument in enumerate(arguments_out):
         assert argument['annotation'] == func_return[arg_idx]['annotation'], \
-                "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, the ith-argument needs to correspond to the i-th return.".format(func_decl['func'])
+                "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, " \
+                "the ith-argument needs to correspond to the i-th return.".format(func_decl['func'])
 
-    assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors as can be passed as output.".format(func_decl['func'])
+    assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors as can be passed " \
+            "as output.".format(func_decl['func'])
 
     if func_name.endswith('_out'):
         raise RuntimeError("Native functions may not be suffixed with _out as we transistion to a unified schema. "
@@ -208,10 +196,12 @@ def parse_arguments(args, func_decl, declaration, func_return):
         for arg_idx, argument in enumerate(arguments):
             if argument['name'] == "self" and inplace:
                 assert argument['annotation'] and argument['annotation'].endswith("!"), \
-                    "Inplace function \"{}\" needs to annotate Tensor argument named self as mutable.".format(func_decl['func'])
+                    "Inplace function \"{}\" needs to annotate Tensor argument named self " \
+                    "as mutable.".format(func_decl['func'])
                 found_self = True
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
-                        "Inplace function annotations of function {} need to match between input and correponding output.".format(func_decl['func'])
+                        "Inplace function annotations of function {} need to match between " \
+                        "input and correponding output.".format(func_decl['func'])
                 assert argument['name'] == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
@@ -237,7 +227,8 @@ def parse_return_arguments(return_decl, inplace, func_decl):
         if not name:
             if t == "Tensor" and inplace:
                 assert annotation and annotation.endswith("!"), \
-                        "Return Tensor of function \"{}\" flagged as inplace needs to be annotated as mutable".format(func_decl['func'])
+                        "Return Tensor of function \"{}\" flagged as inplace needs to be " \
+                        "annotated as mutable".format(func_decl['func'])
                 name = 'self'
             else:
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
