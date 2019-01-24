@@ -1835,22 +1835,44 @@ struct to_ir {
     }
   }
 
+  std::vector<NamedValue> getNamedValue(const TreeRef& tree, bool maybe_unpack) {
+    std::vector<NamedValue> values;
+    if (maybe_unpack && tree->kind() == TK_STARRED) {
+      auto starred = Starred(tree);
+      auto entries = emitSugaredExpr(starred.expr(), 1)
+                         ->asTuple(starred.range(), method);
+      for (const auto& entry : entries) {
+        values.emplace_back(
+            tree->range(), entry->asValue(starred.range(), method));
+      }
+    } else {
+      values.emplace_back(tree->range(), emitExpr(Expr(tree)));
+    }
+    return values;
+  }
+  // Get values from 2 tree lists simultaneously (i.e. dictionary keys/values)
+  std::pair<std::vector<NamedValue>, std::vector<NamedValue>> getNamedValues(
+      const TreeList& trees1,
+      const TreeList& trees2,
+      bool maybe_unpack) {
+    JIT_ASSERT(trees1.size() == trees2.size());
+    std::vector<NamedValue> values1;
+    std::vector<NamedValue> values2;
+    for (size_t i = 0; i < trees1.size(); ++i) {
+      auto tree_values1 = getNamedValue(trees1[i], maybe_unpack);
+      values1.insert(values1.end(), tree_values1.begin(), tree_values1.end());
+      auto tree_values2 = getNamedValue(trees2[i], maybe_unpack);
+      values2.insert(values2.end(), tree_values2.begin(), tree_values2.end());
+    }
+    return std::make_pair(values1, values2);
+  }
   std::vector<NamedValue> getNamedValues(
       const TreeList& trees,
       bool maybe_unpack) {
     std::vector<NamedValue> values;
     for (const auto& tree : trees) {
-      if (maybe_unpack && tree->kind() == TK_STARRED) {
-        auto starred = Starred(tree);
-        auto entries = emitSugaredExpr(starred.expr(), 1)
-                           ->asTuple(starred.range(), method);
-        for (const auto& entry : entries) {
-          values.emplace_back(
-              tree->range(), entry->asValue(starred.range(), method));
-        }
-      } else {
-        values.emplace_back(tree->range(), emitExpr(Expr(tree)));
-      }
+      auto tree_values = getNamedValue(tree, maybe_unpack);
+      values.insert(values.end(), tree_values.begin(), tree_values.end());
     }
     return values;
   }
@@ -1862,6 +1884,16 @@ struct to_ir {
 
   std::vector<Value*> getValues(const TreeList& trees, bool maybe_unpack) {
     return toValues(*graph, getNamedValues(trees, maybe_unpack));
+  }
+  std::pair<std::vector<Value*>, std::vector<Value*>> getValues(
+      const TreeList& trees1,
+      const TreeList& trees2,
+      bool maybe_unpack) {
+    std::vector<NamedValue> named_values1, named_values2;
+    std::tie(named_values1, named_values2) =
+        getNamedValues(trees1, trees2, maybe_unpack);
+    return std::make_pair(
+        toValues(*graph, named_values1), toValues(*graph, named_values2));
   }
   std::vector<Value*> getValues(const List<Expr>& trees, bool maybe_unpack) {
     return getValues(trees.tree()->trees(), maybe_unpack);
@@ -2243,9 +2275,11 @@ struct to_ir {
       } break;
       case TK_DICT_LITERAL: {
         auto dl = DictLiteral(tree);
-        auto keys = getValues(dl.key_inputs(), /*maybe_unpack=*/true);
-        auto values = getValues(dl.value_inputs(), /*maybe_unpack=*/true);
-
+        std::vector<Value*> keys, values;
+        std::tie(keys, values) = getValues(
+            dl.key_inputs().tree()->trees(),
+            dl.value_inputs().tree()->trees(),
+            /*maybe_unpack=*/true);
         JIT_ASSERT(keys.size() == values.size());
 
         TypePtr key_type = nullptr;
@@ -2259,10 +2293,9 @@ struct to_ir {
           key_type = keys.at(0)->type();
           value_type = values.at(0)->type();
         } else {
-          throw ErrorReport(tree) << "Cannot get key and value types without a"
-            << " type hint on an empty dict";
+          key_type = StringType::get();
+          value_type = DynamicType::get();
         }
-
         JIT_ASSERT(key_type != nullptr && value_type != nullptr);
 
         return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();

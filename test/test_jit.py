@@ -8234,7 +8234,8 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Indexing only supported on lists, dictionaries, tensors, and tuples"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -9554,6 +9555,12 @@ a")
 
         self.checkScript(index, ({'item': 20, 'other_item': 120},))
 
+        def type_default():
+            # type: () -> Dict[str, Tensor]
+            return {}
+
+        self.checkScript(type_default, ())
+
         @torch.jit.script
         def missing_index(x):
             # type: (Dict[str, int]) -> int
@@ -9572,13 +9579,11 @@ a")
         self.assertEqual({}, cu.literal1())
         self.assertEqual({10: 1.2}, cu.literal2())
 
-        with self.disableModuleHook():
-            # Iteration order isn't defined, so import-export jitter may occur
-            cu = torch.jit.CompilationUnit(dedent('''
-                def literal3():
-                    return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
-            '''))
-            self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
+        cu = torch.jit.CompilationUnit(dedent('''
+            def literal3():
+                return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
+        '''))
+        self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
 
     def test_view_write(self):
         def fn(x, y):
