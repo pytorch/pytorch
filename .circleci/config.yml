@@ -75,6 +75,22 @@ setup_ci_environment: &setup_ci_environment
     export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
 
+macos_brew_update: &macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    pwd
+    ls -lah
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils --without-parallel
+    brew link parallel --overwrite
+    brew install expect
+
 
 ##############################################################################
 # Linux build defaults
@@ -271,6 +287,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   steps:
     - checkout
     - run:
+        <<: *macos_brew_update
+    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
@@ -278,14 +296,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           export IN_CIRCLECI=1
 
-          brew update
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
           brew install cmake
-          brew install expect
 
           # Reinitialize submodules
           git submodule sync && git submodule update -q --init --recursive
@@ -303,9 +314,10 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           # Install Anaconda if we need to
           if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
             rm -rf ${TMPDIR}/anaconda
-            curl -o ${TMPDIR}/anaconda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
-            /bin/bash ${TMPDIR}/anaconda.sh -b -p ${TMPDIR}/anaconda
-            rm -f ${TMPDIR}/anaconda.sh
+            curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+            chmod +x ${TMPDIR}/conda.sh
+            /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
+            rm -f ${TMPDIR}/conda.sh
             export PATH="${TMPDIR}/anaconda/bin:${PATH}"
             source ${TMPDIR}/anaconda/bin/activate
           fi
@@ -451,19 +463,14 @@ smoke_mac_build: &smoke_mac_build
     xcode: "9.0"
   steps:
     - run:
+        <<: *macos_brew_update
+    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
           set -ex
           export DATE=today
           export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew update
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
-          brew install expect
           git clone https://github.com/pytorch/builder.git
           unbuffer ./builder/smoke_test.sh | ts
 
@@ -514,7 +521,7 @@ binary_linux_build: &binary_linux_build
         export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
         export PIP_UPLOAD_FOLDER='nightly/'
         export NO_FBGEMM=1
-        export PYTORCH_FINAL_PACKAGE_DIR='/final_pkgs'
+        export PYTORCH_FINAL_PACKAGE_DIR="/final_pkgs"
         export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
         export PYTORCH_BUILD_NUMBER=1
         export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -619,10 +626,17 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
         /builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
 
         # Upload the package to the final location
-        if [[ -z "DO_NOT_UPLOAD" ]]; then
+        if [[ -z "$DO_NOT_UPLOAD" ]]; then
           if [[ "$PACKAGE_TYPE" == conda ]]; then
             retry conda install -yq anaconda-client
-            yes | anaconda login --username "$CONDA_USERNAME" --password "$CONDA_PASSWORD"
+            set +x
+            echo 'If there is no more output then logging into Anaconda failed'
+            timeout 30 \
+                anaconda login \
+                    --username '"$CONDA_USERNAME"' \
+                    --password '"$CONDA_PASSWORD"' \
+                    >/dev/null 2>&1
+            set -x
             anaconda upload "$pkg" -u pytorch --label main --no-progress
           elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
             retry pip install -q awscli
@@ -638,44 +652,169 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
       <<: *binary_run_in_docker
 
 
+##############################################################################
+# Macos binary build defaults
+# The root of everything is /Users/distiller/pytorch-ci-env/workspace
+##############################################################################
+binary_mac_install_miniconda: &binary_mac_install_miniconda
+  name: Install miniconda
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    workdir='/Users/distiller/project'
+    conda_sh="$workdir/install_miniconda.sh"
+    curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+    chmod +x "$conda_sh"
+    "$conda_sh" -b -p "$workdir/miniconda"
+    rm -f "$conda_sh"
+    export PATH="$workdir/miniconda/bin:$PATH"
+    source "$workdir/miniconda/bin/activate"
+
 binary_mac_build: &binary_mac_build
   macos:
     xcode: "9.0"
   steps:
-    - run:
-        name: Build
-        no_output_timeout: "1h"
-        command: |
-          set -ex
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew update
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
-          brew install expect
+  - run:
+      <<: *macos_brew_update
+  - run:
+      <<: *binary_mac_install_miniconda
 
-          # Default parameters in one place so they're easy to change
-          export PYTORCH_REPO='pytorch'
-          export PYTORCH_BRANCH='master'
-          export TORCH_PACKAGE_NAME='torch-nightly'
-          export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
-          export PYTORCH_BUILD_NUMBER=1
-          export TORCH_CONDA_BUILD_FOLDER="pytorch-nightly"
-          #export OVERRIDE_PACKAGE_VERSION="some_version.123"
+  - run:
+      name: Checkout from Github
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        git clone https://github.com/pytorch/pytorch.git "$workdir/pytorch"
+        pushd "$workdir/pytorch"
+        if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
+          # "smoke" binary build on PRs
+          git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+          git reset --hard "$CIRCLE_SHA1"
+          git checkout -q -B "$CIRCLE_BRANCH"
+          git reset --hard "$CIRCLE_SHA1"
+        fi
+        git submodule update --init --recursive
+        popd
+        git clone https://github.com/pytorch/builder.git "$workdir/builder"
 
-          # Job parameters
-          if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
-            export BUILD_PYTHONLESS=1
-          fi
+  - run:
+      name: Build
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        export PYTORCH_REPO='pytorch'
+        export PYTORCH_BRANCH='master'
+        export TORCH_PACKAGE_NAME='torch-nightly'
+        export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
+        export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
+        export PYTORCH_BUILD_NUMBER=1
+        export TORCH_CONDA_BUILD_FOLDER="pytorch-nightly"
+        export MAC_PACKAGE_WORK_DIR="$workdir"
+        #export OVERRIDE_PACKAGE_VERSION="some_version.123"
+        if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+          export BUILD_PYTHONLESS=1
+        fi
+        mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-          git clone https://github.com/pytorch/builder.git
-          if [[ "$PACKAGE_TYPE" == conda ]]; then
-            unbuffer ./builder/conda/build_pytorch.sh | ts
-          else
-            export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-            unbuffer ./builder/wheel/build_wheel.sh | ts
-          fi
+        # For some reason `unbuffer` breaks if we change the PATH here, so we
+        # write a script with the PATH change in it and unbuffer the whole
+        # thing
+        build_script="$workdir/build_script.sh"
+        touch "$build_script"
+        chmod +x "$build_script"
+
+        # Build
+        cat >"$build_script" <<EOL
+        export PATH="$workdir/miniconda/bin:$PATH"
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          "$workdir/builder/conda/build_pytorch.sh"
+        else
+          export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
+          "$workdir/builder/wheel/build_wheel.sh"
+        fi
+        EOL
+        unbuffer "$build_script" | ts
+
+  - run:
+      name: Test
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        export "PATH=$workdir/miniconda/bin:$PATH"
+        pkg="$workdir/final_pkgs/$(ls $workdir/final_pkgs)"
+
+        # Create a new test env TODO cut all this out into a separate test
+        # job and have an entirely different miniconda
+        source deactivate || true
+        conda create -qyn test python="$DESIRED_PYTHON"
+        source activate test
+
+        # Install the package
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          conda install -y "$pkg" --offline --no-update-dependencies
+        else
+          pip install "$pkg" --no-index --no-dependencies -v
+        fi
+
+        # Test
+        pushd "$workdir/pytorch"
+        $workdir/builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
+        popd
+
+  - persist_to_workspace:
+      root: /Users/distiller/project
+      paths: final_pkgs
+
+binary_mac_upload: &binary_mac_upload
+  macos:
+    xcode: "9.0"
+  steps:
+  - run:
+      <<: *macos_brew_update
+  - run:
+      <<: *binary_mac_install_miniconda
+  - attach_workspace:
+      at: /Users/distiller/project
+  - run:
+      name: Upload
+      no_output_timeout: "1h"
+      command: |
+        export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
+        export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+        export CONDA_USERNAME="${PYTORCH_BINARY_PJH5_CONDA_USERNAME}"
+        export CONDA_PASSWORD="${PYTORCH_BINARY_PJH5_CONDA_PASSWORD}"
+        set -ex
+        workdir='/Users/distiller/project'
+        export "PATH=$workdir/miniconda/bin:$PATH"
+
+        # We need timeout to guard against anaconda login hanging on bad
+        # username/password
+        brew install coreutils
+
+        pkg="$workdir/final_pkgs/$(ls $workdir/final_pkgs)"
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          conda install -yq anaconda-client
+          set +x
+          echo 'If there is no more output then logging into Anaconda failed'
+          /usr/local/bin/gtimeout 30 \
+              anaconda login \
+                  --username '"$CONDA_USERNAME"' \
+                  --password '"$CONDA_PASSWORD"' \
+                  >/dev/null 2>&1
+          set -x
+          anaconda upload "$pkg" -u pytorch --label main --no-progress
+        elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
+          pip install -q awscli
+          s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+          aws s3 cp "$pkg" "$s3_dir" --acl public-read
+        else
+          pip install -q awscli
+          s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+          aws s3 cp "$pkg" "$s3_dir" --acl public-read
+        fi
 
 
 
@@ -1011,6 +1150,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Build
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-py3-build
@@ -1020,14 +1161,6 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -1061,6 +1194,8 @@ jobs:
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Test
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-py3-test
@@ -1069,14 +1204,6 @@ jobs:
           command: |
             set -e
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
@@ -1089,6 +1216,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Build
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
@@ -1098,14 +1227,6 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             # Install CUDA 9.2
             sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
@@ -2178,8 +2299,80 @@ jobs:
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
+  binary_macos_wheel_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_2.7_cpu"
+    <<: *binary_mac_upload
 
-# Non-upload binary jobs for PRsPACKAGE_TYPEDESIRED_PYTHONDESIRED_CUDA:
+  binary_macos_wheel_3.5_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.5"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.5_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_wheel_3.6_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.6"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.6_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_wheel_3.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_2.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.5_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.5"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.5_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.6_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.6"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.6_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_libtorch_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "libtorch"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_libtorch_2.7_cpu"
+    <<: *binary_mac_upload
+
+
+# Non-upload binary jobs for PRs:
 # Keywords: binary tests first round smoke tests binary pr test pr binary test
 
 
@@ -2972,12 +3165,10 @@ workflows:
       - caffe2_py2_gcc4_8_ubuntu14_04_test:
           requires:
             - caffe2_py2_gcc4_8_ubuntu14_04_build
-
       - caffe2_onnx_py2_gcc5_ubuntu16_04_build
       - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
           requires:
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-
       - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
           requires:
@@ -3288,3 +3479,39 @@ workflows:
           context: org-member
           requires:
             - binary_linux_conda_3.7_cu100_build
+      - binary_macos_wheel_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_2.7_cpu_build
+      - binary_macos_wheel_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.5_cpu_build
+      - binary_macos_wheel_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.6_cpu_build
+      - binary_macos_wheel_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.7_cpu_build
+      - binary_macos_conda_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_2.7_cpu_build
+      - binary_macos_conda_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.5_cpu_build
+      - binary_macos_conda_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.6_cpu_build
+      - binary_macos_conda_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.7_cpu_build
+      - binary_macos_libtorch_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_libtorch_2.7_cpu_build

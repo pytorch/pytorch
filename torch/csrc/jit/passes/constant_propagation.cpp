@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/utils/functional.h>
 
@@ -16,10 +16,10 @@ namespace {
 
 std::unordered_set<Symbol> skip_list = {
     prim::If,
-    prim::Loop, // TODO: handle Loop
+    prim::Loop,
     prim::Constant,
     prim::Undefined,
-    prim::unchecked_unwrap_optional, //TODO remove
+    prim::unchecked_unwrap_optional, // TODO remove
     prim::None, // it is already a constant and propagating it will lose
                 // important type information about which Optional type it is
     // TODO (zach): we should consider skipping tensor factories in the cases
@@ -75,7 +75,30 @@ void propagateNode(Node* n) {
   }
 }
 
-void inlineIf(Block* body, Node* n) {
+void removeLoopNode(Node* n) {
+  auto loop_input_offset = 2; // offset of loop carried deps in input list
+  for (size_t i = 0; i < n->outputs().size(); ++i) {
+    n->outputs().at(i)->replaceAllUsesWith(
+        n->inputs().at(i + loop_input_offset));
+  }
+  n->destroy();
+}
+
+bool loopWillNotRun(Node* node) {
+  Value* trip_count = node->inputs().at(0);
+  int64_t iter_len = constant_as<int64_t>(trip_count).value_or(1);
+
+  Value* start_cond = node->inputs().at(1);
+  bool cond_val = constant_as<bool>(start_cond).value_or(true);
+
+  bool loop_might_run = cond_val && iter_len > 0;
+  return !loop_might_run;
+}
+
+void ConstantPropagation(Block* block, const AliasDb& aliasDb);
+
+void inlineIfBody(Block* body) {
+  Node* n = body->owningNode();
   for (auto it = body->nodes().begin(); it != body->nodes().end();) {
     Node* body_node = *it;
     // advance iterator because after body_node is moved its next pointer will
@@ -91,22 +114,16 @@ void inlineIf(Block* body, Node* n) {
   n->destroy();
 }
 
-bool isTrueConstant(Value* val) {
-  c10::optional<bool> maybe_value = constant_as<bool>(val);
-  JIT_ASSERT(maybe_value);
-  return *maybe_value;
-}
-
-void inlineIf(Node* n) {
-  if (isTrueConstant(n->input())) {
-    inlineIf(n->blocks()[0], n);
-  } else {
-    inlineIf(n->blocks()[1], n);
-  }
+void inlineIf(Node* n, const AliasDb& aliasDb) {
+  auto input_bool = constant_as<bool>(n->input());
+  JIT_ASSERT(input_bool);
+  size_t block_index = *input_bool ? 0 : 1;
+  ConstantPropagation(n->blocks().at(block_index), aliasDb);
+  inlineIfBody(n->blocks().at(block_index));
 }
 
 // remove extra outputs from the node
-bool removeExtraNodeOutputs(Node* n) {
+bool removeExtraIfOutputs(Node* n) {
   JIT_ASSERTM(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
@@ -126,53 +143,78 @@ bool removeExtraNodeOutputs(Node* n) {
   return initial_outputs != true_block->outputs().size();
 }
 
-void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse);
+// remove extra outputs from the node
+void removeExtraLoopOutputs(Node* node) {
+  auto loop_body = node->blocks().at(0);
+  auto loop_input_offset = 2; // offset of loop carried deps in input list
+  auto loop_body_offset =
+      1; // offset to the loop carried dependencies in block inputs/outputs
+  for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
+    size_t i = i_1 - 1;
+    // if the value is no longer changed remove output
+    if (loop_body->inputs().at(loop_body_offset + i) ==
+        loop_body->outputs().at(loop_body_offset + i)) {
+      auto node_input = node->inputs().at(loop_input_offset + i);
+      node->outputs().at(i)->replaceAllUsesWith(node_input);
+      loop_body->inputs()
+          .at(loop_body_offset + i)
+          ->replaceAllUsesWith(node_input);
+      node->eraseOutput(i);
+      node->removeInput(loop_input_offset + i);
+      loop_body->eraseInput(loop_body_offset + i);
+      loop_body->eraseOutput(loop_body_offset + i);
+    }
+  }
+}
 
-void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
+void ConstantPropagation(Node* n, const AliasDb& aliasDb) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-        return v->node()->kind() == prim::Constant || v->node()->kind() == prim::None;
+        return v->node()->kind() == prim::Constant ||
+            v->node()->kind() == prim::None;
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
       !n->hasSideEffects() && !aliasDb.hasWriters(n);
   auto run_blocks = [&]() {
-    if (recurse) {
-      for (Block* block : n->blocks()) {
-        ConstantPropagation(block, aliasDb, recurse);
-      }
+    for (Block* block : n->blocks()) {
+      ConstantPropagation(block, aliasDb);
     }
   };
   if (n->kind() == prim::If) {
-    run_blocks();
     // inline node if we can, otherwise check for simplified outputs
     if (constant_inputs) {
-      inlineIf(n);
+      inlineIf(n, aliasDb);
     } else {
-      removeExtraNodeOutputs(n);
+      run_blocks();
+      removeExtraIfOutputs(n);
     }
-    // don't rerun run_blocks
-    return;
+  } else if (n->kind() == prim::Loop) {
+    if (loopWillNotRun(n)) {
+      removeLoopNode(n);
+    } else {
+      run_blocks();
+      removeExtraLoopOutputs(n);
+    }
   } else if (constant_inputs && supported_node) {
     propagateNode(n);
+  } else {
+    run_blocks();
   }
-  // TODO handle loop nodes. Even if a loop node contains an if that is
-  // inlined its mutated variables currently don't get updated
-  run_blocks();
 }
 
-void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse) {
+void ConstantPropagation(Block* block, const AliasDb& aliasDb) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // advance iterator bc the current node may be destroyed
-    ConstantPropagation(n, aliasDb, recurse);
+    ConstantPropagation(n, aliasDb);
   }
 }
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   const auto aliasDb = AliasAnalysis(graph);
-  ConstantPropagation(graph->block(), aliasDb, true);
+  ConstantPropagation(graph->block(), aliasDb);
   EliminateDeadCode(graph);
 }
 
