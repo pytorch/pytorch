@@ -45,13 +45,11 @@ class BatchDataBuffer {
   BatchDataBuffer(
       size_t num_chunks,
       size_t batch_size,
-      ExampleSampler example_sampler,
-      bool ignore_empty_chunk,
+      ExampleSampler& example_sampler,
       size_t queue_capacity)
       : remaining_chunk_count_(num_chunks),
         batch_size_(batch_size),
-        example_sampler_(std::move(example_sampler)),
-        ignore_empty_chunk_(ignore_empty_chunk),
+        example_sampler_(example_sampler),
         queue_capacity_(queue_capacity),
         stop_(false) {}
 
@@ -67,14 +65,13 @@ class BatchDataBuffer {
           this->remaining_chunk_count_ == 0);
     });
     if (batch_queue_.empty()) {
-      lock.unlock();
       AT_ASSERT(remaining_chunk_count_ == 0);
 
       // All batches have been retrieved. Return an empty batch.
       return nullopt;
     }
 
-    auto batch = batch_queue_.front();
+    UnwrappedBatchData batch = std::move(batch_queue_.front());
     batch_queue_.pop();
     if (batch.exception) {
       throw WorkerException(batch.exception);
@@ -108,7 +105,6 @@ class BatchDataBuffer {
     if (stop_.load()){
       // When stop_ is true, it means this current thread needs to be tore down.
       // Return without any further processing.
-      lock.unlock();
       return;
     }
 
@@ -123,7 +119,7 @@ class BatchDataBuffer {
           batch_example_indices.value().size() == example_count)
       BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
-        AT_ASSERT(i < data_size);
+        AT_CHECK(i < data_size, "Index out of range");
         batch.emplace_back(std::move(data[i]));
       }
       remaining_size -= example_count;
@@ -175,7 +171,6 @@ class BatchDataBuffer {
       // When stop_ is true, it means this current thread needs to be tore down,
       // the batch buffer will be discarded, so no need to enqueue any new
       // exceptions.
-      lock.unlock();
       return;
     }
 
@@ -232,11 +227,7 @@ class BatchDataBuffer {
   std::condition_variable cv_read_;
   std::condition_variable cv_write_;
 
-  ExampleSampler example_sampler_;
-
-  // indicator for whether an empty chunk should be ignored. When it is false, an
-  // empty chunk will throw, otherwise,it is skipped.
-  bool ignore_empty_chunk_ = false;
+  ExampleSampler& example_sampler_;
 
   // configurable maximun number of elements the queue can hold at one time.
   size_t queue_capacity_;
@@ -257,11 +248,9 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      bool ignore_empty_chunk = false,
       size_t cache_size = 2048)
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
-        ignore_empty_chunk_(ignore_empty_chunk),
         cache_size_(cache_size) {
     AT_CHECK(
         preloader_count_ > 0,
@@ -283,11 +272,6 @@ struct ChunkDatasetOptions {
 
   /// The size of each batch.
   TORCH_ARG(size_t, batch_size);
-
-  /// If it is set to true, the dataset will quietly move to the next chunk when
-  /// the current one is empty. Otherwise, an exception is thrown on the empty
-  /// batch.
-  TORCH_ARG(bool, ignore_empty_chunk) = false;
 
   // the capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
@@ -370,7 +354,6 @@ class ChunkDataset final
         chunks_to_load,
         options_.batch_size_,
         example_sampler_,
-        options_.ignore_empty_chunk_,
         options_.cache_size_);
 
     // create new workers for this new epoch.
@@ -399,11 +382,11 @@ class ChunkDataset final
           break;
         }
         UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_id);
-        AT_CHECK(options_.ignore_empty_chunk_ || !data.empty(),
-                 "Chunk with index " + std::to_string(chunk_id) + " is empty");
-
         if (data.empty()) {
-          // skip adding the current chunk data and move to the next.
+          AT_WARN("Chunk with index ", std::to_string(chunk_id),
+          " is empty. Skip and move to the next chunk.");
+
+          // skip the current chunk data and move to the next.
           batch_buffer_->skip_chunk();
         }
         else {

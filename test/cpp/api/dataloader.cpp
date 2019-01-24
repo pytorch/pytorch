@@ -104,7 +104,7 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
               DummyChunkDataReader,
               samplers::SequentialSampler,
               samplers::SequentialSampler>>(
-              data_reader, sampler, sampler, datasets::ChunkDatasetOptions(preloader_count, batch_size, false, cache_size));
+              data_reader, sampler, sampler, datasets::ChunkDatasetOptions(preloader_count, batch_size, cache_size));
   };
 
   ASSERT_THROWS_WITH(
@@ -1513,25 +1513,23 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
   ASSERT_THROWS_WITH(*(data_loader->begin()), exception_msg);
 }
 
-struct DummyEmptyChunkDataReader
-    : public datasets:: ChunkDataReader<std::vector<int>> {
- public:
-  using BatchType = std::vector<int>;
+TEST(DataLoaderTest, ChunkDataSetWithEmptyBatchIgnoreEmptyChunk) {
+  struct DummyEmptyChunkDataReader
+      : datasets::ChunkDataReader<std::vector<int>> {
+   public:
+    using BatchType = std::vector<int>;
 
-  BatchType read_chunk(size_t chunk_index) override {
-    return {};
-  }
+    BatchType read_chunk(size_t chunk_index) override {
+      return {};
+    }
 
-  size_t chunk_count() override {
-    return chunk_count_;
+    size_t chunk_count() override {
+      return 2;
+    };
+
+    void reset() override{};
   };
 
-  void reset() override{};
-
-  const static size_t chunk_count_ = 3;
-};
-
-TEST(DataLoaderTest, ChunkDataSetWithEmptyBatchThrowException) {
   const size_t prefetch_count = 1;
   const size_t batch_size = 5;
   DummyEmptyChunkDataReader data_reader;
@@ -1546,28 +1544,6 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatchThrowException) {
           samplers::SequentialSampler,
           samplers::SequentialSampler>>(
           data_reader, sampler, sampler, datasets::ChunkDatasetOptions(prefetch_count, batch_size));
-
-  auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(batch_size).workers(0));
-
-  ASSERT_THROWS_WITH(*(data_loader->begin()), "Chunk with index 0 is empty");
-}
-
-TEST(DataLoaderTest, ChunkDataSetWithEmptyBatchIgnoreEmptyChunk) {
-  const size_t prefetch_count = 1;
-  const size_t batch_size = 5;
-  DummyEmptyChunkDataReader data_reader;
-  samplers::SequentialSampler sampler(0);
-
-  datasets::SharedBatchDataset<datasets::ChunkDataset<
-      DummyEmptyChunkDataReader,
-      samplers::SequentialSampler,
-      samplers::SequentialSampler>>
-      dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
-          DummyEmptyChunkDataReader,
-          samplers::SequentialSampler,
-          samplers::SequentialSampler>>(
-          data_reader, sampler, sampler, datasets::ChunkDatasetOptions(prefetch_count, batch_size, true));
 
   auto data_loader = torch::data::make_data_loader(
       dataset, DataLoaderOptions(batch_size).workers(0));
@@ -1605,7 +1581,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
             D,
             samplers::SequentialSampler,
             samplers::SequentialSampler>>(
-            data_reader, sampler, sampler, datasets::ChunkDatasetOptions(1, batch_size, true));
+            data_reader, sampler, sampler, datasets::ChunkDatasetOptions(1, batch_size));
 
     auto data_loader = torch::data::make_data_loader(
         dataset, DataLoaderOptions(batch_size).workers(0));
