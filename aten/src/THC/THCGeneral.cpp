@@ -41,7 +41,7 @@ THCState* THCState_alloc(void)
 void THCudaInit(THCState* state)
 {
   if (!state->cudaDeviceAllocator) {
-    state->cudaDeviceAllocator = THCCachingAllocator_get();
+    state->cudaDeviceAllocator = at::cuda::THCCachingAllocator_get();
   }
   if (!state->cudaHostAllocator) {
     state->cudaHostAllocator = getTHCCachingHostAllocator();
@@ -130,8 +130,8 @@ void THCudaShutdown(THCState* state)
   }
 
   free(state->resourcesPerDevice);
-  if (state->cudaDeviceAllocator == THCCachingAllocator_get()) {
-    THCCachingAllocator_emptyCache();
+  if (state->cudaDeviceAllocator == at::cuda::THCCachingAllocator_get()) {
+    at::cuda::THCCachingAllocator_emptyCache();
   }
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCCachingHostAllocator_emptyCache();
@@ -421,8 +421,8 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
   /* not always true - our optimistic guess here */
   *largestBlock = *freeBytes;
 
-  if (allocator == THCCachingAllocator_get()) {
-    THCCachingAllocator_cacheInfo(device, &cachedBytes, largestBlock);
+  if (allocator == at::cuda::THCCachingAllocator_get()) {
+    at::cuda::THCCachingAllocator_cacheInfo(device, &cachedBytes, largestBlock);
   }
 
   /* Adjust resulting free bytes number. largesBlock unused for now */
