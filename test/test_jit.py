@@ -9568,6 +9568,48 @@ a")
                         return 4
                 return 5
 
+    def test_overloading(self):
+        @torch._jit_internal.weak_module
+        class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
+            def __init__(self):
+                super(W, self).__init__()
+
+            @torch._jit_internal.weak_script_method
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            def forward(self, x):
+                # manually do argument switching
+                if isinstance(x, tuple):
+                    return self.forward_tuple(x)
+                else:
+                    return self.forward_tensor(x)
+
+            @torch._jit_internal.weak_script_method
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x) + self.weak((x, x))
+
+        s = S()
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20 + 5 + x)
+
+        w = W()
+        self.assertEqual(w((x, x)), x + 5)
+        self.assertEqual(w((x)), x + 20)
+
     def test_select_after_chunk(self):
         def foo(x):
             chunked = torch.chunk(x, 1)
