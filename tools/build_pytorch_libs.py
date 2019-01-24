@@ -246,7 +246,7 @@ def build_caffe2(version,
 
     if build_python:
         for proto_file in glob('build/caffe2/proto/*.py'):
-            if proto_file != 'caffe2/proto/__init__.py':
+            if proto_file != 'build/caffe2/proto/__init__.py':
                 shutil.copyfile(proto_file, "caffe2/proto/" + os.path.basename(proto_file))
 
     copy_files(build_test)
