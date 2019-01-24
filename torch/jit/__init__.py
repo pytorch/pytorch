@@ -1234,7 +1234,7 @@ if _enabled:
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
-            super(ScriptModule, self)
+            super(ScriptModule, self).__init__()
 
 
 def _get_weak_stubs(cls):
