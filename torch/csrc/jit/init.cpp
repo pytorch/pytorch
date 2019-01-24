@@ -386,8 +386,16 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper>(m, "Future");
 
-  // TODO: don't do this
-  m.def("fork", [](py::function f, py::args args) {
+  m.def("fork", [](py::args args) {
+    AT_ASSERT(args.size() >= 1);
+
+    py::function f = py::cast<py::function>(args[0]);
+    py::tuple args_tup(args.size() - 1);
+
+    for (size_t i = 1; i < args.size(); ++i) {
+      args_tup[i - 1] = args[i];
+    }
+
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
       auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
@@ -403,7 +411,7 @@ void initJITBindings(PyObject* module) {
         tracer::WithTracingEnvStack env_guard;
 
         // Run the user-supplied function
-        py_func_output = f(*args);
+        py_func_output = f(*args_tup);
 
         // Convert the output of the user-supplied funciton to IValue. The type
         // information of this IValue is used both to record the correct type in
@@ -440,7 +448,7 @@ void initJITBindings(PyObject* module) {
       return PythonFutureWrapper(retval);
     } else {
       auto retval = c10::make_intrusive<c10::ivalue::Future>();
-      retval->markCompleted(toIValue(f(*args)));
+      retval->markCompleted(toIValue(f(*args_tup)));
       return PythonFutureWrapper(retval);
     }
   });
