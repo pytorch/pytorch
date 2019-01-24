@@ -24,29 +24,32 @@ Tensor pdist(const Tensor& self, const double p) {
 }
 
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
-    AT_CHECK(x1.dim() == 2, "cdist only supports 2D tensors, X1 got: ", x1.dim(), "D");
-    auto device1 = x1.type().device_type();
-    AT_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device);
-    AT_CHECK(x2.dim() == 2, "cdist only supports 2D tensors, X2 got: ", x2.dim(), "D");
-    auto device2 = x2.type().device_type();
-    AT_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device);
-    AT_CHECK(p >= 0, "cdist only supports non-negative p values");
-    AT_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
-    int64_t c1 = x1.size(-1);
-    int64_t c2 = x2.size(-1);
-    AT_CHECK(c1 == c2, "X1 and X2 must have the same number of columns. X1: ", c1, " X2: ", c2);
+  AT_CHECK(x1.dim() == 2, "cdist only supports 2D tensors, X1 got: ", x1.dim(), "D");
+  AT_CHECK(at::isFloatingType(x1.type().scalarType()), "cdist only supports floating-point dtypes, X1 got: ", x1.type().scalarType());
+  auto device1 = x1.type().device_type();
+  AT_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device);
+  AT_CHECK(x2.dim() == 2, "cdist only supports 2D tensors, X2 got: ", x2.dim(), "D");
+  AT_CHECK(at::isFloatingType(x1.type().scalarType()), "cdist only supports floating-point dtypes, X2 got: ", x2.type().scalarType());
+  auto device2 = x2.type().device_type();
+  AT_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device);
+  AT_CHECK(p >= 0, "cdist only supports non-negative p values");
+  AT_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
+  AT_CHECK(!x1.is_cuda() || x1.get_device() == x2.get_device(), "device of X1 (", x1.get_device(), ") must match device of X2 (", x2.get_device(), ")");
+  int64_t c1 = x1.size(-1);
+  int64_t c2 = x2.size(-1);
+  AT_CHECK(c1 == c2, "X1 and X2 must have the same number of columns. X1: ", c1, " X2: ", c2);
 
-    int64_t r1 = x1.size(-2);
-    int64_t r2 = x2.size(-2);
-    Tensor result = at::empty({r1, r2}, x1.options());
-    if (r1 > 0 && r2 > 0) {
-      if (c1 == 0) {
-        result.fill_(0);
-      } else {
-        cdist_stub(device1, result, x1.contiguous(), x2.contiguous(), p);
-      }
+  int64_t r1 = x1.size(-2);
+  int64_t r2 = x2.size(-2);
+  Tensor result = at::empty({r1, r2}, x1.options());
+  if (r1 > 0 && r2 > 0) {
+    if (c1 == 0) {
+      result.fill_(0);
+    } else {
+      cdist_stub(device1, result, x1.contiguous(), x2.contiguous(), p);
     }
-    return result;
+  }
+  return result;
 }
 
 Tensor _pdist_forward(const Tensor& self, const double p) {

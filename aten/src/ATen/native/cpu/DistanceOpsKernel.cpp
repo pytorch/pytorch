@@ -150,35 +150,35 @@ struct PDist {
 
   template <typename F>
   static void run_cdist_parallel(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-      const scalar_t * const t1_start = t1.data<scalar_t>();
-      const scalar_t * const t2_start = t2.data<scalar_t>();
-      int64_t r1 = t1.size(-2);
-      int64_t r2 = t2.size(-2);
-      int64_t m = t1.size(-1);
+    const scalar_t * const t1_start = t1.data<scalar_t>();
+    const scalar_t * const t2_start = t2.data<scalar_t>();
+    int64_t r1 = t1.size(-2);
+    int64_t r2 = t2.size(-2);
+    int64_t m = t1.size(-1);
 
-      scalar_t * const res_start = result.data<scalar_t>();
-      int64_t total = r1 * r2;
-      const Vec pvec(p);
+    scalar_t * const res_start = result.data<scalar_t>();
+    int64_t total = r1 * r2;
+    const Vec pvec(p);
 
-      parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t start, int64_t end) {
-          scalar_t * res = res_start + start;
-          const scalar_t * const res_end = res_start + end;
+    parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t start, int64_t end) {
+      scalar_t * res = res_start + start;
+      const scalar_t * const res_end = res_start + end;
 
-          int64_t k = start;
-          while (res != res_end) {
-              int64_t i = k / r2;
-              int64_t j = k % r2;
-              const scalar_t * self_i = t1_start + i * m;
-              const scalar_t * self_j = t2_start + j * m;
+      int64_t k = start;
+      while (res != res_end) {
+        int64_t i = k / r2;
+        int64_t j = k % r2;
+        const scalar_t * self_i = t1_start + i * m;
+        const scalar_t * self_j = t2_start + j * m;
 
-              *res = F::finish(vec256::map2_reduce_all<scalar_t>(
-                      [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
-                      F::red, self_i, self_j, m), p);
+        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+                [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
+                F::red, self_i, self_j, m), p);
 
-              res += 1;
-              k++;
-          }
-      });
+        res += 1;
+        k++;
+      }
+    });
   }
 
   static void apply_cdist(Tensor& result, const Tensor& x1, const Tensor& x2, const scalar_t p) {
@@ -281,9 +281,9 @@ static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 }
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
-    AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
-        PDist<scalar_t>::apply_cdist(result, x1, x2, p);
-    });
+  AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
+    PDist<scalar_t>::apply_cdist(result, x1, x2, p);
+  });
 }
 
 
