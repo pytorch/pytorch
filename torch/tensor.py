@@ -343,7 +343,23 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted, return_inverse, dim)
+        if dim is not None:
+            output, inverse_indices = torch._unique_dim(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = torch._unique(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)

@@ -1719,6 +1719,20 @@ class TestJit(JitTestCase):
         graph_str = str(constant_prop.graph)
         self.assertTrue(graph_str.count("prim::None") == 0)
 
+    def test_constant_prop_if_inline(self):
+        @torch.jit.script
+        def constant_prop():
+            cond = True
+            a = 1
+            if cond:
+                a = 1 * 2
+            else:
+                a = 1 // 0
+            return a
+
+        # testing that 1 // 0 error is not thrownn
+        self.run_pass('constant_propagation', constant_prop.graph)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
@@ -1759,16 +1773,49 @@ class TestJit(JitTestCase):
 
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
-        def constant_prop():
+        def constant_prop(cond, iter):
+            # type: (bool, int) -> int
             b = 0
             while True:
-                b = 1
+                print("stays")
+            for _ in range(2):
+                print("stays")
+            for _ in range(iter):
+                print("stays")
+            while cond:
+                print("stays")
             while False:
-                b = 2
+                print("removed")
+            for _i in range(0):
+                print("removed")
+            for _i in range(-4):
+                print("removed")
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = canonical(constant_prop.graph)
+        self.assertTrue(graph.count("removed") == 0)
+        self.assertTrue(graph.count("stays") == 1)  # constant gets pooled
+        self.assertTrue(graph.count("prim::Print") == 4)
+
+    def test_constant_prop_remove_output(self):
+        @torch.jit.script
+        def constant_prop(iter):
+            # type: (int) -> None
+            a = 1
+            b = 1
+            c = 1
+            for i in range(iter):
+                if False:
+                    a = 10
+                if i == 5:
+                    b = 2
+                    c = 3
+            print(a, b, c)
+
+        graph = constant_prop.graph
+        self.run_pass('constant_propagation', graph)
+        self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
     def test_trace_detach(self):
         def foo(x, w):
@@ -4409,35 +4456,6 @@ a")
         self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
-
-    def test_script_unique_none(self):
-        def test_unique_inverse(a):
-            b, c = torch.unique(a, return_inverse=True)
-            return b + 1
-
-        def test_unique_inverse_nonedim(a):
-            b, c = torch.unique(a, return_inverse=True, dim=None)
-            return b + 1
-
-        def test_unique_noinverse(a):
-            b = torch.unique(a)
-            return b + 1
-
-        def test_unique_noinverse_nonedim(a):
-            b = torch.unique(a, dim=None)
-            return b + 1
-
-        a = torch.rand(5, 6, 7)
-
-        self.checkTrace(test_unique_inverse, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_inverse_nonedim, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_noinverse, [a], inputs_require_grads=False)
-        self.checkTrace(test_unique_noinverse_nonedim, [a], inputs_require_grads=False)
-        self.checkScript(test_unique_inverse, [a])
-        self.checkScript(test_unique_inverse_nonedim, [a])
-        # TODO: scripting unique when return_inverse = False is not supported yet
-        # self.checkScript(test_unique_noinverse, [a])
-        # self.checkScript(test_unique_noinverse_nonedim, [a])
 
     def test_script_bool_constant(self):
         script = '''
@@ -9549,6 +9567,48 @@ a")
                     if bool(x < 3):
                         return 4
                 return 5
+
+    def test_overloading(self):
+        @torch._jit_internal.weak_module
+        class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
+            def __init__(self):
+                super(W, self).__init__()
+
+            @torch._jit_internal.weak_script_method
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            def forward(self, x):
+                # manually do argument switching
+                if isinstance(x, tuple):
+                    return self.forward_tuple(x)
+                else:
+                    return self.forward_tensor(x)
+
+            @torch._jit_internal.weak_script_method
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x) + self.weak((x, x))
+
+        s = S()
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20 + 5 + x)
+
+        w = W()
+        self.assertEqual(w((x, x)), x + 5)
+        self.assertEqual(w((x)), x + 20)
 
     def test_select_after_chunk(self):
         def foo(x):

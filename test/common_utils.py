@@ -813,6 +813,7 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
+    'test_conv_double_backward',
     'test_conv_double_backward_groups',
     'test_Conv3d_dilated',
     'test_Conv3d_stride_padding',
