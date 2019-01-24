@@ -24,7 +24,7 @@
 
 C10_DEFINE_string(
     caffe2_cuda_memory_pool,
-    "",
+    "thc",
     "Sets the memory pool used by caffe2. Possible values are "
     "none, cnmem, thc and cub.");
 
