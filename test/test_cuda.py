@@ -1677,15 +1677,13 @@ class TestCuda(TestCase):
         self.assertGreater(start_event.elapsed_time(event), 0)
 
     @staticmethod
-    def _stream_synchronize(self, spin_time=50000000):
+    def _stream_synchronize(self, spin_time_cycles=50000000):
         s = torch.cuda.current_stream()
         e_tik = torch.cuda.Event(enable_timing=True)
         e_tok = torch.cuda.Event(enable_timing=True)
 
-        torch.cuda._sleep(1)
         e_tik.record(s)
-
-        torch.cuda._sleep(spin_time)
+        torch.cuda._sleep(spin_time_cycles)
         e_tok.record(s)
         s.synchronize()
 
@@ -1696,15 +1694,13 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_synchronize(self, spin_time=50000000):
+    def _event_synchronize(self, spin_time_cycles=50000000):
         s = torch.cuda.current_stream()
         e_tik = torch.cuda.Event(enable_timing=True)
         e_tok = torch.cuda.Event(enable_timing=True)
 
-        torch.cuda._sleep(1)
         e_tik.record(s)
-
-        torch.cuda._sleep(spin_time)
+        torch.cuda._sleep(spin_time_cycles)
         s.record_event(e_tok)
         e_tok.synchronize()
 
@@ -1715,16 +1711,14 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    def _event_wait(self, spin_time=50000000):
+    def _event_wait(self, spin_time_cycles=50000000):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
-
         e_tik = torch.cuda.Event(blocking=True, enable_timing=True)
         e_tok = torch.cuda.Event(blocking=True, enable_timing=True)
-        torch.cuda._sleep(1)
-        e_tik.record(s0)
 
-        torch.cuda._sleep(spin_time - 10)
+        e_tik.record(s0)
+        torch.cuda._sleep(spin_time_cycles - 10)
         e_sync = torch.cuda.Event(blocking=True)
         e_sync.record()
         e_sync.wait(s1)
@@ -1756,7 +1750,6 @@ class TestCuda(TestCase):
                           TestCuda._event_wait]:
             p2c = queue.Queue()
             c2p = queue.Queue()
-
             e_tik = torch.cuda.Event(enable_timing=True)
             e_tok = torch.cuda.Event(enable_timing=True)
 
@@ -1768,14 +1761,10 @@ class TestCuda(TestCase):
 
             c2p.get()
             with torch.cuda.device('cuda:0'):
-                torch.cuda._sleep(1)
                 e_tik.record()
-
                 p2c.put(0)
                 parent_time = sync_func(self, 50000000)
                 child_time = c2p.get()
-
-                torch.cuda._sleep(1)
                 e_tok.record()
                 e_tok.synchronize()
                 total_time = e_tik.elapsed_time(e_tok)
