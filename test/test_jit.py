@@ -12360,7 +12360,6 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
 
-
     def test_trace_fork_wait_inline_onnx(self):
         def fork_body(x):
             return torch.neg(x), torch.neg(x)

@@ -52,7 +52,7 @@ TORCH_API void setValueTrace(const IValue& v, Value* value);
 TORCH_API void setFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut, Value* value);
 
 inline void delValueTrace(const Variable& var) {
-  JIT_ASSERT(var.defined());
+  AT_ASSERT(var.defined());
   getTracingState()->env_stack.back().value_map.erase(var);
 }
 

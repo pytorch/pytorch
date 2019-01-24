@@ -88,7 +88,7 @@ Value* getValueTrace(const Variable& var) {
 void setValueTrace(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
-    JIT_ASSERT(var.defined());
+    AT_ASSERT(var.defined());
     getTracingState()->env_stack.back().value_map[var] = value;
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();

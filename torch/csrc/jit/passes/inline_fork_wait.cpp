@@ -12,7 +12,7 @@ void InlineForkWait(Block* b, std::unordered_map<Value*, Value*>& future_remap) 
       auto subgraph = n->g(attr::Subgraph);
       // Map subgraph values -> this graph values
       std::unordered_map<Value*, Value*> value_remap;
-      JIT_ASSERT(n->inputs().size() == subgraph->inputs().size());
+      AT_ASSERT(n->inputs().size() == subgraph->inputs().size());
       for (size_t i = 0; i < n->inputs().size(); ++i) {
         value_remap[subgraph->inputs()[i]] = n->input(i);
       }
@@ -21,21 +21,21 @@ void InlineForkWait(Block* b, std::unordered_map<Value*, Value*>& future_remap) 
       };
       for (auto sub_n : subgraph->nodes()) {
         auto cloned_node = graph->insertNode(graph->createClone(sub_n, remap_fn));
-        JIT_ASSERT(sub_n->outputs().size() == cloned_node->outputs().size());
+        AT_ASSERT(sub_n->outputs().size() == cloned_node->outputs().size());
         for (size_t i = 0; i < sub_n->outputs().size(); ++i) {
           value_remap[sub_n->output(i)] = cloned_node->output(i);
         }
       }
 
-      JIT_ASSERT(n->outputs().size() == 1);
-      JIT_ASSERT(subgraph->outputs().size() == 1);
-      JIT_ASSERT(value_remap.count(subgraph->outputs()[0]) > 0);
+      AT_ASSERT(n->outputs().size() == 1);
+      AT_ASSERT(subgraph->outputs().size() == 1);
+      AT_ASSERT(value_remap.count(subgraph->outputs()[0]) > 0);
 
       future_remap[n->output()] = value_remap[subgraph->outputs()[0]];
     } else if (n->kind() == Symbol::fromQualString("aten::wait")) {
-      JIT_ASSERT(n->inputs().size() == 1);
-      JIT_ASSERT(n->outputs().size() == 1);
-      JIT_ASSERT(future_remap.count(n->input()) > 0);
+      AT_ASSERT(n->inputs().size() == 1);
+      AT_ASSERT(n->outputs().size() == 1);
+      AT_ASSERT(future_remap.count(n->input()) > 0);
       n->output()->replaceAllUsesWith(future_remap[n->input()]);
     }
 
