@@ -4,7 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
@@ -23,6 +23,21 @@ namespace torch {
 namespace jit {
 namespace tracer {
 
+using ::c10::ivalue::List;
+using ::c10::ivalue::Shared;
+
+using ::c10::IValue;
+using ::c10::ivalue::Future;
+using ::c10::ivalue::Tuple;
+
+using ::c10::ivalue::BoolList;
+using ::c10::ivalue::DoubleList;
+using ::c10::ivalue::GenericList;
+using ::c10::ivalue::IntList;
+using ::c10::ivalue::TensorList;
+
+using ::c10::ivalue::ConstantString;
+
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
@@ -35,7 +50,7 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
 inline void delValueTrace(const Variable& var) {
-  JIT_ASSERT(var.defined());
+  AT_ASSERT(var.defined());
   getTracingState()->value_map.erase(var);
 }
 
