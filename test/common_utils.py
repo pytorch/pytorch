@@ -304,7 +304,7 @@ class TestCase(expecttest.TestCase):
         t = time.time() - self.startTime
         needToPrintTime = os.environ.get('PYTORCH_TEST_TIMING')
         if needToPrintTime:
-            print "%s: %.3f" % (self.id(), t)
+            print("%s: %.3f" % (self.id(), t))
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
