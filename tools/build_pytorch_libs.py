@@ -7,6 +7,8 @@ import os
 import sys
 import distutils
 import distutils.sysconfig
+from distutils.file_util import copy_file
+from distutils.dir_util import copy_tree
 from subprocess import check_call, call, check_output
 from distutils.version import StrictVersion
 from setup_helpers.cuda import USE_CUDA
@@ -40,6 +42,8 @@ def cmake_version(cmd):
 
 def get_cmake_command():
     cmake_command = 'cmake'
+    if IS_WINDOWS:
+        return cmake_command
     cmake3, cmake = which('cmake'), which('cmake')
     if cmake3 is not None and cmake is not None:
         bare_version = cmake_version(cmake)
@@ -177,25 +181,25 @@ def run_cmake(version,
 
 
 def copy_files(build_test):
-    if which("rsync") is not None:
-        def sync(*args):
-            check_call(('rsync', '-lptgoD') + args, cwd=torch_lib_dir)
-    else:
-        def sync(*args):
-            check_call(('cp',) + args, cwd=torch_lib_dir)
-    def sync_here(pattern):
-        args = glob(pattern) + [ '-r', '.']
-        sync(*args)
+    def copy_all(pattern, dst):
+        for file in glob(pattern):
+            print(file)
+            if os.path.isdir(file):
+                copy_tree(file, dst, update=True)
+            else:
+                copy_file(file, dst, update=True)
+
     shutil.rmtree(install_dir + '/lib/cmake', ignore_errors=True)
     shutil.rmtree(install_dir + '/lib/python', ignore_errors=True)
-    sync_here(install_dir + '/lib/*')
+    copy_all(install_dir + '/lib/*', torch_lib_dir)
     if os.path.exists(install_dir + '/lib64'):
-        sync_here(install_dir + '/lib64/*')
-    sync('../../aten/src/THNN/generic/THNN.h', '.')
-    sync('../../aten/src/THCUNN/generic/THCUNN.h', '.')
-    sync('-r', install_dir + '/include', '.')
+        copy_all(install_dir + '/lib64/*', torch_lib_dir)
+    copy_file('aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
+    copy_file('aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
+
+    copy_tree(install_dir + '/include', torch_lib_dir + '/include', update=True)
     if os.path.exists(install_dir + '/bin/'):
-        sync_here(install_dir + '/bin/*')
+        copy_all(install_dir + '/bin/*', torch_lib_dir)
 
     if build_test:
         # Copy the test files to pytorch/caffe2 manually
@@ -211,7 +215,7 @@ def copy_files(build_test):
         # folder like site-packages/caffe2_cpp_test would also be possible by adding a
         # caffe2_cpp_test folder to pytorch with an __init__.py in it.
         mkdir_p(base_dir + '/caffe2/cpp_test/')
-        sync('-r', install_dir + '/test/*', base_dir + '/caffe2/cpp_test/')
+        copy_tree(install_dir + '/test', base_dir + '/caffe2/cpp_test', update=True)
 
 def build_caffe2(version,
                  cmake_python_library,
