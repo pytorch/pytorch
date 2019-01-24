@@ -317,7 +317,7 @@ std::string generateKernel(
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : inputs) {
+  for (const auto& input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
