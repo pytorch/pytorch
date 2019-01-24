@@ -514,7 +514,7 @@ struct THCCachingAllocator
 
 THCCachingAllocator caching_allocator;
 
-static void CudaCachingDeleter(void* ptr) {
+void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
 }
 
@@ -529,10 +529,10 @@ struct CudaCachingAllocator : public Allocator {
     if (size != 0) {
       caching_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &CudaCachingDeleter, Device(DeviceType::CUDA, device)};
+    return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    return &CudaCachingDeleter;
+    return &raw_delete;
   }
 };
 
