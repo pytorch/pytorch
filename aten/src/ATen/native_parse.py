@@ -103,23 +103,18 @@ def type_argument_translations(arg):
             except ValueError:
                 pass
 
-    t, annotation = get_annotation(t)
-    return t, name, default, size, annotation
-
-
-def get_annotation(t):
     match = re.match(r'(Tensor.*)\((.+)\)', t)
     annotation = None
     if match:
         t = match.group(1)
         annotation = match.group(2)
-    return t, annotation
+
+    return t, name, default, size, annotation
 
 
-def parse_arguments(args, func_decl, declaration, func_return):
+def parse_arguments(args, func_variants, declaration, func_return):
     arguments = []
     kwarg_only = False
-    func_name = declaration['name']
     inplace = declaration['inplace']
 
     if len(args.strip()) == 0:
@@ -162,6 +157,7 @@ def parse_arguments(args, func_decl, declaration, func_return):
 
     arguments = arguments_out + arguments_other
 
+    name = declaration['name']
     if is_out_fn:
         declaration['name'] += "_out"
 
@@ -172,39 +168,39 @@ def parse_arguments(args, func_decl, declaration, func_return):
     for arg_idx, argument in enumerate(arguments_out):
         assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                 "For func {} writeable keyword Tensor arguments need to have a matching return Tensor. Further, " \
-                "the ith-argument needs to correspond to the i-th return.".format(func_decl['func'])
+                "the ith-argument needs to correspond to the i-th return.".format(name)
 
     assert len(arguments_out) <= len(func_return), "func {} must return at least as many Tensors as can be passed " \
-            "as output.".format(func_decl['func'])
+            "as output.".format(name)
 
-    if func_name.endswith('_out'):
-        raise RuntimeError("Native functions may not be suffixed with _out as we transistion to a unified schema. "
-                           "Otherwise you will cause confusion amongst consumers of native functions.")
+    if name.endswith('_out'):
+        raise RuntimeError("Native function {} may not be suffixed with _out as we transistion to a unified schema. "
+                           "Otherwise you will cause confusion amongst consumers of native functions.".format(name))
 
-    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
+    if is_out_fn and func_variants not in [[], 'function', ['function']]:
         raise RuntimeError("Native functions with output MUST be declared with only the function variant; "
                            "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
                            "(which usually manifests itself as the result variable being undefined.) "
-                           "The culprit was: {}".format(func_name))
+                           "The culprit was: {}".format(name))
     if not is_out_fn:
-        assert len(arguments_out) == 0, "func {} is not marked as output yet contains output keyword arguments"
+        assert len(arguments_out) == 0, "func {} is not marked as output yet contains output keyword arguments".format(name)
 
     # Explicit checking for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
-    if inplace and len(func_return) > 0 and func_return[0]['type'] != "void":
+    if declaration['inplace'] and len(func_return) > 0 and func_return[0]['type'] != "void":
         found_self = False
         for arg_idx, argument in enumerate(arguments):
-            if argument['name'] == "self" and inplace:
+            if argument['name'] == "self":
                 assert argument['annotation'] and argument['annotation'].endswith("!"), \
                     "Inplace function \"{}\" needs to annotate Tensor argument named self " \
-                    "as mutable.".format(func_decl['func'])
+                    "as mutable.".format(name)
                 found_self = True
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                         "Inplace function annotations of function {} need to match between " \
-                        "input and correponding output.".format(func_decl['func'])
+                        "input and correponding output.".format(name)
                 assert argument['name'] == func_return[arg_idx]['name']
                 assert argument['type'] == func_return[arg_idx]['type']
-        assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(func_decl['func'])
+        assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
     return arguments
 
@@ -219,25 +215,19 @@ def parse_return_arguments(return_decl, inplace, func_decl):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         t, name, default, size, annotation = type_argument_translations(arg)
-        # See Note [field_name versus name]
-        field_name = None
+        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
         if name:
-            field_name = name
-
-        if not name:
+            # See Note [field_name versus name]
+            argument_dict['field_name'] = name
+        else:
             if t == "Tensor" and inplace:
                 assert annotation and annotation.endswith("!"), \
                         "Return Tensor of function \"{}\" flagged as inplace needs to be " \
                         "annotated as mutable".format(func_decl['func'])
-                name = 'self'
+                argument_dict['name'] = 'self'
             else:
-                name = 'result' if not multiple_args else 'result' + str(arg_idx)
-
-        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
+                argument_dict['name'] = 'result' if not multiple_args else 'result' + str(arg_idx)
         argument_dict['output'] = True
-        if field_name:
-            argument_dict['field_name'] = name
-
         arguments.append(argument_dict)
     return arguments
 
@@ -278,7 +268,7 @@ def run(paths):
                 declaration['name'] = func.get('name', fn_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
-                arguments = parse_arguments(arguments, func, declaration, return_arguments)
+                arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
