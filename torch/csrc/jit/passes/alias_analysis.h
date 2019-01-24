@@ -130,5 +130,7 @@ class AliasDb {
 inline TORCH_API AliasDb AliasAnalysis(std::shared_ptr<Graph> graph) {
   return AliasDb(std::move(graph));
 }
+
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit
 } // namespace torch

@@ -308,8 +308,6 @@ void AliasDb::analyze(Block* block) {
 //      will have to be handwritten.
 void AliasDb::analyze(Node* node) {
   // These nodes are not schematized, so we need to handle them specially
-  // TODO do the thing that python_printer does to force operator writers to
-  // register aliasing information
   switch (node->kind()) {
     case prim::If:
       return analyzeIf(node);
@@ -979,5 +977,40 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
   }
   JIT_ASSERT(false);
 }
+
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol sym) {
+  // WARNING: by adding a case to this list, you are asserting that you have
+  // added a case for this unschematized node in AliasDb::analyze
+  const static std::unordered_set<Symbol> handled = {
+    prim::If,
+    prim::Loop,
+    prim::FusionGroup,
+    prim::DifferentiableGraph,
+    prim::Constant,
+    prim::ListConstruct,
+    prim::TupleConstruct,
+    prim::Undefined,
+    prim::FusedConcat,
+    prim::MMTreeReduce,
+    prim::MMBatchSide,
+    prim::None,
+    prim::BroadcastSizes,
+    prim::ChunkSizes,
+    prim::Function,
+    prim::TupleUnpack,
+    prim::TupleIndex,
+    prim::TupleSlice,
+    prim::ListUnpack,
+    prim::PythonOp,
+    prim::ConstantChunk,
+    prim::BroadcastingChunk,
+    aten::add,
+    aten::sub,
+    aten::mul,
+    aten::div
+  };
+  return handled.count(sym);
+}
+
 } // namespace jit
 } // namespace torch
