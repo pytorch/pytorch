@@ -708,7 +708,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
         // Free the cached blocks in our caching allocator. They are
         // needed here because the above benchmarking uses a huge amount of memory,
         // e.g. a few GBs.
-        at::cuda::THCCachingAllocator_emptyCache();
+        c10::cuda::CUDACachingAllocator::emptyCache();
       }
 
       *algoPerf = perfResults;

@@ -8,7 +8,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -41,7 +41,7 @@ THCState* THCState_alloc(void)
 void THCudaInit(THCState* state)
 {
   if (!state->cudaDeviceAllocator) {
-    state->cudaDeviceAllocator = at::cuda::THCCachingAllocator_get();
+    state->cudaDeviceAllocator = c10::cuda::CUDACachingAllocator::get();
   }
   if (!state->cudaHostAllocator) {
     state->cudaHostAllocator = getTHCCachingHostAllocator();
@@ -130,8 +130,8 @@ void THCudaShutdown(THCState* state)
   }
 
   free(state->resourcesPerDevice);
-  if (state->cudaDeviceAllocator == at::cuda::THCCachingAllocator_get()) {
-    at::cuda::THCCachingAllocator_emptyCache();
+  if (state->cudaDeviceAllocator == c10::cuda::CUDACachingAllocator::get()) {
+    c10::cuda::CUDACachingAllocator::emptyCache();
   }
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCCachingHostAllocator_emptyCache();
@@ -421,8 +421,8 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
   /* not always true - our optimistic guess here */
   *largestBlock = *freeBytes;
 
-  if (allocator == at::cuda::THCCachingAllocator_get()) {
-    at::cuda::THCCachingAllocator_cacheInfo(device, &cachedBytes, largestBlock);
+  if (allocator == c10::cuda::CUDACachingAllocator::get()) {
+    c10::cuda::CUDACachingAllocator::cacheInfo(device, &cachedBytes, largestBlock);
   }
 
   /* Adjust resulting free bytes number. largesBlock unused for now */
