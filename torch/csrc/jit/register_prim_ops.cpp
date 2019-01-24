@@ -468,7 +468,7 @@ RegisterOperators reg({
                   (shape[dim] + split_size - 1) / split_size, 1);
               last_shape[dim] =
                   split_size - (split_size * num_splits - shape[dim]);
-              JIT_ASSERT(last_shape[dim] >= 0);
+              AT_ASSERT(last_shape[dim] >= 0);
             }
             push(stack, std::move(regular_shape));
             push(stack, std::move(last_shape));
@@ -518,20 +518,20 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        onnx::Reshape,
+        c10::onnx::Reshape,
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor input, shape;
             pop(stack, input, shape);
             shape = shape.contiguous();
-            JIT_ASSERT(shape.ndimension() == 1);
+            AT_ASSERT(shape.ndimension() == 1);
             at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
             push(stack, input.reshape(shape_list));
             return 0;
           };
         }),
     Operator(
-        onnx::Shape,
+        c10::onnx::Shape,
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
@@ -671,7 +671,7 @@ RegisterOperators reg({
             int64_t num_results = result.size();
             if (num_results != chunks) {
               if (num_results > chunks) {
-                JIT_ASSERTM(
+                AT_CHECK(
                     num_results == chunks,
                     "Expected chunk to return ",
                     chunks,
@@ -808,8 +808,8 @@ RegisterOperators reg({
         [](const Node* node) {
           Code code(node->g(attr::Subgraph));
           int n_inputs = node->inputs().size();
-          JIT_ASSERT(node->blocks().size() == 0);
-          JIT_ASSERT(node->hasAttribute(attr::Subgraph));
+          AT_ASSERT(node->blocks().size() == 0);
+          AT_ASSERT(node->hasAttribute(attr::Subgraph));
           return [=](Stack& stack) {
             // Move inputs to a separate stack
             InterpreterState forked_interprester(code);

@@ -88,7 +88,7 @@ void checkInputPreconditions(const Stack& inputs) {
       }
       const auto& lhs = inputs.at(i);
       const auto& rhs = inputs.at(j);
-      JIT_ASSERT(!lhs.isAliasOf(rhs));
+      AT_ASSERT(!lhs.isAliasOf(rhs));
     }
   }
 }
@@ -103,8 +103,8 @@ void checkAliases(
       if (output.iValue.isAliasOf(input.iValue)) {
         const auto inputSet = input.aliasInfo;
         const auto outputSet = output.aliasInfo;
-        JIT_ASSERT(inputSet && outputSet);
-        JIT_ASSERT(inputSet->isSubsetOf(*outputSet));
+        AT_ASSERT(inputSet && outputSet);
+        AT_ASSERT(inputSet->isSubsetOf(*outputSet));
       }
     }
   }
@@ -115,12 +115,12 @@ void checkAliases(
 void checkWrites(
     const std::vector<AliasAndIValue>& inputs,
     const std::vector<IValue>& deepCopiedInputs) {
-  JIT_ASSERT(inputs.size() == deepCopiedInputs.size());
+  AT_ASSERT(inputs.size() == deepCopiedInputs.size());
   for (size_t i = 0; i < inputs.size(); i++) {
     const auto& input = inputs[i];
     const auto& deepCopiedInput = deepCopiedInputs[i];
     if (!input.aliasInfo || !input.aliasInfo->isWrite()) {
-      JIT_ASSERT(deepEquals(input.iValue, deepCopiedInput));
+      AT_ASSERT(deepEquals(input.iValue, deepCopiedInput));
     }
   }
 }
@@ -134,7 +134,7 @@ const Node* findNodeForOp(
       return node;
     }
   }
-  JIT_ASSERT(false);
+  AT_ASSERT(false);
 }
 
 // Handle a few special cases where we need to propagate constants
@@ -205,7 +205,7 @@ void checkAliasAnnotation(
       if (inputValue) {
         push(stack, *inputValue);
       } else {
-        JIT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
+        AT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
         push(stack, IValue());
       }
     }

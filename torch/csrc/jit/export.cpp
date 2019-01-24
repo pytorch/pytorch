@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/onnx/onnx.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/utils/functional.h>
@@ -69,7 +69,7 @@ void validateBlock(
           onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
         WithInsertPoint guard(node);
         auto* new_node = b->owningGraph()->insertNode(b->owningGraph()->create(
-            Symbol(::torch::jit::onnx::ATen),
+            Symbol(::c10::onnx::ATen),
             node->inputs(),
             node->outputs().size()));
         for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -216,7 +216,7 @@ void EncoderBase::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
     const std::vector<at::Tensor>& initializers) {
-  JIT_ASSERT(graph_proto != nullptr);
+  AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
@@ -259,10 +259,10 @@ void EncoderBase::EncodeBlock(
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (is_raw_export) {
-      JIT_ASSERT(!node->kind().is_onnx());
+      AT_ASSERT(!node->kind().is_onnx());
       p_n->set_domain(node->kind().domainString());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      JIT_ASSERT(node->kind().is_onnx());
+      AT_ASSERT(node->kind().is_onnx());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     for (auto attr_name : node->attributeNames()) {
@@ -277,8 +277,8 @@ void EncoderBase::EncodeBlock(
         EncodeBlock(graph, block, initializers);
       }
     }
-    if (node->kind() == torch::jit::onnx::Loop) {
-      JIT_ASSERT(node->blocks().size() == 1);
+    if (node->kind() == ::c10::onnx::Loop) {
+      AT_ASSERT(node->blocks().size() == 1);
 
       auto body = p_n->add_attribute();
       body->set_name("body");
@@ -286,8 +286,8 @@ void EncoderBase::EncodeBlock(
       auto g = body->mutable_g();
       EncodeBlock(g, node->blocks()[0]);
     }
-    if (node->kind() == torch::jit::onnx::If) {
-      JIT_ASSERT(node->blocks().size() == 2);
+    if (node->kind() == ::c10::onnx::If) {
+      AT_ASSERT(node->blocks().size() == 2);
 
       auto true_branch = p_n->add_attribute();
       true_branch->set_name("then_branch");
@@ -303,7 +303,7 @@ void EncoderBase::EncodeBlock(
     }
   }
   auto num_initializers = initializers.size();
-  JIT_ASSERT(block->inputs().size() >= num_initializers);
+  AT_ASSERT(block->inputs().size() >= num_initializers);
   size_t inputs_count = block->inputs().size() - num_initializers;
   for (auto& tensor : initializers) {
     // TODO: stop using positions to determine which initializers
@@ -320,7 +320,7 @@ void EncoderBase::AddAttribute(
     const jit::Node* node,
     const jit::Symbol name) {
   auto attr = node_proto->add_attribute();
-  JIT_ASSERT(name.is_attr());
+  AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   switch (node->kindOf(name)) {
     case AttributeKind::f:
@@ -439,12 +439,12 @@ void GraphEncoder::EncodeTensor(
   if (defer_weight_export_ && external_ref) {
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
-    JIT_ASSERT(external_ref.value() == tensor_proto->name());
-    JIT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    AT_ASSERT(external_ref.value() == tensor_proto->name());
+    AT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
-    JIT_ASSERT(t.is_contiguous());
+    AT_ASSERT(t.is_contiguous());
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()),
         t.type().elementSizeInBytes() * t.numel()));

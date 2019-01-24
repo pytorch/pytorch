@@ -54,7 +54,7 @@ void specializeUndef(Graph& g) {
             // where we do not know if a value is defined since at the top level
             // a gradient graph is composed of Linear nodes and AutogradAdds
             // and LinearNodes only appear in these graphs
-            JIT_ASSERT(state[input] != State::Unknown);
+            AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
           for (auto it = body->nodes().begin(); it != body->nodes().end();) {

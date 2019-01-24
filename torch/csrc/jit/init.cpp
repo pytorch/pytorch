@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/batched/BatchTensor.h>
 #include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -43,6 +42,8 @@
 
 #include <caffe2/serialize/inline_container.h>
 
+#include <ATen/core/function_schema.h>
+
 #include <pybind11/functional.h>
 
 #include <memory>
@@ -55,6 +56,8 @@
 namespace torch {
 namespace jit {
 
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 
@@ -145,7 +148,7 @@ void initJITBindings(PyObject* module) {
                 with_grad,
                 evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
             auto graph_inputs = graph->inputs();
-            JIT_ASSERT(spec.size() == graph_inputs.size());
+            AT_ASSERT(spec.size() == graph_inputs.size());
             for (size_t i = 0; i < graph_inputs.size(); ++i) {
               graph_inputs[i]->setType(spec.at(i));
             }

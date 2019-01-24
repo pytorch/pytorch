@@ -101,14 +101,14 @@ struct PDist {
 
     scalar_t * const res_start = result.data<scalar_t>();
     int64_t combs = result.numel(); // n * (n - 1) / 2
-    const Vec pvec(p);
 
     // We conceptually iterate over tuples of (i, j, k) where i is the first
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t k, int64_t end) {
-      float n2 = n - .5;
+    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=](int64_t k, int64_t end) {
+      const Vec pvec(p);
+      double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
@@ -177,7 +177,6 @@ struct PDist {
     const int64_t n = self.size(0);
     const int64_t m = self.size(1);
     const int64_t gs = grad.stride(0);
-    const Vec pvec(p);
 
     const scalar_t * const grad_start = grad.data<scalar_t>();
     const scalar_t * const dist_start = dist.data<scalar_t>();
@@ -187,7 +186,9 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t l, int64_t end) {
+    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=](int64_t l, int64_t end) {
+      const Vec pvec(p);
+
       const scalar_t * self_l = self_start + l * Vec::size();
       scalar_t * res_l = res_start + l * Vec::size();
 
@@ -197,7 +198,7 @@ struct PDist {
     });
     const int64_t remainder = m % Vec::size();
     if (remainder) {
-      backward_down_column<F>(self_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, pvec, n, m, gs, remainder);
+      backward_down_column<F>(self_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, Vec(p), n, m, gs, remainder);
     }
   }
 
