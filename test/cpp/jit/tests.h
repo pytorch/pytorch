@@ -30,14 +30,14 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/assertions.h"
+#include "c10/util/Exception.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/interned_strings.h"
+#include "ATen/core/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -61,7 +61,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ivalue.h"
+#include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 
@@ -955,7 +955,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
         std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
           return node->kind() == prim::FusionGroup;
         });
-    JIT_ASSERTM(
+    AT_CHECK(
         maybe_fusion_group != nodes.end(),
         "testRegisterFusionCachesKernel: could not create FusionGroup");
     return *maybe_fusion_group;
@@ -1596,19 +1596,19 @@ std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
 
 void testNewVertex() {
   auto graph = newDynamicDAG();
-  JIT_ASSERT(graph->debugNumVertices() == 0);
+  AT_ASSERT(graph->debugNumVertices() == 0);
   auto a = graph->newVertex("a");
-  JIT_ASSERT(graph->debugNumVertices() == 1);
-  JIT_ASSERT(a->ord == 0);
-  JIT_ASSERT(a->data.size() == 1);
-  JIT_ASSERT(a->data[0] == "a");
-  JIT_ASSERT(a->in_edges().size() == 0);
-  JIT_ASSERT(a->out_edges().size() == 0);
+  AT_ASSERT(graph->debugNumVertices() == 1);
+  AT_ASSERT(a->ord == 0);
+  AT_ASSERT(a->data.size() == 1);
+  AT_ASSERT(a->data[0] == "a");
+  AT_ASSERT(a->in_edges().size() == 0);
+  AT_ASSERT(a->out_edges().size() == 0);
   auto b = graph->newVertex("b");
   auto c = graph->newVertex("c");
-  JIT_ASSERT(graph->debugNumVertices() == 3);
-  JIT_ASSERT(b->ord == 1);
-  JIT_ASSERT(c->ord == 2);
+  AT_ASSERT(graph->debugNumVertices() == 3);
+  AT_ASSERT(b->ord == 1);
+  AT_ASSERT(c->ord == 2);
 }
 
 void testAddEdgeBasic() {
@@ -1621,18 +1621,18 @@ void testAddEdgeBasic() {
   graph->addEdge(a, b);
   graph->addEdge(b, c);
   graph->addEdge(a, c);
-  JIT_ASSERT(a->in_edges().size() == 0);
-  JIT_ASSERT(a->out_edges().size() == 2);
-  JIT_ASSERT(a->out_edges().contains(b));
-  JIT_ASSERT(a->out_edges().contains(c));
-  JIT_ASSERT(b->in_edges().size() == 1);
-  JIT_ASSERT(b->out_edges().size() == 1);
-  JIT_ASSERT(b->in_edges().contains(a));
-  JIT_ASSERT(b->out_edges().contains(c));
-  JIT_ASSERT(c->in_edges().size() == 2);
-  JIT_ASSERT(c->out_edges().size() == 0);
-  JIT_ASSERT(c->in_edges().contains(a));
-  JIT_ASSERT(c->in_edges().contains(b));
+  AT_ASSERT(a->in_edges().size() == 0);
+  AT_ASSERT(a->out_edges().size() == 2);
+  AT_ASSERT(a->out_edges().contains(b));
+  AT_ASSERT(a->out_edges().contains(c));
+  AT_ASSERT(b->in_edges().size() == 1);
+  AT_ASSERT(b->out_edges().size() == 1);
+  AT_ASSERT(b->in_edges().contains(a));
+  AT_ASSERT(b->out_edges().contains(c));
+  AT_ASSERT(c->in_edges().size() == 2);
+  AT_ASSERT(c->out_edges().size() == 0);
+  AT_ASSERT(c->in_edges().contains(a));
+  AT_ASSERT(c->in_edges().contains(b));
 }
 
 void testAddEdgeCycleDetection() {
@@ -1650,7 +1650,7 @@ void testAddEdgeCycleDetection() {
   } catch (c10::Error& err) {
     erred = true;
   }
-  JIT_ASSERT(erred);
+  AT_ASSERT(erred);
 }
 
 void testAddEdgeReordersBasic() {
@@ -1658,11 +1658,11 @@ void testAddEdgeReordersBasic() {
   auto graph = newDynamicDAG();
   auto a = graph->newVertex("a");
   auto b = graph->newVertex("b");
-  JIT_ASSERT(a->ord == 0);
-  JIT_ASSERT(b->ord == 1);
+  AT_ASSERT(a->ord == 0);
+  AT_ASSERT(b->ord == 1);
   graph->addEdge(b, a);
-  JIT_ASSERT(a->ord == 1);
-  JIT_ASSERT(b->ord == 0);
+  AT_ASSERT(a->ord == 1);
+  AT_ASSERT(b->ord == 0);
 }
 
 void testAddEdgeReordersComplicated() {
@@ -1675,29 +1675,29 @@ void testAddEdgeReordersComplicated() {
   auto d = graph->newVertex("d");
   graph->addEdge(a, b);
   graph->addEdge(c, d);
-  JIT_ASSERT(a->ord == 0);
-  JIT_ASSERT(b->ord == 1);
-  JIT_ASSERT(c->ord == 2);
-  JIT_ASSERT(d->ord == 3);
+  AT_ASSERT(a->ord == 0);
+  AT_ASSERT(b->ord == 1);
+  AT_ASSERT(c->ord == 2);
+  AT_ASSERT(d->ord == 3);
   graph->addEdge(d, a);
-  JIT_ASSERT(c->ord == 0);
-  JIT_ASSERT(d->ord == 1);
-  JIT_ASSERT(a->ord == 2);
-  JIT_ASSERT(b->ord == 3);
-  JIT_ASSERT(c->in_edges().size() == 0);
-  JIT_ASSERT(c->out_edges().size() == 1);
-  JIT_ASSERT(c->out_edges().contains(d));
-  JIT_ASSERT(d->in_edges().size() == 1);
-  JIT_ASSERT(d->out_edges().size() == 1);
-  JIT_ASSERT(d->in_edges().contains(c));
-  JIT_ASSERT(d->out_edges().contains(a));
-  JIT_ASSERT(a->in_edges().size() == 1);
-  JIT_ASSERT(a->out_edges().size() == 1);
-  JIT_ASSERT(a->in_edges().contains(d));
-  JIT_ASSERT(a->out_edges().contains(b));
-  JIT_ASSERT(b->in_edges().size() == 1);
-  JIT_ASSERT(b->out_edges().size() == 0);
-  JIT_ASSERT(b->in_edges().contains(a));
+  AT_ASSERT(c->ord == 0);
+  AT_ASSERT(d->ord == 1);
+  AT_ASSERT(a->ord == 2);
+  AT_ASSERT(b->ord == 3);
+  AT_ASSERT(c->in_edges().size() == 0);
+  AT_ASSERT(c->out_edges().size() == 1);
+  AT_ASSERT(c->out_edges().contains(d));
+  AT_ASSERT(d->in_edges().size() == 1);
+  AT_ASSERT(d->out_edges().size() == 1);
+  AT_ASSERT(d->in_edges().contains(c));
+  AT_ASSERT(d->out_edges().contains(a));
+  AT_ASSERT(a->in_edges().size() == 1);
+  AT_ASSERT(a->out_edges().size() == 1);
+  AT_ASSERT(a->in_edges().contains(d));
+  AT_ASSERT(a->out_edges().contains(b));
+  AT_ASSERT(b->in_edges().size() == 1);
+  AT_ASSERT(b->out_edges().size() == 0);
+  AT_ASSERT(b->in_edges().contains(a));
 }
 
 void testRemoveEdgeBasic() {
@@ -1706,11 +1706,11 @@ void testRemoveEdgeBasic() {
   auto a = graph->newVertex("a");
   auto b = graph->newVertex("b");
   graph->addEdge(a, b);
-  JIT_ASSERT(graph->debugNumVertices() == 2);
+  AT_ASSERT(graph->debugNumVertices() == 2);
   graph->removeEdge(a, b);
-  JIT_ASSERT(graph->debugNumVertices() == 2);
-  JIT_ASSERT(a->out_edges().size() == 0);
-  JIT_ASSERT(b->in_edges().size() == 0);
+  AT_ASSERT(graph->debugNumVertices() == 2);
+  AT_ASSERT(a->out_edges().size() == 0);
+  AT_ASSERT(b->in_edges().size() == 0);
 }
 
 void testRemoveVertexBasic() {
@@ -1721,11 +1721,11 @@ void testRemoveVertexBasic() {
   auto c = graph->newVertex("c");
   graph->addEdge(a, b);
   graph->addEdge(b, c);
-  JIT_ASSERT(graph->debugNumVertices() == 3);
+  AT_ASSERT(graph->debugNumVertices() == 3);
   graph->removeVertex(b);
-  JIT_ASSERT(graph->debugNumVertices() == 2);
-  JIT_ASSERT(a->out_edges().size() == 0);
-  JIT_ASSERT(c->in_edges().size() == 0);
+  AT_ASSERT(graph->debugNumVertices() == 2);
+  AT_ASSERT(a->out_edges().size() == 0);
+  AT_ASSERT(c->in_edges().size() == 0);
 }
 
 void testContractEdgeBasic() {
@@ -1739,18 +1739,18 @@ void testContractEdgeBasic() {
   graph->addEdge(b, c);
   graph->addEdge(c, d);
   graph->contractEdge(b, c);
-  JIT_ASSERT(graph->debugNumVertices() == 3);
-  JIT_ASSERT(a->out_edges().size() == 1);
-  JIT_ASSERT(d->in_edges().size() == 1);
-  JIT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
+  AT_ASSERT(graph->debugNumVertices() == 3);
+  AT_ASSERT(a->out_edges().size() == 1);
+  AT_ASSERT(d->in_edges().size() == 1);
+  AT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
   auto* contracted = *a->out_edges().begin();
-  JIT_ASSERT(contracted->data.size() == 2);
-  JIT_ASSERT(contracted->data[0] == "b");
-  JIT_ASSERT(contracted->data[1] == "c");
-  JIT_ASSERT(contracted->out_edges().size() == 1);
-  JIT_ASSERT(contracted->in_edges().size() == 1);
-  JIT_ASSERT(contracted->in_edges().contains(a));
-  JIT_ASSERT(contracted->out_edges().contains(d));
+  AT_ASSERT(contracted->data.size() == 2);
+  AT_ASSERT(contracted->data[0] == "b");
+  AT_ASSERT(contracted->data[1] == "c");
+  AT_ASSERT(contracted->out_edges().size() == 1);
+  AT_ASSERT(contracted->in_edges().size() == 1);
+  AT_ASSERT(contracted->in_edges().contains(a));
+  AT_ASSERT(contracted->out_edges().contains(d));
 }
 
 void testContractEdgeCycleDetection() {
@@ -1764,7 +1764,7 @@ void testContractEdgeCycleDetection() {
   graph->addEdge(a, b);
   graph->addEdge(b, c);
   graph->addEdge(a, c);
-  JIT_ASSERT(!graph->contractEdge(a, c));
+  AT_ASSERT(!graph->contractEdge(a, c));
 }
 
 void testDynamicDAG() {
@@ -1888,7 +1888,7 @@ struct TopoMoveTestFixture {
     curNode = original;
     size_t idx = 0;
     while (curNode != n->owningBlock()->return_node()) {
-      JIT_ASSERT(originalOrdering[idx] == curNode);
+      AT_ASSERT(originalOrdering[idx] == curNode);
       if (isAfter) {
         curNode = curNode->next();
       } else {
@@ -1905,9 +1905,9 @@ struct TopoMoveTestFixture {
       const std::string& insertPoint,
       bool after) {
     if (after) {
-      JIT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
+      AT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
     } else {
-      JIT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
+      AT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
     }
   }
 
@@ -1921,49 +1921,49 @@ void testTopologicalMove() {
     // Check that we are removing `this`'s deps properly when we need to split
     // `this` and deps (see code for what the hell that means)
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
     fixture.checkPostCondition("q", "s", false);
   }
   // Move after
   {
     // Simple move backward
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "a"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("c", "a"));
     fixture.checkPostCondition("c", "a", true);
   }
   {
     // simple invalid move backward
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("d", "a"));
+    AT_ASSERT(!fixture.moveAfterTopologicallyValid("d", "a"));
   }
   {
     // doesn't actually move anything
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "e"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("f", "e"));
     fixture.checkPostCondition("f", "e", true);
   }
   {
     // move backward with multiple dependencies
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("e", "c"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("e", "c"));
     fixture.checkPostCondition("e", "c", true);
   }
   {
     // Move backward with non-zero working set
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("k", "f"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("k", "f"));
     fixture.checkPostCondition("k", "f", true);
   }
   {
     // Simple move forward
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "d"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("c", "d"));
     fixture.checkPostCondition("c", "d", true);
   }
   {
     // Move forward with non-zero working set
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "l"));
+    AT_ASSERT(fixture.moveAfterTopologicallyValid("f", "l"));
     fixture.checkPostCondition("f", "l", true);
   }
 
@@ -1971,41 +1971,41 @@ void testTopologicalMove() {
   {
     // Simple move forward
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("b", "d"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("b", "d"));
     fixture.checkPostCondition("b", "d", false);
   }
   {
     // Simple move backward
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("c", "a"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("c", "a"));
     fixture.checkPostCondition("c", "a", false);
   }
   {
     // doesn't actually move anything
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("a", "b"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("a", "b"));
     fixture.checkPostCondition("a", "b", false);
   }
   {
     // move forward with deps
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("f", "m"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("f", "m"));
     fixture.checkPostCondition("f", "m", false);
   }
   {
     // move backward with deps
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("l", "f"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("l", "f"));
     fixture.checkPostCondition("l", "f", false);
   }
 
   // check that dependencies in blocks are recognized
   {
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("l", "m"));
-    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
-    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
-    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
+    AT_ASSERT(!fixture.moveAfterTopologicallyValid("l", "m"));
+    AT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
+    AT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
+    AT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
   }
 
   // Test that moveAfter(n) and moveBefore(n->next()) are not necessarily
@@ -2014,8 +2014,8 @@ void testTopologicalMove() {
   // `p`)
   {
     TopoMoveTestFixture fixture;
-    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
-    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
+    AT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
+    AT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
     fixture.checkPostCondition("o", "p", false);
   }
 }
@@ -2039,13 +2039,13 @@ void testAliasAnalysis() {
 
     auto aliasDb = AliasAnalysis(graph);
     // Can't move past a mutation of a used value
-    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
-    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
 
     // b should alias to a (since they are both inputs)
-    JIT_ASSERT(
+    AT_ASSERT(
         !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
-    JIT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
 
     graph->lint();
   }
@@ -2063,9 +2063,9 @@ void testAliasAnalysis() {
     graph->lint();
 
     auto aliasDb = AliasAnalysis(graph);
-    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         aliasesB->node(), mutatesAliasOfB->node()));
-    JIT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
   }
 }

@@ -15,6 +15,8 @@
 // I don't have to also fix namespaces.  Sorry!
 namespace c10 { namespace hip {
 
+// Note [Masquerading as CUDA]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // HIPGuardImplMasqueradingAsCUDA is like a HIPGuardImpl, but
 // it reports its DeviceType as CUDA (e.g., type() returns CUDA,
 // getDevice() reports the current HIP device as a CUDA device.)
