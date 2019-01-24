@@ -16,17 +16,21 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
-                          skipIfRocm, load_tests)
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
+                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                          load_tests)
 
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-    warnings.warn(
-        "psutil not found. Some crucial data loader tests relying on it (e.g., "
-        "TestDataLoader.test_proper_exit) will not run.")
+    err_msg = ("psutil not found. Some critical data loader tests relying on it "
+               "(e.g., TestDataLoader.test_proper_exit) will not run.")
+    if IS_PYTORCH_CI:
+        raise ImportError(err_msg)
+    else:
+        warnings.warn(err_msg)
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -584,6 +588,33 @@ class TestDataLoader(TestCase):
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
+
+    def test_random_sampler_len_with_replacement(self):
+        from torch.utils.data import RandomSampler
+        # add 5 extra samples
+        num_samples = len(self.dataset) + 5
+        sampler = RandomSampler(self.dataset,
+                                replacement=True,
+                                num_samples=num_samples)
+        # test len method
+        self.assertEqual(num_samples, len(sampler))
+
+        # test with iteration
+        count_num_samples = sum(1 for _ in sampler)
+        self.assertEqual(num_samples, count_num_samples)
+
+        # test with dataloader, batch_size = 1
+        batch_size = 1
+        count_num_samples_in_data_loader = len(DataLoader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(num_samples, count_num_samples_in_data_loader)
+
+        # test with dataloader, batch_size = 6
+        batch_size = 6
+        count_num_samples_in_data_loader = len(DataLoader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
+                         count_num_samples_in_data_loader)
 
     def test_duplicating_data_with_drop_last(self):
 

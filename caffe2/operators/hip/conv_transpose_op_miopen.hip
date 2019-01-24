@@ -180,19 +180,19 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
   int W_out = Y->ndim() > 3 ? Y->dim32(3) : 1;
   int D_out = Y->ndim() > 4 ? Y->dim32(4) : 1;
 
-  bool input_changed = (X.dims() != mio_input_dims_);
-  bool weight_changed = (Weight.dims() != mio_weight_dims_);
+  bool input_changed = (X.sizes() != mio_input_dims_);
+  bool weight_changed = (Weight.sizes() != mio_weight_dims_);
 
   if (input_changed || weight_changed) {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
-      mio_input_dims_ = X.dims().vec();
+      mio_input_dims_ = X.sizes().vec();
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
     }
 
     if (weight_changed) {
-      mio_weight_dims_ = Weight.dims().vec();
+      mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
           miopenTranspose,
@@ -324,19 +324,19 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
   D_out = dY.ndim() > 4 ? dY.dim32(4) : 1;
 
   bool doBwdDataComputation = (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
-  bool input_changed = (X.dims() != mio_input_dims_);
-  bool weight_changed = (Weight.dims() != mio_weight_dims_);
+  bool input_changed = (X.sizes() != mio_input_dims_);
+  bool weight_changed = (Weight.sizes() != mio_weight_dims_);
 
   if (input_changed || weight_changed) {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
-      mio_input_dims_ = X.dims().vec();
+      mio_input_dims_ = X.sizes().vec();
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
     }
 
     if (weight_changed) {
-      mio_weight_dims_ = Weight.dims().vec();
+      mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
           miopenTranspose,

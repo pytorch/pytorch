@@ -173,10 +173,10 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& A = Input(2); // argmaxes
   auto& dY = Input(3); // Gradient of net w.r.t. output of "forward" op
   // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-  // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->template mutable_data<float>(), &context_);

@@ -1,6 +1,6 @@
 # IMPORTANT: To update Docker image version, please search and update ":{previous_version}"
 # in this file to the new version number, and **ALSO** update the version number below:
-# PyTorchDockerVersion:278
+# PyTorchDockerVersion:282
 # Caffe2DockerVersion:238
 
 docker_config_defaults: &docker_config_defaults
@@ -74,6 +74,22 @@ setup_ci_environment: &setup_ci_environment
     export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
     export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
+
+macos_brew_update: &macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    pwd
+    ls -lah
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils --without-parallel
+    brew link parallel --overwrite
+    brew install expect
 
 
 ##############################################################################
@@ -155,23 +171,13 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        # TODO: merge this into Caffe2 build.sh
         cat >/home/circleci/project/ci_build_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
+        export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
 
         # Reinitialize submodules
         git submodule sync && git submodule update -q --init --recursive
-
-        mkdir -p build
-
-        # Configure additional cmake arguments
-        cmake_args=()
-        cmake_args+=("$CMAKE_ARGS")
-
-        if [[ $BUILD_ENVIRONMENT == *aten* ]]; then
-          cmake_args+=("-DBUILD_ATEN=ON")
-        fi
 
         # conda must be added to the path for Anaconda builds (this location must be
         # the same as that in install_anaconda.sh used to build the docker image)
@@ -180,17 +186,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           sudo chown -R jenkins:jenkins '/opt/conda'
         fi
 
-        # set the env var for onnx build and test
-        if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-          export INTEGRATED=1
-        fi
-
         # Build
-        if test -x ".jenkins/caffe2/build.sh"; then
-          ./.jenkins/caffe2/build.sh ${cmake_args[@]}
-        else
-          ./.jenkins/build.sh ${cmake_args[@]}
-        fi
+        ./.jenkins/caffe2/build.sh
 
         # Show sccache stats if it is running
         if pgrep sccache > /dev/null; then
@@ -210,7 +207,11 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+          else
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          fi
           docker commit "$id" ${COMMIT_DOCKER_IMAGE}
           docker push ${COMMIT_DOCKER_IMAGE}
         fi
@@ -231,18 +232,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # =================== The following code will be executed inside Docker container ===================
         set -ex
 
+        export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
         # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
         sudo ln /dev/null /dev/raw1394
-
-        # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
-        # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
-        if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
-          sudo pip -q uninstall -y hypothesis
-          # "pip install hypothesis==3.44.6" from official server is unreliable on CircleCI, so we host a copy on S3 instead
-          sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-          sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-          sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-        fi
 
         # conda must be added to the path for Anaconda builds (this location must be
         # the same as that in install_anaconda.sh used to build the docker image)
@@ -250,23 +243,13 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           export PATH=/opt/conda/bin:$PATH
         fi
 
-        # set the env var for onnx build and test
-        if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-          export INTEGRATED=1
-        fi
-
         # Upgrade SSL module to avoid old SSL warnings
         pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
 
         pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-        pip -q install --user future
 
         # Build
-        if test -x ".jenkins/caffe2/test.sh"; then
-          ./.jenkins/caffe2/test.sh
-        else
-          ./.jenkins/test.sh
-        fi
+        ./.jenkins/caffe2/test.sh
 
         # Remove benign core dumps.
         # These are tests for signal handling (including SIGABRT).
@@ -276,7 +259,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         EOL
         chmod +x /home/circleci/project/ci_test_script.sh
 
-        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+        if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+        else
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+        fi
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
@@ -300,6 +287,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   steps:
     - checkout
     - run:
+        <<: *macos_brew_update
+    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
@@ -307,14 +296,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           export IN_CIRCLECI=1
 
-          brew update
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
           brew install cmake
-          brew install expect
 
           # Reinitialize submodules
           git submodule sync && git submodule update -q --init --recursive
@@ -332,9 +314,10 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           # Install Anaconda if we need to
           if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
             rm -rf ${TMPDIR}/anaconda
-            curl -o ${TMPDIR}/anaconda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
-            /bin/bash ${TMPDIR}/anaconda.sh -b -p ${TMPDIR}/anaconda
-            rm -f ${TMPDIR}/anaconda.sh
+            curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+            chmod +x ${TMPDIR}/conda.sh
+            /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
+            rm -f ${TMPDIR}/conda.sh
             export PATH="${TMPDIR}/anaconda/bin:${PATH}"
             source ${TMPDIR}/anaconda/bin/activate
           fi
@@ -480,19 +463,14 @@ smoke_mac_build: &smoke_mac_build
     xcode: "9.0"
   steps:
     - run:
+        <<: *macos_brew_update
+    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
           set -ex
           export DATE=today
           export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew update
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
-          brew install expect
           git clone https://github.com/pytorch/builder.git
           unbuffer ./builder/smoke_test.sh | ts
 
@@ -543,7 +521,7 @@ binary_linux_build: &binary_linux_build
         export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
         export PIP_UPLOAD_FOLDER='nightly/'
         export NO_FBGEMM=1
-        export PYTORCH_FINAL_PACKAGE_DIR='/final_pkgs'
+        export PYTORCH_FINAL_PACKAGE_DIR="/final_pkgs"
         export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
         export PYTORCH_BUILD_NUMBER=1
         export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -648,10 +626,17 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
         /builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
 
         # Upload the package to the final location
-        if [[ -z "DO_NOT_UPLOAD" ]]; then
+        if [[ -z "$DO_NOT_UPLOAD" ]]; then
           if [[ "$PACKAGE_TYPE" == conda ]]; then
             retry conda install -yq anaconda-client
-            yes | anaconda login --username "$CONDA_USERNAME" --password "$CONDA_PASSWORD"
+            set +x
+            echo 'If there is no more output then logging into Anaconda failed'
+            timeout 30 \
+                anaconda login \
+                    --username '"$CONDA_USERNAME"' \
+                    --password '"$CONDA_PASSWORD"' \
+                    >/dev/null 2>&1
+            set -x
             anaconda upload "$pkg" -u pytorch --label main --no-progress
           elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
             retry pip install -q awscli
@@ -667,44 +652,169 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
       <<: *binary_run_in_docker
 
 
+##############################################################################
+# Macos binary build defaults
+# The root of everything is /Users/distiller/pytorch-ci-env/workspace
+##############################################################################
+binary_mac_install_miniconda: &binary_mac_install_miniconda
+  name: Install miniconda
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    workdir='/Users/distiller/project'
+    conda_sh="$workdir/install_miniconda.sh"
+    curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+    chmod +x "$conda_sh"
+    "$conda_sh" -b -p "$workdir/miniconda"
+    rm -f "$conda_sh"
+    export PATH="$workdir/miniconda/bin:$PATH"
+    source "$workdir/miniconda/bin/activate"
+
 binary_mac_build: &binary_mac_build
   macos:
     xcode: "9.0"
   steps:
-    - run:
-        name: Build
-        no_output_timeout: "1h"
-        command: |
-          set -ex
-          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-          # so we must unlink GNU `parallel` first, and relink it afterwards
-          brew update
-          brew unlink parallel
-          brew install moreutils --without-parallel
-          brew link parallel --overwrite
-          brew install expect
+  - run:
+      <<: *macos_brew_update
+  - run:
+      <<: *binary_mac_install_miniconda
 
-          # Default parameters in one place so they're easy to change
-          export PYTORCH_REPO='pytorch'
-          export PYTORCH_BRANCH='master'
-          export TORCH_PACKAGE_NAME='torch-nightly'
-          export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
-          export PYTORCH_BUILD_NUMBER=1
-          export TORCH_CONDA_BUILD_FOLDER="pytorch-nightly"
-          #export OVERRIDE_PACKAGE_VERSION="some_version.123"
+  - run:
+      name: Checkout from Github
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        git clone https://github.com/pytorch/pytorch.git "$workdir/pytorch"
+        pushd "$workdir/pytorch"
+        if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
+          # "smoke" binary build on PRs
+          git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+          git reset --hard "$CIRCLE_SHA1"
+          git checkout -q -B "$CIRCLE_BRANCH"
+          git reset --hard "$CIRCLE_SHA1"
+        fi
+        git submodule update --init --recursive
+        popd
+        git clone https://github.com/pytorch/builder.git "$workdir/builder"
 
-          # Job parameters
-          if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
-            export BUILD_PYTHONLESS=1
-          fi
+  - run:
+      name: Build
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        export PYTORCH_REPO='pytorch'
+        export PYTORCH_BRANCH='master'
+        export TORCH_PACKAGE_NAME='torch-nightly'
+        export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
+        export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
+        export PYTORCH_BUILD_NUMBER=1
+        export TORCH_CONDA_BUILD_FOLDER="pytorch-nightly"
+        export MAC_PACKAGE_WORK_DIR="$workdir"
+        #export OVERRIDE_PACKAGE_VERSION="some_version.123"
+        if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+          export BUILD_PYTHONLESS=1
+        fi
+        mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-          git clone https://github.com/pytorch/builder.git
-          if [[ "$PACKAGE_TYPE" == conda ]]; then
-            unbuffer ./builder/conda/build_pytorch.sh | ts
-          else
-            export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-            unbuffer ./builder/wheel/build_wheel.sh | ts
-          fi
+        # For some reason `unbuffer` breaks if we change the PATH here, so we
+        # write a script with the PATH change in it and unbuffer the whole
+        # thing
+        build_script="$workdir/build_script.sh"
+        touch "$build_script"
+        chmod +x "$build_script"
+
+        # Build
+        cat >"$build_script" <<EOL
+        export PATH="$workdir/miniconda/bin:$PATH"
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          "$workdir/builder/conda/build_pytorch.sh"
+        else
+          export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
+          "$workdir/builder/wheel/build_wheel.sh"
+        fi
+        EOL
+        unbuffer "$build_script" | ts
+
+  - run:
+      name: Test
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        workdir='/Users/distiller/project'
+        export "PATH=$workdir/miniconda/bin:$PATH"
+        pkg="$workdir/final_pkgs/$(ls $workdir/final_pkgs)"
+
+        # Create a new test env TODO cut all this out into a separate test
+        # job and have an entirely different miniconda
+        source deactivate || true
+        conda create -qyn test python="$DESIRED_PYTHON"
+        source activate test
+
+        # Install the package
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          conda install -y "$pkg" --offline --no-update-dependencies
+        else
+          pip install "$pkg" --no-index --no-dependencies -v
+        fi
+
+        # Test
+        pushd "$workdir/pytorch"
+        $workdir/builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
+        popd
+
+  - persist_to_workspace:
+      root: /Users/distiller/project
+      paths: final_pkgs
+
+binary_mac_upload: &binary_mac_upload
+  macos:
+    xcode: "9.0"
+  steps:
+  - run:
+      <<: *macos_brew_update
+  - run:
+      <<: *binary_mac_install_miniconda
+  - attach_workspace:
+      at: /Users/distiller/project
+  - run:
+      name: Upload
+      no_output_timeout: "1h"
+      command: |
+        export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
+        export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+        export CONDA_USERNAME="${PYTORCH_BINARY_PJH5_CONDA_USERNAME}"
+        export CONDA_PASSWORD="${PYTORCH_BINARY_PJH5_CONDA_PASSWORD}"
+        set -ex
+        workdir='/Users/distiller/project'
+        export "PATH=$workdir/miniconda/bin:$PATH"
+
+        # We need timeout to guard against anaconda login hanging on bad
+        # username/password
+        brew install coreutils
+
+        pkg="$workdir/final_pkgs/$(ls $workdir/final_pkgs)"
+        if [[ "$PACKAGE_TYPE" == conda ]]; then
+          conda install -yq anaconda-client
+          set +x
+          echo 'If there is no more output then logging into Anaconda failed'
+          /usr/local/bin/gtimeout 30 \
+              anaconda login \
+                  --username '"$CONDA_USERNAME"' \
+                  --password '"$CONDA_PASSWORD"' \
+                  >/dev/null 2>&1
+          set -x
+          anaconda upload "$pkg" -u pytorch --label main --no-progress
+        elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
+          pip install -q awscli
+          s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+          aws s3 cp "$pkg" "$s3_dir" --acl public-read
+        else
+          pip install -q awscli
+          s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+          aws s3 cp "$pkg" "$s3_dir" --acl public-read
+        fi
 
 
 
@@ -718,65 +828,65 @@ jobs:
   pytorch_linux_trusty_py2_7_9_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_9_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py2_7_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_5_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.5-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_5_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.5-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -796,84 +906,85 @@ jobs:
   pytorch_linux_trusty_py3_6_gcc7_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc7_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_pynightly_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-pynightly-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_pynightly_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-pynightly-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:282"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:282"
       PYTHON_VERSION: "3.6"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda8_cudnn6_py3_build:
+  pytorch_linux_xenial_cuda8_cudnn7_py3_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
+      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+  pytorch_linux_xenial_cuda8_cudnn7_py3_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+  pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-multigpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
       MULTI_GPU: "1"
     resource_class: gpu.large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX2_test:
+  pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX_NO_AVX2_test:
+  pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -882,7 +993,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
       PYTHON_VERSION: "2.7"
       CUDA_VERSION: "9"
     <<: *pytorch_linux_build_defaults
@@ -890,7 +1001,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
       PYTHON_VERSION: "2.7"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -899,7 +1010,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py3_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9"
     <<: *pytorch_linux_build_defaults
@@ -907,7 +1018,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -916,7 +1027,7 @@ jobs:
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9.2"
     <<: *pytorch_linux_build_defaults
@@ -924,7 +1035,7 @@ jobs:
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9.2"
     resource_class: gpu.medium
@@ -933,7 +1044,7 @@ jobs:
   pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "10"
     <<: *pytorch_linux_build_defaults
@@ -941,7 +1052,7 @@ jobs:
   pytorch_short_perf_test_gpu:
     environment:
       JOB_BASE_NAME: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -972,7 +1083,7 @@ jobs:
   pytorch_doc_push:
     environment:
       JOB_BASE_NAME: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
     resource_class: large
     machine:
       image: default
@@ -1052,6 +1163,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Build
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-py3-build
@@ -1061,14 +1174,6 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -1102,6 +1207,8 @@ jobs:
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Test
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-py3-test
@@ -1110,14 +1217,6 @@ jobs:
           command: |
             set -e
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
@@ -1130,6 +1229,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *macos_brew_update
+      - run:
           name: Build
           environment:
             JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
@@ -1139,14 +1240,6 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
-
-            brew update
-            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
-            # so we must unlink GNU `parallel` first, and relink it afterwards
-            brew unlink parallel
-            brew install moreutils --without-parallel
-            brew link parallel --overwrite
-            brew install expect
 
             # Install CUDA 9.2
             sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
@@ -1176,23 +1269,6 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-  caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build:
-    environment:
-      JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn6-ubuntu16.04-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn6-ubuntu16.04:238"
-      CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn6-ubuntu16.04"
-    <<: *caffe2_linux_build_defaults
-
-  caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
-    environment:
-      JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn6-ubuntu16.04-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn6-ubuntu16.04:238"
-      CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn6-ubuntu16.04"
-    resource_class: gpu.medium
-    <<: *caffe2_linux_test_defaults
-
   caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build
@@ -1207,6 +1283,23 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
       CUDA_VERSION: "9"
       BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
+    resource_class: gpu.medium
+    <<: *caffe2_linux_test_defaults
+
+  caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build:
+    environment:
+      JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
+      CUDA_VERSION: "9"
+      BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
+    <<: *caffe2_linux_build_defaults
+
+  caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
+    environment:
+      JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
+      CUDA_VERSION: "9"
+      BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
@@ -1276,9 +1369,18 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
+      CUDA_VERSION: "8"
       BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
-      BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
+
+  caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
+    environment:
+      JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
+      CUDA_VERSION: "8"
+      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
+    resource_class: gpu.medium
+    <<: *caffe2_linux_test_defaults
 
   caffe2_py2_gcc4_9_ubuntu14_04_build:
     environment:
@@ -2210,8 +2312,80 @@ jobs:
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
+  binary_macos_wheel_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_2.7_cpu"
+    <<: *binary_mac_upload
 
-# Non-upload binary jobs for PRsPACKAGE_TYPEDESIRED_PYTHONDESIRED_CUDA:
+  binary_macos_wheel_3.5_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.5"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.5_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_wheel_3.6_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.6"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.6_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_wheel_3.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "wheel"
+      DESIRED_PYTHON: "3.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_wheel_3.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_2.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.5_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.5"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.5_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.6_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.6"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.6_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_conda_3.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "conda"
+      DESIRED_PYTHON: "3.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_conda_3.7_cpu"
+    <<: *binary_mac_upload
+
+  binary_macos_libtorch_2.7_cpu_upload:
+    environment:
+      PACKAGE_TYPE: "libtorch"
+      DESIRED_PYTHON: "2.7"
+      DESIRED_CUDA: "cpu"
+      JOB_BASE_NAME: "binary_macos_libtorch_2.7_cpu"
+    <<: *binary_mac_upload
+
+
+# Non-upload binary jobs for PRs:
 # Keywords: binary tests first round smoke tests binary pr test pr binary test
 
 
@@ -2947,25 +3121,25 @@ workflows:
       - pytorch_linux_xenial_py3_clang5_asan_test:
           requires:
             - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_test:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX2_test:
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX_NO_AVX2_test:
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_short_perf_test_gpu:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_doc_push:
           requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
@@ -2988,10 +3162,10 @@ workflows:
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
       # Caffe2 builds
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
+      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
           requires:
-            - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+            - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
           requires:
@@ -3013,6 +3187,9 @@ workflows:
           requires:
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
       - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
+          requires:
+            - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_clang3_8_ubuntu16_04_build
       - caffe2_py2_clang3_9_ubuntu16_04_build
       - caffe2_py2_clang7_ubuntu16_04_build
@@ -3319,3 +3496,39 @@ workflows:
           context: org-member
           requires:
             - binary_linux_conda_3.7_cu100_build
+      - binary_macos_wheel_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_2.7_cpu_build
+      - binary_macos_wheel_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.5_cpu_build
+      - binary_macos_wheel_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.6_cpu_build
+      - binary_macos_wheel_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.7_cpu_build
+      - binary_macos_conda_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_2.7_cpu_build
+      - binary_macos_conda_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.5_cpu_build
+      - binary_macos_conda_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.6_cpu_build
+      - binary_macos_conda_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.7_cpu_build
+      - binary_macos_libtorch_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_libtorch_2.7_cpu_build
