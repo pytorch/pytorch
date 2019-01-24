@@ -35,7 +35,7 @@ else:
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
 
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
-RERUN_CMAKE = True
+RERUN_CMAKE = False
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")

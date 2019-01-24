@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/concat.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    at::ArrayRef<C10Tensor> inputs,
-    const C10Tensor& output_,
-    const C10Tensor& split_,
+    ArrayRef<at::Tensor> inputs,
+    const at::Tensor& output_,
+    const at::Tensor& split_,
     int axis,
     int add_axis) {
-  Tensor output(output_);
-  Tensor split(split_);
+  Tensor output{C10Tensor(output_)};
+  Tensor split{C10Tensor(split_)};
   CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));
@@ -108,6 +108,6 @@ void concat_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Concat)
-    .kernel(&caffe2::concat_op_cpu_impl<float, CPUContext>)
+    .kernel<&caffe2::concat_op_cpu_impl<float, CPUContext>>()
     .dispatchKey(c10::DeviceTypeId::CPU);
 } // namespace c10
