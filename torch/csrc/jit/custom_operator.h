@@ -1,17 +1,21 @@
 #pragma once
 
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/stack.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 
 namespace torch {
 namespace jit {
 namespace detail {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
+
 /// Checks the static C++ type `T` for correctness to catch common error cases.
 template <typename T>
 void checkStaticTypes() {
