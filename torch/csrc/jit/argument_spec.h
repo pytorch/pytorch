@@ -3,7 +3,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>
@@ -77,7 +77,7 @@ struct ArgumentSpec {
     for (const auto& i : inputs) {
       addInput(i, offset, with_grad);
     }
-    JIT_ASSERT(offset == num_flat_inputs);
+    AT_ASSERT(offset == num_flat_inputs);
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {
