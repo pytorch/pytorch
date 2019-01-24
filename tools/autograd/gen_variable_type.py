@@ -138,7 +138,7 @@ Storage ${tensor_name}_storage_saved =
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
-if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alias_of(${tensor_name}.storage()));
+AT_ASSERT(${tensor_name}_storage_saved.is_alias_of(${tensor_name}.storage()));
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
