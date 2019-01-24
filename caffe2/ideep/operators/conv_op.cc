@@ -8,12 +8,17 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+      : IDEEPConvPoolOpBase(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW,
+        "Unsupported storage order.");
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
+
+    attr_ = iattr();
+    algo_ = ialgo::convolution_direct;
+    training_mode_ = OperatorBase::GetSingleArgument<int>("training_mode", 0);
+    pk_ = training_mode_ ? iprop::forward_training : iprop::forward_inference;
   }
   virtual ~IDEEPConvOp() {}
 
@@ -50,10 +55,15 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
               pad_tl(),
               pad_br(),
               dilation_,
-              group_);
-      filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-          expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
+              group_,
+              algo_,
+              pk_);
+      if (filter_in.get_descriptor() != expected_descriptor) {
+        filter_.init(expected_descriptor);
+        filter_.feed_from(filter_in);
+      } else {
+        filter_ = filter_in;
+      }
     }
 
     // NB: actually, in the case when `group_ > 1`, IDEEP will create
@@ -73,7 +83,10 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           dilation_,
           pad_tl(),
           pad_br(),
-          group_);
+          group_,
+          attr_,
+          algo_,
+          pk_);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -84,19 +97,26 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           dilation_,
           pad_tl(),
           pad_br(),
-          group_);
+          group_,
+          attr_,
+          algo_,
+          pk_);
     }
 
     return true;
   }
 
  private:
-  INPUT_TAGS(INPUT, FILTER, BIAS);
-  OUTPUT_TAGS(OUTPUT);
+  iprop pk_;
+  ialgo algo_;
+  iattr attr_;
 
   bool training_mode_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
+
+  INPUT_TAGS(INPUT, FILTER, BIAS);
+  OUTPUT_TAGS(OUTPUT);
 };
 
 class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {

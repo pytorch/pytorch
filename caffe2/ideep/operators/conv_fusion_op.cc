@@ -7,40 +7,37 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
-  enum FusionType {
-    FUSION_UNKNOWN = 0,
-    FUSION_CONV_RELU = 1,
-    FUSION_CONV_SUM = 2,
-    FUSION_CONV_SUM_RELU = 3,
-    FUSION_MAX = FUSION_CONV_SUM_RELU + 1,
-  };
-
   IDEEPConvFusionOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws),
-        fusion_type_(static_cast<FusionType>(
-            OperatorBase::GetSingleArgument<int>("fusion_type", 0))),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+      : IDEEPConvPoolOpBase(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(order_ == StorageOrder::NCHW,
+        "Unsupported storage order.");
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
     OPERATOR_NEEDS_FEATURE(group_ == 1, "Group not supported.");
+
+    fusion_type_ = static_cast<FusionType>(
+        OperatorBase::GetSingleArgument<int>("fusion_type", 0));
     OPERATOR_NEEDS_FEATURE(
         fusion_type_ > FUSION_UNKNOWN && fusion_type_ < FUSION_MAX,
         "Undefined Conv fusion type.",
         fusion_type_);
 
-    // Check kernel only if we are doing conv. The reason is that a
-    // few other ops, like PadImage, are also using this base class. We really
-    // need to clean this up.
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
-      CAFFE_ENFORCE_GE(pads_[dim], 0);
-      CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
-      CAFFE_ENFORCE(
-          kernel_[dim],
-          "If you are doing convolution, you will need to set "
-          "explicitly the kernel size.");
+    last_input_ = INPUT_S;
+    if (fusion_type_ == FUSION_CONV_RELU) {
+      attr_ = iattr::fuse_relu();
+      last_input_ = BIAS_OR_INPUT_S;
+    } else if (fusion_type_ == FUSION_CONV_SUM) {
+      attr_ = iattr::fuse_sum();
+    } else if (fusion_type_ == FUSION_CONV_SUM_RELU) {
+      attr_ = iattr::residual();
+    } else {
+      attr_ = iattr();
     }
+
+    algo_ = ialgo::convolution_direct;
+    training_mode_ = OperatorBase::GetSingleArgument<int>("training_mode", 0);
+    pk_ = training_mode_ ? iprop::forward_training : iprop::forward_inference;
   }
   virtual ~IDEEPConvFusionOp() {}
 
@@ -49,17 +46,6 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
     const auto& filter = Input(FILTER);
     auto* Y = Output(OUTPUT);
     auto Y_dims_conv = CalcOutputDims(X, filter.get_dim(0));
-    auto attr = [this]() {
-      return (fusion_type_ == FUSION_CONV_RELU)
-          ? iattr::fuse_relu()
-          : ((fusion_type_ == FUSION_CONV_SUM)
-                 ? iattr::fuse_sum()
-                 : ((fusion_type_ == FUSION_CONV_SUM_RELU) ? iattr::residual()
-                                                           : iattr()));
-    };
-    auto last_input = [this]() {
-      return (fusion_type_ == FUSION_CONV_RELU) ? BIAS_OR_INPUT_S : INPUT_S;
-    };
 
     CAFFE_ENFORCE(4 == X.ndims());
     CAFFE_ENFORCE(4 == filter.ndims());
@@ -82,15 +68,22 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
       filter_ = filter;
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
-              filter.get_dims());
+              filter.get_dims(),
+              filter.get_data_type(),
+              stride_,
+              pad_tl(),
+              pad_br(),
+              dilation_,
+              group_,
+              algo_,
+              pk_);
       if (filter_.get_descriptor() != expected_descriptor) {
-        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-            expected_descriptor);
-        ideep::reorder::compute(filter, filter_);
+        filter_.init(expected_descriptor);
+        filter_.feed_from(filter);
       }
     }
 
-    if (InputSize() > last_input()) {
+    if (InputSize() > last_input_) {
       ideep::convolution_forward::compute(
           X,
           training_mode_ ? filter : filter_,
@@ -102,7 +95,9 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr_,
+          algo_,
+          pk_);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -114,7 +109,9 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr_,
+          algo_,
+          pk_);
     }
 
     if (fusion_type_ != FUSION_CONV_RELU) {
@@ -127,6 +124,10 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
   }
 
  private:
+  iprop pk_;
+  ialgo algo_;
+  iattr attr_;
+  int last_input_;
   FusionType fusion_type_;
 
   bool training_mode_;

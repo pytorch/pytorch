@@ -95,7 +95,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           dtensor->ShareExternalPointer(
               static_cast<float*>(input.get_data_handle()));
         } else {
-          input.reorder_to(dtensor->template mutable_data<float>());
+          input.to_public(dtensor->template mutable_data<float>());
         }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
@@ -146,7 +146,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           dtensor->resize(dst_dims, itensor::data_type::f32);
         }
         if (output_inplace_[i]) {
-          dtensor->reorder_from(dst_dims, itensor::data_type::f32,
+          dtensor->feed_from(dst_dims, itensor::data_type::f32,
                                 const_cast<void*>(src.raw_data()));
         } else {
           dtensor->set_data_handle(const_cast<void *>(src.raw_data()));
