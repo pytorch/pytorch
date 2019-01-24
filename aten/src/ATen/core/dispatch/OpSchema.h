@@ -10,11 +10,22 @@
 
 namespace c10 {
 
+/**
+ * A kernel can keep around a cache to have better performance when it's
+ * called multiple times. This is used by a lot of caffe2 kernels.
+ * This cache owned by the call site and passed in to the kernel as a function
+ * argument. It must inherit from KernelState so the call site knows how to
+ * store and destruct it.
+ */
 class KernelState {
 public:
   virtual ~KernelState() = default;
 };
 
+/**
+ * This is the basic ABI for any kernel call. Each kernel is registered as a
+ * pointer to a global C function of this type.
+ */
 using KernelFunction = IValue(ArrayRef<IValue>, KernelState* state);
 
 namespace details {
