@@ -8,60 +8,79 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
-        conv_algorithm_(
-            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
+      : IDEEPConvPoolOpBase(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(
+        order_ == StorageOrder::NCHW, "Unsupported storage order.");
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
+
+    training_mode_ = OperatorBase::GetSingleArgument<int>("training_mode", 0);
+    pk_ = training_mode_ ? iprop::forward_training : iprop::forward_inference;
+
+    algo_ = ialgo::convolution_direct;
+    auto conv_algorithm = OperatorBase::GetSingleArgument<int>(
+        "conv_algorithm", CONV_ALGORITHM_AUTO);
+    if (conv_algorithm == CONV_ALGORITHM_WINOGRAD) {
+      algo_ = ialgo::convolution_winograd;
+    }
   }
-  ~IDEEPConvOp() override {}
+  virtual ~IDEEPConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
     const auto& filter = Input(FILTER);
     auto* Y = Output(OUTPUT);
-    auto Y_dims = CalcOutputDims(X, filter.get_dim(0));
+    auto grouped = filter.is_grouped() ? 1 : 0;
+    auto Y_dims = CalcOutputDims(
+        X,
+        grouped ? (filter.get_dim(0) * filter.get_dim(1)) : filter.get_dim(0));
 
     CAFFE_ENFORCE(4 == X.ndims());
-    CAFFE_ENFORCE(4 == filter.ndims());
-    CAFFE_ENFORCE(filter.get_dim(2) == kernel_h());
-    CAFFE_ENFORCE(filter.get_dim(3) == kernel_w());
+    CAFFE_ENFORCE(4 == filter.ndims() || (grouped && (group_ > 1)));
+    CAFFE_ENFORCE(filter.get_dim(2 + grouped) == kernel_h());
+    CAFFE_ENFORCE(filter.get_dim(3 + grouped) == kernel_w());
     CAFFE_ENFORCE(
-        X.get_dim(1) == filter.get_dim(1) * group_,
+        X.get_dim(1) == filter.get_dim(1 + grouped) * group_,
         "Convolution op: input channels does not match: # of input channels ",
         X.get_dim(1),
         " is not equal to kernel channels * group:",
-        filter.get_dim(1),
+        filter.get_dim(1 + grouped),
         "*",
         group_);
-
-    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
-    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
-      aalgorithm = ideep::algorithm::convolution_winograd;
-    }
 
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
-      cached_weights_descriptor_ = filter.get_descriptor();
-      auto filter_in = filter;
+      op_key_.clear();
+      cached_weights_descriptor_ = filter.dup_descriptor();
+      auto filter_in = filter.as_weights();
       filter_in.make_group(group_);
+
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
               filter_in.get_dims(),
-              filter_in.get_data_type(),
+              idtype::f32,
               stride_,
               pad_tl(),
               pad_br(),
               dilation_,
               group_,
-              aalgorithm);
-      filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-          expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
+              algo_,
+              pk_,
+              idtype::f32,
+              X.get_dims());
+      if (filter_in.get_descriptor() != expected_descriptor) {
+        filter_.init(expected_descriptor);
+        filter_.feed_from(filter_in);
+      } else {
+        filter_ = filter_in;
+      }
+    }
+
+    if (cached_X_descriptor_ != X.get_descriptor()) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
     }
 
     // NB: actually, in the case when `group_ > 1`, IDEEP will create
@@ -70,8 +89,10 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
     // go now. If we encounter performance surprise when convoluting with group
     // > 1, this is the first place to check and we need to do the same cache
     // trick as above
+
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
+          op_key_,
           X,
           training_mode_ ? filter : filter_,
           Input(BIAS),
@@ -82,10 +103,15 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          ideep::descriptor_group::attr_t(),
-          aalgorithm);
+          dummy_scale_,
+          dummy_scale_,
+          dummy_scale_,
+          attr_,
+          algo_,
+          pk_);
     } else {
       ideep::convolution_forward::compute(
+          op_key_,
           X,
           training_mode_ ? filter : filter_,
           Y_dims,
@@ -95,21 +121,29 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          ideep::descriptor_group::attr_t(),
-          aalgorithm);
+          dummy_scale_,
+          dummy_scale_,
+          dummy_scale_,
+          attr_,
+          algo_,
+          pk_);
     }
 
     return true;
   }
 
  private:
+  iprop pk_;
+  ialgo algo_;
+  iattr attr_;
+  ikey op_key_;
+  iscale dummy_scale_;
+  bool training_mode_;
+  itensor filter_;
+  itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
+
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
-
-  bool training_mode_;
-  int conv_algorithm_;
-  ideep::tensor filter_;
-  ideep::tensor::descriptor cached_weights_descriptor_;
 };
 
 class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
@@ -131,7 +165,7 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
-  ~IDEEPConvGradientOp() override {}
+  virtual ~IDEEPConvGradientOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);

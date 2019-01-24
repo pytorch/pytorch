@@ -102,10 +102,6 @@ void removeStopGradientForInference(repr::NNModule *nn) {
 }
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
-  // Fusion types:
-  // FUSION_CONV_RELU = 1
-  // FUSION_CONV_SUM = 2
-  // FUSION_CONV_SUM_RELU = 3
   auto conv = repr::nn::get<repr::Conv>(convNode);
   auto annotation = conv->getMutableAnnotation();
   if (!annotation || !isa<Caffe2Annotation>(annotation)) {
@@ -118,19 +114,18 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   }
 
   if (op->type() == "ConvFusion") {
-    CAFFE_ENFORCE(fusion_type == 1, "Invalid nest fusion");
+    CAFFE_ENFORCE(fusion_type == FUSION_CONV_RELU, "Invalid nest fusion");
     for (auto& arg : *op->mutable_arg()) {
       if (arg.name() == "fusion_type") {
-        // Only from FUSION_CONV_SUM to FUSION_CONV_SUM_RELU
-        CAFFE_ENFORCE(arg.i() == 2, "Invalid nest fusion");
-        arg.set_i(3);
+        CAFFE_ENFORCE(arg.i() == FUSION_CONV_SUM, "Invalid nest fusion");
+        arg.set_i(FUSION_CONV_SUM_RELU);
         return;
       }
     }
     return;
   }
 
-  CAFFE_ENFORCE(fusion_type < 3, "Invalid fusion type");
+  CAFFE_ENFORCE(fusion_type < FUSION_CONV_SUM_RELU, "Invalid fusion type");
   op->set_type("ConvFusion");
   auto* arg = op->add_arg();
   arg->set_name("fusion_type");
@@ -216,7 +211,7 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       continue;                                                          \
     }                                                                    \
     name##Tensor.resize(name->get_dims(), name->get_data_type());        \
-    name##Tensor.reorder_from(*name);                                    \
+    name##Tensor.feed_from(*name);                                       \
     CAFFE_ENFORCE(                                                       \
       name##Tensor.is_public_format(), #name " not with public format"); \
     name##Data = static_cast<float*>(name##Tensor.get_data_handle());    \
@@ -255,8 +250,8 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       }
     }
 
-    filter->reorder_from(filterTensor);
-    biasConv->reorder_from(biasConvTensor);
+    filter->feed_from(filterTensor);
+    biasConv->feed_from(biasConvTensor);
     nn->dataFlow.replaceNode(convOutput, bnOrAffChOutput);
 
     nn->dataFlow.deleteNode(bnOrAffChNode);
@@ -364,8 +359,7 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto sumOutput = repr::nn::getOutputs(sumNode).front();
     nn->dataFlow.replaceNode(sumOutput, newOutput);
 
-    // 2 means FUSION_CONV_SUM
-    resetConvForFusion(convNode, 2);
+    resetConvForFusion(convNode, FUSION_CONV_SUM);
     nn->dataFlow.createEdge(sumInputX, convNode);
     nn->dataFlow.createEdge(convNode, newOutput);
 
@@ -403,8 +397,8 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
 
     bool enforce_inplace = false;
     for (const auto& arg : op.arg()) {
-      // Only check FUSION_SUM & FUSION_SUM_RELU
-      if (arg.name() == "fusion_type" && (arg.i() == 2 || arg.i() == 3)) {
+      if (arg.name() == "fusion_type"
+          && (arg.i() == FUSION_CONV_SUM || arg.i() == FUSION_CONV_SUM_RELU)) {
         enforce_inplace = true;
         break;
       }
