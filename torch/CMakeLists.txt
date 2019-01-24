@@ -728,16 +728,18 @@ if (BUILD_PYTHON)
     LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
     ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+  # We need to make a target so that we run this custom command by
+  # default
+  add_custom_target(torch_python_stubs ALL DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
   add_custom_command(
     OUTPUT
-    "${TORCH_SRC_DIR}/torch/__init__.pyi"
+    "${TORCH_SRC_DIR}/__init__.pyi"
     COMMAND
     ${PYCMD} -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/torch/__init__.pyi.in"
-    torch_python
+    "${TORCH_SRC_DIR}/__init__.pyi.in"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
     )

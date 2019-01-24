@@ -10,6 +10,8 @@ import re
 import argparse
 
 from ..autograd.utils import CodeTemplate, write
+from ..autograd.gen_python_functions import get_py_torch_functions, get_py_variable_methods
+from ..autograd.gen_autograd import load_aten_declarations
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -27,9 +29,9 @@ Here's our general strategy:
   generate, including pure Python definitions directly in __init__.py
   (the latter case should be pretty rare).
 
-- We iterate through all members of torch and torch.Tensor.  If the
-  function comes from a C extension, generate the type hint based on the
-  type information recorded in Declarations.yaml (generate_type_hints)
+- We go through automatically bound functions based on the
+  type information recorded in Declarations.yaml and
+  generate type hints for them (generate_type_hints)
 
 There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
@@ -43,7 +45,7 @@ needed_modules = set()
 FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: bool=False"
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
-INDICES = "indices: Union[None, builtins.int, slice, Tensor, List, Tuple]"
+INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
 blacklist = [
     '__init_subclass__',
@@ -54,7 +56,39 @@ blacklist = [
     'device',
     'grad',
     'requires_grad',
-    'range'
+    'range',
+    # defined in functional
+    'einsum',
+    # reduction argument; these bindings don't make sense
+    'ctc_loss',
+    'cosine_embedding_loss',
+    'hinge_embedding_loss',
+    'kl_div',
+    'margin_ranking_loss',
+    'triplet_margin_loss',
+    # Somehow, these are defined in both _C and in functional. Ick!
+    'broadcast_tensors',
+    'meshgrid',
+    'cartesian_prod',
+    'norm',
+    'chain_matmul',
+    'stft',
+    'tensordot',
+    'norm',
+    'split',
+    # These are handled specially by python_arg_parser.cpp
+    'add',
+    'add_',
+    'add_out',
+    'sub',
+    'sub_',
+    'sub_out',
+    'mul',
+    'mul_',
+    'mul_out',
+    'div',
+    'div_',
+    'div_out',
 ]
 
 
@@ -76,23 +110,25 @@ def type_to_python(typename, size=None):
         'Device': 'Union[_device, str, None]',
         'Generator*': 'Generator',
         'IntegerTensor': 'Tensor',
-        'Scalar': 'Union[builtins.float, builtins.int]',
+        'Scalar': 'Number',
         'ScalarType': '_dtype',
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
         'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
-        'IntList': 'Union[Tuple[builtins.int, ...], List[builtins.int], Size]',
-        'IntList[]': 'Union[builtins.int, Tuple[builtins.int, ...], List[builtins.int], Size]',
+        'IntList': '_size',
+        'IntList[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
         'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
         'bool': 'bool',
-        'double': 'builtins.float',
-        'int64_t': 'builtins.int',
-        'accreal': 'Union[builtins.float, builtins.int]',
-        'real': 'Union[builtins.float, builtins.int]',
-        'void*': 'builtins.int',    # data_ptr
+        'double': '_float',
+        'int64_t': '_int',
+        'accreal': 'Number',
+        'real': 'Number',
+        'void*': '_int',    # data_ptr
+        'void': 'None',
+        'std::string': 'str',
     }[typename]
 
     return typename
@@ -114,9 +150,11 @@ def arg_to_type_hint(arg):
         default = arg['default']
         if default == 'nullptr':
             default = None
+        elif default == 'c10::nullopt':
+            default = None
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
-                default = None  # hack, not really correct...
+                default = None
             elif arg['dynamic_type'] == 'IntList':
                 default = '(' + default[1:-1] + ')'
             else:
@@ -127,22 +165,25 @@ def arg_to_type_hint(arg):
     return name + ': ' + typename + default
 
 
+binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
+              'matmul',
+              'radd', 'rmul',                      # reverse arithmetic
+              'and', 'or', 'xor',                  # logic
+              'iadd', 'iand', 'idiv', 'ilshift', 'imul',
+              'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
+              )
+comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
+unary_ops = ('neg', 'abs', 'invert')
+to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
+
+
 def sig_for_ops(opname):
-    """sig_for_ops(opname : str) -> str
+    """sig_for_ops(opname : str) -> List[str]
 
-    returns signatures for operator special functions (__add__ etc.)"""
+    Returns signatures for operator special functions (__add__ etc.)"""
 
-    binary_ops = {'add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
-                  'matmul',
-                  'radd', 'rmul',                      # reverse arithmetic
-                  'and', 'or', 'xor',                  # logic
-                  'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-                  'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
-                  }
-    comparison_ops = {'eq', 'ne', 'ge', 'gt', 'lt', 'le'}
-    unary_ops = {'neg', 'abs', 'invert'}
-    skip = {'getitem', 'setitem', 'delitem', 'new'}
-    to_py_type_ops = {'bool', 'float', 'long', 'index', 'int', 'nonzero'}
+    # we have to do this by hand, because they are hand-bound in Python
 
     assert opname.endswith('__') and opname.startswith('__'), "Unexpected op {}".format(opname)
 
@@ -154,8 +195,6 @@ def sig_for_ops(opname):
         return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore'.format(opname)]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
-    elif name in skip:
-        return []  # expected to be done manually
     elif name in to_py_type_ops:
         if name in {'bool', 'float'}:
             tname = name
@@ -183,6 +222,8 @@ def generate_type_hints(fname, decls, is_tensor=False):
     This function currently encodes quite a bit about the semantics of
     the translation C++ -> Python.
     """
+    if fname in blacklist:
+        return []
 
     type_hints = []
     dnames = ([d['name'] for d in decls])
@@ -192,14 +233,6 @@ def generate_type_hints(fname, decls, is_tensor=False):
         decls = [d for d in decls if d['name'] != fname + '_out']
 
     for decl in decls:
-        skip = ((is_tensor and 'Tensor' not in decl['method_of']) or
-                'Type' in [a['dynamic_type'] for a in decl['arguments']])
-        if skip:
-            # there currently is one variant of tensor() showing up with a Type argument,
-            # Python only uses the TensorOptions one. This check could be taken out once
-            # the tensor function is removed
-            continue
-
         render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
         python_args = []
 
@@ -259,7 +292,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
             # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
             typelist = decl['arguments'][vararg_pos]['dynamic_type']
             if typelist == 'IntList':
-                vararg_type = 'builtins.int'
+                vararg_type = '_int'
             else:
                 vararg_type = 'Tensor'
             # replace first argument and eliminate '*' if present
@@ -272,14 +305,10 @@ def generate_type_hints(fname, decls, is_tensor=False):
     return type_hints
 
 
-def gen_pyi(declarations, out):
+def gen_pyi(declarations_path, out):
     """gen_pyi()
 
-    This function generates a pyi file for torch. To do this, it imports torch and loops
-    over the members of torch and torch.Tensor.
-
-    To import torch it removes things from the import path and adds the freshly build PyTorch.
-    As such it is intended to be used from a subprocess.
+    This function generates a pyi file for torch.
     """
 
     # Some of this logic overlaps with generate_python_signature in
@@ -289,73 +318,73 @@ def gen_pyi(declarations, out):
     # checking.  If you are update this, consider if your change
     # also needs to update the other file.
 
-    import torch
-
     yaml_loader = getattr(yaml, 'CLoader', yaml.loader)
 
     # Load information from YAML
-    fns = collections.defaultdict(list)
-    for d in yaml.load(open(declarations),
-                       Loader=yaml_loader):
-
-        name = d['name']
-        if name.endswith('_out'):
-            name = name[:-4]
-        if not name.startswith('_'):
-            fns[name].append(d)
+    declarations = load_aten_declarations(declarations_path)
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     unsorted_function_hints = collections.defaultdict(list)
-
     unsorted_function_hints.update({
-        'tensor': ["def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         'set_flush_denormal': ['def set_flush_denormal(mode: bool) -> bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
-        'clamp': ["def clamp(self, min: builtins.float=-inf, max: builtins.float=inf,"
+        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
-        'get_num_threads': ['def get_num_threads() -> builtins.int: ...'],
-        'set_num_threads': ['def set_num_threads(num: builtins.int) -> None: ...'],
-        'range': ['def range(start: Union[builtins.float, builtins.int], end: Union[builtins.float, builtins.int],'
-                  ' step: Union[builtins.float, builtins.int]=1, *, out: Optional[Tensor]=None, dtype: _dtype=None,'
-                  ' layout: layout=strided, device: Optional[_device]=None, requires_grad:bool=False) -> Tensor: ...'],
-        'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: List,'
-                              ' size: Union[Tuple[builtins.int, ...],'
-                              ' List[builtins.int], Size], *, dtype: _dtype=None, layout: layout=strided,'
+        'get_num_threads': ['def get_num_threads() -> _int: ...'],
+        'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
+        # These functions are explicitly disabled by
+        # SKIP_PYTHON_BINDINGS because they are hand bound.
+        # Correspondingly, we must hand-write their signatures.
+        'tensor': ["def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
+        'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
+                              ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:bool=False) -> Tensor: ...'],
+        'range': ['def range(start: Number, end: Number,'
+                  ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                  .format(FACTORY_PARAMS)],
+        'arange': ['def arange(start: Number, end: Number, step: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                   .format(FACTORY_PARAMS),
+                   'def arange(start: Number, end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                   .format(FACTORY_PARAMS),
+                   'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
+        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+                    .format(FACTORY_PARAMS),
+                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    .format(FACTORY_PARAMS)],
     })
+    for binop in ['add', 'sub', 'mul', 'div']:
+        unsorted_function_hints[binop].append(
+            'def {}(input: Union[Tensor, Number],'
+            ' other: Union[Tensor, Number],'
+            ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
+        unsorted_function_hints[binop].append(
+            'def {}(input: Union[Tensor, Number],'
+            ' value: Number,'
+            ' other: Union[Tensor, Number],'
+            ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    for fname in dir(torch):
-        fn = getattr(torch, fname)
-        docstr = inspect.getdoc(fn)
-        if docstr and fname not in blacklist:
-            if isinstance(fn, types.BuiltinFunctionType):
-                if fname in fns:
-                    unsorted_function_hints[fname] += generate_type_hints(fname, fns[fname])
-                elif (fname not in unsorted_function_hints and
-                      ("\n" in docstr or not fn.__qualname__.startswith("PyCapsule"))):
-                    # if we have annotated them manually, assume that we can skip them here without worrying too much
-                    # the second part (filter single line line docstring of PyCapsule functions)
-                    # is intended to filter out pollution (e.g. merge_type_from_type_comment)
-                    # one might ask whether they should either get a docstring or be prefixed with an underscore,
-                    # though
-                    raise Exception("unhandled function ", fname)
+    function_declarations = get_py_torch_functions(declarations)
+    for name in sorted(function_declarations.keys()):
+        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name])
+
+    # Generate type signatures for deprecated functions
 
     # TODO: Maybe we shouldn't generate type hints for deprecated
-    # functions :)
+    # functions :)  However, examples like those addcdiv rely on these.
     deprecated = yaml.load(open('tools/autograd/deprecated.yaml'),
                            Loader=yaml_loader)
     for d in deprecated:
-        fname, sig = re.match(r"^([^\(]+)\(([^\)]*)", d['name']).groups()
+        name, sig = re.match(r"^([^\(]+)\(([^\)]*)", d['name']).groups()
         sig = ['*' if p.strip() == '*' else p.split() for p in sig.split(',')]
         sig = ['*' if p == '*' else (p[1] + ': ' + type_to_python(p[0])) for p in sig]
-        unsorted_function_hints[fname].append("def {}({}) -> Tensor: ...".format(fname, ', '.join(sig)))
+        unsorted_function_hints[name].append("def {}({}) -> Tensor: ...".format(name, ', '.join(sig)))
 
     function_hints = []
-    for fname, hints in sorted(unsorted_function_hints.items()):
+    for name, hints in sorted(unsorted_function_hints.items()):
         if len(hints) > 1:
             hints = ['@overload\n' + h for h in hints]
         function_hints += hints
@@ -365,8 +394,10 @@ def gen_pyi(declarations, out):
 
     unsorted_tensor_method_hints = collections.defaultdict(list)
     unsorted_tensor_method_hints.update({
-        'size': ['def size(self) -> Size: ...'],
-        'stride': ['def stride(self) -> Tuple[builtins.int]: ...'],
+        'size': ['def size(self) -> Size: ...',
+                 'def size(self, _int) -> _int: ...'],
+        'stride': ['def stride(self) -> Tuple[_int]: ...',
+                   'def stride(self, _int) -> _int: ...'],
         'new_empty': ['def new_empty(self, size: {}, {}) -> Tensor: ...'.
                       format(type_to_python('IntList'), FACTORY_PARAMS)],
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
@@ -377,18 +408,18 @@ def gen_pyi(declarations, out):
                      format(type_to_python('IntList'), type_to_python('Scalar'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # clamp has no default values in the Declarations
-        'clamp': ["def clamp(self, min: builtins.float=-inf, max: builtins.float=inf,"
+        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
-        'clamp_': ["def clamp_(self, min: builtins.float=-inf, max: builtins.float=inf) -> Tensor: ..."],
+        'clamp_': ["def clamp_(self, min: _float=-inf, max: _float=inf) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
-        '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, builtins.float, builtins.int])"
+        '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],
         'tolist': ['def tolist(self) -> List: ...'],
         'requires_grad_': ['def requires_grad_(self, mode: bool=True) -> Tensor: ...'],
-        'element_size': ['def element_size(self) -> builtins.int: ...'],
-        'dim': ['def dim(self) -> builtins.int: ...'],
-        'ndimension': ['def ndimension(self) -> builtins.int: ...'],
-        'nelement': ['def nelement(self) -> builtins.int: ...'],
+        'element_size': ['def element_size(self) -> _int: ...'],
+        'dim': ['def dim(self) -> _int: ...'],
+        'ndimension': ['def ndimension(self) -> _int: ...'],
+        'nelement': ['def nelement(self) -> _int: ...'],
         'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
@@ -397,42 +428,51 @@ def gen_pyi(declarations, out):
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
-        'get_device': ['def get_device(self) -> builtins.int: ...'],
+        'get_device': ['def get_device(self) -> _int: ...'],
         'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
         'is_cuda': ['def is_cuda(self) -> bool: ...'],
         'is_leaf': ['def is_leaf(self) -> bool: ...'],
-        'storage_offset': ['def storage_offset(self) -> builtins.int: ...'],
-        'coalesce': ['def coalesce(self) -> Tensor: ...'],
-        'to': ['def to(self, device: Union[_device, str, None], non_blocking: bool=False,'
-               ' copy: bool=False) -> Tensor: ...']
+        'storage_offset': ['def storage_offset(self) -> _int: ...'],
+        'to': ['def to(self, dtype: _dtype, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
+               'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
+               'non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
+               'def to(self, other: Tensor, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
+               ],
+        'item': ["def item(self) -> Number: ..."],
     })
+    for binop in ['add', 'sub', 'mul', 'div']:
+        for inplace in [True, False]:
+            out_suffix = ', *, out: Optional[Tensor]=None'
+            if inplace:
+                name += '_'
+                out_suffix = ''
+            unsorted_tensor_method_hints[name].append(
+                'def {}(self, other: Union[Tensor, Number]{})'
+                ' -> Tensor: ...'.format(name, out_suffix))
+            unsorted_tensor_method_hints[name].append(
+                'def {}(self, value: Number,'
+                ' other: Union[Tensor, Number]{})'
+                ' -> Tensor: ...'.format(name, out_suffix))
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float', 'half', 'int', 'long', 'short']
-    for fname in simple_conversions:
-        unsorted_tensor_method_hints[fname].append('def {}(self) -> Tensor: ...'.format(fname))
+    for name in simple_conversions:
+        unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
-    for fname in dir(torch.Tensor):
-        fn = getattr(torch.Tensor, fname)
-        docstr = inspect.getdoc(fn)
-        if ((docstr and not fname.startswith('_')) or fname.startswith('__')) and fname not in blacklist:
-            if getattr(fn, '__qualname__', '').startswith('_TensorBase.'):  # better check?
-                if fname in fns:
-                    unsorted_tensor_method_hints[fname] += generate_type_hints(fname, fns[fname], is_tensor=True)
-                elif fname.startswith('__') and fname.endswith('__'):
-                    sig = sig_for_ops(fname)
-                    if sig:
-                        unsorted_tensor_method_hints[fname] += sig
-                elif fname not in unsorted_tensor_method_hints:  # it's presumably OK if we already have a type hint
-                    raise Exception("Don't know what to do with Tensor.", fname)
-            # Python-defined methods are skipped; you're expected to
-            # put them directly in __init__.pyi.in
+    tensor_method_declarations = get_py_variable_methods(declarations)
+    for name in sorted(tensor_method_declarations.keys()):
+        unsorted_tensor_method_hints[name] += \
+            generate_type_hints(name, tensor_method_declarations[name], is_tensor=True)
+
+    for op in all_ops:
+        name = '__{}__'.format(op)
+        unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
-    for fname, hints in sorted(unsorted_tensor_method_hints.items()):
-        hints = [re.sub(r"\bTensor\b", r"'Tensor'", h) for h in hints]
+    for name, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
-            tensor_method_hints += ['@overload\n' + h for h in hints]
-        else:
-            tensor_method_hints.append(hints[0])  # it is only one
+            hints = ['@overload\n' + h for h in hints]
+        tensor_method_hints += hints
+
+    # TODO: Missing type hints for nn
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -450,8 +490,13 @@ def gen_pyi(declarations, out):
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    # TODO: don't explicitly list dtypes here; get it from canonical
+    # source
     dtype_class_hints = ['{}: dtype = ...'.format(n)
-                         for n in dir(torch) if isinstance(getattr(torch, n), torch.dtype)]
+                         for n in
+                         ['float32', 'float', 'float64', 'double', 'float16', 'half',
+                          'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
+                          'complex32', 'complex64', 'complex128']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -477,7 +522,7 @@ def main():
                         default='.',
                         help='path to output directory')
     args = parser.parse_args()
-    gen_pyi(args.declarations, args.out)
+    gen_pyi(args.declarations_path, args.out)
 
 
 if __name__ == '__main__':

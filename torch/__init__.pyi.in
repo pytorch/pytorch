@@ -29,8 +29,13 @@ class layout: ...
 
 strided : layout = ...
 
+# See https://github.com/python/mypy/issues/4146 for why these workarounds
+# is necessary
+_int = builtins.int
+_float = builtins.float
+
 class device:
-   def __init__(self, device: Union[builtins.int, str, None]=None) -> None: ...
+   def __init__(self, device: Union[_int, str, None]=None) -> None: ...
 
 class Generator: ...
 
@@ -42,6 +47,10 @@ class Storage: ...
 # is necessary
 _dtype = dtype
 _device = device
+_size = Union[Size, List[_int], Tuple[_int, ...]]
+
+# Meta-type for "numeric" things; matches our docs
+Number = Union[builtins.int, builtins.float]
 
 # TODO: One downside of doing it this way, is direct use of
 # torch.tensor.Tensor doesn't get type annotations.  Nobody
