@@ -15,6 +15,11 @@ ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
   return THStorage_size(self);
 }
 
+int32_t THCStorage_(epoch)(THCState *state, const THCStorage *self)
+{
+  return self->epoch();
+}
+
 int THCStorage_(elementSize)(THCState *state)
 {
   return sizeof(scalar_t);

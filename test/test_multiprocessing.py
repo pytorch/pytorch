@@ -8,6 +8,7 @@ from sys import platform
 
 import torch
 import torch.cuda
+import torch.distributions as dist
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
@@ -128,6 +129,23 @@ def mixed_type_producer(queue, event):
         event.wait()
         event.clear()
 
+def cuda_storage_epoch_producer(queue, event):
+    def sample_normal():
+        d1 = dist.Normal(torch.zeros(3, dtype=torch.float, device='cuda'), 1)
+        v1 = d1.rsample()
+        d2 = dist.Normal(v1, 2)
+        v2 = d2.rsample()
+        return [(d1, v1), (d2, v2)]
+
+    for _ in range(10):
+        # Create additional storage to push new storage get created to
+        # a old storage with different size. (#16141)
+        sample = [torch.zeros(1, dtype=torch.float, device='cuda'),
+                  torch.ones(1, dtype=torch.float, device='cuda')]
+        sample = sample_normal()
+        queue.put(sample)
+        event.wait()
+        event.clear()
 
 @contextlib.contextmanager
 def fs_sharing():
@@ -452,6 +470,22 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertFalse(p.is_alive())
 
+    # Checking storage epoch in cuda cache (#16141)
+    def _test_cuda_storage_sharing_epoch(self, ctx=mp):
+        queue = ctx.Queue()
+        event = ctx.Event()
+
+        p = ctx.Process(target=cuda_storage_epoch_producer, args=(queue, event))
+
+        p.start()
+
+        for _ in range(10):
+            sample = queue.get()
+            event.set()
+
+        time.sleep(5)
+        p.join()
+
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
     def _test_mixed_types_cuda_sharing(self, ctx=mp):
@@ -525,6 +559,12 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_mixed_types_cuda_sharing(self):
         self._test_mixed_types_cuda_sharing(mp.get_context('spawn'))
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_storage_sharing_epoch(self):
+        self._test_cuda_storage_sharing_epoch(mp.get_context('spawn'))
 
     def test_parameter_sharing(self):
         param = Parameter(torch.arange(1., 26).view(5, 5))

@@ -16,6 +16,7 @@
 #define THCudaLongStorage   THCStorage
 
 THC_API scalar_t* THCStorage_(data)(THCState *state, const THCStorage*);
+THC_API int32_t THCStorage_(epoch)(THCState *state, const THCStorage*);
 THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
 THC_API int THCStorage_(elementSize)(THCState *state);
 

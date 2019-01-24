@@ -89,6 +89,10 @@ struct C10_API Storage {
     return storage_impl_->resizable();
   }
 
+  int32_t epoch() const {
+    return storage_impl_->epoch();
+  }
+
   size_t capacity() const {
     return storage_impl_->capacity();
   }

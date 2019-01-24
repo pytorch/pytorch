@@ -85,13 +85,14 @@ def rebuild_tensor(cls, storage, metadata):
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
+                        storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes, storage_epoch,
                         requires_grad):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
     else:
-        storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes, storage_size_bytes))
+        print('Epoch: ', storage_epoch)
+        storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes, storage_epoch))
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -99,7 +100,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 storage_handle,
                 storage_size_bytes,
                 storage_offset_bytes)
-            shared_cache[(storage_handle, storage_offset_bytes, storage_size_bytes)] = StorageWeakRef(storage)
+            shared_cache[(storage_handle, storage_offset_bytes, storage_epoch)] = StorageWeakRef(storage)
         else:
             print("Hit cache", storage)
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
@@ -183,12 +184,12 @@ def reduce_tensor(tensor):
     #      basePtr may not be exactly 0xA000 since it's a different process.
     #   2. offset(0xA100) of storage1 in the CUDA allocation.
     #   3. size of storage1(0x100).
-    #   4. python id of storage1[#16141]. This is necessary since on Python side, we only
+    #   4. epoch of storage1 [#16141]. This is necessary since on Python side, we used to only
     #      check if the storage ptr has expired. It's possible that a storage ptr is still
     #      valid, but its content has been already changed. We cannot prevent sender from
     #      changing the content, and we are not able to call free_dead_references()
-    #      frequent enough to delete the old cache in time. But we can know this from sender
-    #      side that it's sending a different python object.
+    #      frequent enough to delete the old cache in time. With `storage1.epoch()` we know
+    #      the storage has been updated.
     #
     # On receiver side:
     #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
@@ -233,6 +234,7 @@ def reduce_tensor(tensor):
                  handle,  # identifier which CUDA allocation is the storage in.
                  storage_size_bytes,  # size(in bytes) of the storage
                  storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+                 storage.epoch(),
                  tensor.requires_grad))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]

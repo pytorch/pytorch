@@ -42,6 +42,7 @@ typedef struct at_Storage_Impl at_Storage_Impl;
 #define THLongStorage THStorage
 
 TH_API scalar_t* THStorage_(data)(const THStorage*);
+TH_API int32_t THStorage_(epoch)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
 TH_API size_t THStorage_(elementSize)(void);
 

@@ -9,6 +9,11 @@ scalar_t* THStorage_(data)(const THStorage *self)
   return self->data<scalar_t>();
 }
 
+int32_t THStorage_(epoch)(const THStorage *self)
+{
+  return self->epoch();
+}
+
 ptrdiff_t THStorage_(size)(const THStorage *self)
 {
   return THStorage_size(self);
