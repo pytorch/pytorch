@@ -647,6 +647,8 @@ private:
       return false;
     if (!hasNames() && !rhs.cast<TupleType>()->hasNames())
       return true;
+    if (!hasNames() || !rhs.cast<TupleType>()->hasNames())
+      return false;
     const auto & l_names = names();
     const auto & r_names = rhs.cast<TupleType>()->names();
     if(l_names.size() != r_names.size())
