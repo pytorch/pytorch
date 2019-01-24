@@ -89,13 +89,6 @@ struct ReduceConfig {
     return dim3(div_up(num_outputs, step_output), ctas_per_output);
   }
 
-  C10_HOST_DEVICE bool should_run_block_x_reduce() const {
-    return should_block_x_reduce() &&
-           (!should_block_y_reduce() ||
-            threadIdx.y == 0 ||
-            threadIdx.x + threadIdx.y * blockDim.x < warpSize);
-  }
-
   C10_HOST_DEVICE bool should_block_x_reduce() const {
     return input_mult[BLOCK_X] != 0;
   }
@@ -313,7 +306,7 @@ struct ReduceOp {
     if (should_block_y_reduce) {
       value = block_y_reduce(value, shared_memory);
     }
-    if (config.should_run_block_x_reduce()) {
+    if (config.should_block_x_reduce()) {
       value = block_x_reduce(value, shared_memory);
     }
 
@@ -489,7 +482,7 @@ struct ReduceOp {
         }
       }
       value = block_y_reduce(value, shared_memory);
-      if (config.should_run_block_x_reduce()) {
+      if (config.should_block_x_reduce()) {
         value = block_x_reduce(value, shared_memory);
       }
       if (should_store) {
