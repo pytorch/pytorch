@@ -24,6 +24,7 @@ enum FusionType {
   using iscale = ideep::scale_t;                                               \
   using ialgo = ideep::algorithm;                                              \
   using iprop = ideep::prop_kind;                                              \
+  using ilowp_kind = ideep::lowp_kind;                                         \
   using ipadding = ideep::padding_kind;                                        \
   using idtype = ideep::tensor::data_type;                                     \
   using iattr = ideep::descriptor_group::attr_t;                               \

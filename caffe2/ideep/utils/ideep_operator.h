@@ -109,4 +109,14 @@ class IDEEPOperator : public OperatorBase {
       : IDEEPOperator(operator_def, ws) {}                                     \
   virtual ~name() {}
 
+// Convert zero_point scales to min_max scales
+inline ideep::scale_t ConvertScales(
+    const std::vector<float> scales_z) {
+  ideep::scale_t scales (scales_z);
+  for (auto it = scales.begin(); it != scales.end(); it++) {
+    *it = 1.0f / *it;
+  }
+  return scales;
+}
+
 } // namespace caffe2
