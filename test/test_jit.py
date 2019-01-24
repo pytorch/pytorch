@@ -1692,12 +1692,12 @@ class TestJit(JitTestCase):
             return c
         out_ref = constant_prop(torch.tensor(2))
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.run_pass('constant_pooling', constant_prop.graph)
         out_test = constant_prop(torch.tensor(2))
         self.assertEqual(out_ref, out_test)
         if_node = constant_prop.graph.findNode("prim::If")
         for block in if_node.blocks():
-            self.assertTrue(len(list(block.nodes())) == 0)
+            for node in block.nodes():
+                self.assertTrue(node.kind() == "prim::Constant")
 
     def test_constant_prop_print(self):
         @torch.jit.script
