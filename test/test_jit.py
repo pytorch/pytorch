@@ -9561,6 +9561,12 @@ a")
 
         self.checkScript(type_default, ())
 
+        def list_of_dicts():
+            # type: () -> List[Dict[str, Tensor]]
+            return [{'word': torch.ones(2) + 3}, {'other word': torch.ones(1) + 2}]
+
+        self.checkScript(list_of_dicts, ())
+
         @torch.jit.script
         def missing_index(x):
             # type: (Dict[str, int]) -> int

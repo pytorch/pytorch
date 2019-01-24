@@ -9,6 +9,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
+      type->kind() == TypeKind::DictType ||
       type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
@@ -258,6 +259,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Create a separate alias set for each tuple type
   std::map<TupleTypePtr, Symbol> tupleTypeAliases;
   std::map<TypeKind, Symbol> optionalTypeAliases;
+  std::map<TypeKind, Symbol> dictTypeAliases;
 
   for (auto input : graph->inputs()) {
     auto inputType = input->type();
@@ -287,6 +289,26 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
         tupleTypeAliases[tupleType] = getFreshAlias(/*isGraphInput=*/true);
       }
       addAlias(input, tupleTypeAliases.at(tupleType));
+    } else if (inputType->kind() == TypeKind::DictType) {
+      auto dictType = inputType->cast<DictType>();
+      auto keyType = dictType->getKeyType();
+      auto valueType = dictType->getValueType();
+      // All tensor subtypes may alias to each other, so we should consider all
+      // lists of them to alias to each other.
+      if (valueType->isSubtypeOf(DynamicType::get())) {
+        valueType = DynamicType::get();
+      }
+      if (dictTypeAliases.count(keyType->kind()) == 0) {
+        dictTypeAliases[keyType->kind()] =
+            getFreshAlias(/*isGraphInput=*/true);
+      }
+      if (dictTypeAliases.count(valueType->kind()) == 0) {
+        dictTypeAliases[valueType->kind()] =
+            getFreshAlias(/*isGraphInput=*/true);
+      }
+
+      addAlias(input, dictTypeAliases.at(keyType->kind()));
+      addAlias(input, dictTypeAliases.at(valueType->kind()));
     } else {
       JIT_ASSERT(!shouldAnnotate(input));
     }
