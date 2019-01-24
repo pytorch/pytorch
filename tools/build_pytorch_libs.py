@@ -227,7 +227,7 @@ def build_caffe2(version,
     if USE_NINJA:
         check_call(['ninja', 'install'], cwd='build')
     else:
-        check_call(['make', '-j', multiprocessing.cpu_count(), 'install'], cwd='build')
+        check_call(['make', '-j', str(multiprocessing.cpu_count()), 'install'], cwd='build')
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
