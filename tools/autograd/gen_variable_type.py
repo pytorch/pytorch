@@ -133,7 +133,8 @@ CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
 SAVE_TENSOR_STORAGE = CodeTemplate("""\
-Storage ${tensor_name}_storage_saved = (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage() : Storage();
+Storage ${tensor_name}_storage_saved =
+  (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage() : Storage();
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
@@ -143,7 +144,9 @@ if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alia
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  ${tensorlist_name}_storage_saved[i] = (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) ? ${tensorlist_name}[i].storage() : Storage();
+  ${tensorlist_name}_storage_saved[i] =
+    (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) ?
+      ${tensorlist_name}[i].storage() : Storage();
 }
 """)
 
@@ -624,12 +627,12 @@ def emit_body(declaration):
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_STORAGE:
             if 'unpacked_tensors' in env:
                 for arg in env['unpacked_tensors']:
-                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg);
-                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg);
+                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
+                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
             if 'unpacked_tensorlists' in env:
                 for arg in env['unpacked_tensorlists']:
-                    pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg);
-                    post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg);
+                    pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
+                    post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
