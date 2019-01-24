@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include "torch/csrc/jit/fuser/interface.h"
 
 #include <atomic>
 #include <iostream>

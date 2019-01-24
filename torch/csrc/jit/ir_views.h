@@ -38,7 +38,8 @@ struct IfView {
 
 struct LoopView {
   explicit LoopView(Node* node) : node_(node) {
-    AT_ASSERT(node->kind() == ::c10::prim::Loop || node->kind() == ::c10::onnx::Loop);
+    AT_ASSERT(
+        node->kind() == ::c10::prim::Loop || node->kind() == ::c10::onnx::Loop);
   }
   Block* bodyBlock() const {
     return node_->blocks().at(0);
