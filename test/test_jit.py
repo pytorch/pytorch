@@ -2231,13 +2231,20 @@ class TestJit(JitTestCase):
         old_jit_env = os.environ.get('PYTORCH_JIT', None)
         os.environ['PYTORCH_JIT'] = '0'
 
-        new_jit = reload(torch.jit)
+        reload(torch.jit)
 
-        class M(new_jit.ScriptModule):
+        class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(optimize=False)
 
+            @torch.jit.script_method
+            def forward(self):
+                return 3
+
         m = M()
+
+        with self.assertRaisesRegex(AttributeError, "no attribute 'graph'"):
+            M().graph
 
         if old_jit_env is None:
             del os.environ['PYTORCH_JIT']
@@ -2245,6 +2252,17 @@ class TestJit(JitTestCase):
             os.environ['PYTORCH_JIT'] = old_jit_env
 
         reload(torch.jit)
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(optimize=False)
+
+            @torch.jit.script_method
+            def forward(self):
+                return 3
+
+        # assert that the compiler ran
+        M().graph
 
 
 class TestBatched(TestCase):
