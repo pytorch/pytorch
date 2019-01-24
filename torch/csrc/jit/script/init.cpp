@@ -510,15 +510,19 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
+
   py::object ignored_python_op =
       py::module::import("torch.jit").attr("_try_get_ignored_op")(obj);
   if (py::cast<bool>(ignored_python_op)) {
     return std::make_shared<IgnoredPythonValue>(obj);
+  }
+
   py::object overloads =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
   if (!overloads.is_none()) {
     return std::make_shared<OverloadedFunctionValue>(std::move(overloads));
   }
+
   return std::make_shared<PythonValue>(obj);
 }
 

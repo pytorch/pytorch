@@ -9660,7 +9660,7 @@ a")
         self.assertIn('IgnoredPythonOp', ppv)
         self.assertNotIn('ignored_code', ppv)
 
-        with self.assertRaisesRegex(torch.jit.Error, "ignored and cannot be executed"):
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             printed(torch.ones(1))
 
     def test_view_write(self):
