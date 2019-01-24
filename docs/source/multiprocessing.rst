@@ -36,6 +36,45 @@ by the CUDA runtime.
     kinds of data should be done with care. Note that this restriction doesn't
     apply to shared CPU memory.
 
+Let's see a simple example explaining how this works:
+
+::
+    import torch
+    import torch.multiprocessing as mp
+
+    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+    def sender(q, e):
+        for i in range(10):
+            s_sample = [torch.zeros(1), torch.ones(1)]
+            q.put(s_sample)
+            e.wait()
+            e.clear()
+
+    if __name__ == "__main__":
+        ctx = mp.get_context("spawn")
+        q = ctx.Queue()
+        e = ctx.Event()
+        p = ctx.Process(target=sender, args=(q, e))
+        p.start()
+
+        for i in range(10):
+            print('=== ITER {} ===".format(i))
+            r_sample = q.get()
+            del r_sample
+            e.set()
+
+        p.join()
+
+`q` and `e` are used to coordinate between sender and receiver processes.
+Once sender calls `q.put(s_sample);e.wait()`, receiver can do whatever it wants
+to `r_sample`. `r_sample` points to exactly the same CUDA storage as `s_sample`
+using CUDA IPC sharing. All operations about `r_sample` should be done before
+calling `del r_sample;e.set()`, which indicates receiver will NEVER touch
+this memory any more. If receiver wants to save the data of `r_sample` for
+future use, it has to `clone()` it. Otherwise the memory could be deallocated
+or reallocated on sender side, and `r_sample` could points to wild data which
+eventually result in unexpected behavior.
 
 Sharing strategies
 ------------------
