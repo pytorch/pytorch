@@ -143,17 +143,13 @@ if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alia
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) {
-    ${tensorlist_name}_storage_saved[i] = ${tensorlist_name}[i].storage();
-  }
+  ${tensorlist_name}_storage_saved[i] = (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) ? ${tensorlist_name}[i].storage() : Storage();
 }
 """)
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i]) {
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].is_alias_of(${tensorlist_name}[i].storage()));
-  }
+  AT_ASSERT(${tensorlist_name}_storage_saved[i].is_alias_of(${tensorlist_name}[i].storage()));
 }
 """)
 
