@@ -83,13 +83,13 @@ DONT_REQUIRE_DERIVATIVE = {
 # When a function modifies its input tensors, it should only change the input tensors'
 # storage data in-place, and should never change their storage pointers.
 #
-# The code templates `SAVE_TENSOR_STORAGE_PTR` / `ENFORCE_SAME_TENSOR_STORAGE` /
-# `SAVE_TENSORLIST_STORAGE_PTRS` / `ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST`
-# implement the checks for this invariant.
+# The code templates `SAVE_TENSOR_STORAGE` / `ENFORCE_SAME_TENSOR_STORAGE` /
+# `SAVE_TENSORLIST_STORAGE` / `ENFORCE_SAME_TENSORLIST_STORAGE` implement the checks
+# for this invariant.
 #
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_STORAGE = {
-    # These functions are expected to change storage pointer of input tensors
+    # These functions are expected to change storage of input tensors
     '_th_set_', '_cudnn_rnn_flatten_weight',
     # TODO: Fix these functions to update input tensor in-place
     'tril_', 'triu_',
@@ -132,27 +132,27 @@ TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
-SAVE_TENSOR_STORAGE_PTR = CodeTemplate("""\
-StorageImpl* ${tensor_name}_storage_ptr_saved = (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage().unsafeGetStorageImpl() : nullptr;
+SAVE_TENSOR_STORAGE = CodeTemplate("""\
+Storage ${tensor_name}_storage_saved = (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage() : Storage();
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
-if (${tensor_name}_storage_ptr_saved) AT_ASSERT(${tensor_name}_storage_ptr_saved == ${tensor_name}.storage().unsafeGetStorageImpl());
+if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alias_of(${tensor_name}.storage()));
 """)
 
-SAVE_TENSORLIST_STORAGE_PTRS = CodeTemplate("""\
-std::vector<StorageImpl*> ${tensorlist_name}_storage_ptrs_saved(${tensorlist_name}.size());
+SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
+std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   if (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) {
-    ${tensorlist_name}_storage_ptrs_saved[i] = ${tensorlist_name}[i].storage().unsafeGetStorageImpl();
+    ${tensorlist_name}_storage_saved[i] = ${tensorlist_name}[i].storage();
   }
 }
 """)
 
-ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST = CodeTemplate("""\
+ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_ptrs_saved[i]) {
-    AT_ASSERT(${tensorlist_name}_storage_ptrs_saved[i] == ${tensorlist_name}[i].storage().unsafeGetStorageImpl());
+  if (${tensorlist_name}_storage_saved[i]) {
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].is_alias_of(${tensorlist_name}[i].storage()));
   }
 }
 """)
@@ -628,12 +628,12 @@ def emit_body(declaration):
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_STORAGE:
             if 'unpacked_tensors' in env:
                 for arg in env['unpacked_tensors']:
-                    pre_call_block += SAVE_TENSOR_STORAGE_PTR.substitute(tensor_name=arg);
+                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg);
                     post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg);
             if 'unpacked_tensorlists' in env:
                 for arg in env['unpacked_tensorlists']:
-                    pre_call_block += SAVE_TENSORLIST_STORAGE_PTRS.substitute(tensorlist_name=arg);
-                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE_IN_TENSORLIST.substitute(tensorlist_name=arg);
+                    pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg);
+                    post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg);
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
