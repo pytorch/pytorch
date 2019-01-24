@@ -183,6 +183,12 @@ Example::
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
 
+
+
+There are 2 scenarios in which you can annotate:
+
+1. Function Argument Type annotation
+
 By default, all parameters to a TorchScript function are assumed to be Tensor
 because this is the most common type used in modules. To specify that an
 argument to a TorchScript function is another type, it is possible to use
@@ -202,6 +208,33 @@ Example::
   It is also possible to annotate types with Python 3 type annotations.
   In our examples, we use comment-based annotations to ensure Python 2
   compatibility as well.
+
+
+2. Variable Type Annotation
+
+For example, a list by default is assumed to be List[Tensor]. If you would like to
+have a list of other types. PyTorch provides annotation functions.
+
+Example::
+
+    import torch
+    from torch.jit import Tensor
+    from typing import List, Tuple
+
+    class ListOfTupleOfTensor(torch.jit.ScriptModule):
+        def __init__(self):
+            super(ListOfTupleOfTensor, self).__init__()
+
+        @torch.jit.script_method
+        def forward(self, x):
+            # type: (Tensor) -> List[Tuple[Tensor, Tensor]]
+
+            # This annotates the list to be a List[Tuple[Tensor, Tensor]]
+            returns = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
+            for i in range(10):
+                returns.append((x, x))
+
+            return returns
 
 Expressions
 ~~~~~~~~~~~
@@ -677,7 +710,7 @@ Automatic Trace Checking
     Gives us the following diagnostic information::
 	ERROR: Graphs differed across invocations!
 	Graph diff::
-  
+
 		  graph(%x : Tensor) {
 		    %1 : int = prim::Constant[value=0]()
 		    %2 : int = prim::Constant[value=0]()
