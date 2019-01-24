@@ -119,7 +119,6 @@ def type_argument_translations(arg):
 def parse_arguments(args, func_variants, declaration, func_return):
     arguments = []
     kwarg_only = False
-    inplace = declaration['inplace']
 
     if len(args.strip()) == 0:
         return arguments
