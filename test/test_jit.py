@@ -1719,6 +1719,20 @@ class TestJit(JitTestCase):
         graph_str = str(constant_prop.graph)
         self.assertTrue(graph_str.count("prim::None") == 0)
 
+    def test_constant_prop_if_inline(self):
+        @torch.jit.script
+        def constant_prop():
+            cond = True
+            a = 1
+            if cond:
+                a = 1 * 2
+            else:
+                a = 1 // 0
+            return a
+
+        # testing that 1 // 0 error is not thrownn
+        self.run_pass('constant_propagation', constant_prop.graph)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
@@ -1759,16 +1773,49 @@ class TestJit(JitTestCase):
 
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
-        def constant_prop():
+        def constant_prop(cond, iter):
+            # type: (bool, int) -> int
             b = 0
             while True:
-                b = 1
+                print("stays")
+            for _ in range(2):
+                print("stays")
+            for _ in range(iter):
+                print("stays")
+            while cond:
+                print("stays")
             while False:
-                b = 2
+                print("removed")
+            for _i in range(0):
+                print("removed")
+            for _i in range(-4):
+                print("removed")
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = canonical(constant_prop.graph)
+        self.assertTrue(graph.count("removed") == 0)
+        self.assertTrue(graph.count("stays") == 1)  # constant gets pooled
+        self.assertTrue(graph.count("prim::Print") == 4)
+
+    def test_constant_prop_remove_output(self):
+        @torch.jit.script
+        def constant_prop(iter):
+            # type: (int) -> None
+            a = 1
+            b = 1
+            c = 1
+            for i in range(iter):
+                if False:
+                    a = 10
+                if i == 5:
+                    b = 2
+                    c = 3
+            print(a, b, c)
+
+        graph = constant_prop.graph
+        self.run_pass('constant_propagation', graph)
+        self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
     def test_trace_detach(self):
         def foo(x, w):
