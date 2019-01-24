@@ -118,7 +118,8 @@ inline IValue createGenericDict(
   at::ivalue::DictUnorderedMap<IValue, IValue> elems;
   elems.reserve(py::len(obj));
   for (auto key : obj) {
-    elems[toIValue(key, key_type)] = toIValue(obj[key], value_type);
+    elems.insert(std::make_pair(
+        toIValue(key, key_type), toIValue(obj[key], value_type)));
   }
   return at::ivalue::Dict<IValue, IValue>::create(std::move(elems));
 }

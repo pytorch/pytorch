@@ -885,9 +885,9 @@ inline size_t at::ivalue::DictHash::operator()(const c10::IValue& ivalue) const 
   if (ivalue.isInt()) {
     return std::hash<int>()(ivalue.toInt());
   } else if (ivalue.isString()) {
-    return std::hash<int>()(ivalue.toString());
+    return std::hash<std::string>()(ivalue.toStringRef());
   } else if (ivalue.isDouble()) {
-    return std::hash<int>()(ivalue.toDouble());
+    return std::hash<double>()(ivalue.toDouble());
   } else {
     throw std::runtime_error("Can't hash IValues with this tag");
   }
