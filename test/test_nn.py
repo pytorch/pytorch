@@ -4238,9 +4238,9 @@ class TestNN(NNTestCase):
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
         with self.assertRaises(RuntimeError): 
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, list(float(i) for i in target_lengths)) 
+            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, list(float(i) for i in target_lengths))
         with self.assertRaises(RuntimeError):
-             torch.nn.functional.ctc_loss(log_probs, targets, list(float(i) for i in input_lengths), target_lengths) 
+            torch.nn.functional.ctc_loss(log_probs, targets, list(float(i) for i in input_lengths), target_lengths)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
