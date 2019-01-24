@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/utils/functional.h>
@@ -83,10 +83,10 @@ static void VisitNode(Node* n, Node* insert_point) {
   for (size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
-      JIT_ASSERTM(
+      AT_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples");
-      JIT_ASSERTM(
+      AT_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
       for (size_t j = 0; j < tt->elements().size(); ++j) {
@@ -112,7 +112,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     //    tup = (t0, t1)
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
-      JIT_ASSERTM(
+      AT_CHECK(
           white_list.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples");
       for (size_t j = 0; j < tt->elements().size(); j++) {
@@ -150,7 +150,7 @@ static void LowerAllTuples(Block* block) {
 
 static void EnsureNoTuples(ArrayRef<Value*> values) {
   for (Value* v : values) {
-    JIT_ASSERTM(
+    AT_CHECK(
         v->type()->kind() != TypeKind::TupleType, "Couldn't lower all tuples.");
   }
 }
