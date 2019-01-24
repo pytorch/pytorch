@@ -552,6 +552,16 @@ class build_ext(build_ext_parent):
         return outputs
 
 
+# this is a subclass of build just to get access to self.build_lib
+# as there does not seem to be an utility function getting this
+class create_pyi(distutils.command.build.build):
+    def run(self):
+        print("-- Building .pyi --")
+        if sys.version_info[0] == 3:
+            from tools.pyi.gen_pyi import gen_pyi
+            gen_pyi(self.build_lib)
+
+
 class build(distutils.command.build.build):
     sub_commands = [
         ('build_deps', lambda self: True),
@@ -806,6 +816,7 @@ if USE_CUDA:
 
 cmdclass = {
     'create_version_file': create_version_file,
+    'create_pyi': create_pyi,
     'build': build,
     'build_py': build_py,
     'build_ext': build_ext,
