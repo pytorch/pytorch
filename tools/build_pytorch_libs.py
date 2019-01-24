@@ -10,7 +10,7 @@ import distutils.sysconfig
 from distutils.file_util import copy_file
 from distutils.dir_util import copy_tree
 from subprocess import check_call, call, check_output
-from distutils.version import StrictVersion
+from distutils.version import LooseVersion
 from .setup_helpers.cuda import USE_CUDA
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
@@ -37,7 +37,7 @@ def which(thefile):
 def cmake_version(cmd):
     for line in check_output([cmd, '--version']).split('\n'):
         if 'version' in line:
-            return StrictVersion(line.strip().split(' ')[2])
+            return LooseVersion(line.strip().split(' ')[2])
     raise Exception('no version found')
 
 def get_cmake_command():
@@ -49,7 +49,7 @@ def get_cmake_command():
         cmake = which('cmake')
         if cmake is not None:
             bare_version = cmake_version(cmake)
-            if bare_version < StrictVersion("3.5.0") and cmake_version(cmake3) > bare_version:
+            if bare_version < LooseVersion("3.5.0") and cmake_version(cmake3) > bare_version:
                 cmake_command = 'cmake3'
     return cmake_command
 
