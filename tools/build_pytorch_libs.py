@@ -1,4 +1,3 @@
-
 from .setup_helpers.env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
                                DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
                                check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
@@ -11,7 +10,7 @@ from distutils.file_util import copy_file
 from distutils.dir_util import copy_tree
 from subprocess import check_call, call, check_output
 from distutils.version import LooseVersion
-from .setup_helpers.cuda import USE_CUDA
+from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from .setup_helpers.rocm import ROCM_HOME, ROCM_VERSION, USE_ROCM
@@ -69,6 +68,11 @@ except ImportError:
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 torch_lib_dir = base_dir + "/torch/lib"
 install_dir = base_dir + "/torch/lib/tmp_install"
+build_type = "Release"
+if DEBUG:
+    build_type = "Debug"
+elif REL_WITH_DEB_INFO:
+    build_type = "RelWithDebInfo"
 
 def mkdir_p(dir):
     try:
@@ -79,19 +83,14 @@ def mkdir_p(dir):
 def run_cmake(version,
               cmake_python_library,
               build_python,
-              build_test):
+              build_test,
+              build_dir):
     cmake_args = [
         get_cmake_command(),
         base_dir
     ]
-    if USE_NINJA and not IS_WINDOWS:
+    if USE_NINJA:
         cmake_args.append('-GNinja')
-    build_type = "Release"
-    if DEBUG:
-        build_type = "Debug"
-    elif REL_WITH_DEB_INFO:
-        build_type = "RelWithDebInfo"
-
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
@@ -118,9 +117,11 @@ def run_cmake(version,
     if USE_CUDNN:
         my_env['CUDNN_LIBRARY'] = CUDNN_LIBRARY
         my_env['CUDNN_INCLUDE_DIR'] = CUDNN_INCLUDE_DIR
+    if USE_CUDA:
+        my_env['CUDA_BIN_PATH'] = CUDA_HOME
 
     mkdir_p(install_dir)
-    mkdir_p('build')
+    mkdir_p(build_dir)
 
     cmake_defines(cmake_args,
         PYTHON_EXECUTABLE=sys.executable,
@@ -179,7 +180,7 @@ def run_cmake(version,
         cmake_defines(cmake_args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                                   CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    check_call(cmake_args, cwd='build', env=my_env)
+    check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
 def copy_files(build_test):
@@ -195,8 +196,8 @@ def copy_files(build_test):
     copy_all(install_dir + '/lib/*', torch_lib_dir)
     if os.path.exists(install_dir + '/lib64'):
         copy_all(install_dir + '/lib64/*', torch_lib_dir)
-    copy_file('aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
-    copy_file('aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
+    copy_file(base_dir+'/aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
+    copy_file(base_dir+'/aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
 
     copy_tree(install_dir + '/include', torch_lib_dir + '/include', update=True)
     if os.path.exists(install_dir + '/bin/'):
@@ -222,18 +223,34 @@ def copy_files(build_test):
 def build_caffe2(version,
                  cmake_python_library,
                  build_python,
-                 rerun_cmake):
+                 rerun_cmake,
+                 build_dir):
     build_test = not check_negative_env_flag('BUILD_TEST')
     if rerun_cmake or not os.path.exists('build/CMakeCache.txt'):
         run_cmake(version,
                   cmake_python_library,
                   build_python,
-                  build_test)
+                  build_test,
+                  build_dir)
 
-    if USE_NINJA:
-        check_call(['ninja', 'install'], cwd='build')
+    if IS_WINDOWS:
+        if USE_NINJA:
+            # sccache will fail if all cores are used for compiling
+            j = min(1, multiprocessing.cpu_count() - 1)
+            check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
+                       cwd=build_dir)
+        else:
+            my_env = os.environ.copy()
+            my_env['CC'] = 'cl.exe'
+            my_env['CXX'] = 'cl.exe'
+            check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
+                       cwd=build_dir, env=my_env)
     else:
-        check_call(['make', '-j', str(multiprocessing.cpu_count()), 'install'], cwd='build')
+        if USE_NINJA:
+            check_call(['ninja', 'install'], cwd=build_dir)
+        else:
+            check_call(['make', '-j', str(multiprocessing.cpu_count()), 'install'], cwd=build_dir)
+
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled

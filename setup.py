@@ -276,7 +276,8 @@ def build_deps():
     build_caffe2(version=version,
                  cmake_python_library=cmake_python_library,
                  build_python=True,
-                 rerun_cmake=RERUN_CMAKE)
+                 rerun_cmake=RERUN_CMAKE,
+                 build_dir='build')
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
