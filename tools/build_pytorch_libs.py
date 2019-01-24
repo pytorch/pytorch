@@ -1,5 +1,6 @@
 
 from setup_helpers.env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
+                               DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
                                check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
 
 import os
@@ -80,9 +81,9 @@ def run_cmake(version,
     if USE_NINJA and not IS_WINDOWS:
         cmake_args.append('-GNinja')
     build_type = "Release"
-    if check_env_flag('DEBUG'):
+    if DEBUG:
         build_type = "Debug"
-    elif check_env_flag('REL_WITH_DEB_INFO'):
+    elif REL_WITH_DEB_INFO:
         build_type = "RelWithDebInfo"
 
     try:
@@ -103,8 +104,11 @@ def run_cmake(version,
         ldflags += " -Wl,-rpath,$ORIGIN"
 
 
-    # what joy! our cmake file sometimes looks at the system environment
+    # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
+    # you should NEVER add something to this list. It is bad practice to
+    # have cmake read the environment
+    my_env = os.environ.copy()
     if USE_CUDNN:
         my_env['CUDNN_LIBRARY'] = CUDNN_LIBRARY
         my_env['CUDNN_INCLUDE_DIR'] = CUDNN_INCLUDE_DIR
@@ -146,7 +150,7 @@ def run_cmake(version,
         USE_TENSORRT=check_env_flag('USE_TENSORRT'),
         USE_FFMPEG=check_env_flag('USE_FFMPEG'),
         USE_SYSTEM_EIGEN_INSTALL="OFF",
-        USE_MKLDNN=check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'OFF'),
+        USE_MKLDNN=USE_MKLDNN,
         NCCL_EXTERNAL=USE_CUDA,
         CMAKE_INSTALL_PREFIX=install_dir,
         CMAKE_C_FLAGS=cflags,
@@ -162,14 +166,14 @@ def run_cmake(version,
         USE_GFLAGS=os.getenv('USE_GFLAGS'))
 
     if USE_GLOO_IBVERBS:
-        cmake_args += cmake_defines(USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
+        cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 
     expected_wrapper = '/usr/local/opt/ccache/libexec'
     if IS_DARWIN and os.path.exists(expected_wrapper):
-        cmake_args += cmake_defines(CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
-                                    CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+        cmake_defines(cmake_args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
+                                  CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    check_call(cmake_args, cwd='build')
+    check_call(cmake_args, cwd='build', env=my_env)
 
 
 def copy_files(build_test):
