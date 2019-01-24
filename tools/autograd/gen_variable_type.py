@@ -166,9 +166,9 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 """)
 
 SAVE_TENSOR_IMPL = CodeTemplate("""\
-c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> ${tensor_name}_impl_saved =
-  (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ?
-    ${tensor_name}.getIntrusivePtr() : UndefinedTensorImpl::singleton();
+c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> ${tensor_name}_impl_saved;
+if (${tensor_name}.defined() && !${tensor_name}.is_sparse())
+  ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
 """)
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate("""\
