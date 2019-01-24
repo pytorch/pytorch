@@ -39,8 +39,6 @@ class IDEEPOperator : public OperatorBase {
         context_(operator_def.device_option()),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    OPERATOR_NEEDS_FEATURE(
-        order_ == StorageOrder::NCHW, "Unsupported storage order.");
   }
   virtual ~IDEEPOperator() {}
 

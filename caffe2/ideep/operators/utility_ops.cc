@@ -19,7 +19,7 @@ class CopyCPUToIDEEPOp final : public IDEEPOperator {
       Y->Reset(new itensor());
       Y->GetMutable<itensor>()->resize(src_dims, itensor::data_type::f32);
     }
-    Y->GetMutable<itensor>()->reorder_from(
+    Y->GetMutable<itensor>()->feed_from(
         src_dims, itensor::data_type::f32, X.raw_data());
     return true;
   }
@@ -61,7 +61,7 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
         }
         auto* Y =
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
-        X.reorder_to(Y->template mutable_data<float>());
+        X.to_public(Y->template mutable_data<float>());
       } else {
         CAFFE_THROW("Unsupported ideep type: ", X.get_data_type());
       }

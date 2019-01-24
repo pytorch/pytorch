@@ -77,7 +77,7 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
         // we have to do explicit conversion here.
         filter_in.set_public_format(ideep::format::iohw);
         filter_.init(expected_descriptor);
-        ideep::reorder::compute(filter_in, filter_);
+        filter_.feed_from(filter_in);
       }
 
       // TODO: The code below works around correctness issues with particular input shapes
@@ -178,7 +178,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
       // we have to do explicit conversion here.
       filter_in.set_public_format(ideep::format::iohw);
       filter_.init(expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
+      filter_.feed_from(filter_in);
 
       // TODO: The code below works around correctness issues with particular input shapes
       // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
