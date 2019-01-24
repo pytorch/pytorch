@@ -310,7 +310,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * of sizes of a tensor.
    */
   virtual int64_t numel() const {
-#ifdef DEBUG
+#ifndef NDEBUG
     AT_ASSERT(compute_numel() == numel_);
 #endif
     return numel_;
@@ -324,7 +324,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * a tensor is contiguous or not.
    */
   virtual bool is_contiguous() const {
-#ifdef DEBUG
+#ifndef NDEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
     return is_contiguous_;

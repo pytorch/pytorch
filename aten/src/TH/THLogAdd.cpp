@@ -24,7 +24,7 @@ double THLogAdd(double log_a, double log_b)
   }
 
   minusdif = log_b - log_a;
-#ifdef DEBUG
+#ifndef NDEBUG
   if (isnan(minusdif))
     THError("THLogAdd: minusdif (%f) log_b (%f) or log_a (%f) is nan", minusdif, log_b, log_a);
 #endif
@@ -42,7 +42,7 @@ double THLogSub(double log_a, double log_b)
     THError("LogSub: log_a (%f) should be greater than log_b (%f)", log_a, log_b);
 
   minusdif = log_b - log_a;
-#ifdef DEBUG
+#ifndef NDEBUG
   if (isnan(minusdif))
     THError("LogSub: minusdif (%f) log_b (%f) or log_a (%f) is nan", minusdif, log_b, log_a);
 #endif

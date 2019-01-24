@@ -95,7 +95,7 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
   ptrdiff_t numel = THByteTensor_sumall(mask);
   scalar_t *tensor_data;
 
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(numel <= LONG_MAX);
 #endif
   THTensor_(resize1d)(tensor,numel);
@@ -131,7 +131,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                   if IS_NONZERO(*tensor_data) {
                     ++numel;
                   });
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(numel <= LONG_MAX);
 #endif
   THLongTensor_resize2d(subscript, numel, tensor->dim());
@@ -190,7 +190,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   numel = THLongTensor_nElement(index);
 
   std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(numel <= LONG_MAX);
 #endif
   newSize[dim] = numel;

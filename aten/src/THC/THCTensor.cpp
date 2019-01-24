@@ -71,7 +71,7 @@ void THCTensor_resize(THCState *state, THCTensor *self, at::IntList size, at::In
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
   }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(size.size() <= INT_MAX);
 #endif
   THCTensor_resizeNd(state, self, size.size(), size.data(), stride.data());

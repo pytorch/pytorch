@@ -22,7 +22,7 @@ void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageO
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
   }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(size_.size() <= INT_MAX);
 #endif
   THTensor_setStorageNd(self,
@@ -67,7 +67,7 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
   }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   THAssert(size.size() <= INT_MAX);
 #endif
   THTensor_resizeNd(self, size.size(), size.data(), stride.data());
