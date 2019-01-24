@@ -7,28 +7,9 @@
 #include <c10/core/DeviceType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/dispatch/KernelFunction.h>
 
 namespace c10 {
-
-/**
- * A kernel can keep around a cache to have better performance when it's
- * called multiple times. This is used by a lot of caffe2 kernels.
- * This cache owned by the call site and passed in to the kernel as a function
- * argument. It must inherit from KernelState so the call site knows how to
- * store and destruct it.
- */
-class KernelState {
-public:
-  virtual ~KernelState() = default;
-};
-
-using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
-
-/**
- * This is the basic ABI for any kernel call. Each kernel is registered as a
- * pointer to a global C function of this type.
- */
-using KernelFunction = void(Stack*, KernelState* state);
 
 namespace details {
 
@@ -127,35 +108,35 @@ struct write_outputs<std::tuple<OutputTypes...>> final {
 };
 
 
-// SFINAE over (1) does the operator kernel have state and (2) does it return a value or void
-template<class StateTypeOrVoid, class FuncType, class Enable = void> struct call_kernel_with_ivalue_args {};
-// SFINAE version for kernels with output and with state
-template<class StateTypeOrVoid, class FuncType>
-struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, StateTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* state) {
-    auto output = call_with_ivalue_args(func, ivalue_args, static_cast<StateTypeOrVoid*>(state));
+// SFINAE over (1) does the operator kernel have a cache and (2) does it return a value or void
+template<class CacheTypeOrVoid, class FuncType, class Enable = void> struct call_kernel_with_ivalue_args {};
+// SFINAE version for kernels with output and with cache
+template<class CacheTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<CacheTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelCache* cache) {
+    auto output = call_with_ivalue_args(func, ivalue_args, static_cast<CacheTypeOrVoid*>(cache));
     write_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), outputs);
   }
 };
-// SFINAE version for kernels with output and without state
-template<class StateTypeOrVoid, class FuncType>
-struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, StateTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* /*state*/) {
+// SFINAE version for kernels with output and without a cache
+template<class CacheTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<CacheTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelCache* /*cache*/) {
     auto output = call_with_ivalue_args(func, ivalue_args);
     write_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), outputs);
   }
 };
-// SFINAE version for kernels without output and with state
-template<class StateTypeOrVoid, class FuncType>
-struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, StateTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* state) {
-    call_with_ivalue_args(func, ivalue_args, static_cast<StateTypeOrVoid*>(state));
+// SFINAE version for kernels without output and with a cache
+template<class CacheTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<CacheTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelCache* cache) {
+    call_with_ivalue_args(func, ivalue_args, static_cast<CacheTypeOrVoid*>(cache));
   }
 };
-// SFINAE version for kernels without output and without state
-template<class StateTypeOrVoid, class FuncType>
-struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, StateTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* /*state*/) {
+// SFINAE version for kernels without output and without a cache
+template<class CacheTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<CacheTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelCache* /*cache*/) {
     call_with_ivalue_args(func, ivalue_args);
   }
 };
@@ -204,17 +185,17 @@ public:
 
   static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
 
-  template<class StateTypeOrVoid> using func_type_with_state = typename add_ptr_parameter_if_not_void<func_type, StateTypeOrVoid>::type;
+  template<class CacheTypeOrVoid> using func_type_with_cache = typename add_ptr_parameter_if_not_void<func_type, CacheTypeOrVoid>::type;
 
-  template<class StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>* kernel>
-  static void wrap_kernel(Stack* stack, KernelState* state) {
+  template<class CacheTypeOrVoid, func_type_with_cache<CacheTypeOrVoid>* kernel>
+  static void wrap_kernel(Stack* stack, KernelCache* cache) {
     constexpr size_t num_inputs = guts::typelist::size<parameter_types>::value;
     constexpr size_t num_outputs = 1; // TODO allow multiple outputs if it's a tuple
 
     ArrayRef<IValue> inputs = torch::jit::peekSlice(*stack, 0, num_inputs + num_outputs, num_inputs);
     ArrayRef<IValue> outputs = torch::jit::peekSlice(*stack, 0, num_outputs, num_outputs);
 
-    call_kernel_with_ivalue_args<StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>>::call(kernel, inputs, outputs, state);
+    call_kernel_with_ivalue_args<CacheTypeOrVoid, func_type_with_cache<CacheTypeOrVoid>>::call(kernel, inputs, outputs, cache);
   }
 
 private:

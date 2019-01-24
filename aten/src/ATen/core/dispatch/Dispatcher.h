@@ -17,8 +17,8 @@ namespace c10 {
  */
 class OpKernel final {
 public:
-  explicit OpKernel(KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
-  : kernel_(kernel), state_creator_(state_creator) {}
+  explicit OpKernel(KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
+  : kernel_(kernel), cache_creator_(cache_creator) {}
 
   OpKernel(OpKernel&&) = default;
   OpKernel& operator=(OpKernel&&) = default;
@@ -29,10 +29,10 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) {
-    if (state_.get() == nullptr) {
-      state_ = (*state_creator_)();
+    if (cache_.get() == nullptr) {
+      cache_ = (*cache_creator_)();
     }
-    return (*kernel_)(stack, state_.get());
+    return (*kernel_)(stack, cache_.get());
   }
 
 private:
@@ -40,8 +40,8 @@ private:
   // That is, ownership is not an issue.
   KernelFunction* kernel_;
 
-  KernelStateCreatorFunction* state_creator_;
-  std::unique_ptr<c10::KernelState> state_;
+  KernelCacheCreatorFunction* cache_creator_;
+  std::unique_ptr<c10::KernelCache> cache_;
 };
 
 /**
@@ -59,9 +59,9 @@ public:
   /**
    * Register an operator to the dispatch table for some operator schema.
    */
-  static void registerKernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelStateCreatorFunction* state_creator_func) {
+  static void registerKernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return dispatch_table_for_this_op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, state_creator_func});
+    return dispatch_table_for_this_op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
   }
 
   /**
@@ -78,7 +78,7 @@ public:
   static OpKernel lookup(const Stack* stack) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
     const DispatchTableEntry& kernel = dispatch_table_for_this_op.lookup(stack);
-    return OpKernel(kernel.kernel_func, kernel.state_creator_func);
+    return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
   }
 
 };

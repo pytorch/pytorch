@@ -186,13 +186,13 @@ to the end.)
 
 // Register layer norm with c10
 namespace {
-struct State final : public c10::KernelState {
+struct Cache final : public c10::KernelCache {
     at::optional<at::Tensor> scale = at::nullopt;
     at::optional<at::Tensor> bias = at::nullopt;
 };
 
 template <class DataType>
-void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass in correct state type
+void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass in correct cache type
   c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, 3, 6);
   c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 0, 3, 3);
 
@@ -204,7 +204,7 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass i
   caffe2::Tensor sig{c10::C10Tensor(outputs[2].toTensor())};
 
   caffe2::CPUContext context;
-  State* cache = static_cast<State*>(state);
+  Cache* cache = static_cast<Cache*>(cache_);
   if (!cache->scale.has_value()) {
     cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }
@@ -233,7 +233,7 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass i
 }
 namespace c10 {
 C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
-    .withState<State>()
+    .withCache<Cache>()
     .kernel<&layer_norm_c10<float>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

@@ -15,10 +15,10 @@
 
 namespace c10 {
 
-using KernelStateCreatorFunction = std::unique_ptr<c10::KernelState> ();
+using KernelCacheCreatorFunction = std::unique_ptr<c10::KernelCache> ();
 struct DispatchTableEntry final {
   KernelFunction* kernel_func;
-  KernelStateCreatorFunction* state_creator_func;
+  KernelCacheCreatorFunction* cache_creator_func;
 };
 
 namespace details {

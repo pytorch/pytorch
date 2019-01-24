@@ -11,7 +11,7 @@ namespace math = caffe2::math;
 namespace caffe2 {
 namespace {
 
-struct State final : public c10::KernelState {
+struct Cache final : public c10::KernelCache {
   std::shared_ptr<at::Tensor> scratch;
 };
 
@@ -23,7 +23,7 @@ void batch_matmul_op_cpu_impl(
     int trans_a,
     int trans_b,
     int broadcast,
-    State* state) {
+    Cache* cache) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
   Tensor Y{C10Tensor(Y_)};
@@ -273,7 +273,7 @@ void batch_matmul_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchMatmul)
-    .withState<caffe2::State>()
+    .withCache<caffe2::Cache>()
     .kernel<&caffe2::batch_matmul_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10
