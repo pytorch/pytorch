@@ -68,6 +68,35 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
+std::vector<Node*> findAllNodes(Block* block, Symbol kind) {
+  std::vector<Node*> ret;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      auto nodes = findAllNodes(b, kind);
+      ret.insert(ret.end(), nodes.begin(), nodes.end());
+    }
+    if (n->kind() == kind) {
+      ret.push_back(n);
+    }
+  }
+  return ret;
+}
+
+Node* findNode(Block* block, Symbol kind) {
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      auto node = findNode(b, kind);
+      if (node != nullptr) {
+        return node;
+      }
+    }
+    if (n->kind() == kind) {
+      return n;
+    }
+  }
+  return nullptr;
+}
+
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 struct ConcretePythonOp : public PythonOp {
@@ -231,6 +260,16 @@ void initPythonIRBindings(PyObject* module_) {
           [](Graph& g) {
             return py::make_iterator(g.nodes().begin(), g.nodes().end());
           })
+      .def(
+          "findNode",
+          [](Graph& g, const std::string& kind) {
+            return findNode(g.block(), Symbol::fromQualString(kind));
+          })
+      .def(
+          "findAllNodes",
+          [](Graph& g, const std::string& kind) {
+            return findAllNodes(g.block(), Symbol::fromQualString(kind));
+          })
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
@@ -308,8 +347,8 @@ void initPythonIRBindings(PyObject* module_) {
             return node;
           })
       .VS(copyMetadata)
-      .VS(isTensor);
-
+      .VS(isTensor)
+      .def("toIValue", [](Value& n) { return toIValue(&n); });
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
@@ -340,6 +379,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
           "inputs",
           [](Node& n) {
@@ -349,6 +389,29 @@ void initPythonIRBindings(PyObject* module_) {
           "outputs",
           [](Node& n) {
             return py::make_iterator(n.outputs().begin(), n.outputs().end());
+          })
+      .def("outputsAt", [](Node& n, size_t i) { return n.outputs().at(i); })
+      .def(
+          "findNode",
+          [](Node& n, const std::string& kind) {
+            Node* node;
+            for (Block* b : n.blocks()) {
+              node = findNode(b, Symbol::fromQualString(kind));
+              if (node != nullptr) {
+                return node;
+              }
+            }
+            return node;
+          })
+      .def(
+          "findAllNodes",
+          [](Node& n, const std::string& kind) {
+            std::vector<Node*> ret;
+            for (Block* b : n.blocks()) {
+              auto nodes = findAllNodes(b, Symbol::fromQualString(kind));
+              ret.insert(ret.end(), nodes.begin(), nodes.end());
+            }
+            return ret;
           })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)
@@ -542,8 +605,7 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
-      .def(
-          py::init([](TypePtr a) { return ListType::create(a); }))
+      .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);

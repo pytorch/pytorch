@@ -1,7 +1,7 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/ir.h>
@@ -157,7 +157,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
     } else if (device.type() == at::DeviceType::CUDA) {
       at::Tensor cpu_tensor =
           at::empty({0}, at::CPU(type).options())
-              .set_(cpu_storage, tensor_proto.offset(), dims, strides);
+              .set_(cpu_storage);
       at::Storage cuda_storage =
           cpu_tensor.to(device, cpu_tensor.scalar_type()).storage();
       storage_it =

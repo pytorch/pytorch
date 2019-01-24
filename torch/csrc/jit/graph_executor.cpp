@@ -2,12 +2,12 @@
 
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -101,7 +101,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     }
 
     executor.run(stack);
-    JIT_ASSERT(stack.size() == num_outputs());
+    AT_ASSERT(stack.size() == num_outputs());
 
     variable_list outputs;
     outputs.reserve(num_outputs());
@@ -256,7 +256,7 @@ struct DifferentiableGraphOp {
 };
 
 void packGradient(Gradient gradient, Node* dnode) {
-  JIT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
   dnode->g_(attr::Subgraph, gradient.f)
       ->g_(attr::ReverseSubgraph, gradient.df)
       ->i_(attr::f_real_outputs, gradient.f_real_outputs)
@@ -271,7 +271,7 @@ void packGradient(Gradient gradient, Node* dnode) {
 }
 
 Gradient getGradient(const Node* n) {
-  JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
   grad.df = n->g(attr::ReverseSubgraph);
@@ -377,7 +377,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
-    JIT_ASSERT(stack.size() >= num_inputs);
+    AT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(
         autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
