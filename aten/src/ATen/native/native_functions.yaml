@@ -1735,7 +1735,7 @@
   matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
+  matches_jit_signature: False # TODO: The default value of upper and some Caffe2 builds will trigger the assert.
 
 - func: relu(Tensor self) -> Tensor
   matches_jit_signature: True
