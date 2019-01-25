@@ -15,8 +15,6 @@
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <ATen/core/thread_pool.h>
 
-#include <caffe2/core/operator.h>
-
 #include <exception>
 #include <iostream>
 #include <memory>
