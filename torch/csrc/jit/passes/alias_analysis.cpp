@@ -980,7 +980,7 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
 
 TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a case to this list, you are asserting that you have
-  // added a case for this unschematized node in AliasDb::analyze
+  // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {
     prim::If,
     prim::Loop,
