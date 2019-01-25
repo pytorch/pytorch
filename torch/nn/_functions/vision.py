@@ -1,8 +1,9 @@
 import torch
 import torch.backends.cudnn as cudnn
+from ..._jit_internal import weak_script
 
 
-@torch._jit_internal.weak_script
+@weak_script
 def affine_grid_generator(theta, size):
     # type: (Tensor, List[int]) -> Tensor
     if theta.is_cuda and cudnn.enabled and cudnn.is_acceptable(theta) and len(size) == 4:

@@ -1,7 +1,8 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/sparse_lengths_sum.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::Tensor;
 
@@ -10,10 +11,15 @@ namespace {
 
 template <typename InputType, typename IndexType>
 void sparse_lengths_sum_op_cpu_impl(
-    const Tensor& dataInput,
-    const Tensor& indicesInput,
-    const Tensor& lengthsInput,
-    Tensor* output) {
+    const at::Tensor& dataInput_,
+    const at::Tensor& indicesInput_,
+    const at::Tensor& lengthsInput_,
+    const at::Tensor& output_) {
+  Tensor dataInput{C10Tensor(dataInput_)};
+  Tensor indicesInput{C10Tensor(indicesInput_)};
+  Tensor lengthsInput{C10Tensor(lengthsInput_)};
+  Tensor output{C10Tensor(output_)};
+
   using T = float;
   constexpr bool USE_MEAN = false;
   constexpr bool USE_POSITIONAL_WEIGHT = false;
@@ -27,8 +33,8 @@ void sparse_lengths_sum_op_cpu_impl(
 
   auto shape = dataInput.sizes().vec();
   shape[0] = M;
-  output->Resize(shape);
-  T* out_data = output->template mutable_data<T>();
+  output.Resize(shape);
+  T* out_data = output.template mutable_data<T>();
 
   const InputType* in_data = dataInput.template data<InputType>();
   const IndexType* indices = indicesInput.template data<IndexType>();
@@ -54,7 +60,7 @@ void sparse_lengths_sum_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<float, int32_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int32_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
@@ -67,7 +73,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int32_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int32_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{
             DeviceTypeId::CPU,
@@ -81,7 +87,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<float, int64_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int64_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
                                                  LayoutId(0),
@@ -94,7 +100,7 @@ C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
                                                  LayoutId(0),
                                                  caffe2::TypeMeta::Id<int>()}});
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel(&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int64_t>)
+    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int64_t>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{
             DeviceTypeId::CPU,

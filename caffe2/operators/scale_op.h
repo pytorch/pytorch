@@ -18,8 +18,8 @@ class ScaleOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     math::Scale<float, T, Context>(
         X.numel(),
         scale_,

@@ -183,6 +183,12 @@ Example::
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
 
+
+
+There are 2 scenarios in which you can annotate:
+
+1. Function Argument Type annotation
+
 By default, all parameters to a TorchScript function are assumed to be Tensor
 because this is the most common type used in modules. To specify that an
 argument to a TorchScript function is another type, it is possible to use
@@ -202,6 +208,33 @@ Example::
   It is also possible to annotate types with Python 3 type annotations.
   In our examples, we use comment-based annotations to ensure Python 2
   compatibility as well.
+
+
+2. Variable Type Annotation
+
+For example, a list by default is assumed to be List[Tensor]. If you would like to
+have a list of other types. PyTorch provides annotation functions.
+
+Example::
+
+    import torch
+    from torch.jit import Tensor
+    from typing import List, Tuple
+
+    class ListOfTupleOfTensor(torch.jit.ScriptModule):
+        def __init__(self):
+            super(ListOfTupleOfTensor, self).__init__()
+
+        @torch.jit.script_method
+        def forward(self, x):
+            # type: (Tensor) -> List[Tuple[Tensor, Tensor]]
+
+            # This annotates the list to be a List[Tuple[Tensor, Tensor]]
+            returns = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
+            for i in range(10):
+                returns.append((x, x))
+
+            return returns
 
 Expressions
 ~~~~~~~~~~~
@@ -596,6 +629,7 @@ Interpreting Graphs
     graph of a method named ``bar`` on a ScriptModule by accessing ``.bar.graph``.
 
     The example script above produces the graph::
+
 	graph(%len : int) {
 	  %15 : int = prim::Constant[value=1]()
 	  %9 : bool = prim::Constant[value=1]()
@@ -675,7 +709,8 @@ Automatic Trace Checking
 
     Gives us the following diagnostic information::
 	ERROR: Graphs differed across invocations!
-	Graph diff:
+	Graph diff::
+
 		  graph(%x : Tensor) {
 		    %1 : int = prim::Constant[value=0]()
 		    %2 : int = prim::Constant[value=0]()
@@ -787,14 +822,24 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-TorchScript supports a subset of the builtin tensor and neural network functions that
-PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
-namespace are available. Many functions in ``torch.nn.functional`` are also availiable.
+Torch Script supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in Torch Script, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
+Unsupported ``torch.nn`` Modules  ::
 
-We currently do not provide any builtin ScriptModules e.g. a ``Linear`` or
-``Conv`` module. This functionality is something that will be developed in the future.
-For now we suggest using ``torch.jit.trace`` to transform standard ``torch.nn``
-modules into ScriptModules on construction.
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.fold.Fold
+    torch.nn.modules.fold.Unfold
+    torch.nn.modules.rnn.GRU
+    torch.nn.modules.rnn.LSTM
+    torch.nn.modules.rnn.RNN
+    torch.nn.modules.rnn.GRUCell
+    torch.nn.modules.rnn.LSTMCell
+    torch.nn.modules.rnn.RNNCell
+
 
 .. automodule:: torch.jit.supported_ops

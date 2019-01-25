@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
+#include "torch/csrc/cuda/Event.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -374,7 +375,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
   void* data = self_.data_ptr();
-  THCCachingAllocator_recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
+  c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");

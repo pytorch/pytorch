@@ -26,9 +26,7 @@ class DistributedDataParallel(Module):
     each such replica handles a portion of the input. During the backwards
     pass, gradients from each node are averaged.
 
-    The batch size should be larger than the number of GPUs used locally. It
-    should also be an integer multiple of the number of GPUs so that each chunk
-    is the same size (so that each GPU processes the same number of samples).
+    The batch size should be larger than the number of GPUs used locally.
 
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
@@ -59,7 +57,7 @@ class DistributedDataParallel(Module):
     parallel training.
 
     Here is how to use it: on each host with N GPUs, you should spawn up N
-    processes, while ensuring that each process invidually works on a single GPU
+    processes, while ensuring that each process individually works on a single GPU
     from 0 to N-1. Therefore, it is your job to ensure that your training script
     operates on a single given GPU by calling:
 
@@ -78,6 +76,13 @@ class DistributedDataParallel(Module):
         highly recommended backend to be used with Multi-Process Single-GPU
         distributed training and this applies to both single-node and multi-node
         distributed training
+
+    .. note:: This module also supports mixed-precision distributed training.
+        This means that your model can have different types of parameters such
+        as mixed types of fp16 and fp32, the gradient reduction on these
+        mixed types of parameters will just work fine.
+        Also note that ``nccl`` backend is currently the fastest and highly
+        recommended backend for fp16/fp32 mixed-precision training.
 
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.

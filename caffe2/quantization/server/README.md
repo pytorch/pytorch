@@ -7,7 +7,7 @@ Please use Int8* op types because op types without Int8 prefix and DNNLOWP engin
 ## Quantization method
 
 The basic quantization method is similar to that used by gemmlowp (https://github.com/google/gemmlowp/) and TensorFlow Lite.
-That is we use a linear quantizaion method where quantization and dequantization is a simple affine transformation (plus rounding and saturation in quantization). Therefore, quantization bins are uniform.
+That is we use a linear quantization method where quantization and dequantization is a simple affine transformation (plus rounding and saturation in quantization). Therefore, quantization bins are uniform.
 Similar to gemmlowp, our quantized operators use asymmetric quantization by default but there's an option to use symmetric quantization (this can be controlled globally using caffe2_dnnlowp_preserve_activation_sparsity and caffe2_dnnlowp_preserve_weight_sparsity gflags options or per-operator basis using preserve_activation_sparsity and preserve_weight_sparsity arguments).
 Unsigned 8-bit integers are used for activations and signed 8-bit integers are used for weights (this design choice is mostly because int8 SIMD instructions in x86 has one input operand unsigned and the other input operand signed).
 We also support per-output-channel quantization similarly to gemmlowp (Int8FC with DNNLOWP_ROWWISE engine). Note that only the weights can have multiple pairs of scale and zero_offset (per output channel) and activations can still have only one pair of scale and zero_offset. This is because if an activation has per-channel quantization, inner-products in a GEMM that multiplies the activation would require summing up numbers with different scales, which is significant overhead.
@@ -24,7 +24,7 @@ The users could modify the code to use a different requantization implementation
 
 * 16-bit accumulation with outlier-aware quantization
 
-In current Intel processors, int8 multiplication with int32 accumulation doesn't provide very high speedup: 3 instructions vpmaddubsw + vpmaddwd + vpadd are needed. With 16-bit accumulation, we can use 2 instructions instead with up to 2x instruction throughput per cycle. However, 16-bit accumulation can lead to frequent saturation and hence a big accuracy drop. We minimize the saturation by splitting the weight matrix into two parts, W = W_main + W_outlier, where W_main contains values with small magnitude and W_outlier contains the residual. The matrix multiplication, X*W^T is calculated in two stages, where X*W_main^T uses 16-bit accumulation, and X*W_outlier^T uses 32-bit accumulation. W_outlier is typically sparse hence X*W_outlier^T accounts for a small fraction of the total time.
+In current Intel processors, int8 multiplication with int32 accumulation doesn't provide very high speedup: 3 instructions vpmaddubsw + vpmaddwd + vpadd are needed. With 16-bit accumulation, we can use 2 instructions instead with up to 2x instruction throughput per cycle. However, 16-bit accumulation can lead to frequent saturation and hence a big accuracy drop. We minimize the saturation by splitting the weight matrix into two parts, W = W_main + W_outlier, where W_main contains values with small magnitude and W_outlier contains the residual. The matrix multiplication, X x W^T is calculated in two stages, where X x W_main^T uses 16-bit accumulation, and X x W_outlier^T uses 32-bit accumulation. W_outlier is typically sparse hence X x W_outlier^T accounts for a small fraction of the total time.
 This implementation can be used by setting the Caffe2 operator engine to DNNLOWP_ACC16. Conv, ConvRelu, and FC support DNNLOWP_ACC16. The threshold for outlier can be controlled by nbits_in_non_outlier argument of the operator. For example, when nbits_in_non_outlier=7, a value is outlier if it needs more than 7-bit (e.g. the value is <= -65 or >= 64).
 
 * Dynamic quantization
@@ -57,10 +57,10 @@ The following quantized operators are currently implemented
 
 ## Differences from mobile quantization operators
 
-The aim is Int8* operators in caffe2/operators/quantized (primarily optimized for mobile processsors) compatible with the operators in this directory, but there're a few minor differences we will soon to fix
+The aim is Int8* operators in caffe2/operators/quantized (primarily optimized for mobile processors) compatible with the operators in this directory, but there're a few minor differences we will soon to fix
 
 * The implementation of Int8AveragePool in this directory can have different quantization parameters for its input and output.
-* Int8Sum in caffe2/operators/quantized assumes 2 input tensors while the implementation in this directory can work with arbitraty number of input tensors.
+* Int8Sum in caffe2/operators/quantized assumes 2 input tensors while the implementation in this directory can work with arbitrary number of input tensors.
 
 ## Extra functionality
 
@@ -72,7 +72,7 @@ In fact, it's currently mandatory to set followed_by to Sigmoid and Tanh . This 
 
 * Measure quantization error
 
-To faciliate numerical debugging, setting measure_quantization_error argument will run a shadow copy of single-precision floating-point operator and reports the L2 error compared to quantized outputs. This can help identifying which operator introduces the biggest error to narrow down the numerical issues.
+To facilitate numerical debugging, setting measure_quantization_error argument will run a shadow copy of single-precision floating-point operator and reports the L2 error compared to quantized outputs. This can help identifying which operator introduces the biggest error to narrow down the numerical issues.
 
 * Different precision
 

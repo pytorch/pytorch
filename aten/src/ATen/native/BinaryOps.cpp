@@ -130,46 +130,46 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
 
-static Tensor scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::add(self, scalar_tensor(other), alpha);
+  return native::add(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::add_(self, scalar_tensor(other), alpha);
+  return native::add_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor div(const Tensor& self, Scalar other) {
-  return native::div(self, scalar_tensor(other));
+  return native::div(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_(Tensor& self, Scalar other) {
-  return native::div_(self, scalar_tensor(other));
+  return native::div_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, scalar_tensor(other));
+  return native::mul(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, scalar_tensor(other));
+  return native::mul_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub(self, scalar_tensor(other), alpha);
+  return native::sub(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub_(self, scalar_tensor(other), alpha);
+  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::rsub(self, scalar_tensor(other), alpha);
+  return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
 }

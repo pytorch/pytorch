@@ -880,7 +880,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
 
   CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
@@ -945,7 +944,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
   } else {
     CAFFE_THROW("Unsupported kernel size:", kernel_.size());
   }
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T_DW>());
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.sizes() != cudnn_input_dims_);
@@ -1173,9 +1172,10 @@ bool CudnnConvGradientOp::DoRunWithType() {
                     data_perf_stat;
                 cudnn_wrapper_.with_cudnn_state(
                     cudnn_state_, [&](CuDNNState* state) {
-                      auto* dX =
-                          Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-                      dX->ResizeLike(X);
+                      auto* dX = Output(
+                          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+                          X.sizes(),
+                          at::dtype<T_DX>());
                       const T_W* filter_data = filter.template data<T_W>();
                       const T_DY* dYdata = dY.template data<T_DY>();
                       T_DX* dXdata = dX->template mutable_data<T_DX>();
@@ -1335,8 +1335,11 @@ bool CudnnConvGradientOp::DoRunWithType() {
         dfilter->template mutable_data<T_DW>()));
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       // Compute the gradient w.r.t. the input.
-      auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-      dX->ResizeLike(X);
+
+      auto* dX = Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T_DX>());
       CUDNN_ENFORCE(cudnnConvolutionBackwardData(
           state->cudnn_handle(),
           cudnnTypeWrapper<T_W>::kOne(),

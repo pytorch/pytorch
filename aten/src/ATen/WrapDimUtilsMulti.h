@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/WrapDimUtils.h>
 #include <sstream>
 #include <bitset>

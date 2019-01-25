@@ -107,7 +107,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 
 static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::legacy_new_from_data(idx_type, c10::nullopt, seq);
+  return torch::utils::indexing_tensor_from_data(idx_type, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(const at::Type & type, PyObject* value) {
@@ -115,10 +115,10 @@ static Variable valueToTensor(const at::Type & type, PyObject* value) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
   if (THPUtils_checkLong(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackLong(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options());
   }
   if (PyFloat_Check(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options());
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }

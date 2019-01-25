@@ -56,22 +56,27 @@ Stack deepCopy(const Stack& stack) {
 }
 
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
-  // only check tensors for now
-  if (!lhs.isTensor() || !rhs.isTensor()) {
+  if (lhs.isInt() && rhs.isInt()) {
+    return lhs.toInt() == rhs.toInt();
+  } else if (lhs.isDouble() && rhs.isDouble()) {
+    return lhs.toDouble() == rhs.toDouble();
+  } else if (lhs.isNone() && rhs.isNone()) {
     return true;
+  } else if (lhs.isIntList() && rhs.isIntList()) {
+    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
+  } else if (lhs.isTensor() && rhs.isTensor()) {
+    return lhs.toTensor().equal(rhs.toTensor());
   }
 
-  return lhs.toTensor().equal(rhs.toTensor());
+  throw std::runtime_error("Deep equals not implemented for type");
 }
 
 struct AliasAndIValue {
-  AliasAndIValue(
-      const c10::optional<at::AliasInfo>& aliasInfo,
-      const IValue& iValue)
-      : aliasInfo(aliasInfo), iValue(iValue) {}
+  AliasAndIValue(c10::optional<at::AliasInfo> aliasInfo, IValue iValue)
+      : aliasInfo(std::move(aliasInfo)), iValue(std::move(iValue)) {}
 
-  const c10::optional<at::AliasInfo>& aliasInfo;
-  const IValue& iValue;
+  const c10::optional<at::AliasInfo> aliasInfo;
+  const IValue iValue;
 };
 
 // No inputs should alias each other
@@ -83,7 +88,7 @@ void checkInputPreconditions(const Stack& inputs) {
       }
       const auto& lhs = inputs.at(i);
       const auto& rhs = inputs.at(j);
-      JIT_ASSERT(!lhs.isAliasOf(rhs));
+      AT_ASSERT(!lhs.isAliasOf(rhs));
     }
   }
 }
@@ -98,8 +103,8 @@ void checkAliases(
       if (output.iValue.isAliasOf(input.iValue)) {
         const auto inputSet = input.aliasInfo;
         const auto outputSet = output.aliasInfo;
-        JIT_ASSERT(inputSet && outputSet);
-        JIT_ASSERT(inputSet->isSubsetOf(*outputSet));
+        AT_ASSERT(inputSet && outputSet);
+        AT_ASSERT(inputSet->isSubsetOf(*outputSet));
       }
     }
   }
@@ -110,12 +115,12 @@ void checkAliases(
 void checkWrites(
     const std::vector<AliasAndIValue>& inputs,
     const std::vector<IValue>& deepCopiedInputs) {
-  JIT_ASSERT(inputs.size() == deepCopiedInputs.size());
+  AT_ASSERT(inputs.size() == deepCopiedInputs.size());
   for (size_t i = 0; i < inputs.size(); i++) {
     const auto& input = inputs[i];
     const auto& deepCopiedInput = deepCopiedInputs[i];
     if (!input.aliasInfo || !input.aliasInfo->isWrite()) {
-      JIT_ASSERT(deepEquals(input.iValue, deepCopiedInput));
+      AT_ASSERT(deepEquals(input.iValue, deepCopiedInput));
     }
   }
 }
@@ -129,7 +134,7 @@ const Node* findNodeForOp(
       return node;
     }
   }
-  JIT_ASSERT(false);
+  AT_ASSERT(false);
 }
 
 // Handle a few special cases where we need to propagate constants
@@ -178,7 +183,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
 } // namespace
 
 void checkAliasAnnotation(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::vector<IValue> pythonInputs,
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name
@@ -200,7 +205,7 @@ void checkAliasAnnotation(
       if (inputValue) {
         push(stack, *inputValue);
       } else {
-        JIT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
+        AT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
         push(stack, IValue());
       }
     }

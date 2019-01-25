@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from hypothesis import given
 
 
@@ -26,8 +26,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         X[0, 0, 0, 0] = 0
         X[0, 0, 0, 1] = 255
         if order == "NHWC":
-            # NCHW -> NHWC
-            X = X.transpose((0, 2, 3, 1))
+            X = utils.NCHW2NHWC(X)
 
         net = core.Net("test_net")
 
@@ -52,16 +51,14 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
 
         def channel_shuffle_ref(X):
             if order == "NHWC":
-                # NHWC -> NCHW
-                X = X.transpose((0, 3, 1, 2))
+                X = utils.NHWC2NCHW(X)
             Y_r = X.reshape(
                 X.shape[0], groups, X.shape[1] // groups, X.shape[2], X.shape[3]
             )
             Y_trns = Y_r.transpose((0, 2, 1, 3, 4))
             Y_reshaped = Y_trns.reshape(X.shape)
             if order == "NHWC":
-                # NCHW -> NHWC
-                Y_reshaped = Y_reshaped.transpose((0, 2, 3, 1))
+                Y_reshaped = utils.NCHW2NHWC(Y_reshaped)
             return Y_reshaped
 
         Y_ref = channel_shuffle_ref(X)
@@ -80,8 +77,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         )
         X[0, 0, 0, 0] = 0
         X[0, 0, 0, 1] = 255
-        # NCHW -> NHWC
-        X = X.transpose((0, 2, 3, 1))
+        X = utils.NCHW2NHWC(X)
 
         net = core.Net("test_net")
 
@@ -106,16 +102,14 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
 
         def channel_shuffle_ref(X):
             if order == "NHWC":
-                # NHWC -> NCHW
-                X = X.transpose((0, 3, 1, 2))
+                X = utils.NHWC2NCHW(X)
             Y_r = X.reshape(
                 X.shape[0], groups, X.shape[1] // groups, X.shape[2], X.shape[3]
             )
             Y_trns = Y_r.transpose((0, 2, 1, 3, 4))
             Y_reshaped = Y_trns.reshape(X.shape)
             if order == "NHWC":
-                # NCHW -> NHWC
-                Y_reshaped = Y_reshaped.transpose((0, 2, 3, 1))
+                Y_reshaped = utils.NCHW2NHWC(Y_reshaped)
             return Y_reshaped
 
         Y_ref = channel_shuffle_ref(X)

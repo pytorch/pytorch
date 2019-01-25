@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime
 import os
 import shutil
@@ -10,6 +11,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._six
@@ -132,14 +134,36 @@ def shell(command, cwd=None):
         p.wait()
 
 
+@contextmanager
+def cd(path):
+    if not os.path.isabs(path):
+        raise RuntimeError('Can only cd to absolute path, got: {}'.format(path))
+    orig_path = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(orig_path)
+
+
 def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    command = executable + [test_module + '.py'] + unittest_args
-    return shell(command, test_directory)
+    argv = [test_module + '.py'] + unittest_args
+
+    # Forking after HIP is initialized could trigger random
+    # ihipException issue, see
+    # https://github.com/pytorch/pytorch/issues/14497
+    if TEST_WITH_ROCM:
+        with cd(test_directory):
+            res = unittest.main(argv=argv, module=test_module, exit=False).result
+        return int(bool(len(res.failures) + len(res.errors)))
+    else:
+        command = executable + argv
+        return shell(command, test_directory)
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
@@ -209,10 +233,10 @@ def test_distributed(executable, test_module, test_directory, options):
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
-                    devnull = open(os.devnull, 'w')
-                    noprefix_opt = '--noprefix' if subprocess.call(
-                        'mpiexec -n 1 --noprefix bash -c ""', shell=True,
-                        stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
+                    with open(os.devnull, 'w') as devnull:
+                        noprefix_opt = '--noprefix' if subprocess.call(
+                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
                     mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 
@@ -316,9 +340,9 @@ def get_executable_command(options):
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
-    """Find the index of the first or last occurrence of a given test/test module in the list of seleceted tests.
+    """Find the index of the first or last occurrence of a given test/test module in the list of selected tests.
 
-    This function is used to determine the indexes when slicing the list of selected tests when
+    This function is used to determine the indices when slicing the list of selected tests when
     ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
 
     :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests

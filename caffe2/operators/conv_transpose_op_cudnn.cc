@@ -368,7 +368,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   CAFFE_ENFORCE_EQ(X.dim(), 4);
   CAFFE_ENFORCE_EQ(filter.dim(), 4);
   int C = 0;
@@ -413,7 +413,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   }
   // Since we only handle LegacyPadding::NOTSET, we don't need to
   // compute padding.
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.sizes() != cudnn_input_dims_);
@@ -644,8 +644,11 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
 
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       // Compute the gradient w.r.t. the input.
-      auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-      dX->ResizeLike(X);
+
+      auto* dX = Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T>());
       CUDNN_ENFORCE(cudnnConvolutionForward(
           state->cudnn_handle(),
           cudnnTypeWrapper<T>::kOne(),

@@ -7,7 +7,6 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   const auto& X = Input(0);
   const auto& a = Input(1);
   const auto& b = Input(2);
-  auto* Y = Output(0);
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
@@ -18,7 +17,7 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(b.dim(), 1, b.dim());
   CAFFE_ENFORCE_EQ(b.size(0), D, b.dim());
 
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   const float* X_data = X.data<float>();
   const float* a_data = a.data<float>();
@@ -48,12 +47,9 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
   CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
 
-  auto* g_X = Output(0);
-  auto *g_a = Output(1);
-  auto *g_b = Output(2);
-  g_X->ResizeLike(X);
-  g_a->ResizeLike(a);
-  g_b->ResizeLike(a);
+  auto* g_X = Output(0, X.sizes(), at::dtype<float>());
+  auto* g_a = Output(1, a.sizes(), at::dtype<float>());
+  auto* g_b = Output(2, a.sizes(), at::dtype<float>());
 
   const float* g_o_data = g_o.data<float>();
   const float* X_data = X.data<float>();

@@ -76,6 +76,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
 
   ProfDAGProtos GetOperatorStats() const;
   ProfDAGProtos GetPerOperatorCost() const;
+  ProfDAGReport GetProfReport() const;
 
  protected:
   bool canSchedule(

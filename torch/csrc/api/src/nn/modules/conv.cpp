@@ -59,7 +59,16 @@ void ConvImpl<D, Derived>::reset() {
   }
 }
 
-Tensor Conv1dImpl::forward(Tensor input) {
+template <size_t D, typename Derived>
+void ConvImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Conv" << D << "d"
+         << "(input_channels=" << options.input_channels_
+         << ", output_channels=" << options.output_channels_
+         << ", kernel_size=" << options.kernel_size_
+         << ", stride=" << options.stride_ << ")";
+}
+
+Tensor Conv1dImpl::forward(const Tensor& input) {
   if (options.transposed_) {
     return torch::conv_transpose1d(
         input,
@@ -81,7 +90,7 @@ Tensor Conv1dImpl::forward(Tensor input) {
       options.groups_);
 }
 
-Tensor Conv2dImpl::forward(Tensor input) {
+Tensor Conv2dImpl::forward(const Tensor& input) {
   if (options.transposed_) {
     return torch::conv_transpose2d(
         input,
@@ -103,7 +112,7 @@ Tensor Conv2dImpl::forward(Tensor input) {
       options.groups_);
 }
 
-Tensor Conv3dImpl::forward(Tensor input) {
+Tensor Conv3dImpl::forward(const Tensor& input) {
   if (options.transposed_) {
     return torch::conv_transpose3d(
         input,

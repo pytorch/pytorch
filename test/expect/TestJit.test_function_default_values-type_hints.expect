@@ -1,8 +1,0 @@
-graph(%x : Tensor
-      %a : float
-      %b : int) {
-  %3 : int = prim::Constant[value=1]()
-  %4 : Tensor = aten::add(%x, %a, %3)
-  %5 : Tensor = aten::add(%4, %b, %3)
-  return (%5);
-}

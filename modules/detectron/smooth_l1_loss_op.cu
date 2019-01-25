@@ -66,7 +66,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& Y         = Input(1);
   auto& alpha_in  = Input(2);
   auto& alpha_out = Input(3);
-  auto* avg_loss  = Output(0);
+
 
   int N = Y.dim32(0);
   // Require the same number of elements along axis 0 (batch size), but
@@ -78,7 +78,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_in.size());
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
 
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   buff_.ResizeLike(Y);
 
   // Difference
@@ -128,7 +128,6 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& alpha_in   = Input(2);
   auto& alpha_out  = Input(3);
   auto& d_avg_loss = Input(4);  // gradient of net w.r.t. avg_loss ("gradOuput")
-  auto* d_Y_hat    = Output(0); // gradient of net w.r.t. Y_hat ("gradInput")
   // We intentially don't compute gradients for Y, alpha_{in,out} since they
   // are not needed (can change in the future if desired)
 
@@ -143,7 +142,7 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
   CAFFE_ENFORCE_EQ(d_avg_loss.size(), 1);
 
-  d_Y_hat->ResizeLike(Y_hat);
+  auto* d_Y_hat = Output(0, Y_hat.sizes(), at::dtype<float>()); // gradient of net w.r.t. Y_hat ("gradInput")
   buff_.ResizeLike(Y);
 
   // Difference

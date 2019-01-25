@@ -119,7 +119,8 @@ struct RegisterCUDADispatch {
 template <typename FnPtr, typename T>
 struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.hip_dispatch_ptr = value;
+    // TODO: make this point at hip_dispatch_ptr
+    stub.cuda_dispatch_ptr = value;
   }
 };
 } // anonymous namespace

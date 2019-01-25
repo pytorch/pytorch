@@ -7,7 +7,7 @@ namespace at {
 template <typename FnPtr>
 void register_extension_backend_op(
     Backend backend,
-    const std::string schema,
+    const char * schema,
     FnPtr fn) {
       switch (backend) {
         ${extension_backend_register_switches}
