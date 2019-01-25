@@ -189,7 +189,6 @@
   cname: put
   variants: function
   backends:
-    - CPU
     - CUDA
   return: argument 0
   arguments:
@@ -1000,7 +999,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1015,7 +1013,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: lgamma
   variants: function
@@ -2259,7 +2256,6 @@
     - Float
     - Double
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -2358,7 +2354,6 @@
     - Float
     - Double
   backends:
-    - CPU
     - CUDA
   variants:
     - function
