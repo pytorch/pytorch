@@ -25,6 +25,26 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 endif()
 
+# For MSVC,
+# 1. Replace /Zi and /ZI with /Z7
+# 2. Switch off incremental linking in debug builds
+if (MSVC)
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    if(${flag_var} MATCHES "/Z[iI]")
+      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+    endif(${flag_var} MATCHES "/Z[iI]")
+  endforeach(flag_var)
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
+      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+endif(MSVC)
+
 # ---[ Threads
 include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
 if (TARGET Threads::Threads)
@@ -187,6 +207,7 @@ if(USE_QNNPACK)
       set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
       set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
       set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
       add_subdirectory(
         "${QNNPACK_SOURCE_DIR}"
         "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
@@ -236,6 +257,7 @@ if (NOT TARGET cpuinfo)
   set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
   set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
   set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
   if(MSVC)
     if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
@@ -319,7 +341,7 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
       "Not compiling with FBGEMM. "
@@ -348,6 +370,9 @@ endif()
 if(USE_FBGEMM)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
   include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+  caffe2_update_option(USE_FBGEMM ON)
+else()
+  caffe2_update_option(USE_FBGEMM OFF)
 endif()
 
 
@@ -632,37 +657,12 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    message(STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
-    if(DARWIN_VERSION GREATER 9)
-      set(APPLE_OPENMP_SUCKS 1)
-    endif(DARWIN_VERSION GREATER 9)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      message(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
-      message(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
-      add_compile_options(-Wno-unknown-pragmas)
-      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    endif()
-  endif()
-
-  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
-    find_package(OpenMP)
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  endif()
-
+  find_package(OpenMP)
   if(OPENMP_FOUND)
     message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
@@ -747,49 +747,43 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
 
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+       list(APPEND HIP_CXX_FLAGS -g)
+       list(APPEND HIP_CXX_FLAGS -O0)
+    endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
     list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
 
-    set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    set(Caffe2_HIP_INCLUDE
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
 
     # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
+    hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT BUILD_ATEN_MOBILE)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
-    endif()
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
-    # TODO: Currently pytorch hipify script uses a feature called
-    # "disabled_modules" that effectively ifdef out a file, but
-    # without doing extra processing in the callers, which results in
-    # some unresolved symbols in the shared lib
-    # (libcaffe2_hip.so). Remove this when all disabled_modules are
-    # eliminated.
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
+    # Note [rocblas & rocfft cmake bug]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      roc::rocblas roc::rocfft)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
 
-# ---[ ROCm
-if(USE_ROCM)
- include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${ROCBLAS_PATH}/include)
- include_directories(SYSTEM ${ROCFFT_PATH}/include)
- include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
- include_directories(SYSTEM ${HIPRAND_PATH}/include)
- include_directories(SYSTEM ${ROCRAND_PATH}/include)
- include_directories(SYSTEM ${THRUST_PATH})
+  include_directories(SYSTEM ${HIP_PATH}/include)
+  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+  include_directories(SYSTEM ${ROCFFT_PATH}/include)
+  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
+  include_directories(SYSTEM ${HIPRAND_PATH}/include)
+  include_directories(SYSTEM ${ROCRAND_PATH}/include)
+  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -854,6 +848,7 @@ if(USE_GLOO)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
     endif()
+    add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
 endif()
 
@@ -867,23 +862,13 @@ if(USE_PROF)
   endif()
 endif()
 
-if (USE_MOBILE_OPENGL)
-  if (ANDROID)
-    list(APPEND Caffe2_DEPENDENCY_LIBS EGL GLESv2)
-  elseif (IOS)
-    message(STATUS "TODO item for adding ios opengl dependency")
-  else()
-    message(WARNING "mobile opengl is only used in android or ios builds.")
-    caffe2_update_option(USE_MOBILE_OPENGL OFF)
-  endif()
-endif()
-
 # ---[ ARM Compute Library: check compatibility.
 if (USE_ACL)
   if (NOT ANDROID)
     message(WARNING "ARM Compute Library is only supported for Android builds.")
     caffe2_update_option(USE_ACL OFF)
   else()
+    list(APPEND Caffe2_DEPENDENCY_LIBS EGL GLESv2)
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
       # 32-bit ARM (armv7, armv7-a, armv7l, etc)
       set(ACL_ARCH "armv7a")
@@ -1107,13 +1092,49 @@ if (NOT BUILD_ATEN_MOBILE)
   OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
   IF (NOT NDEBUG)
     MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
+
+  # OpenMP support?
+  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+    IF (DARWIN_VERSION GREATER 9)
+      SET(APPLE_OPENMP_SUCKS 1)
+    ENDIF (DARWIN_VERSION GREATER 9)
+    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+      MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+      add_compile_options(-Wno-unknown-pragmas)
+      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    ENDIF()
+  ENDIF()
+
+  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+    FIND_PACKAGE(OpenMP)
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+
+    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  ENDIF()
+
+  IF (OPENMP_FOUND)
+    MESSAGE(STATUS "Compiling with OpenMP support")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+  ENDIF()
+
+
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   FIND_PACKAGE(MAGMA)
@@ -1308,11 +1329,10 @@ if (NOT BUILD_ATEN_MOBILE)
   SET(AT_MKLDNN_ENABLED 0)
   SET(CAFFE2_USE_MKLDNN OFF)
   IF (USE_MKLDNN)
-    FIND_PACKAGE(MKLDNN)
     INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     IF(MKLDNN_FOUND)
       SET(AT_MKLDNN_ENABLED 1)
-      INCLUDE_DIRECTORIES(SYSTEM ${MKLDNN_INCLUDE_DIR})
+      INCLUDE_DIRECTORIES(BEFORE SYSTEM ${MKLDNN_INCLUDE_DIR})
       IF(BUILD_CAFFE2_OPS)
         SET(CAFFE2_USE_MKLDNN ON)
         LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)

@@ -29,8 +29,8 @@ IMAGE_COMMIT_TAG = os.getenv('IMAGE_COMMIT_TAG')
 
 session = boto3.session.Session()
 s3 = session.resource('s3')
-data = open(sys.argv[1], 'rb')
-s3.Bucket('ossci-windows-build').put_object(Key='pytorch/'+IMAGE_COMMIT_TAG+'.7z', Body=data)
+with open(sys.argv[1], 'rb') as data:
+  s3.Bucket('ossci-windows-build').put_object(Key='pytorch/'+IMAGE_COMMIT_TAG+'.7z', Body=data)
 object_acl = s3.ObjectAcl('ossci-windows-build','pytorch/'+IMAGE_COMMIT_TAG+'.7z')
 response = object_acl.put(ACL='public-read')
 
@@ -141,6 +141,11 @@ if not "%USE_CUDA%"=="0" (
     sccache --show-stats
     sccache --zero-stats
     rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        del /S /Q %%i
+      )
+    )
     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
   )
 

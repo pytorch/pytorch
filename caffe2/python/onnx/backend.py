@@ -55,7 +55,7 @@ def force_unicode(s):
 
 def get_device_option(device):
     m = {DeviceType.CPU: caffe2_pb2.CPU,
-         DeviceType.CUDA: caffe2_pb2.CUDA}
+         DeviceType.CUDA: workspace.GpuDeviceType}
     return core.DeviceOption(m[device.type], device.device_id)
 
 
@@ -644,7 +644,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
@@ -915,8 +918,8 @@ class Caffe2Backend(Backend):
         device = Device(device_str)
         if device.type == DeviceType.CPU:
             return True
-        elif device.type == DeviceType.CUDA:
-            return workspace.has_gpu_support
+        elif core.IsGPUDeviceType(device.type):
+            return workspace.has_gpu_support or workspace.has_hip_support
         return False
 
     @classmethod

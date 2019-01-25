@@ -81,83 +81,86 @@ static void EmbeddingLookupGenericSlow(
 }
 
 // Proxy back to generic implementation
-#define EMBEDDING_SPECIALIZATION(                                                                      \
-    IndexTypeName,                                                                                     \
-    IndexType,                                                                                         \
-    InTypeName,                                                                                        \
-    InType,                                                                                            \
-    OutTypeName,                                                                                       \
-    OutType,                                                                                           \
-    IS_WEIGHT_POSITIONAL)                                                                              \
-  void                                                                                                 \
-      EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__base( \
-          const int64_t block_size,                                                                    \
-          const int64_t output_size,                                                                   \
-          const int64_t index_size,                                                                    \
-          const int64_t data_size,                                                                     \
-          const InType* input,                                                                         \
-          const IndexType* indices,                                                                    \
-          const int* lengths,                                                                          \
-          const float* weights,                                                                        \
-          const float* scale_bias,                                                                     \
-          bool normalize_by_lengths,                                                                   \
-          OutType* out) {                                                                              \
-    EmbeddingLookupGenericSlow<                                                                        \
-        IndexType,                                                                                     \
-        InType,                                                                                        \
-        OutType,                                                                                       \
-        IS_WEIGHT_POSITIONAL>(                                                                         \
-        block_size,                                                                                    \
-        output_size,                                                                                   \
-        index_size,                                                                                    \
-        data_size,                                                                                     \
-        input,                                                                                         \
-        indices,                                                                                       \
-        lengths,                                                                                       \
-        weights,                                                                                       \
-        scale_bias,                                                                                    \
-        normalize_by_lengths,                                                                          \
-        out);                                                                                          \
-  }                                                                                                    \
-  template <>                                                                                          \
-  void EmbeddingLookup<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                              \
-      const int64_t block_size,                                                                        \
-      const int64_t output_size,                                                                       \
-      const int64_t index_size,                                                                        \
-      const int64_t data_size,                                                                         \
-      const InType* input,                                                                             \
-      const IndexType* indices,                                                                        \
-      const int* lengths,                                                                              \
-      const float* weights,                                                                            \
-      const float* scale_bias,                                                                         \
-      bool normalize_by_lengths,                                                                       \
-      OutType* out) {                                                                                  \
-    AVX2_FMA_DO(                                                                                       \
-        EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL,       \
-        block_size,                                                                                    \
-        output_size,                                                                                   \
-        index_size,                                                                                    \
-        data_size,                                                                                     \
-        input,                                                                                         \
-        indices,                                                                                       \
-        lengths,                                                                                       \
-        weights,                                                                                       \
-        scale_bias,                                                                                    \
-        normalize_by_lengths,                                                                          \
-        out);                                                                                          \
-    BASE_DO(                                                                                           \
-        EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL,       \
-        block_size,                                                                                    \
-        output_size,                                                                                   \
-        index_size,                                                                                    \
-        data_size,                                                                                     \
-        input,                                                                                         \
-        indices,                                                                                       \
-        lengths,                                                                                       \
-        weights,                                                                                       \
-        scale_bias,                                                                                    \
-        normalize_by_lengths,                                                                          \
-        out);                                                                                          \
+#define EMBEDDING_SPECIALIZATION(                                                                          \
+    IndexTypeName,                                                                                         \
+    IndexType,                                                                                             \
+    InTypeName,                                                                                            \
+    InType,                                                                                                \
+    OutTypeName,                                                                                           \
+    OutType,                                                                                               \
+    IS_WEIGHT_POSITIONAL)                                                                                  \
+  void                                                                                                     \
+      EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__base(     \
+          const int64_t block_size,                                                                        \
+          const int64_t output_size,                                                                       \
+          const int64_t index_size,                                                                        \
+          const int64_t data_size,                                                                         \
+          const InType* input,                                                                             \
+          const IndexType* indices,                                                                        \
+          const int* lengths,                                                                              \
+          const float* weights,                                                                            \
+          const float* scale_bias,                                                                         \
+          bool normalize_by_lengths,                                                                       \
+          OutType* out) {                                                                                  \
+    EmbeddingLookupGenericSlow<                                                                            \
+        IndexType,                                                                                         \
+        InType,                                                                                            \
+        OutType,                                                                                           \
+        IS_WEIGHT_POSITIONAL>(                                                                             \
+        block_size,                                                                                        \
+        output_size,                                                                                       \
+        index_size,                                                                                        \
+        data_size,                                                                                         \
+        input,                                                                                             \
+        indices,                                                                                           \
+        lengths,                                                                                           \
+        weights,                                                                                           \
+        scale_bias,                                                                                        \
+        normalize_by_lengths,                                                                              \
+        out);                                                                                              \
+  }                                                                                                        \
+  decltype(                                                                                                \
+      EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__base)     \
+      EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
+  template <>                                                                                              \
+  void EmbeddingLookup<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                                  \
+      const int64_t block_size,                                                                            \
+      const int64_t output_size,                                                                           \
+      const int64_t index_size,                                                                            \
+      const int64_t data_size,                                                                             \
+      const InType* input,                                                                                 \
+      const IndexType* indices,                                                                            \
+      const int* lengths,                                                                                  \
+      const float* weights,                                                                                \
+      const float* scale_bias,                                                                             \
+      bool normalize_by_lengths,                                                                           \
+      OutType* out) {                                                                                      \
+    AVX2_FMA_DO(                                                                                           \
+        EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                        \
+        output_size,                                                                                       \
+        index_size,                                                                                        \
+        data_size,                                                                                         \
+        input,                                                                                             \
+        indices,                                                                                           \
+        lengths,                                                                                           \
+        weights,                                                                                           \
+        scale_bias,                                                                                        \
+        normalize_by_lengths,                                                                              \
+        out);                                                                                              \
+    BASE_DO(                                                                                               \
+        EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                        \
+        output_size,                                                                                       \
+        index_size,                                                                                        \
+        data_size,                                                                                         \
+        input,                                                                                             \
+        indices,                                                                                           \
+        lengths,                                                                                           \
+        weights,                                                                                           \
+        scale_bias,                                                                                        \
+        normalize_by_lengths,                                                                              \
+        out);                                                                                              \
   }
 
 EMBEDDING_SPECIALIZATION(int32_t, int32_t, float, float, float, float, false);

@@ -3,7 +3,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     return()
   endif()
 else()
-  cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -129,7 +129,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
@@ -144,7 +143,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
-  ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
@@ -158,7 +156,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
@@ -189,46 +187,53 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/torch.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
   )
 
-SET(USE_CPU_FUSER 0)
-if (NOT WIN32)
-  SET(USE_CPU_FUSER 1)
-
+if (WIN32)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
+  )
+else ()
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
   )
-endif()
+  if (USE_CUDA AND NOT USE_ROCM)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+    )
+  endif()
+endif ()
 
-SET(USE_CUDA_FUSER 0)
-if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
-  SET(USE_CUDA_FUSER 1)
-
+if (USE_CUDA)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
+    ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   )
-
 endif()
 
-CONFIGURE_FILE(
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/config.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fuser/config.h)
-
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -260,6 +265,7 @@ endif()
 
 if (TORCH_STATIC)
   add_library(torch STATIC ${TORCH_SRCS})
+  target_compile_definitions(torch PUBLIC TORCH_BUILD_STATIC_LIBS)
 else()
   add_library(torch SHARED ${TORCH_SRCS})
 endif()
@@ -331,19 +337,11 @@ if(OPENMP_FOUND)
   if (VERBOSE)
     message(STATUS "Compiling with OpenMP")
   endif()
-  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_compile_options(torch INTERFACE -fopenmp)
   target_link_libraries(torch -fopenmp)
-  #cmake only check for separate OpenMP library on AppleClang 7+
-  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-  if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
-        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
-      target_link_libraries(torch ${OpenMP_libomp_LIBRARY})
-    endif()
-  endif()
 endif()
 
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
@@ -421,6 +419,12 @@ if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
   set_property(TARGET torch PROPERTY CXX_STANDARD 11)
 endif()
 
+# Prevent the unused functions being optimized away
+# Otherwise torch.dll will be linked without caffe2_gpu.dll
+if (MSVC)
+  set_target_properties(torch PROPERTIES LINK_FLAGS "/OPT:NOREF")
+endif(MSVC)
+
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
@@ -432,11 +436,15 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
+if (MSVC AND NOT TORCH_STATIC)
+  install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
 if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
 
-if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT NO_API)
   add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
 endif()
 
@@ -503,6 +511,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
     ${TORCH_SRC_DIR}/csrc/Storage.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp
@@ -573,6 +582,7 @@ if (BUILD_PYTHON)
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc
+    ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
     )
 
@@ -592,13 +602,16 @@ if (BUILD_PYTHON)
 
   set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-  set(TORCH_PYTHON_LINK_FLAGS)
+  set(TORCH_PYTHON_LINK_FLAGS "")
 
   if (MSVC)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    if (NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+    endif()
   elseif (APPLE)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
   else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -611,6 +624,7 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
@@ -622,7 +636,6 @@ if (BUILD_PYTHON)
     if(MSVC)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
       list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES "${NVTOOLEXT_HOME}/include")
-      list(APPEND TORCH_PYTHON_LINK_FLAGS " /FORCE:UNRESOLVED")
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
@@ -657,6 +670,7 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
@@ -705,8 +719,8 @@ if (BUILD_PYTHON)
 
   target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
-  if (TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if (NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
 
   install(TARGETS torch_python

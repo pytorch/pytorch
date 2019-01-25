@@ -157,7 +157,7 @@ void TestCopyBroadcasting(Type& type) {
   }
 }
 void TestAbsValue(Type& type) {
-  Tensor r = at::abs(type.scalarTensor(-3));
+  Tensor r = at::abs(at::scalar_tensor(-3, type.options()));
   ASSERT_EQ_RESOLVED(r.item<int32_t>(), 3);
 }
 /*
@@ -187,7 +187,7 @@ void TestSelect(Type& type) {
 }
 
 void TestZeroDim(Type& type) {
-  Tensor a = type.scalarTensor(4); // rand(type, {1});
+  Tensor a = at::scalar_tensor(4, type.options()); // rand(type, {1});
 
   Tensor b = rand({3, 4}, type);
   ASSERT_EQ_RESOLVED((a + a).dim(), 0);

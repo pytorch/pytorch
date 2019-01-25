@@ -4,7 +4,7 @@
 
 #include "caffe2_dnnlowp_utils.h"
 
-C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 
 namespace caffe2 {
 
@@ -214,7 +214,7 @@ FullyConnectedDNNLowPPackWeightOp::FullyConnectedDNNLowPPackWeightOp(
       axis_w_(this->GetSingleArgument<int32_t>("axis_w", 1)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
     nbits_in_non_outlier_ = this->GetSingleArgument<int>(
-        "nbits_in_non_outlier", FLAGS_dnnlowp_nbits_in_non_outlier);
+        "nbits_in_non_outlier", FLAGS_caffe2_dnnlowp_nbits_in_non_outlier);
   }
 }
 
@@ -261,7 +261,7 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
           ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized));
       int outlier_cnt = Y->W_outlier->ColPtr()[N];
 
-      LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
+      LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
                 << this->debug_def().input(0) << " is "
                 << static_cast<float>(outlier_cnt) / W_quantized.size();
       LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_;
@@ -311,7 +311,7 @@ ConvDNNLowPPackWeightOp::ConvDNNLowPPackWeightOp(
           this->GetSingleArgument<bool>("quantize_groupwise", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
     nbits_in_non_outlier_ = this->GetSingleArgument<int>(
-        "nbits_in_non_outlier", FLAGS_dnnlowp_nbits_in_non_outlier);
+        "nbits_in_non_outlier", FLAGS_caffe2_dnnlowp_nbits_in_non_outlier);
   }
 }
 
@@ -326,7 +326,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3FastPath_() {
       kernel_h() == 3 && kernel_w() == 3 && stride_h() == stride_w() &&
       (stride_h() == 1 || stride_h() == 2) && dilation_h() == 1 &&
       dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 && pad_l() == 1 &&
-      pad_r() == 1 && GetCpuId().avx2() && !quantize_groupwise_;
+      pad_r() == 1 && GetCpuId().avx2();
 }
 
 bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
@@ -345,8 +345,29 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
       this->dilation_[2] == 1 &&
       accumulate(
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
-      GetCpuId().avx2() && !quantize_groupwise_;
+      GetCpuId().avx2();
   return ret;
+}
+
+bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
+      this->kernel_.size() != 2) {
+    return false;
+  }
+
+  auto& filter = InputTensorCPU_(FILTER);
+  const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
+  fbgemm::conv_param_t<> conv_p(
+      1,
+      C,
+      M,
+      {1, 1},
+      group_,
+      {this->kernel_[0], this->kernel_[1]},
+      {this->stride_[0], this->stride_[1]},
+      {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+  return fbgemm::fbgemmOptimizedGConv(conv_p);
 }
 
 bool ConvDNNLowPPackWeightOp::RunOnDevice() {
@@ -397,7 +418,9 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   ComputeColumnOffsets(
       kernel_dim, M, W_quantized.data(), Y->qparams, *Y->column_offsets);
 
-  if (this->debug_def().engine() == "DNNLOWP_ACC16") {
+  // When nbits_in_non_outlier == 0, we fall back to acc32
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" &&
+      nbits_in_non_outlier_ > 0) {
     if (nbits_in_non_outlier_ < 8) {
       Y->W_outlier.reset(ExtractOutlierMatrix(
           group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
@@ -424,6 +447,19 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   } else if (TakeDepthWise3x3x3FastPath_()) {
     Y->W_depthwise_3x3x3.reset(
         new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+  } else if (TakeGConvFastPath_()) {
+    fbgemm::conv_param_t<> conv_p(
+        1,
+        group_ * C_per_group,
+        M,
+        {1, 1},
+        group_,
+        {this->kernel_[0], this->kernel_[1]},
+        {this->stride_[0], this->stride_[1]},
+        {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+    Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+        fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
   } else {
     Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
         fbgemm::matrix_op_t::Transpose,

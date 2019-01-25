@@ -31,8 +31,8 @@ class SquareRootDivideOp final : public Operator<Context> {
   bool DoRunWithType2() {
     auto& data = Input(DATA);
     auto& scale = Input(SCALE);
-    auto* Y = Output(0);
-    Y->ResizeLike(data);
+
+    auto* Y = Output(0, data.sizes(), at::dtype<TData>());
     size_t batchSize = data.size(0);
     size_t exampleSize = data.size_from_dim(1);
     CAFFE_ENFORCE(batchSize == scale.size(0), batchSize, " != ", scale.size(0));

@@ -215,7 +215,9 @@ TEST(SerializeTest, Optim) {
 TEST(SerializeTest, XOR_CUDA) {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
-  auto getLoss = [](Sequential model, uint32_t batch_size, bool is_cuda=false) {
+  auto getLoss = [](Sequential model,
+                    uint32_t batch_size,
+                    bool is_cuda = false) {
     auto inputs = torch::empty({batch_size, 2});
     auto labels = torch::empty({batch_size});
     if (is_cuda) {
@@ -268,4 +270,35 @@ TEST(SerializeTest, XOR_CUDA) {
 
   loss = getLoss(model3, 100, true);
   ASSERT_LT(loss.item<float>(), 0.1);
+}
+
+TEST(
+    SerializeTest,
+    CanSerializeModulesWithIntermediateModulesWithoutParametersOrBuffers) {
+  struct C : torch::nn::Module {
+    C() {
+      register_buffer("foo", torch::ones(5, torch::kInt32));
+    }
+  };
+  struct B : torch::nn::Module {};
+  struct A : torch::nn::Module {
+    A() {
+      register_module("b", std::make_shared<B>());
+      register_module("c", std::make_shared<C>());
+    }
+  };
+  struct M : torch::nn::Module {
+    M() {
+      register_module("a", std::make_shared<A>());
+    }
+  };
+
+  auto out = std::make_shared<M>();
+  std::stringstream ss;
+  torch::save(out, ss);
+  auto in = std::make_shared<M>();
+  torch::load(in, ss);
+
+  const int output = in->named_buffers()["a.c.foo"].sum().item<int>();
+  ASSERT_EQ(output, 5);
 }

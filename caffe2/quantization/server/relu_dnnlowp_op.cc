@@ -7,7 +7,7 @@ namespace caffe2 {
 template <typename T>
 bool ReluDNNLowPOp<T>::RunOnDevice() {
   auto& X = InputIsType<int8::Int8TensorCPU>(0)
-      ? OperatorBase::Input<int8::Int8TensorCPU>(0).t
+      ? (this->template Input<int8::Int8TensorCPU>(0)).t
       : Input(0);
 
   TensorCPU* Y = nullptr;
@@ -65,7 +65,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
   // If input was not quantized, output should be dequantized because ReLU
   // can be inplace.
   if (!X.template IsType<T>()) {
-    Dequantize(
+    fbgemm::Dequantize<T>(
         Y_data, Y->template mutable_data<float>(), Y->numel(), in_qparams);
   }
 

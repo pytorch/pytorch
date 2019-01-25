@@ -8,8 +8,9 @@
 #
 # TODO: Replace this with the root-level CMakeLists.txt
 
+set -e
 if [[ $VERBOSE_SCRIPT == '1' ]]; then
-  set -ex
+  set -x
   report() {
     echo "$@"
   }
@@ -203,6 +204,21 @@ function build_caffe2() {
   if [[ -n $CMAKE_PREFIX_PATH ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
   fi
+  if [[ -n $BLAS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DBLAS=$BLAS")
+  fi
+  if [[ -n $CUDA_NVCC_EXECUTABLE ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE")
+  fi
+  if [[ -n $USE_REDIS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_REDIS=$USE_REDIS")
+  fi
+  if [[ -n $USE_GLOG ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GLOG=$USE_GLOG")
+  fi
+  if [[ -n $USE_GFLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DUSE_GFLAGS=$USE_GFLAGS")
+  fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_COMMAND} $BASE_DIR \
@@ -239,8 +255,6 @@ function build_caffe2() {
 		       -DUSE_QNNPACK=$USE_QNNPACK \
 		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
-		       -DUSE_GLOG=OFF \
-		       -DUSE_GFLAGS=OFF \
 		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
 		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
 		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
@@ -287,21 +301,12 @@ function build_caffe2() {
       fi
 
       for proto_file in $(pwd)/caffe2/proto/*.py; do
-          cp $proto_file "$(pwd)/../caffe2/proto/"
+          # __init__.py is not auto-generated, copying it breaks
+          # mod-times for rebuild logic
+          if [[ "$proto_file" != "$(pwd)/caffe2/proto/__init__.py" ]]; then
+            cp $proto_file "$(pwd)/../caffe2/proto/"
+          fi
       done
-  fi
-
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-      # root/torch/lib/tmp_install/lib
-      report "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
-      for lib in *.dylib; do
-          report "Updating install_name for $(pwd)/$lib"
-          install_name_tool -id @rpath/$lib $lib
-      done
-      popd
   fi
 }
 
@@ -309,15 +314,7 @@ function build_caffe2() {
 mkdir -p $INSTALL_DIR
 
 # Build
-for arg in "$@"; do
-    if [[ "$arg" == "caffe2" ]]; then
-        build_caffe2
-    else
-        pushd "$THIRD_PARTY_DIR"
-        build $arg
-        popd
-    fi
-done
+build_caffe2
 
 pushd $TORCH_LIB_DIR > /dev/null
 
@@ -342,4 +339,23 @@ $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
+
+# Copy the test files to pytorch/caffe2 manually
+# They were built in pytorch/torch/lib/tmp_install/test
+# Why do we do this? So, setup.py has this section called 'package_data' which
+# you need to specify to include non-default files (usually .py files).
+# package_data takes a map from 'python package' to 'globs of files to
+# include'. By 'python package', it means a folder with an __init__.py file
+# that's not excluded in the find_packages call earlier in setup.py. So to
+# include our cpp_test into the site-packages folder in
+# site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
+# root caffe2 folder and then tell setup.py to include them. Having another
+# folder like site-packages/caffe2_cpp_test would also be possible by adding a
+# caffe2_cpp_test folder to pytorch with an __init__.py in it.
+if [[ "$INSTALL_TEST" == "ON" ]]; then
+    echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
+    mkdir -p "$BASE_DIR/caffe2/cpp_test/"
+    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+fi
+
 popd > /dev/null

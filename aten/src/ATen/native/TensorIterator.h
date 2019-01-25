@@ -123,7 +123,7 @@ struct CAFFE2_API TensorIterator {
 
   using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
 
-  void foreach_reduced_elt(const loop_subiter_t& loop);
+  void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
@@ -224,6 +224,11 @@ struct CAFFE2_API TensorIterator {
   /// reductions.
   bool should_accumulate() const { return accumulate_; }
 
+  /// Whether this iterator produces the actual output,
+  /// as opposed to something that will be accumulated further. Only relevant for
+  /// CUDA reductions.
+  bool is_final_output() const { return final_output_; }
+
 protected:
   void mark_outputs();
   void compute_shape();
@@ -247,6 +252,7 @@ protected:
   bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
+  bool final_output_ = true;
 };
 
 struct TensorIterator::Builder {

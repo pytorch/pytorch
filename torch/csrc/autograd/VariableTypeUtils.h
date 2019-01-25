@@ -71,7 +71,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Functio
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        var.rebase_history({grad_fn, output_nr});
+        var.rebase_history({std::move(grad_fn), output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }
@@ -153,7 +153,7 @@ inline Tensor as_variable(Tensor tensor) {
 
 inline std::vector<Tensor> as_variable(TensorList tl) {
   return fmap(tl, [](const Tensor& t) -> Tensor {
-      return make_variable(std::move(t), /*requires_grad=*/false);
+      return make_variable(t, /*requires_grad=*/false);
   });
 }
 

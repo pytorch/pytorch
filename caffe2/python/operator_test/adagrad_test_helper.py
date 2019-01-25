@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from functools import partial
+
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 from caffe2.python import core
@@ -101,14 +103,20 @@ def adagrad_sparse_test_helper(
     def ref_sparse(param, momentum, indices, grad, lr, ref_using_fp16=False):
         param_out = np.copy(param)
         momentum_out = np.copy(momentum)
+        # Need to do this because it's possible ref_adagrad's using_fp16 could
+        # have been already specialized.
+        ref_adagrad_temp = (
+            partial(ref_adagrad, using_fp16=ref_using_fp16)
+            if ref_using_fp16
+            else ref_adagrad
+        )
         for i, index in enumerate(indices):
-            param_out[index], momentum_out[index] = ref_adagrad(
+            param_out[index], momentum_out[index] = ref_adagrad_temp(
                 param[index],
                 momentum[index],
                 grad[i],
                 lr,
                 epsilon,
-                using_fp16=ref_using_fp16,
             )
         return (param_out, momentum_out)
 

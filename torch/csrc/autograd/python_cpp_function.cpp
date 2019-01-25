@@ -198,7 +198,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
+PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
 {
   static DefaultFunctionType default_type;
 

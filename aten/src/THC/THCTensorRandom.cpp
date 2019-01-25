@@ -87,7 +87,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state)
   return gen;
 }
 
-struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state)
+curandStateMtgp32* THCRandom_generatorStates(THCState* state)
 {
   THCGenerator* gen = THCRandom_getGenerator(state);
   return gen->state.gen_states;

@@ -5,7 +5,6 @@ set(caffe2_dnnlowp_avx2_ops_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/group_norm_dnnlowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/relu_dnnlowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/transpose.cc"
-  "${CMAKE_CURRENT_SOURCE_DIR}/dnnlowp.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/norm_minimization_avx2.cc")
 
 # ---[ CPU files only
@@ -19,6 +18,7 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/conv_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/conv_relu_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/dequantize_dnnlowp_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/dnnlowp.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/dnnlowp_partition.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_add_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_linear_dnnlowp_op.cc"
