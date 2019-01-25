@@ -171,6 +171,8 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is corrected used.
                          (default: False)
+        remove_null_grads: set to True to support cases where some paramters may
+                        not receive gradients at every step.  (default: False)
 
     Attributes:
         module (Module): the module to be parallelized
@@ -182,7 +184,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
-                 check_reduction=False):
+                 check_reduction=False, remove_null_grads=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -204,6 +206,7 @@ class DistributedDataParallel(Module):
         self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
         self.check_reduction = check_reduction
+        self.remove_null_grads = remove_null_grads
 
         MB = 1024 * 1024
 
@@ -472,9 +475,14 @@ class DistributedDataParallel(Module):
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):
-        # _queue_reduction will use a seperate CUDA stream to coalesce
+        # _queue_reduction will use a separate CUDA stream to coalesce
         # the small tensors to achieve more parallelisms, before passing the
         # coalesced tensor into the c10d CUDA stream for reduction
+        if self.remove_null_grads:
+            for idx, device_grads in enumerate(self.buckets[bucket_idx]):
+                self.buckets[bucket_idx][idx] = [
+                    grad for grad in device_grads if grad is not None
+                ]
         result = dist._queue_reduction(self.process_group,
                                        self.buckets[bucket_idx],
                                        self.device_ids)
@@ -483,7 +491,7 @@ class DistributedDataParallel(Module):
 
     def _sync_reduction_works(self):
         # Now only work on the first GPU of self.device_ids
-        # _sync_reduction will use a seperate CUDA stream to uncoalesce
+        # _sync_reduction will use a separate CUDA stream to uncoalesce
         # the coalesced tensors to achieve more parallelisms
         for bucket_idx, grads_batch in enumerate(self.buckets):
             dist._sync_reduction(self.reduction_works[bucket_idx],
