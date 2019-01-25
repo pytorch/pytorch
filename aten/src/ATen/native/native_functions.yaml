@@ -1016,7 +1016,7 @@
 - func: _cufft_clear_plan_cache() -> void
   device_guard: False
 
-- func: index(Tensor self, Tensor[] indices) -> Tensor
+- func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py

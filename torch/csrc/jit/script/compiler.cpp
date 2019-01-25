@@ -1909,7 +1909,7 @@ struct to_ir {
           type,
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
-      if (!expr->type()->isSubtypeOf(type)) {
+      if (!type->isSubtypeOf(expr->type())) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str();
@@ -2226,7 +2226,7 @@ struct to_ir {
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (*v->type() != *elem_type) {
+          if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
@@ -2318,7 +2318,7 @@ struct to_ir {
       Value* input,
       at::ArrayRef<Value*> indices) {
     auto* index =
-        graph->insertNode(graph->createList(DynamicType::get(), indices))
+        graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
     return emitBuiltinCall(
         loc, *graph, aten::index, c10::nullopt, {input, index}, {}, true);
@@ -2355,7 +2355,7 @@ struct to_ir {
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
-      } else if (index->type()->isSubtypeOf(DynamicType::get())) {
+      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
         handle_tensor(index);
         continue;
       }
@@ -2368,7 +2368,8 @@ struct to_ir {
     // Convert NULL tensorIndices to undefined tensors to pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index = graph->insertNode(graph->createUndefined())->output();
+        index =
+            graph->insertNode(graph->createNone(DynamicType::get()))->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);

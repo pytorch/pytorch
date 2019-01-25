@@ -1,8 +1,7 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -84,13 +83,10 @@ Value* tryConvertToType(
 
   if (value->type()->isSubtypeOf(NoneType::get()) &&
       !concrete_type->isSubtypeOf(NoneType::get())) {
-    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
-      // create undefined tensor when None pass to a optional[tensor] formal arg
-      value = graph.insertNode(graph.createUndefined())->output();
-    } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
-      value =
-          graph.insertNode(graph.createNone(optional_type->getElementType()))
-              ->output();
+    if (concrete_type->cast<OptionalType>()) {
+      value->setType(concrete_type);
+    } else {
+      value->setType(OptionalType::create(concrete_type));
     }
   }
 
@@ -212,7 +208,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (allow_conversions && arg.type()->kind() ==
+      if (allow_conversions &&
+          arg.type()->kind() ==
               TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],
                       // otherwise a single int is a valid input
@@ -349,7 +346,6 @@ static std::string prefixLine(
   return ss.str();
 }
 
-
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
@@ -412,8 +408,9 @@ Value* emitBuiltinCall(
     const auto& user_function_name = name.toQualString();
     error << "unknown builtin op: " << user_function_name << "\n";
     if (close_symbols.size() == 0) {
-      error << "Could not find any similar ops to " << user_function_name
-        << ". This op may not exist or may not be currently supported in TorchScript\n";
+      error
+          << "Could not find any similar ops to " << user_function_name
+          << ". This op may not exist or may not be currently supported in TorchScript\n";
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {

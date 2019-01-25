@@ -1,7 +1,7 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
-#include <ATen/core/jit_type.h>
 
 #include <ATen/core/function_schema.h>
 

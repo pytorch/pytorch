@@ -1,12 +1,11 @@
 #pragma once
 #include <ATen/ATen.h>
 
-#include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/ivalue.h>
 
 namespace torch {
 namespace jit {
 
-using c10::IValue;
 using Stack = std::vector<IValue>;
 using Operation = std::function<int(Stack&)>;
 
@@ -66,7 +65,8 @@ static inline void pop(Stack& stack, Types&... args) {
 }
 template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
-  std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
+  std::initializer_list<int>{
+      (stack.emplace_back(std::forward<Types>(args)), 0)...};
 }
 
 // The packer here is carefully written not to make any unnecessary

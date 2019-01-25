@@ -19,8 +19,8 @@ except ImportError:
 # processing by downstream tools. This will helps us avoid having to prematurely
 # change all downstream tools to detect these new types.
 def temp_type_translations(typ):
-    # Enables Tensor[] by translating to legacy TensorList. See [temp translations]
-    if typ == 'Tensor[]':
+    # Enables Tensor[] and Tensor?[] by translating to legacy TensorList. See [temp translations]
+    if typ == 'Tensor[]' or typ == 'Tensor?[]':
         return 'TensorList'
     # Enables int[] by translating to legacy IntList. See [temp translations]
     if typ == 'int[]':
@@ -119,7 +119,7 @@ def parse_arguments(args, func_decl, func_name, func_return):
 
         typ = sanitize_types(t)
         assert len(typ) == 1
-        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
+        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': '?' in t}
         # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
         match = re.match(r'int\[(\d+)\]', argument_dict['type'])
         if match:

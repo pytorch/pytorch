@@ -3407,7 +3407,6 @@ a")
 
             formals = ''.join(map(', {}'.format, formals))
             inputs = [tensor] + values
-
             self._check_code(template.format(formals=formals, expr=indexing),
                              "func", inputs)
 
@@ -10290,6 +10289,11 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_2',
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
+
+    # This fails because undefined tensor syntax
+    # TODO: remove it when we remove undefined tensor syntax in tracer
+    'test___getitem___adv_index_mid',
+    'test___getitem___adv_index_end',
 }
 
 EXCLUDE_TYPE_CHECK = {

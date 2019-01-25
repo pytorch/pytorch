@@ -73,7 +73,10 @@ def jit_type_of(arg):
         typ = 'int[{}]'.format(arg['size'])
 
     if arg.get('is_nullable') and '?' not in typ:
-        typ = '{}?'.format(typ)
+        if typ == 'Tensor[]':
+            typ = 'Tensor?[]'
+        else:
+            typ = '{}?'.format(typ)
     return typ
 
 
@@ -88,6 +91,7 @@ FROM_IVALUE = {
     'ScalarType': '{}.toScalarType()',
     'ScalarType?': '{}.toOptional<ScalarType>()',
     'Tensor': '{}.toTensor()',
+    'Tensor?': 'toOptionalTensor({})',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
     'double': '{}.toDouble()',
@@ -103,6 +107,9 @@ FROM_IVALUE = {
 
 def from_ivalue(arg, value):
     simple_type = arg['simple_type']
+
+    if arg.get('is_nullable') and '?' not in simple_type and simple_type != 'TensorList':
+        simple_type = '{}?'.format(simple_type)
     return FROM_IVALUE[simple_type].format(value)
 
 
