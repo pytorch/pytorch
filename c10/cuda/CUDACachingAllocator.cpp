@@ -647,7 +647,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
       dev,
       [handle, curr_device](void *ptr) {
         cuda::CUDAGuard device_guard(curr_device);
-        std::lock_guard<std::mutex> lock(IpcMutex);
+        std::lock_guard<std::mutex> nlock(IpcMutex);
         C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;
