@@ -1214,11 +1214,18 @@ jobs:
 
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
-          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
-            # Do a dry_run of the docs build. This will build the docs but not push them.
-            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          else
+          # master branch docs push
+          if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
             export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # stable release docs push. We keep an eternal PR open for merging
+          # v1.0.1 -> master; everytime v1.0.1 is updated the following is run.
+          elif [[ "${CIRCLE_BRANCH}" == "v1.0.1" ]]; then
+            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.0.0 dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # For open PRs: Do a dry_run of the docs build, don't push build
+          else
+            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
