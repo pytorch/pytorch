@@ -58,6 +58,13 @@ signature.
   don't commit them to memory.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
+- `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
+  In general annotations can be defined via the following four situtations
+  `Tensor(a)` - Tensor is in set a
+  `Tensor(a!)` - it is also written to
+  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  `Tensor(a! -> a|b)` - Tensor is in set a, written to, and after the write is in set a AND b.
+  For more details on when and why this needs to happen, please see the section on variants.
 - `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
@@ -70,9 +77,7 @@ signature.
   to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
   `float` and `int` argument types should suffice for most algorithms.
 - `Generator?`, the state for a random number generator,
-- `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
-  this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
-  argument parser both in ATen and in PyTorch.)
+- `bool[N]` (where N is `1-4`).
 - `TensorOptions`.  Tensor options provide information about how a
   tensor should be constructed; it is most useful when you are writing a
   factory function, where you have no `Tensor` inputs and thus
@@ -104,9 +109,7 @@ factory while another is not.
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
-include the result Tensor, you need to call the argument `Tensor result`. And if there are more
-than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
+least). For more details please see the section on `variants`.
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -185,6 +188,42 @@ When should you also generate a method variant? Tensor operations as methods
 are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
+
+As we progress along our schema unification of the `func` schema with the JIT
+signatue schema, we must introduce features that allow us to increase compliance.
+One of these features are Tensor annotations. As of now we use naming conventions
+to indicate whether an argument of a function is going to be mutated and returned.
+
+There are two typical situations in which we mutate the memory of an argument in the Python
+frontend:
+a) For an inplace operations such as `self.abs_()`
+b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
+
+In order to provide implementations for these Python functions the legacy schema
+requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`, 
+`abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
+
+Now, as we move towards the unification, we use different syntax to represent some of
+this using annotations and translate to the legacy schema for the downstream consumers
+such as the C++ code generation.
+
+For this schema we restrict ourselves to `Tensor(a)` and `Tensor(a!)`. If two Tensors
+carry the same annotation, they both *may* represent the same memory. A write annotation,
+as indicated by an exclamation mark, indicates that they both *may* also be written to.
+
+Let's revisit the previous three situtations
+  - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
+  - `abs_(Tensor(a!) self) -> Tensor(a!)`
+    self may be written to and returned. The annotation indicates that the return value.
+    This indicates an inplace function and by convention ends in a single '\_'. Moving forward
+    we won't need the '\_', but we preserve it for now.
+  - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
+    In the Python frontend out can be passed as a keyword argument and if so may be written to. 
+    In this case it indicates the schema for a function that must accept `out` as this does not
+    provide a default argument. The idea behind representing this as a optional argument is to
+    document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
+    As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
+    `Tensor out1` in the context of multiple arguments.
 
 ### `dispatch`
 

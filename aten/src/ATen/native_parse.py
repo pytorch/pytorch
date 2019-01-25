@@ -177,7 +177,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
         "as can be passed as output.".format(name)
 
     if name.endswith('_out'):
-        raise RuntimeError("Native function {} may not be suffixed with _out as we transistion to a unified schema. "
+        raise RuntimeError("Native function {} may not be suffixed with _out as we transition to a unified schema. "
                            "Otherwise you will cause confusion amongst consumers of native functions.".format(name))
 
     if is_out_fn and func_variants not in [[], 'function', ['function']]:
@@ -189,7 +189,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
         assert len(arguments_out) == 0, "func {} is not marked as output yet contains output " \
             "keyword arguments".format(name)
 
-    # Explicit checking for void is a hack and should disappear after a more
+    # TODO: Explicit checking for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
     if declaration['inplace'] and len(func_return) > 0 and func_return[0]['type'] != "void":
         found_self = False
