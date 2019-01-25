@@ -101,6 +101,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
 fi
 
+echo "Running Python tests with"
+pip freeze
+conda list || true
+
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
