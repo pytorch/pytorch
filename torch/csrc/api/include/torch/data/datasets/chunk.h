@@ -383,10 +383,8 @@ class ChunkDataset final
         }
         UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_id);
         if (data.empty()) {
-          AT_WARN("Chunk with index ", std::to_string(chunk_id),
-          " is empty. Skip and move to the next chunk.");
-
-          // skip the current chunk data and move to the next.
+          // if the chunk is empty, skip the current chunk data and move on to
+          // the next.
           batch_buffer_->skip_chunk();
         }
         else {
