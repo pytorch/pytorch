@@ -392,8 +392,9 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    b = b.type_as(a)
-                    b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
+                    if a.device.type == 'cpu' and a.dtype == torch.half:
+                        a = a.float()
+                    b = b.to(a)
                     # check that NaNs are in the same locations
                     nan_mask = a != a
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
