@@ -31,7 +31,6 @@ static inline int last_pow2(int n) {
   n |= (n >>  4);
   n |= (n >>  8);
   n |= (n >> 16);
-  n |= (n >> 32);
   return std::max(1, n - (n >> 1));
 }
 
