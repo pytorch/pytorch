@@ -144,20 +144,18 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
             ret = _VF.quantized_rnn_tanh_cell(
-                input, _hx, self.weight_ih, self.weight_hh, self.bias_ih,
+                input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
                 self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
                 self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
                 self.zero_point_hh
             )
         elif self.nonlinearity == "relu":
             ret = _VF.quantized_rnn_relu_cell(
-                input, _hx, self.weight_ih, self.weight_hh, self.bias_ih,
+                input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
                 self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
                 self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
                 self.zero_point_hh
@@ -179,13 +177,11 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
         self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-            _hx = (zeros, zeros)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx[0], '[0]')
-        self.check_forward_hidden(input, _hx[1], '[1]')
+            hx = (zeros, zeros)
+        self.check_forward_hidden(input, hx[0], '[0]')
+        self.check_forward_hidden(input, hx[1], '[1]')
         return _VF.quantized_lstm_cell(
-            input, _hx, self.weight_ih, self.weight_hh, self.bias_ih,
+            input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
             self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
             self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
             self.zero_point_hh
@@ -201,12 +197,10 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         return _VF.quantized_gru_cell(
-            input, _hx, self.weight_ih, self.weight_hh, self.bias_ih,
+            input, hx, self.weight_ih, self.weight_hh, self.bias_ih,
             self.bias_hh, self.packed_ih, self.packed_hh, self.col_offsets_ih,
             self.col_offsets_hh, self.scale_ih, self.scale_hh, self.zero_point_ih,
             self.zero_point_hh
