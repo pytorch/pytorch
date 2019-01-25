@@ -746,7 +746,6 @@ Automatic Trace Checking
     Gives us the following diagnostic information::
 	ERROR: Graphs differed across invocations!
 	Graph diff::
-
 		  graph(%x : Tensor) {
 		    %1 : int = prim::Constant[value=0]()
 		    %2 : int = prim::Constant[value=0]()
