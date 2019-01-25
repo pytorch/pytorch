@@ -16,7 +16,7 @@ void mul_op_cpu_impl(
     const at::Tensor& B_,
     const at::Tensor& C_,
     bool legacy_broadcast,
-    int axis) {
+    int64_t axis) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
   Tensor C{C10Tensor(C_)};

@@ -19,8 +19,9 @@ struct BatchGather final {
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 3> parameter_names = {
-      {"data", "indices", "output"}};
+  static constexpr c10::guts::array<const char*, 3> parameter_names() {
+    return {"data", "indices", "output"};
+  }
 };
 
 } // namespace ops

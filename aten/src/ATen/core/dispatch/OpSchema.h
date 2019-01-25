@@ -8,6 +8,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/function_schema.h>
 
 namespace c10 {
 
@@ -150,6 +151,14 @@ template<class FuncType> struct add_ptr_parameter_if_not_void<FuncType, void, vo
   using type = FuncType;
 };
 
+template<class ReturnType> struct parse_return_types_ final {
+  using type = guts::typelist::typelist<ReturnType>;
+};
+
+template<class... ReturnTypes> struct parse_return_types_<std::tuple<ReturnTypes...>> final {
+  using type = guts::typelist::typelist<ReturnTypes...>;
+};
+
 /**
  * Wrapper class around a user-provided schema definition some useful information about the schema.
  *
@@ -173,6 +182,8 @@ public:
    * A type list of the parameter types of OpSchemaDef::Signature
    */
   using parameter_types = typename signature_traits::parameter_types;
+
+  using return_types = typename parse_return_types_<return_type>::type;
 
   /**
    * The number of arguments of OpSchemaDef::Signature
@@ -201,15 +212,15 @@ public:
 private:
   static_assert(details::has_parameter_names_defined<OpSchemaDef>::value, "Operator schema doesn't define parameter_names member.");
   // TODO Allow simpler definition of parameter_names without having to spell out the guts::array type in the schema def.
-  static_assert(std::is_same<const guts::array<const char*, num_args>, decltype(OpSchemaDef::parameter_names)>::value, "Operator schema defines parameter_names member, but it isn't the correct type. Must be a static constexpr guts::array of const char* with one entry for each parameter.");
+  static_assert(std::is_same<guts::array<const char*, num_args>, decltype(OpSchemaDef::parameter_names())>::value, "Operator schema defines parameter_names member, but it isn't the correct type. Must be a static constexpr function returning guts::array of const char* with one entry for each parameter.");
 
 public:
   /**
    * The names of the parameters (as per OpSchemaDef::parameter_names)
    * @return Array
    */
-  static constexpr const guts::array<const char*, num_args>& parameter_names() {
-    return OpSchemaDef::parameter_names;
+  static constexpr const guts::array<const char*, num_args> parameter_names() {
+    return OpSchemaDef::parameter_names();
   }
 };
 
@@ -261,7 +272,7 @@ public:
  * @tparam OpSchemaDef User-defined OpSchemaDef.
  *   This struct is expected to define:
  *      - a function type Signature
- *      - a constexpr guts<const char*, n_args> parameter_names field (where n_args is
+ *      - a constexpr array<const char*, n_args> parameter_names field (where n_args is
  *        the number of arguments in Signature)
  */
 template <class OpSchemaDef>
@@ -277,6 +288,37 @@ public:
    * Functionality for dispatching on that signature
    */
   using dispatch = details::OpDispatchKeySchema<OpSchemaDef>;
+
+
+  static FunctionSchema create_function_schema() {
+    return FunctionSchema(
+      metadata::name(),
+      _create_jit_types<typename signature::parameter_types>(),
+      _create_jit_types<typename signature::return_types>()
+    );
+  }
+
+private:
+  template<class TypeList>
+  static std::vector<Argument> _create_jit_types() {
+    return __create_jit_types<TypeList>(guts::make_index_sequence<guts::typelist::size<TypeList>::value>());
+  }
+  template<class TypeList, size_t... arg_index>
+  static std::vector<Argument> __create_jit_types(guts::index_sequence<arg_index...>) {
+    return { Argument(
+      signature::parameter_names()[arg_index],
+      getTypePtr<decayed_element_t_<arg_index, TypeList>>(),
+      /* N = */ c10::nullopt,
+      // If it is an optional argument, set the default value to IValue() (i.e. None). If it is not optional, pass in nullopt, which makes the argument mandatory.
+      /* default_value = */
+      (guts::is_instantiation_of<c10::optional, decayed_element_t_<arg_index, TypeList>>::value)
+        ? c10::optional<IValue>(IValue()) : c10::nullopt
+    )... };
+  }
+
+  template<size_t index, class TypeList> using decayed_element_t_ =
+      guts::decay_t<guts::typelist::element_t<index, TypeList>>;
+
 };
 
 // TODO test OpSchema::dispatch stuff

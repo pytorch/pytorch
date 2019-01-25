@@ -16,21 +16,23 @@ struct BatchMatmul final {
       const at::Tensor& A,
       const at::Tensor& B,
       const at::Tensor& output,
-      int trans_a,
-      int trans_b,
-      int broadcast);
+      int64_t trans_a,
+      int64_t trans_b,
+      int64_t broadcast);
 
   static constexpr size_t num_dispatch_args() {return 2;}
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 6> parameter_names = {
-      {"A",
-       "B",
-       "output",
-       "trans_a",
-       "trans_b",
-       "broadcast"}};
+  static constexpr c10::guts::array<const char*, 6> parameter_names() {
+    return {
+      "A",
+      "B",
+      "output",
+      "trans_a",
+      "trans_b",
+      "broadcast"};
+  }
 };
 
 } // namespace ops

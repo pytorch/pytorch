@@ -15,8 +15,9 @@ struct EnforceFinite final {
 
   static constexpr size_t num_outputs() {return 0;}
 
-  static constexpr c10::guts::array<const char*, 1> parameter_names = {
-      {"input"}};
+  static constexpr c10::guts::array<const char*, 1> parameter_names() {
+    return {"input"};
+  }
 };
 
 } // namespace ops

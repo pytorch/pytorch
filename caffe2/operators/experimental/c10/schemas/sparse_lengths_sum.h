@@ -19,8 +19,9 @@ struct SparseLengthsSum final {
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 4> parameter_names = {
-      {"data", "indices", "lengths", "output"}};
+  static constexpr c10::guts::array<const char*, 4> parameter_names() {
+    return {"data", "indices", "lengths", "output"};
+  }
 };
 
 } // namespace ops

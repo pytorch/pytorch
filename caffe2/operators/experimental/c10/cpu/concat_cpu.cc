@@ -16,8 +16,8 @@ void concat_op_cpu_impl(
     ArrayRef<at::Tensor> inputs,
     const at::Tensor& output_,
     const at::Tensor& split_,
-    int axis,
-    int add_axis) {
+    int64_t axis,
+    int64_t add_axis) {
   Tensor output{C10Tensor(output_)};
   Tensor split{C10Tensor(split_)};
   CPUContext context;

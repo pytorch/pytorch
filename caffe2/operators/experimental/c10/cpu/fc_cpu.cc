@@ -23,8 +23,8 @@ void fc_op_cpu_impl(
     const at::Tensor& W_,
     const at::Tensor& b_,
     const at::Tensor& Y_,
-    int axis,
-    int axis_w,
+    int64_t axis,
+    int64_t axis_w,
     Cache* cache) {
   Tensor X{C10Tensor(X_)};
   Tensor W{C10Tensor(W_)};

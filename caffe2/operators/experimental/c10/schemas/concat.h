@@ -18,13 +18,14 @@ struct Concat final {
       ArrayRef<at::Tensor> inputs,
       const at::Tensor& output,
       const at::Tensor& split_info,
-      int add,
-      int add_axis);
+      int64_t add,
+      int64_t add_axis);
 
   static constexpr size_t num_outputs() {return 2;}
 
-  static constexpr c10::guts::array<const char*, 5> parameter_names = {
-      {"inputs", "output", "split_info_output", "add", "add_axis"}};
+  static constexpr c10::guts::array<const char*, 5> parameter_names() {
+    return {"inputs", "output", "split_info_output", "add", "add_axis"};
+  }
 };
 
 } // namespace ops

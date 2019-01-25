@@ -27,13 +27,15 @@ struct GivenTensorFill final {
       bool input_as_shape,
       const at::Tensor& values);
 
-  static constexpr c10::guts::array<const char*, 6> parameter_names = {
+  static constexpr c10::guts::array<const char*, 6> parameter_names() {
+    return
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
-       "values"}};
+       "values"};
+   }
 
    static constexpr size_t num_outputs() {return 1;}
 };
@@ -52,14 +54,16 @@ struct ConstantFill final {
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+  static constexpr c10::guts::array<const char*, 7> parameter_names() {
+    return
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "dtype",
-       "value"}};
+       "value"};
+   }
 
   static TensorTypeId dispatch_key(
       const Stack* stack) {
@@ -81,14 +85,16 @@ struct UniformFill final {
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+  static constexpr c10::guts::array<const char*, 7> parameter_names() {
+    return
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "min",
-       "max"}};
+       "max"};
+   }
 
   static TensorTypeId dispatch_key(
       const Stack* stack) {

@@ -12,7 +12,7 @@ template <class DataType, class Context>
 void flatten_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
-    int axis) {
+    int64_t axis) {
   Tensor input{C10Tensor(input_)};
   Tensor output{C10Tensor(output_)};
   CPUContext context;

@@ -3,12 +3,14 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeTraits.h>
 
-namespace c10 { namespace guts { namespace typelist {
+namespace c10 { namespace guts {
 
-namespace detail {
 template<class... T> struct false_t : std::false_type {};
 template<template<class> class... T> struct false_higher_t : std::false_type {};
-}
+
+namespace typelist {
+
+
 
 /**
  * Type holding a list of types for compile time type computations
@@ -26,7 +28,7 @@ private:
  *   3  ==  size<typelist<int, int, double>>::value
  */
 template<class TypeList> struct size final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::size<T>, T must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::size<T>, T must be typelist<...>.");
 };
 template<class... Types> struct size<typelist<Types...>> final {
     static constexpr size_t value = sizeof...(Types);
@@ -40,7 +42,7 @@ template<class... Types> struct size<typelist<Types...>> final {
  *   std::tuple<int, string>  ==  to_tuple_t<typelist<int, string>>
  */
 template<class TypeList> struct to_tuple final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::to_tuple<T>, T must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::to_tuple<T>, T must be typelist<...>.");
 };
 template<class... Types> struct to_tuple<typelist<Types...>> final {
     using type = std::tuple<Types...>;
@@ -56,7 +58,7 @@ template<class TypeList> using to_tuple_t = typename to_tuple<TypeList>::type;
  *   typelist<int, string>  ==  from_tuple_t<std::tuple<int, string>>
  */
 template<class Tuple> struct from_tuple final {
-    static_assert(detail::false_t<Tuple>::value, "In typelist::from_tuple<T>, T must be std::tuple<...>.");
+    static_assert(false_t<Tuple>::value, "In typelist::from_tuple<T>, T must be std::tuple<...>.");
 };
 template<class... Types> struct from_tuple<std::tuple<Types...>> final {
   using type = typelist<Types...>;
@@ -71,7 +73,7 @@ template<class Tuple> using from_tuple_t = typename from_tuple<Tuple>::type;
  *   typelist<int, string, int>  ==  concat_t<typelist<int, string>, typelist<int>>
  */
 template<class... TypeLists> struct concat final {
-    static_assert(detail::false_t<TypeLists...>::value, "In typelist::concat<T1, ...>, the T arguments each must be typelist<...>.");
+    static_assert(false_t<TypeLists...>::value, "In typelist::concat<T1, ...>, the T arguments each must be typelist<...>.");
 };
 template<class... Head1Types, class... Head2Types, class... TailLists>
 struct concat<typelist<Head1Types...>, typelist<Head2Types...>, TailLists...> final {
@@ -95,7 +97,7 @@ template<class... TypeLists> using concat_t = typename concat<TypeLists...>::typ
  *   typelist<int&, const string&&>  ==  filter_t<std::is_reference, typelist<void, string, int&, bool, const string&&, int>>
  */
 template<template <class> class Condition, class TypeList> struct filter final {
-  static_assert(detail::false_t<TypeList>::value, "In typelist::filter<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+  static_assert(false_t<TypeList>::value, "In typelist::filter<Condition, TypeList>, the TypeList argument must be typelist<...>.");
 };
 template<template <class> class Condition, class Head, class... Tail>
 struct filter<Condition, typelist<Head, Tail...>> final {
@@ -138,7 +140,7 @@ struct count_if final {
  *   false  ==  true_for_each_type<std::is_reference, typelist<int&, const float&&, MyClass>>::value
  */
 template<template <class> class Condition, class TypeList> struct true_for_each_type final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::true_for_each_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::true_for_each_type<Condition, TypeList>, the TypeList argument must be typelist<...>.");
 };
 template<template <class> class Condition, class... Types>
 struct true_for_each_type<Condition, typelist<Types...>> final
@@ -154,7 +156,7 @@ struct true_for_each_type<Condition, typelist<Types...>> final
  *  typelist<int&, double&, string&>  ==  map_t<std::add_lvalue_reference_t, typelist<int, double, string>>
  */
 template<template <class> class Mapper, class TypeList> struct map final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::map<Mapper, TypeList>, the TypeList argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::map<Mapper, TypeList>, the TypeList argument must be typelist<...>.");
 };
 template<template <class> class Mapper, class... Types>
 struct map<Mapper, typelist<Types...>> final {
@@ -171,7 +173,7 @@ using map_t = typename map<Mapper, TypeList>::type;
  *   int  ==  head_t<typelist<int, string>>
  */
 template<class TypeList> struct head final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::head<T>, the T argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::head<T>, the T argument must be typelist<...>.");
 };
 template<class Head, class... Tail> struct head<typelist<Head, Tail...>> final {
   using type = Head;
@@ -186,7 +188,7 @@ template<class TypeList> using head_t = typename head<TypeList>::type;
 
 /// Base template.
 template<size_t Index, class TypeList> struct element final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::element<T>, the T argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::element<T>, the T argument must be typelist<...>.");
 };
 
 /// Successful case, we have reached the zero index and can "return" the head type.
@@ -214,7 +216,7 @@ using element_t = typename element<Index, TypeList>::type;
 template <class TypeList>
 struct last final {
   static_assert(
-      detail::false_t<TypeList>::value,
+      false_t<TypeList>::value,
       "In typelist::last<T>, the T argument must be typelist<...>.");
 };
 template <class Head, class... Tail>
@@ -237,7 +239,7 @@ static_assert(
  *   typelist<int, string>  == reverse_t<typelist<string, int>>
  */
 template<class TypeList> struct reverse final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::reverse<T>, the T argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::reverse<T>, the T argument must be typelist<...>.");
 };
 template<class Head, class... Tail> struct reverse<typelist<Head, Tail...>> final {
   using type = concat_t<typename reverse<typelist<Tail...>>::type, typelist<Head>>;
@@ -249,10 +251,10 @@ template<class TypeList> using reverse_t = typename reverse<TypeList>::type;
 
 
 template<class TypeList, template<class> class Condition, class Enable = void> struct find_if final {
-  static_assert(detail::false_t<TypeList>::value, "In typelist::find_if<TypeList, Condition>, the TypeList argument must be typelist<...>.");
+  static_assert(false_t<TypeList>::value, "In typelist::find_if<TypeList, Condition>, the TypeList argument must be typelist<...>.");
 };
 template<template<class> class Condition> struct find_if<typelist<>, Condition, void> final {
-  static_assert(detail::false_higher_t<Condition>::value, "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
+  static_assert(false_higher_t<Condition>::value, "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
 };
 template<class Head, class... Tail, template<class> class Condition>
 struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<Condition<Head>::value>> final {
@@ -299,7 +301,7 @@ template<class T> struct type_ final {
     using type = T;
 };
 template<class TypeList> struct map_types_to_values final {
-    static_assert(detail::false_t<TypeList>::value, "In typelist::map_types_to_values<T>, the T argument must be typelist<...>.");
+    static_assert(false_t<TypeList>::value, "In typelist::map_types_to_values<T>, the T argument must be typelist<...>.");
 };
 template<class... Types> struct map_types_to_values<typelist<Types...>> final {
   template<class Func>

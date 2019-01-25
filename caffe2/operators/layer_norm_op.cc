@@ -194,7 +194,7 @@ struct Cache final : public c10::KernelCache {
 template <class DataType>
 void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass in correct cache type
   c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, 3, 6);
-  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 0, 3, 3);
+  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 3, 3, 6);
 
   caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
   int64_t axis = inputs[1].toInt();
@@ -224,9 +224,12 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
     X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
   );
 
-  torch::jit::peek(*stack, 0, 3) = at::Tensor(c10::C10Tensor(std::move(Y)));
-  torch::jit::peek(*stack, 1, 3) = at::Tensor(c10::C10Tensor(std::move(mean)));
-  torch::jit::peek(*stack, 2, 3) = at::Tensor(c10::C10Tensor(std::move(sig)));
+  torch::jit::drop(*stack, 6);
+  torch::jit::push(*stack,
+    at::Tensor(c10::C10Tensor(std::move(Y))),
+    at::Tensor(c10::C10Tensor(std::move(mean))),
+    at::Tensor(c10::C10Tensor(std::move(sig)))
+  );
 
   return;
 }

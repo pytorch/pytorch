@@ -18,8 +18,9 @@ struct StopGradient final {
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 2> parameter_names = {
-      {"input", "output"}};
+  static constexpr c10::guts::array<const char*, 2> parameter_names() {
+    return {"input", "output"};
+  }
 };
 
 } // namespace ops

@@ -13,22 +13,23 @@ namespace opschema {
 // on Tensor. It's only here as a proof-of-concept op and for LATTE team
 // to be able to call caffe2 layer norm from PyTorch.
 struct LayerNorm final {
-  static constexpr const char* name = "LayerNorm";
+  static constexpr const char* name = "caffe2::layer_norm_dont_use_this_op_yet";
 
-  using Signature = std::tuple<at::Tensor, int, float, at::Tensor, at::Tensor, at::Tensor> (
+  using Signature = std::tuple<at::Tensor, at::Tensor, at::Tensor> (
       const at::Tensor& input,
-      int axis,
-      float epsilon,
-      const at::Tensor& output,
-      const at::Tensor& output_mean,
-      const at::Tensor& output_stdev);
+      int64_t axis,
+      double epsilon,
+      const at::optional<at::Tensor>& output,
+      const at::optional<at::Tensor>& output_mean,
+      const at::optional<at::Tensor>& output_stdev);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 
   static constexpr size_t num_outputs() {return 3;}
 
-  static constexpr c10::guts::array<const char*, 6> parameter_names = {
-      {"input", "axis", "epsilon", "output", "output_mean", "output_stdev"}};
+  static constexpr c10::guts::array<const char*, 6> parameter_names() {
+      return {"input", "axis", "epsilon", "output", "output_mean", "output_stdev"};
+  };
 };
 
 } // namespace opschema

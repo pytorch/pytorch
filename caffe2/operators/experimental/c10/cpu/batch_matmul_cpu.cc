@@ -20,9 +20,9 @@ void batch_matmul_op_cpu_impl(
     const at::Tensor& A_,
     const at::Tensor& B_,
     const at::Tensor& Y_,
-    int trans_a,
-    int trans_b,
-    int broadcast,
+    int64_t trans_a,
+    int64_t trans_b,
+    int64_t broadcast,
     Cache* cache) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
