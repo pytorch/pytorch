@@ -25,11 +25,6 @@ struct Concat final {
 
   static constexpr c10::guts::array<const char*, 5> parameter_names = {
       {"inputs", "output", "split_info_output", "add", "add_axis"}};
-
-  static TensorTypeId dispatch_key(
-      const Stack* arguments) {
-    return CPUTensorId();
-  }
 };
 
 } // namespace ops

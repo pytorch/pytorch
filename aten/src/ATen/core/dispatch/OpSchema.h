@@ -214,17 +214,6 @@ public:
 };
 
 /**
- * If T has a method dispatch_key, provide a member constant value equal to true.  Otherwise return false.
- * @tparam T
- */
-template<class T, typename = void>
-struct has_function_dispatch_key_defined : std::false_type {};
-template<class T>
-struct has_function_dispatch_key_defined<T, guts::void_t<
-  decltype(&T::dispatch_key)
->> : std::true_type {};
-
-/**
  * Wrapper class around a user-defined schema definition providing a way of computing a dispatch key
  * from arguments matching the signature of that schema.
  *
@@ -233,9 +222,8 @@ struct has_function_dispatch_key_defined<T, guts::void_t<
  */
 template<class OpSchemaDef, class Enable = void> class OpDispatchKeySchema final {};
 
-// General case. Operator doesn't overwrite DispatchKey generation. Use default.
 template<class OpSchemaDef>
-class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
+class OpDispatchKeySchema<OpSchemaDef> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
 
 public:
@@ -248,35 +236,6 @@ public:
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");*/
     return details::getDispatchKey_<OpSchemaDef>(torch::jit::last(*stack, signature::num_args));
-  }
-};
-
-// Special case. Operator overwrites DispatchKey generation. Use that.
-template<class OpSchemaDef>
-class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
-  using signature = OpSignatureSchema<OpSchemaDef>;
-
-  static_assert(guts::is_function_type<decltype(OpSchemaDef::dispatch_key)>::value, "Operator schema defines dispatch_key member, but it isn't a function.");
-
-  using dispatch_key_traits = guts::function_traits<decltype(OpSchemaDef::dispatch_key)>;
-  static_assert(std::is_same<TensorTypeId, typename dispatch_key_traits::return_type>::value,
-    "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected it to return a TensorTypeId");
-
-  static_assert(std::is_same<guts::typelist::typelist<const Stack*>,typename dispatch_key_traits::parameter_types>::value,
-    "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type const Stack*.");
-
-public:
-
-  static inline TensorTypeId dispatch_key(const Stack* stack) {
-    /* TODO Should we make this a runtime assert now?
-    using guts::typelist::map_t;
-    using guts::typelist::typelist;
-    static_assert(std::is_same<
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
-      >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
-    */
-    return OpSchemaDef::dispatch_key(stack);
   }
 };
 

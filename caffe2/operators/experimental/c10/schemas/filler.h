@@ -36,11 +36,6 @@ struct GivenTensorFill final {
        "values"}};
 
    static constexpr size_t num_outputs() {return 1;}
-
-   static TensorTypeId dispatch_key(
-      const Stack* stack) {
-    return CPUTensorId();
-  }
 };
 
 struct ConstantFill final {
