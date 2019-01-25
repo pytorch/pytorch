@@ -1098,7 +1098,7 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
   struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
     c10::FunctionSchema getSchema() override {                                \
-      return c10::FunctionSchema(#name, inputs, outputs);                     \
+      return c10::FunctionSchema("caffe2::" #name, inputs, outputs);          \
     }                                                                         \
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
