@@ -2,6 +2,7 @@
 # torch/csrc/{autgrad,jit}/generated. In fbcode, this distinction is
 # not currently relevant so they are combined into one list.
 from __future__ import absolute_import, division, print_function, unicode_literals
+load("@bazel_skylib//lib:new_sets.bzl", "sets")
 
 
 GENERATED_CPP = [
@@ -22,8 +23,8 @@ GENERATED_CPP = [
     "python_variable_methods.cpp",
 ]
 
-# copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/libtorch/CMakeLists.txt
-torch_sources_no_python_default = [
+# copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
+libtorch_sources = [
     ":generate-code=Functions.cpp",
     ":generate-code=register_aten_ops_0.cpp",
     ":generate-code=register_aten_ops_1.cpp",
@@ -39,7 +40,6 @@ torch_sources_no_python_default = [
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
-    "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
@@ -110,39 +110,39 @@ torch_sources_no_python_default = [
     "torch/csrc/jit/fuser/interface.cpp",
 ]
 
+libtorch_cuda_sources = [
+    "torch/csrc/cuda/comm.cpp",
+    "torch/csrc/cuda/nccl.cpp",
+    "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/autograd/profiler_cuda.cpp",
+    "torch/csrc/autograd/functions/comm.cpp"
+]
 
-def torch_vars():
+
+def add_torch_libs():
     r = {}
-    # We start torch_sources with all cpp files, and exclude some.
-    # This is a much better approach than listing all of them manually because
-    # the number of excluded files is small and doesn"t change very frequently
-    r["torch_sources"] = (
-        native.glob(
-            ["torch/csrc/**/*.cpp"],
-            exclude=[
-                # remove anything that has "generic" in it"s path
-                "torch/csrc/**/generic/**/*.cpp",
-                # distributed only uses Module.cpp
-                # so remove all other files and just include that
-                "torch/csrc/distributed/**/*.cpp",
-            ],
-        )
-        + [
-            "torch/csrc/distributed/Module.cpp",
-            "torch/csrc/distributed/c10d/init.cpp",
-            "torch/csrc/distributed/c10d/ddp.cpp",
-        ]
-        + [":generate-code=" + x for x in GENERATED_CPP]
-    )
+    # We start torch_python_sources with all cpp files, and exclude some
+    # including the files already contained in the torch and cuda bindings
+    globbed_sources = (native.glob(
+        ["torch/csrc/**/*.cpp"],
+        exclude=[
+            # remove anything that has "generic" in it"s path
+            "torch/csrc/**/generic/**/*.cpp",
+            # distributed only uses Module.cpp
+            # so remove all other files and just include that
+            "torch/csrc/distributed/**/*.cpp",
+        ],
+    ) + [
+        "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/c10d/init.cpp",
+        "torch/csrc/distributed/c10d/ddp.cpp",
+    ] + [":generate-code=" + x for x in GENERATED_CPP])
+    libtorch_python_sources = sets.to_list(sets.difference(
+        sets.make(globbed_sources),
+        sets.make(libtorch_sources + libtorch_cuda_sources),
+    ))
 
-    r["torch_sources_no_python"] = (
-        torch_sources_no_python_default
-        + ["torch/csrc/cuda/comm.cpp", "torch/csrc/cuda/nccl.cpp", "torch/csrc/jit/fuser/cuda/fused_kernel.cpp"]
-    )
-
-    r["torch_sources_no_python_cpu"] = torch_sources_no_python_default
-
-    r["torch_csrc_flags"] = {
+    common_flags = {
         "compiler_flags": [
             "-D_THP_CORE",
             "-DUSE_C10D",
@@ -180,13 +180,69 @@ def torch_vars():
         ],
     }
 
-    r["torch_csrc_flags_cpu"] = dict(r["torch_csrc_flags"])
+    cpp_library(
+        name="libtorch",
+        srcs=libtorch_sources,
+        link_whole=True,
+        deps=[
+            ":generated-autograd-headers",
+            ":generated-autograd-headers-bare",
+            ":generated-jit-headers",
+            "//caffe2/aten:ATen-cpu",
+            "//caffe2/caffe2:caffe2_cpu",
+            "//caffe2/torch/lib/libshm:libshm",
+        ],
+        external_deps=[
+            ("nanopb", None, "protobuf-nanopb"),
+            ("protobuf", None),
+        ],
+        **common_flags
+    )
 
-    r["torch_csrc_flags_cpu"]["preprocessor_flags"] = [
-        "-Icaffe2",
-        "-Icaffe2/torch/csrc/api/include",
-        "-Icaffe2/torch/csrc",
-        "-Icaffe2/torch/csrc/nn",
-        "-Icaffe2/torch/lib",
-    ]
+    cpp_library(
+        name="libtorch_cuda",
+        srcs=libtorch_cuda_sources,
+        link_whole=True,
+        propagated_pp_flags=[
+            "-DUSE_CUDA",
+        ],
+        deps=[
+            ":generated-autograd-headers",
+            ":generated-autograd-headers-bare",
+            ":generated-jit-headers",
+            ":libtorch",
+            "//caffe2/aten:ATen",
+            "//caffe2/aten:generated-aten-headers-cuda",
+            "//caffe2/caffe2:caffe2_cpu",
+            "//caffe2/torch/lib/libshm:libshm",
+        ],
+        external_deps=[
+            ("cudnn", "7.1.2", "cudnn-lazy"),
+            ("nccl", "2.1.15", "nccl-lazy"),
+            ("cuda", None, "nvToolsExt-lazy"),
+            ("cuda", None, "nvrtc-lazy"),
+            ("cuda", None, "nvrtc-builtins-lazy"),
+        ],
+        **common_flags
+    )
+
+    cpp_python_extension(
+        name="_C",
+        srcs=libtorch_python_sources,
+        base_module="torch",
+        deps=[
+            ":libtorch_cuda",
+            ":thnn",
+            ":torch-lib-headers",
+            "//caffe2/torch/lib/THD:THD",
+            "//caffe2/torch/lib/c10d:c10d",
+            "//caffe2/torch/lib/libshm:libshm",
+        ],
+        external_deps=[
+            ("numpy", None, "cpp"),
+            ("pybind11", None),
+        ],
+        **common_flags
+    )
+
     return r

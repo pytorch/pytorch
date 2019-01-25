@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/averaged_loss.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -12,11 +12,12 @@ namespace {
 
 template <class T, class Context>
 void averaged_loss_op_cpu_impl(
-    const C10Tensor& X_,
-    const C10Tensor& sum_,
-    caffe2::ops::AveragedLoss::State* state) {
-  Tensor X(X_);
-  Tensor sum(sum_);
+    const at::Tensor& X_,
+    const at::Tensor& sum_,
+    intrusive_ptr<Blob> state_) {
+  Tensor X{C10Tensor(X_)};
+  Tensor sum{C10Tensor(sum_)};
+  caffe2::ops::AveragedLoss::State* state = state_->GetMutable<caffe2::ops::AveragedLoss::State>();
   CPUContext context;
 
   sum.Resize(vector<int64_t>());
@@ -44,7 +45,7 @@ void averaged_loss_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::AveragedLoss)
-    .kernel(&caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>)
+    .kernel<&caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,
         LayoutId(0),

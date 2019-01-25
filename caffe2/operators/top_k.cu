@@ -56,7 +56,7 @@ void RunRadixSelectionImpl(
     int64_t* indices,
     CUDAContext* context) {
   const int block = std::min(
-      math::roundUp(static_cast<int>(inner_size), kWarpSize),
+      math::RoundUp(static_cast<int>(inner_size), kWarpSize),
       CAFFE_CUDA_NUM_THREADS);
   gatherTopK<T, kSelectMax, int64_t>
       <<<outer_size, block, 0, context->cuda_stream()>>>(
@@ -321,8 +321,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  at::IntList values_dims = values.dims();
-  at::IntList origin_dims = original_input.dims();
+  at::IntList values_dims = values.sizes();
+  at::IntList origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   T* output_data = output->template mutable_data<T>();

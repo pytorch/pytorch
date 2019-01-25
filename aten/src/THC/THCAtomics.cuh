@@ -133,7 +133,7 @@ static inline  __device__  void atomicAdd(double *address, double val) {
 } while (assumed != old);
 }
 #elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312
+#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif

@@ -3,7 +3,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 
@@ -42,23 +42,31 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 void setValueTrace(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
-    JIT_ASSERT(var.defined());
+    AT_ASSERT(var.defined());
     getTracingState()->value_map[var] = value;
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->appendNode(
-        graph->create(prim::ListUnpack, {value}, outputs.size()));
+    Node* unpack_node = graph->insertNode(
+      graph->createListUnpack(value, outputs.size()));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto& outputs = v.toTuple()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->appendNode(
-        graph->create(prim::TupleUnpack, {value}, outputs.size()));
+    Node* unpack_node = graph->insertNode(
+      graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    }
+  } else if (v.isGenericList()) {
+    auto elements = v.toGenericListRef();
+    auto graph = getTracingState()->graph;
+    Node* unpack_node = graph->insertNode(
+      graph->createListUnpack(value, elements.size()));
+    for (size_t i = 0; i < elements.size(); ++i) {
+      setValueTrace(elements[i], unpack_node->outputs()[i]);
     }
   } else {
     std::ostringstream os;
@@ -260,9 +268,9 @@ void ArgumentStash::stashIntListElem(
   if (!isTracing())
     return;
   auto& list_trace = stash.intlists.emplace(arg_name, size).first->second;
-  JIT_ASSERT(size == list_trace.size());
-  JIT_ASSERT(idx < list_trace.size());
-  JIT_ASSERT(list_trace[idx] == nullptr);
+  AT_ASSERT(size == list_trace.size());
+  AT_ASSERT(idx < list_trace.size());
+  AT_ASSERT(list_trace[idx] == nullptr);
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
