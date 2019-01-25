@@ -60,9 +60,10 @@ OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     const std::vector<c10::IValue>& inputs,
     const std::vector<c10::IValue*>& outputs)
-    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
+    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       ivalue_inputs_(inputs),
       ivalue_outputs_(outputs) {
+  input_tensors_.resize(ivalue_inputs_.size());
   output_tensors_.resize(ivalue_outputs_.size());
 }
 
