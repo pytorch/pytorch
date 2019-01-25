@@ -648,6 +648,21 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
 
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_shared_storage_on_cuda(self):
+        whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
+        m = torch.jit.ScriptModule()
+        m.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
+        m.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+        m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertTrue(m2.p0.is_cuda)
+        self.assertTrue(m2.b0.is_cuda)
+        self.assertTrue(m2.p0.is_shared())
+        self.assertTrue(m2.b0.is_shared())
+        self.assertEqual(m2.b0.storage().data_ptr(), m2.p0.storage().data_ptr())
+
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
@@ -2223,46 +2238,6 @@ class TestJit(JitTestCase):
             j.save(f.name)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
-
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
-    def test_disabled_module(self):
-        from importlib import reload
-
-        old_jit_env = os.environ.get('PYTORCH_JIT', None)
-        os.environ['PYTORCH_JIT'] = '0'
-
-        reload(torch.jit)
-
-        class M(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__(optimize=False)
-
-            @torch.jit.script_method
-            def forward(self):
-                return 3
-
-        m = M()
-
-        with self.assertRaisesRegex(AttributeError, "no attribute 'graph'"):
-            M().graph
-
-        if old_jit_env is None:
-            del os.environ['PYTORCH_JIT']
-        else:
-            os.environ['PYTORCH_JIT'] = old_jit_env
-
-        reload(torch.jit)
-
-        class M(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__(optimize=False)
-
-            @torch.jit.script_method
-            def forward(self):
-                return 3
-
-        # assert that the compiler ran
-        M().graph
 
 
 class TestBatched(TestCase):
