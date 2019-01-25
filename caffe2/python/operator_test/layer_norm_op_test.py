@@ -133,21 +133,6 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
     @given(X=hu.tensors(n=1), **hu.gcs)
-    def test_layer_norm_op_pytorch_2(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
-        axis = np.random.randint(0, len(X.shape))
-        epsilon = 1e-4
-
-        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
-        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.LayerNorm(torch.tensor(X), axis, epsilon)
-
-        torch.testing.assert_allclose(expected_norm, actual_norm)
-        torch.testing.assert_allclose(expected_mean, actual_mean)
-        torch.testing.assert_allclose(expected_stdev, actual_stdev)
-
-    @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
@@ -164,28 +149,6 @@ class TestLayerNormOp(serial.SerializedTestCase):
             'input',
             'output',
             dim_in=X.shape[axis],
-            axis=axis,
-            epsilon=1e-4,
-        )
-
-        self.ws.create_net(model.param_init_net).run()
-        self.ws.create_net(model.net).run()
-
-    @given(X=hu.tensors(n=1), **hu.gcs)
-    def test_c10_layer_norm(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
-        axis = np.random.randint(0, len(X.shape))
-        scale_dim = [1] * np.ndim(X)
-        scale_dim[axis] = X.shape[axis]
-
-        self.ws.create_blob('input').feed(X)
-
-        model = ModelHelper(name='test_layer_norm_brew_wrapper')
-        model.C10LayerNorm_DontUseThisOpYet(
-            ['input'],
-            ['output_1', 'output_1', 'output_2'],
             axis=axis,
             epsilon=1e-4,
         )
