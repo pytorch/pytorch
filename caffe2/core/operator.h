@@ -120,23 +120,34 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // a bit easier
   template <typename T>
   inline const T& Input(int idx, DeviceType type) {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "Input(int, DeviceType) is only available for Tensor");
-    DCHECK_LT(idx, inputs_.size());
-    try {
-      // TODO(jerryzh): We'll need to check device type in Get<T>() later
-      // Get<T>() -> Get<T>(type)
-      const auto& tensor = inputs_.at(idx)->template Get<T>();
-      return tensor;
-    } catch (::caffe2::EnforceNotMet& enf) {
-      if (has_debug_def()) {
-        enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
-        enf.AppendMessage(".\n");
+    if (isLegacyOperator()) {
+      static_assert(
+          std::is_same<T, Tensor>::value,
+          "Input(int, DeviceType) is only available for Tensor");
+      DCHECK_LT(idx, inputs_.size());
+      try {
+        // TODO(jerryzh): We'll need to check device type in Get<T>() later
+        // Get<T>() -> Get<T>(type)
+        const auto& tensor = inputs_.at(idx)->template Get<T>();
+        return tensor;
+      } catch (::caffe2::EnforceNotMet& enf) {
+        if (has_debug_def()) {
+          enf.AppendMessage(".\nOffending Blob name: ");
+          enf.AppendMessage(debug_def().input(idx));
+          enf.AppendMessage(".\n");
+        }
+        throw enf;
       }
-      throw enf;
     }
+    DCHECK_LT(idx, ivalue_inputs_.size());
+    auto ival = ivalue_inputs_[idx];
+    CAFFE_ENFORCE(
+        ival.isTensor(),
+        "Inpput(int, DeviceType) is only available for IValues that store Tensors");
+    Tensor tensor = caffe2::Tensor(ival.toTensor());
+    CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
+    input_tensors_[idx] = std::move(tensor);
+    return input_tensors_[idx];
   }
 
   template <typename T>
@@ -485,6 +496,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // We preserve the fact that Output() returns Tensor*
   // by storing Tensor in a vector owned by the
   // operator.
+  vector<caffe2::Tensor> input_tensors_;
   vector<caffe2::Tensor> output_tensors_;
 
   int net_position_{kNoNetPositionSet};
