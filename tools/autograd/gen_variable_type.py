@@ -95,8 +95,8 @@ DONT_REQUIRE_DERIVATIVE = {
 # implement the checks for this invariant.
 #
 # The following list contains functions that we don't enforce the invariant on.
-DONT_ENFORCE_SAME_TENSOR_STORAGE = {
-    # These functions are expected to change storage of input tensors
+DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
+    # These functions are expected to change impl or storage of input tensors
     '_th_set_', '_cudnn_rnn_flatten_weight',
     # TODO: Fix these functions to update input tensor in-place
     'tril_', 'triu_',
@@ -677,7 +677,7 @@ def emit_body(declaration):
     def emit_call(env):
         pre_call_block = ''
         post_call_block = ''
-        if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_STORAGE:
+        if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             if 'unpacked_tensors' in env:
                 for arg in env['unpacked_tensors']:
                     pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
