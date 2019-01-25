@@ -114,6 +114,7 @@ def run_cmake(version,
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
+    my_env['PYTORCH_PYTHON'] = sys.executable
     if USE_CUDNN:
         my_env['CUDNN_LIBRARY'] = CUDNN_LIBRARY
         my_env['CUDNN_INCLUDE_DIR'] = CUDNN_INCLUDE_DIR
@@ -180,6 +181,7 @@ def run_cmake(version,
         cmake_defines(cmake_args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                                   CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
+    check_call(['printenv'])
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
