@@ -89,7 +89,7 @@ class CreateMapOp final : public Operator<Context> {
     CAFFE_THROW(
         "CreateMap is not implemented on value tensor of type ",
         DataTypeToTypeMeta(value_dtype).name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   OUTPUT_TAGS(MAP);
@@ -140,7 +140,7 @@ class KeyValueToMapOp final : public Operator<Context> {
     CAFFE_THROW(
         "KeyValueToMap is not implemented on value tensor of type ",
         Input(VALUES).dtype().name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   INPUT_TAGS(KEYS, VALUES);

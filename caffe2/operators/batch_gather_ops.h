@@ -128,8 +128,9 @@ class BatchGatherGradientOp final : public Operator<Context> {
     CAFFE_THROW(
         "BatchGatherGradient is not implemented on tensor of type ",
         Input(DATA).meta().name(),
-        "Consider adding it a type in the list DispatchHelper or implementing "
-        "a generic version (which won't work for duplicated indices though)");
+        "consider adding it as a type in the DispatchHelper list or "
+        "implementing a generic version (which won't work for "
+        "duplicated indices though)");
   }
 
   INPUT_TAGS(DATA, INDICES, GRAD);
