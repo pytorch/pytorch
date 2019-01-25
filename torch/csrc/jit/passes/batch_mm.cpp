@@ -1,14 +1,14 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/custom_operator.h>
-#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>

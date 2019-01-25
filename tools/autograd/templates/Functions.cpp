@@ -26,6 +26,8 @@ using at::Scalar;
 using at::IntList;
 using at::TensorList;
 
+using c10::fmap;
+
 namespace torch { namespace autograd { namespace generated {
 
 namespace {
@@ -447,7 +449,10 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
       break;
     }
   }
-  auto grads_tensors = fmap(grads, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes));});
+  auto grads_tensors = fmap(grads, [&](const Variable& v) {
+    return (
+        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+  });
   return at::stack(grads_tensors, dim);
 }
 
