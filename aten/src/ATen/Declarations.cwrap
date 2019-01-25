@@ -926,78 +926,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_sigmoid
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: sigmoid
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log
-  cname: log
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log10
-  cname: log10
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log1p
-  cname: log1p
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log2
-  cname: log2
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_lgamma
   cname: lgamma
   types:
@@ -1648,6 +1576,12 @@
         - THTensor* self
         - real exponent
 ]]
+
+
+
+
+
+
 [[
   name: _th_pow
   variants:
