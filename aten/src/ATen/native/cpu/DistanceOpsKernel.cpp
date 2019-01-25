@@ -158,9 +158,9 @@ struct PDist {
 
     scalar_t * const res_start = result.data<scalar_t>();
     int64_t total = r1 * r2;
-    const Vec pvec(p);
 
-    parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=, &pvec](int64_t start, int64_t end) {
+    parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
+      const Vec pvec(p);
       scalar_t * res = res_start + start;
       const scalar_t * const res_end = res_start + end;
 
