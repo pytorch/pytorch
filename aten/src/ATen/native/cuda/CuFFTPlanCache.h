@@ -338,19 +338,19 @@ private:
 #if CUDA_VERSION < 10000
   // Note that the max plan number for CUDA version < 10 has to be 1023
   // due to a bug that fails on the 1024th plan
-  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
-  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
+  constexpr size_t CUFFT_MAX_PLAN_NUM = 1023;
+  constexpr size_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
 #else
-  constexpr int64_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<size_t>::max();
+  constexpr size_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<size_t>::max();
   // The default max cache size chosen for CUDA version > 10 is arbitrary.
   // This number puts a limit on how big of a plan cache should we maintain by
   // default. Users can always configure it via cufft_set_plan_cache_max_size.
-  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
+  constexpr size_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
 #endif
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
-static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= std::numeric_limits<size_t>::max(),
-              "CUFFT_DEFAULT_CACHE_SIZE not in size_t range");
+static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
+              "CUFFT_DEFAULT_CACHE_SIZE not in [0, CUFFT_MAX_PLAN_NUM] range");
 
 // This cache assumes that the mapping from key to value never changes.
 // This is **NOT** thread-safe. Please use a mutex when using it **AND** the
