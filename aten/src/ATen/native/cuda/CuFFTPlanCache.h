@@ -71,9 +71,6 @@ static bool is_pow_of_two(int64_t x) {
 //   2. whether to clone input before executing the plan
 //   3. the workspace size needed
 //
-// Its constructor also guarantees that if `input` is contiguous in all
-// dimensions, e.g., from cloning, clone_input will be false.
-//
 // This class will be the **value** in the plan cache.
 // It **owns** the raw plan via a unique_ptr.
 class CuFFTConfig {
@@ -342,14 +339,18 @@ private:
   // Note that the max plan number for CUDA version < 10 has to be 1023
   // due to a bug that fails on the 1024th plan
   constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
 #else
-  // The max plan number chosen for CUDA version > 10 is arbitrary.
-  // This number puts a limit on how big of a plan cache should we maintain.
-  // Without this number, the plan cache can grow unconditionally.
-  constexpr int64_t CUFFT_MAX_PLAN_NUM = 4096;
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<size_t>::max();
+  // The default max cache size chosen for CUDA version > 10 is arbitrary.
+  // This number puts a limit on how big of a plan cache should we maintain by
+  // default. Users can always configure it via cufft_set_plan_cache_max_size.
+  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
 #endif
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
+static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= std::numeric_limits<size_t>::max(),
+              "CUFFT_DEFAULT_CACHE_SIZE not in size_t range");
 
 // This cache assumes that the mapping from key to value never changes.
 // This is **NOT** thread-safe. Please use a mutex when using it **AND** the
@@ -366,7 +367,7 @@ public:
   using map_kkv_iter_t = typename map_t::iterator;
 
 
-  CuFFTParamsLRUCache() : CuFFTParamsLRUCache(CUFFT_MAX_PLAN_NUM) {}
+  CuFFTParamsLRUCache() : CuFFTParamsLRUCache(CUFFT_DEFAULT_CACHE_SIZE) {}
 
   CuFFTParamsLRUCache(int64_t max_size) {
     _set_max_size(max_size);
