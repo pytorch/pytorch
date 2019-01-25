@@ -176,7 +176,8 @@ if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_n
 """)
 
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
-std::vector<c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
+std::vector<c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>>
+  ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   if (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse())
     ${tensorlist_name}_impl_saved[i] = ${tensorlist_name}[i].getIntrusivePtr();
