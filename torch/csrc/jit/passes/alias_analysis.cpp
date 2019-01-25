@@ -978,7 +978,7 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
   JIT_ASSERT(false);
 }
 
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol sym) {
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // WARNING: by adding a case to this list, you are asserting that you have
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {
@@ -1007,9 +1007,23 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol sym) {
     aten::add,
     aten::sub,
     aten::mul,
-    aten::div
+    aten::div,
   };
-  return handled.count(sym);
+
+  // Operators that should not be used by alias analysis
+  const static std::unordered_set<Symbol> purposefully_not_handled = {
+    prim::Print,
+    prim::Load,
+    prim::Store,
+    prim::Drop,
+    onnx::Reshape,
+    onnx::Shape,
+    prim::AnyDefined,
+    prim::AutogradAdd,
+    prim::fork,
+  };
+
+  return handled.count(symbol) || purposefully_not_handled.count(symbol);
 }
 
 } // namespace jit
