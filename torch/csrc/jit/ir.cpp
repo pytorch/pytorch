@@ -1223,11 +1223,11 @@ Node* Graph::createDict(
     const TypePtr& value_type,
     at::ArrayRef<Value*> keys,
     at::ArrayRef<Value*> values) {
-  JIT_ASSERT(keys.size() == values.size());
+  AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (size_t i = 0; i < keys.size(); ++i) {
-    JIT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
-    JIT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
     n->addInput(keys[i]) ;
     n->addInput(values[i]);
@@ -1238,7 +1238,7 @@ Node* Graph::createDict(
 
 Node* Graph::createDictIndex(Value* dict, Value* index) {
   auto dict_type = dict->type()->expect<DictType>();
-  JIT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
 
   auto n = create(prim::DictIndex, {dict, index});
   n->output()->setType(dict_type->getValueType());

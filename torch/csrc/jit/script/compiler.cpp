@@ -1855,7 +1855,7 @@ struct to_ir {
       const TreeList& trees1,
       const TreeList& trees2,
       bool maybe_unpack) {
-    JIT_ASSERT(trees1.size() == trees2.size());
+    AT_ASSERT(trees1.size() == trees2.size());
     std::vector<NamedValue> values1;
     std::vector<NamedValue> values2;
     for (size_t i = 0; i < trees1.size(); ++i) {
@@ -2280,7 +2280,7 @@ struct to_ir {
             dl.key_inputs().tree()->trees(),
             dl.value_inputs().tree()->trees(),
             /*maybe_unpack=*/true);
-        JIT_ASSERT(keys.size() == values.size());
+        AT_ASSERT(keys.size() == values.size());
 
         TypePtr key_type = nullptr;
         TypePtr value_type = nullptr;
@@ -2296,7 +2296,7 @@ struct to_ir {
           key_type = StringType::get();
           value_type = DynamicType::get();
         }
-        JIT_ASSERT(key_type != nullptr && value_type != nullptr);
+        AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
         return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
       } break;
@@ -2531,7 +2531,7 @@ struct to_ir {
       Value* dict_val,
       Value* key_val) {
     auto dict_type = dict_val->type()->cast<DictType>();
-    JIT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
     return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
