@@ -17,7 +17,7 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
 ENDIF()
 
 # this flag is used in Config but set externally, we must normalize it
-# 0/1 otherwise #if ON will evaluation to false.
+# to 0/1 otherwise `#if ON` will be evaluated to false.
 if (CAFFE2_STATIC_LINK_CUDA)
   set(CAFFE2_STATIC_LINK_CUDA_INT 1)
 else()

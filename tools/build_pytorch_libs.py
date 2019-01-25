@@ -253,7 +253,7 @@ def build_caffe2(version,
                        cwd=build_dir)
         else:
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
-                       cwd=build_dir, env=my_env)
+                       cwd=build_dir)
     else:
         if USE_NINJA:
             check_call(['ninja', 'install'], cwd=build_dir)
