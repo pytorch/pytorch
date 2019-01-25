@@ -22,10 +22,19 @@ void InputBuffer::add(size_t pos, Variable var) {
   } else {
     at::OptionalDeviceGuard device_guard(device_of(var));
     // ATen doesn't route sparse additions correctly...
+    // do dense + sparse in-place if possible
     if (old_var.is_sparse()) {
-      buffer[pos] = var + old_var;
+      if (!var.is_sparse() && var.is_contiguous()) {
+          buffer[pos] = var.add_(old_var);
+      } else {
+          buffer[pos] = var + old_var;
+      }
     } else {
-      buffer[pos] = old_var + var;
+      if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous()) {
+          buffer[pos] = old_var.add_(var);
+      } else {
+          buffer[pos] = old_var + var;
+      }
     }
   }
 }
