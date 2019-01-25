@@ -702,7 +702,7 @@ struct Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || !v.is_variable());
+    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(name, std::forward<TensorAttr::ConstructorType>(v));
   }
   const TensorAttr::ValueType& t(Symbol name) const {
@@ -711,7 +711,7 @@ struct Node {
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
     for (auto& t : v) {
-      AT_ASSERT(!t.defined() || !t.is_variable());
+      AT_ASSERT(!t.defined() || t.is_variable());
     }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));

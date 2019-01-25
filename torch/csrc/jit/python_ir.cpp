@@ -472,13 +472,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, torch::autograd::Variable v) {
-            return n.t_(Symbol::attr(name), v.data());
+            return n.t_(Symbol::attr(name), v.set_requires_grad(false));
           })
       .def(
           "t",
           [](Node& n, const char* name) {
-            return torch::autograd::make_variable(
-                n.t(Symbol::attr(name)), /*requires_grad=*/false);
+            return n.t(Symbol::attr(name)).set_requires_grad(false);
           })
       // Tensors (ts_) -- manually written to unwrap variables into tensors.
       .def(
@@ -489,7 +488,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              tensors.push_back(variable.data());
+              tensors.push_back(variable.set_requires_grad(false));
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));
           })
@@ -500,8 +499,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<torch::autograd::Variable> variables;
             variables.reserve(tensors.size());
             for (auto& tensor : tensors) {
-              variables.push_back(torch::autograd::make_variable(
-                  std::move(tensor), /*requires_grad=*/false));
+              variables.push_back(std::move(tensor.set_requires_grad(false)));
             }
             return variables;
           })
@@ -509,7 +507,7 @@ void initPythonIRBindings(PyObject* module_) {
           "z_",
           [](Node& n, const char* name, at::Tensor v) {
             return n.t_(
-                Symbol::attr(name), autograd::Variable(v.view({})).data());
+                Symbol::attr(name), autograd::Variable(v.view({})).set_requires_grad(false));
           })
       .def(
           "z",
@@ -518,7 +516,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view({})).data();
+              i = autograd::Variable(i.view({})).set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })

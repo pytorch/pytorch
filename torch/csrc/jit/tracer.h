@@ -85,9 +85,10 @@ inline Value* getValueTrace(const Variable& var) {
   auto& value_map = getTracingState()->value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
-    Value* constant = state->graph->insertConstant(var.data());
+    var.set_requires_grad(false);
+    Value* constant = state->graph->insertConstant(var);
     recordSourceLocation(constant->node());
-    constant->inferTypeFrom(var.data());
+    constant->inferTypeFrom(var);
     it = value_map.emplace_hint(it, var, constant);
   }
   if (!it->second->hasUniqueName()) {
