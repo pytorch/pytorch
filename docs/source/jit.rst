@@ -249,8 +249,7 @@ that are not explicitly written.
 
 The expression must be emitted within the conditional; assigning
 a None check to a variable and using it in the conditional will not refine types.
-You can manually unwrap an optional with torch.jit._unwrap_optional(opt_var),
-which will refine Optional[T] to T and throw an exception if opt_var is None.
+
 
 Example::
 
@@ -263,12 +262,6 @@ Example::
 
     if y is not None and z is not None:
       x = y + z
-    return x
-
-  @torch.jit.script
-  def manual_opt_unwrap(x):
-    # type: (Optional[int]) -> int
-    x = torch.jit._unwrap_optional(x)
     return x
 
 
