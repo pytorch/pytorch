@@ -105,6 +105,8 @@ def run_cmake(version,
         ldflags += " -Wl,-rpath,@loader_path"
     elif USE_ROCM:
         ldflags += " -Wl,-rpath,\\\\\\$ORIGIN"
+    elif IS_WINDOWS:
+        cflags += " /EHa"
     else:
         ldflags += " -Wl,-rpath,$ORIGIN"
 
@@ -238,13 +240,10 @@ def build_caffe2(version,
     if IS_WINDOWS:
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
-            j = min(1, multiprocessing.cpu_count() - 1)
+            j = max(1, multiprocessing.cpu_count() - 1)
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
                        cwd=build_dir)
         else:
-            my_env = os.environ.copy()
-            my_env['CC'] = 'cl.exe'
-            my_env['CXX'] = 'cl.exe'
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
                        cwd=build_dir, env=my_env)
     else:
