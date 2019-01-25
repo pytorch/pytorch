@@ -1164,6 +1164,13 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
+// Using the new C10 interface and FunctionSchema registry,
+// instantiate and run the operator.
+CAFFE2_API void RunOperator(
+    c10::Symbol name,
+    std::vector<c10::IValue>& inputs,
+    std::vector<c10::IValue*>& outputs);
+
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
     const std::string& engine = "");
