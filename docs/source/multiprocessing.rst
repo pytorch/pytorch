@@ -27,15 +27,6 @@ a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
 Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
-.. warning::
-
-    CUDA API requires that the allocation exported to other processes remains
-    valid as long as it's used by them. You should be careful and ensure that
-    CUDA tensors you shared don't go out of scope as long as it's necessary.
-    This shouldn't be a problem for sharing model parameters, but passing other
-    kinds of data should be done with care. Note that this restriction doesn't
-    apply to shared CPU memory.
-
 Let's see a simple example explaining how this works:
 
 ::
@@ -49,6 +40,7 @@ Let's see a simple example explaining how this works:
             s_sample = [torch.zeros(1), torch.ones(1)]
             q.put(s_sample)
             e.wait()
+            del s_sample
             e.clear()
 
     if __name__ == "__main__":
@@ -66,15 +58,30 @@ Let's see a simple example explaining how this works:
 
         p.join()
 
-`q` and `e` are used to coordinate between sender and receiver processes.
-Once sender calls `q.put(s_sample);e.wait()`, receiver can do whatever it wants
-to `r_sample`. `r_sample` points to exactly the same CUDA storage as `s_sample`
-using CUDA IPC sharing. All operations about `r_sample` should be done before
-calling `del r_sample;e.set()`, which indicates receiver will NEVER touch
-this memory any more. If receiver wants to save the data of `r_sample` for
-future use, it has to `clone()` it. Otherwise the memory could be deallocated
-or reallocated on sender side, and `r_sample` could points to wild data which
-eventually result in unexpected behavior.
+CUDA API requires that the allocation exported to other processes remains
+valid as long as it's used by them. In the example above, calling `e.wait()`
+on sender side ensures tensor `s_sample` doesn't get deleted while
+receiver is working on it.
+
+This shouldn't be a problem for sharing model parameters, but passing other
+kinds of data should be done with care. Note that this restriction doesn't
+apply to shared CPU memory.
+
+Once sender calls `e.wait()`, receiver can do whatever it wants to `r_sample`.
+`r_sample` points to exactly the same CUDA storage as `s_sample` using CUDA
+IPC sharing. All operations to `r_sample` should be done before calling
+`del r_sample;e.set()`, which indicates receiver will NEVER touch this memory
+any more.
+
+Note that once receiver is done working on `r_sample`, calling `del r_sample`
+is REQUIRED. Keeping `r_sample` alive while sender could reallocate a new
+tensor `s_sample_new` on where `r_sample` points to is dangerous. When sharing
+`s_sample_new`, receiver can find this memory in its cache, and it has no way
+to discover this storage is a completely new one. And this could potentially
+result in unexpected behavior.
+
+If receiver wants to save the data of `r_sample` for future use, it has to
+`clone()` it.
 
 Sharing strategies
 ------------------
