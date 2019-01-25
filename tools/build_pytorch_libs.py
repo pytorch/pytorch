@@ -1,6 +1,6 @@
 from .setup_helpers.env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
-                               DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
-                               check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
+                                DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
+                                check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
 
 import os
 import sys
@@ -24,6 +24,7 @@ from glob import glob
 import multiprocessing
 import shutil
 
+
 def which(thefile):
     path = os.environ.get("PATH", os.defpath).split(os.pathsep)
     for dir in path:
@@ -33,11 +34,13 @@ def which(thefile):
             return name
     return None
 
+
 def cmake_version(cmd):
     for line in check_output([cmd, '--version']).split('\n'):
         if 'version' in line:
             return LooseVersion(line.strip().split(' ')[2])
     raise Exception('no version found')
+
 
 def get_cmake_command():
     cmake_command = 'cmake'
@@ -52,11 +55,13 @@ def get_cmake_command():
                 cmake_command = 'cmake3'
     return cmake_command
 
+
 def cmake_defines(lst, **kwargs):
     for key in sorted(kwargs.keys()):
         value = kwargs[key]
         if value is not None:
             lst.append('-D{}={}'.format(key, value))
+
 
 # Ninja
 try:
@@ -74,11 +79,13 @@ if DEBUG:
 elif REL_WITH_DEB_INFO:
     build_type = "RelWithDebInfo"
 
+
 def mkdir_p(dir):
     try:
         os.makedirs(dir)
     except OSError:
         pass
+
 
 def run_cmake(version,
               cmake_python_library,
@@ -97,7 +104,7 @@ def run_cmake(version,
         USE_NUMPY = True
     except ImportError:
         USE_NUMPY = False
-        NUMPY_INCLUDE_DIR=None
+        NUMPY_INCLUDE_DIR = None
 
     cflags = os.getenv('CFLAGS') or ""
     ldflags = os.getenv('LDFLAGS') or ""
@@ -109,7 +116,6 @@ def run_cmake(version,
         cflags += " /EHa"
     else:
         ldflags += " -Wl,-rpath,$ORIGIN"
-
 
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
@@ -126,10 +132,11 @@ def run_cmake(version,
     mkdir_p(install_dir)
     mkdir_p(build_dir)
 
-    cmake_defines(cmake_args,
+    cmake_defines(
+        cmake_args,
         PYTHON_EXECUTABLE=sys.executable,
         PYTHON_LIBRARY=cmake_python_library,
-        PYTHON_INCLUDE_DIR= distutils.sysconfig.get_python_inc(),
+        PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
         BUILDING_WITH_TORCH_LIBS="ON",
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
@@ -180,8 +187,9 @@ def run_cmake(version,
 
     expected_wrapper = '/usr/local/opt/ccache/libexec'
     if IS_DARWIN and os.path.exists(expected_wrapper):
-        cmake_defines(cmake_args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
-                                  CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+        cmake_defines(cmake_args,
+                      CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
+                      CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
     check_call(['printenv'])
     check_call(cmake_args, cwd=build_dir, env=my_env)
@@ -200,8 +208,8 @@ def copy_files(build_test):
     copy_all(install_dir + '/lib/*', torch_lib_dir)
     if os.path.exists(install_dir + '/lib64'):
         copy_all(install_dir + '/lib64/*', torch_lib_dir)
-    copy_file(base_dir+'/aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
-    copy_file(base_dir+'/aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
+    copy_file(base_dir + '/aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
+    copy_file(base_dir + '/aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
 
     copy_tree(install_dir + '/include', torch_lib_dir + '/include', update=True)
     if os.path.exists(install_dir + '/bin/'):
@@ -251,7 +259,6 @@ def build_caffe2(version,
             check_call(['ninja', 'install'], cwd=build_dir)
         else:
             check_call(['make', '-j', str(multiprocessing.cpu_count()), 'install'], cwd=build_dir)
-
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled

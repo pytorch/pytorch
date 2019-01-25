@@ -177,7 +177,7 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE=False
+RERUN_CMAKE = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == '--cmake':
@@ -312,6 +312,7 @@ def check_pydep(importname, module):
         importlib.import_module(importname)
     except ImportError:
         raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
