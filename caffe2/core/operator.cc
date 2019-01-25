@@ -323,6 +323,23 @@ unique_ptr<OperatorBase> CreateOperator(
   }
 }
 
+void RunOperator(
+    c10::Symbol name,
+    std::vector<c10::IValue>& inputs,
+    std::vector<c10::IValue*>& outputs) {
+  auto fn_wrap =
+      caffe2::FunctionSchemaRegistry()->Create(name.toUnqualString());
+  CAFFE_ENFORCE(
+      fn_wrap,
+      "Operator not registered with FunctionSchema constructor.",
+      name);
+  auto fn = fn_wrap->getSchema();
+  auto op = caffe2::FunctionSchemaOperatorRegistry()->Create(
+      name.toUnqualString(), fn, inputs, outputs);
+
+  op->Run();
+}
+
 std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   static std::map<DeviceType, OperatorRegistry*> g_device_type_registry;
   return &g_device_type_registry;
