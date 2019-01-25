@@ -1485,8 +1485,6 @@
   matches_jit_signature: True
 
 - func: cdist(Tensor x1, Tensor x2, double p=2) -> Tensor
-  dispatch:
-    CPU: cdist
     
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
