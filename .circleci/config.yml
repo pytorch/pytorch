@@ -169,9 +169,15 @@ setup_ci_environment: &setup_ci_environment
       export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
       echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
-      # This IAM user allows write access to S3 bucket for sccache
-      echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
-      echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+      if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+        # This IAM user allows write access to S3 bucket for sccache & bazels3cache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+      else
+        # This IAM user allows write access to S3 bucket for sccache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+      fi
     fi
 
     # This IAM user only allows read-write access to ECR
@@ -991,6 +997,19 @@ jobs:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+    environment:
+      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
+    environment:
+      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -3155,6 +3174,18 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc7_build
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+          filters:
+            branches:
+              only:
+                - master
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
+          filters:
+            branches:
+              only:
+                - master
+          requires:
+            - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_pynightly_build
       - pytorch_linux_trusty_pynightly_test:
           requires:
