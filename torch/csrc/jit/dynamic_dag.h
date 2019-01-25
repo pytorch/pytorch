@@ -115,7 +115,7 @@ struct visited_list {
   }
 
   void push_back(Vertex<T>* elt) {
-    JIT_ASSERT(!elt->visited_);
+    AT_ASSERT(!elt->visited_);
     elt->visited_ = true;
     data_.push_back(elt);
   }
@@ -224,9 +224,9 @@ Vertex<T>* DynamicDAG<T>::newVertex(T datum) {
 
 template <typename T>
 void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
-  JIT_ASSERT(producer != consumer);
-  JIT_ASSERT(producer->out_edges().contains(consumer));
-  JIT_ASSERT(consumer->in_edges().contains(producer));
+  AT_ASSERT(producer != consumer);
+  AT_ASSERT(producer->out_edges().contains(consumer));
+  AT_ASSERT(consumer->in_edges().contains(producer));
   producer->out_edges().erase(consumer);
   consumer->in_edges().erase(producer);
 }
@@ -347,7 +347,7 @@ IOEdges<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
  */
 template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
-  JIT_ASSERT(producer != consumer);
+  AT_ASSERT(producer != consumer);
 
   // NB: DynamicDAG is a simple graph. If an edge exists already, don't do
   // anything.
@@ -355,7 +355,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   if (!is_distinct)
     return;
   is_distinct = consumer->in_edges().insert(producer);
-  JIT_ASSERT(is_distinct);
+  AT_ASSERT(is_distinct);
 
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.
@@ -379,7 +379,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
   // Search for vertices that can reach producer that have a now incorrect
   // topological ordering
-  JIT_ASSERT(!dfsSearch(
+  AT_ASSERT(!dfsSearch(
       DFSDirection::backward,
       producer,
       consumer,
@@ -400,7 +400,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 //                   |in_edges(consumer)|))
 template <typename T>
 bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
-  JIT_ASSERT(producer != consumer);
+  AT_ASSERT(producer != consumer);
   if (contractionProducesCycle(producer, consumer)) {
     return false;
   }

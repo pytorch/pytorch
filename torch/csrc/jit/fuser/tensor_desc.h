@@ -2,8 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/type.h>
+#include <c10/util/Exception.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <algorithm>
@@ -41,7 +41,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
 
-  TensorDesc(const CompleteTensorTypePtr& type)
+  TensorDesc(const c10::CompleteTensorTypePtr& type)
       : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -57,7 +57,7 @@ struct TORCH_API TensorDesc {
   static std::vector<bool> findContiguous(
       const at::IntList& sizes,
       const at::IntList& strides) {
-    JIT_ASSERT(sizes.size() == strides.size());
+    AT_ASSERT(sizes.size() == strides.size());
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {
       const auto expected_stride =

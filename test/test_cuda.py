@@ -1422,6 +1422,67 @@ class TestCuda(TestCase):
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_current_stream(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        s0 = torch.cuda.current_stream()
+        s1 = torch.cuda.current_stream(device=1)
+        s2 = torch.cuda.current_stream(device=0)
+
+        self.assertEqual(d0, s0.device)
+        self.assertEqual(d1, s1.device)
+        self.assertEqual(d0, s2.device)
+        self.assertEqual(s0, s2)
+
+        with torch.cuda.device(d1):
+            s0 = torch.cuda.current_stream()
+            s1 = torch.cuda.current_stream(1)
+            s2 = torch.cuda.current_stream(d0)
+
+        self.assertEqual(d1, s0.device)
+        self.assertEqual(d1, s1.device)
+        self.assertEqual(d0, s2.device)
+        self.assertEqual(s0, s1)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "Expected a cuda device, but got: cpu"):
+            torch.cuda.current_stream(torch.device('cpu'))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_default_stream(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.default_stream()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.default_stream()
+
+        s2 = torch.cuda.default_stream(device=0)
+        s3 = torch.cuda.default_stream(d1)
+
+        self.assertEqual(d0, s0.device)
+        self.assertEqual(d1, s1.device)
+        self.assertEqual(d0, s2.device)
+        self.assertEqual(d1, s3.device)
+        self.assertEqual(s0, s2)
+        self.assertEqual(s1, s3)
+
+        with torch.cuda.device(d0):
+            self.assertEqual(torch.cuda.current_stream(), s0)
+
+        with torch.cuda.device(d1):
+            self.assertEqual(torch.cuda.current_stream(), s1)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "Expected a cuda device, but got: cpu"):
+            torch.cuda.default_stream(torch.device('cpu'))
+
     @skipIfRocm
     def test_streams(self):
         default_stream = torch.cuda.current_stream()

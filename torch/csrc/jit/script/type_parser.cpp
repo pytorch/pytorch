@@ -115,7 +115,7 @@ c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(
         << "Broadcastable lists only supported for int or float";
 
   auto elem_ptr = ident_to_type_lut().find(value_name);
-  JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  AT_ASSERT(elem_ptr != ident_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
