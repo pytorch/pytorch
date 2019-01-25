@@ -107,6 +107,10 @@ class AliasDb {
 
   void addAlias(const Value* value, Symbol alias);
   void addAlias(const Value* value, const Value* from);
+  void addAlias(
+      Value* input,
+      TypePtr type,
+      std::map<TypeKind, Symbol>& aliases);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
 

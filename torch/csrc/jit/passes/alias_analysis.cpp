@@ -250,6 +250,22 @@ void AliasDb::dump() const {
   }
 }
 
+void AliasDb::addAlias(
+    Value* input,
+    TypePtr type,
+    std::map<TypeKind, Symbol>& aliases) {
+  // All tensor subtypes may alias to each other, so we should consider all
+  // lists of them to alias to each other.
+  if (type->isSubtypeOf(DynamicType::get())) {
+    type = DynamicType::get();
+  }
+  if (aliases.count(type->kind()) == 0) {
+    aliases[type->kind()] = getFreshAlias(/*isGraphInput=*/true);
+  }
+
+  addAlias(input, aliases.at(type->kind()));
+}
+
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
@@ -271,18 +287,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     if (inputType->isSubtypeOf(DynamicType::get())) {
       addAlias(input, tensorAlias);
     } else if (inputType->kind() == TypeKind::ListType) {
-      auto containedType = inputType->containedTypes().at(0);
-      // All tensor subtypes may alias to each other, so we should consider all
-      // lists of them to alias to each other.
-      if (containedType->isSubtypeOf(DynamicType::get())) {
-        containedType = DynamicType::get();
-      }
-      if (listTypeAliases.count(containedType->kind()) == 0) {
-        listTypeAliases[containedType->kind()] =
-            getFreshAlias(/*isGraphInput=*/true);
-      }
-
-      addAlias(input, listTypeAliases.at(containedType->kind()));
+      addAlias(input, inputType->containedTypes().at(0), listTypeAliases);
     } else if (inputType->kind() == TypeKind::TupleType) {
       auto tupleType = inputType->cast<TupleType>();
       if (tupleTypeAliases.count(tupleType) == 0) {
@@ -291,24 +296,9 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       addAlias(input, tupleTypeAliases.at(tupleType));
     } else if (inputType->kind() == TypeKind::DictType) {
       auto dictType = inputType->cast<DictType>();
-      auto keyType = dictType->getKeyType();
-      auto valueType = dictType->getValueType();
-      // All tensor subtypes may alias to each other, so we should consider all
-      // lists of them to alias to each other.
-      if (valueType->isSubtypeOf(DynamicType::get())) {
-        valueType = DynamicType::get();
-      }
-      if (dictTypeAliases.count(keyType->kind()) == 0) {
-        dictTypeAliases[keyType->kind()] =
-            getFreshAlias(/*isGraphInput=*/true);
-      }
-      if (dictTypeAliases.count(valueType->kind()) == 0) {
-        dictTypeAliases[valueType->kind()] =
-            getFreshAlias(/*isGraphInput=*/true);
-      }
-
-      addAlias(input, dictTypeAliases.at(keyType->kind()));
-      addAlias(input, dictTypeAliases.at(valueType->kind()));
+      AT_ASSERT(!shouldAnnotate(dictType->getKeyType()));
+      addAlias(input, dictType->getKeyType(), dictTypeAliases);
+      addAlias(input, dictType->getValueType(), dictTypeAliases);
     } else {
       AT_ASSERT(!shouldAnnotate(input));
     }
