@@ -6,8 +6,6 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/core/function_schema.h>
-#include <caffe2/core/operator.h>
-
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 
@@ -260,8 +258,6 @@ Operator createOperator(
   });
 }
 
-Operator createOperatorFromC2(const std::string& name);
-
 /// Registration class for new operators. Effectively calls
 /// `torch::jit::registerOperator` for every supplied operator, but allows doing
 /// so in the global scope when a `RegisterOperators` object is assigned to a
@@ -281,14 +277,6 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   RegisterOperators(const std::string& name, Implementation&& implementation) {
     op(name, std::forward<Implementation>(implementation));
-  }
-
-  /// Requires declaration of the FunctionSchema with
-  /// REGISTER_FUNCTION_SCHEMA_OPERATOR(name, ...)
-  static RegisterOperators&& Caffe2Operator(const std::string& name) {
-    auto r = RegisterOperators();
-    registerOperator(createOperatorFromC2(name));
-    return std::move(r);
   }
 
   /// Creates a new operator from a name and implementation function (function
