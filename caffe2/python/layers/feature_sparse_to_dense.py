@@ -3,9 +3,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import numpy as np
-from caffe2.python import schema
+from caffe2.python import schema, dyndep
 from caffe2.python.layers.layers import ModelLayer
 
+# @build:cpp_deps [ //caffe2/caffe2/fb/operators:parse_generic_op]
+dyndep.InitOpsLibrary("@/caffe2/caffe2/fb/operators:parse_generic_op")
 
 class FeatureSparseToDense(ModelLayer):
     def __init__(
