@@ -147,7 +147,7 @@ struct ivalue_to_arg_type<ArrayRef<T>> {
 };
 
 template<class FuncType, class... ExtraArgs, size_t... ivalue_arg_indices>
-typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(FuncType* func, ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args, guts::index_sequence<ivalue_arg_indices...>) {
+typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(FuncType* func, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>, ExtraArgs&&... extra_args) {
   using IValueArgTypes = typename guts::function_traits<FuncType>::parameter_types;
   return (*func)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])..., std::forward<ExtraArgs>(extra_args)...);
 }
@@ -155,7 +155,7 @@ typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(Fun
 template<class FuncType, class... ExtraArgs>
 typename guts::function_traits<FuncType>::return_type call_with_ivalue_args(FuncType* func, ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args) {
   constexpr size_t num_ivalue_args = guts::function_traits<FuncType>::number_of_parameters - sizeof...(ExtraArgs);
-  return call_with_ivalue_args_<FuncType, ExtraArgs...>(func, ivalue_args, std::forward<ExtraArgs>(extra_args)..., guts::make_index_sequence<num_ivalue_args>());
+  return call_with_ivalue_args_<FuncType>(func, ivalue_args, guts::make_index_sequence<num_ivalue_args>(), std::forward<ExtraArgs>(extra_args)...);
 }
 
 template<class OutputType>
