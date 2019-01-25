@@ -79,6 +79,29 @@ struct dists {
 };
 
 template <typename scalar_t, typename F>
+__device__ static inline scalar_t reduce_agg(scalar_t agg) {
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
+  }
+
+  __shared__ scalar_t shared[forward_threads];
+  int lane = threadIdx.x % warpSize;
+  int warp_id = threadIdx.x / warpSize;
+  if (lane == 0) {
+    shared[warp_id] = agg;
+  }
+
+  __syncthreads();
+  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
+  if (warp_id == 0) {
+    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
+      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
+    }
+  }
+  return agg;
+}
+
+template <typename scalar_t, typename F>
 __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
                                               const double n2, const double n2_squared_minus_1) {
   const int k = blockIdx.x;
@@ -97,28 +120,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
     F::inc(agg, std::abs(*a - *b), p);
   }
 
-  // Reduce warps
-  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-  }
-
-  // Reduce block
-  // This shared memory is significantly larger than necessary, but the
-  // assumption is that it's not a bottleneck, and this is simple
-  __shared__ scalar_t shared[forward_threads];
-  int lane = threadIdx.x % warpSize;
-  int warp_id = threadIdx.x / warpSize;
-  if (lane == 0) {
-    shared[warp_id] = agg;
-  }
-  __syncthreads();
-  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
-  if (warp_id == 0) {
-    // Only reduce theads with nonzero data
-    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
-      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-    }
-  }
+  agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[k] = F::finish(agg, p);
   }
@@ -173,24 +175,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
-  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-  }
-
-  __shared__ scalar_t shared[forward_threads];
-  int lane = threadIdx.x % warpSize;
-  int warp_id = threadIdx.x / warpSize;
-  if (lane == 0) {
-    shared[warp_id] = agg;
-  }
-
-  __syncthreads();
-  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
-  if (warp_id == 0) {
-    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
-      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-    }
-  }
+  agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[k] = F::finish(agg, p);
   }
