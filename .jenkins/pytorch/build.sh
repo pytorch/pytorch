@@ -48,8 +48,8 @@ pip install -q -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
-  pip install -q mkl mkl-devel
   if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    pip install -q mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
