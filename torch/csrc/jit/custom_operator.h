@@ -103,7 +103,7 @@ Node* getTracedNode(
        0)...};
   (void)_; // ignore
 
-  graph->appendNode(node);
+  graph->insertNode(node);
 
   return node;
 }
