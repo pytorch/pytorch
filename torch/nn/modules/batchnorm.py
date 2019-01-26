@@ -355,6 +355,10 @@ class SyncBatchNorm(_BatchNorm):
     on `(N, +)` slices, it's common terminology to call this Volumetric Batch Normalization
     or Spatio-temporal Batch Normalization.
 
+    Currently SyncBatchNorm only supports DistributedDataParallel with single GPU per process. Use
+    torch.nn.utils.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
+    Network with DDP.
+
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, +)`
@@ -389,6 +393,14 @@ class SyncBatchNorm(_BatchNorm):
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
 
+        >>> # network is nn.BatchNorm layer
+        >>> sync_bn_network = torch.nn.utils.convert_sync_batchnorm(network, process_group)
+        >>> # only single gpu per process is currently supported
+        >>> ddp_sync_bn_network = torch.nn.parallel.DistributedDataParallel(
+        >>>                         sync_bn_network,
+        >>>                         device_ids=[args.local_rank],
+        >>>                         output_device=args.local_rank)
+
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
         https://arxiv.org/abs/1502.03167
     """
@@ -397,6 +409,9 @@ class SyncBatchNorm(_BatchNorm):
                  track_running_stats=True, process_group=None):
         super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
         self.process_group = process_group
+        # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
+        # under supported condition (single GPU per process)
+        self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
         if input.dim() <= 2:
@@ -406,10 +421,18 @@ class SyncBatchNorm(_BatchNorm):
     def _specify_process_group(self, process_group):
         self.process_group = process_group
 
+    def _specify_ddp_gpu_num(self, gpu_size):
+        if gpu_size > 1:
+            raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
+        self.ddp_gpu_size = gpu_size
+
     def forward(self, input):
         # currently only GPU input is supported
         if not input.is_cuda:
             raise ValueError('expected input tensor to be on GPU')
+
+        if not self.ddp_gpu_size:
+            raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
 
         self._check_input_dim(input)
 
@@ -424,10 +447,9 @@ class SyncBatchNorm(_BatchNorm):
 
         world_size = 1
         process_group = torch.distributed.group.WORLD
-        if torch.distributed.is_initialized():
-            if self.process_group:
-                process_group = self.process_group
-            world_size = torch.distributed.get_world_size(process_group)
+        if self.process_group:
+            process_group = self.process_group
+        world_size = torch.distributed.get_world_size(process_group)
 
         # fallback to framework BN when synchronization is not necessary
         if world_size == 1 or (not self.training and self.track_running_stats):
