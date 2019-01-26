@@ -299,11 +299,10 @@ bool runFusion(const int64_t key, Stack& stack) {
   // Acquires inputs from stack
   auto all_inputs = last(stack, spec.nInputs());
   std::vector<at::Tensor> inputs;
-  inputs.reserve(all_inputs.size());
-  for (auto& i : all_inputs) {
-    if (i.isTensor()) {
-      inputs.emplace_back(i.toTensor());
-    }
+  inputs.reserve(spec.nTensorInputs());
+  // we know that tensor inputs are first
+  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+    inputs.emplace_back(all_inputs[i].toTensor());
   }
 
   // Determines device to dispatch to. If there's a device mismatch in the

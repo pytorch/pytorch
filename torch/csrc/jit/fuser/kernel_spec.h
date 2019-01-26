@@ -41,6 +41,13 @@ struct TORCH_API PartitionInfo {
   int64_t dim_;
 };
 
+// This is a helper struct to record the following:
+// for each fusion group output, it records the corresponding
+// kernel output offset (in offset) and the fusion group input
+// to that is to be applied with sumtosize on the output (if any).
+// This mapping is necessar as a single kernel output might be
+// summed to different sizes.
+// These mappings are created during compilation in processGradSumToSize.
 struct TORCH_API OutputMapAndSize {
   OutputMapAndSize(const int64_t _offset, const int64_t _sizeInput)
       : offset_{_offset}, sizeInput_{_sizeInput} {};
@@ -54,6 +61,7 @@ struct TORCH_API OutputMapAndSize {
   bool needsSumToSize() const {
     return sizeInput_ != -1;
   }
+
  private:
   int64_t offset_;
   int64_t sizeInput_;
@@ -79,6 +87,7 @@ struct TORCH_API KernelSpec {
         graph_{_graph},
         code_{_graph},
         nInputs_{_graph->inputs().size()},
+        nTensorInputs_{},
         inputBroadcastGroups_{},
         inputChunks_{},
         outputMapAndSizes_{},
@@ -90,6 +99,10 @@ struct TORCH_API KernelSpec {
         break;
       }
     }
+    nTensorInputs_ = std::count_if(
+        graph_->inputs().begin(), graph_->inputs().end(), [](const Value* v) {
+          return v->type()->isSubtypeOf(DynamicType::get());
+        });
   }
 
   // Getters
@@ -104,6 +117,9 @@ struct TORCH_API KernelSpec {
   }
   int64_t nInputs() const {
     return nInputs_;
+  }
+  int64_t nTensorInputs() const {
+    return nTensorInputs_;
   }
 
   std::vector<std::vector<int64_t>>& inputBroadcastGroups() {
@@ -148,8 +164,13 @@ struct TORCH_API KernelSpec {
   std::shared_ptr<Graph> graph_;
   Code code_;
   uint64_t nInputs_;
+  uint64_t nTensorInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
+  // This will initially be an empty vector. During kernel compilation
+  // in processGradSumToSize it will be filled and will contain one
+  // element per fusion group output (which may be larger than the
+  // number of kernel outputs).
   std::vector<OutputMapAndSize> outputMapAndSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
