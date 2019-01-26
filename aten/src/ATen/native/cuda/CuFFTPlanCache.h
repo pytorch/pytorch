@@ -434,10 +434,10 @@ public:
 private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
-    AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
-             "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
     AT_CHECK(new_size >= 0,
              "cuFFT plan cache size must be non-negative, but got ", new_size);
+    AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
+             "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
     _max_size = static_cast<size_t>(new_size);
   }
 
