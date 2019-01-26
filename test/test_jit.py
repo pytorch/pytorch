@@ -12310,6 +12310,71 @@ class TestAsync(JitTestCase):
         self.assertEqual(inside_fork, False)
         self.assertEqual(after_wait, False)
 
+    def test_trace_fork_wait(self):
+        def fork_body(x):
+            return x.neg(), x.neg() + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            vals = torch.jit._wait(fut)
+            return vals[0], vals[1], x - 1
+
+        traced = torch.jit.trace(fn, (torch.rand(3, 4),))
+        x = torch.rand(3, 4)
+        self.assertEqual(fn(x), traced(x))
+
+        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
+
+    def test_trace_fork_wait_leaking(self):
+        my_list = []
+
+        def fork_body(x):
+            my_list.append(x + 1)
+            return x + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            val = torch.jit._wait(fut)
+            return my_list[0]
+
+        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; '
+                                                  'this probably indicates your program cannot be understood '
+                                                  'by the tracer.'):
+            traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
+
+    def test_trace_fork_wait_inline(self):
+        def fork_body(x):
+            return x + 1, x + 2
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            val = torch.jit._wait(fut)
+            return val[1]
+
+        traced = torch.jit.trace(fn, (torch.rand(3, 4),))
+        torch._C._jit_pass_inline_fork_wait(traced.graph)
+        torch._C._jit_pass_dce(traced.graph)
+        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=0)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
+
+    def test_trace_fork_wait_inline_onnx(self):
+        def fork_body(x):
+            return torch.neg(x), torch.neg(x)
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                fut = torch.jit._fork(fork_body, x)
+                val = torch.jit._wait(fut)
+                return val[1]
+
+        # smoke test for ONNX export
+        f = io.BytesIO()
+        torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
