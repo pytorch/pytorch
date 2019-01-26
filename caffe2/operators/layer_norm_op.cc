@@ -27,6 +27,16 @@ void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
 }
 
 template <>
+LayerNormOp<CPUContext>::LayerNormOp(
+    const c10::FunctionSchema& f,
+    const std::vector<c10::IValue>& i,
+    const std::vector<c10::IValue*>& o)
+    : Operator<CPUContext>(f, i, o),
+      axis_(static_cast<int>(this->GetSingleArgument<int>("axis", 1))),
+      epsilon_(static_cast<float>(
+          this->GetSingleArgument<float>("epsilon", 1e-5f))) {}
+
+template <>
 template <typename T>
 void LayerNormOp<CPUContext>::LayerNormForward(
     const int M,
@@ -181,8 +191,17 @@ to the end.)
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
-} // namespace caffe2
+REGISTER_FUNCTION_SCHEMA_OPERATOR(
+    LayerNorm,
+    (std::vector<c10::Argument>{c10::Argument("input_0"),
+                                c10::Argument("axis", IntType::get()),
+                                c10::Argument("epsilon", FloatType::get())}),
+    (std::vector<c10::Argument>{c10::Argument("output_0"),
+                                c10::Argument("output_1"),
+                                c10::Argument("output_2")}),
+    LayerNormOp<CPUContext>);
 
+} // namespace caffe2
 
 // Register layer norm with c10
 namespace {
