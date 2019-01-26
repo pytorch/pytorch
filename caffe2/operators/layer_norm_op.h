@@ -20,6 +20,10 @@ class LayerNormOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "axis", axis_, 1),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5f) {}
+  LayerNormOp(
+      const c10::FunctionSchema&,
+      const std::vector<c10::IValue>&,
+      const std::vector<c10::IValue*>&);
 
   ~LayerNormOp() {}
 
