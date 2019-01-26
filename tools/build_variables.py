@@ -56,6 +56,8 @@ libtorch_sources = [
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/caffe2_operator.cpp",
+    "torch/csrc/jit/register_caffe2_ops.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
