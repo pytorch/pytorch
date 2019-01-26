@@ -40,7 +40,7 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
 TORCH_API std::function<void()> pauseTracing() {
-  std::shared_ptr<tracer::TracingState> state = getTracingState();
+  const std::shared_ptr<tracer::TracingState>& state = getTracingState();
   tracer::setTracingState(nullptr);
 
   return [state]() { tracer::setTracingState(state); };
