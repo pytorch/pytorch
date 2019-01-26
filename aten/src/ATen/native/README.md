@@ -203,13 +203,13 @@ In order to provide implementations for these Python functions the legacy schema
 requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`, 
 `abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
 
-Now, as we move towards the unification, we use different syntax to represent some of
-this using annotations and translate to the legacy schema for the downstream consumers
-such as the C++ code generation.
+Now, as we move towards the unification, we start to use a different syntax to represent
+this by using annotations. In the end we still translate to the legacy schema for the downstream
+consumers such as the C++ code generation, but this will soon change.
 
-For this schema we restrict ourselves to `Tensor(a)` and `Tensor(a!)`. If two Tensors
-carry the same annotation, they both *may* represent the same memory. A write annotation,
-as indicated by an exclamation mark, indicates that they both *may* also be written to.
+If two Tensors carry the same annotation, they both *may* represent the same memory.
+A write annotation, as indicated by an exclamation mark, indicates that they both *may*
+also be written to.
 
 Let's revisit the previous three situtations
   - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
@@ -224,6 +224,9 @@ Let's revisit the previous three situtations
     document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
     As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
     `Tensor out1` in the context of multiple arguments.
+
+We check that the user uses these annotations and throw asserts if she doesn't. If this causes
+a lot of confusion please add @cpuhrsch to your PR.
 
 ### `dispatch`
 
