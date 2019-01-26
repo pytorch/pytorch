@@ -27,7 +27,7 @@ namespace jit {
 namespace {
 RegisterOperators reg({
   Operator(
-    //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output, Tensor? output_mean, Tensor? output_stdev) -> (Tensor, Tensor, Tensor)
+    //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output = None, Tensor? output_mean = None, Tensor? output_stdev = None) -> (Tensor, Tensor, Tensor)
     c10::OpSchema<c10::core::opschema::LayerNorm>::create_function_schema(),
     [](Stack& stack) {
         Tensor tensor_input = std::move(stack[stack.size()-6]).toTensor();
@@ -41,7 +41,8 @@ RegisterOperators reg({
 
         // allocate the output tensors that aren't set yet
         for (int i = 3; i < 6; ++i) {
-          if (torch::jit::peek(stack, i, 6).isNone()) {
+          // TODO this should just check for isNone, not for undefined tensor. @wanchaol is working on this.
+          if (torch::jit::peek(stack, i, 6).isNone() || !torch::jit::peek(stack, i, 6).toTensor().defined()) {
             torch::jit::peek(stack, i, 6) = at::empty({0}, device);
           }
         }
