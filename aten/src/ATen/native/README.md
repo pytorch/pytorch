@@ -225,6 +225,10 @@ Let's revisit the previous three situtations
     As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
     `Tensor out1` in the context of multiple arguments.
 
+There is also another situtation in which we use annotations, namely views.
+  - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
+    An alias to the memory represented by self may be also returned, however it is not mutated.
+
 We check that the user uses these annotations and throw asserts if she doesn't. If this causes
 a lot of confusion please add @cpuhrsch to your PR.
 
