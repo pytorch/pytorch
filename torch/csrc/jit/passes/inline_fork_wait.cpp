@@ -12,34 +12,14 @@ void InlineForkWait(
       WithInsertPoint insert_guard(n);
       auto graph = b->owningGraph();
       auto subgraph = n->g(attr::Subgraph);
-      // Map subgraph values -> this graph values
-      std::unordered_map<Value*, Value*> value_remap;
-      AT_ASSERT(n->inputs().size() == subgraph->inputs().size());
-      for (size_t i = 0; i < n->inputs().size(); ++i) {
-        value_remap[subgraph->inputs()[i]] = n->input(i);
-      }
-      auto remap_fn = [&](Value* sub_val) -> Value* {
-        return value_remap.at(sub_val);
-      };
-      for (auto sub_n : subgraph->nodes()) {
-        auto cloned_node =
-            graph->insertNode(graph->createClone(sub_n, remap_fn));
-        AT_ASSERT(sub_n->outputs().size() == cloned_node->outputs().size());
-        for (size_t i = 0; i < sub_n->outputs().size(); ++i) {
-          value_remap[sub_n->output(i)] = cloned_node->output(i);
-        }
-      }
 
-      AT_ASSERT(n->outputs().size() == 1);
-      AT_ASSERT(subgraph->outputs().size() == 1);
-      AT_ASSERT(value_remap.count(subgraph->outputs()[0]) > 0);
+      auto output = inlineCallTo(*graph, *subgraph, n->inputs());
 
-      future_remap[n->output()] = value_remap[subgraph->outputs()[0]];
-    } else if (n->kind() == Symbol::fromQualString("aten::wait")) {
+      future_remap[n->output()] = output.at(0);
+    } else if (n->kind() == aten::wait) {
       AT_ASSERT(n->inputs().size() == 1);
       AT_ASSERT(n->outputs().size() == 1);
-      AT_ASSERT(future_remap.count(n->input()) > 0);
-      n->output()->replaceAllUsesWith(future_remap[n->input()]);
+      n->output()->replaceAllUsesWith(future_remap.at(n->input()));
     }
 
     for (auto sub_b : n->blocks()) {

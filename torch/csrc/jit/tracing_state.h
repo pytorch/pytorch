@@ -159,12 +159,12 @@ struct TORCH_API NoWarn {
   bool prev;
 };
 
-struct WithTracingEnvStack {
-  WithTracingEnvStack() {
+struct WithNestedTracingFrame {
+  WithNestedTracingFrame() {
     getTracingState()->env_stack.emplace_back();
   }
 
-  ~WithTracingEnvStack() {
+  ~WithNestedTracingFrame() {
     getTracingState()->env_stack.pop_back();
   }
 };

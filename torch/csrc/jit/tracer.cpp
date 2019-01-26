@@ -39,6 +39,21 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+ void delValueTrace(const Variable& var) {
+  AT_ASSERT(var.defined());
+  auto& env_stack = getTracingState()->env_stack;
+  for (size_t i = 0; i < env_stack.size(); ++i) {
+    auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
+
+    auto it = value_map.find(var);
+    if (it == value_map.end()) {
+      continue;
+    }
+    value_map.erase(it);
+  }
+  getTracingState()->env_stack.back().value_map.erase(var);
+}
+
 // Given a variable 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
@@ -53,37 +68,57 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 // update on, but subsequently ignores it because the alpha scaling factor is
 // zero. This is one of the cases where a Variable can be created inside of a
 // trace, and if we treat it as a constant, everything will work out.
-Value* getValueTrace(const Variable& var) {
+Value* getValueTrace(const IValue& var) {
   auto& state = getTracingState();
-  if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
-    return state->graph->insertNode(n)->output();
-  }
-
   auto& env_stack = getTracingState()->env_stack;
 
-  for (size_t i = 0; i < env_stack.size(); ++i) {
-    auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
-    auto it = value_map.find(var);
-    if (it == value_map.end()) {
-      continue;
+  if (var.isTensor()) {
+    auto ten = var.toTensor();
+    if (!ten.defined()) {
+      Node* n = state->graph->createUndefined();
+      return state->graph->insertNode(n)->output();
     }
-    if (!it->second->hasUniqueName()) {
-      auto unique_name = getTracingState()->lookup_var_name_fn(var);
-      if (!unique_name.empty()) {
-        it->second->setUniqueName(unique_name);
+    for (size_t i = 0; i < env_stack.size(); ++i) {
+      auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
+      auto it = value_map.find(ten);
+      if (it == value_map.end()) {
+        continue;
       }
+      if (!it->second->hasUniqueName()) {
+        auto unique_name = getTracingState()->lookup_var_name_fn(ten);
+        if (!unique_name.empty()) {
+          it->second->setUniqueName(unique_name);
+        }
+      }
+      return it->second;
     }
-    return it->second;
-  }
 
-  // Didn't find it. Bake in a constant
-  Value* constant = state->graph->insertConstant(var.data());
-  recordSourceLocation(constant->node());
-  constant->inferTypeFrom(var.data());
-  auto it = env_stack.back().value_map.find(var);
-  it = env_stack.back().value_map.emplace_hint(it, var, constant);
-  return it->second;
+    // Didn't find it. Bake in a constant
+    Value* constant = state->graph->insertConstant(ten);
+    recordSourceLocation(constant->node());
+    constant->inferTypeFrom(ten);
+    auto it = env_stack.back().value_map.find(ten);
+    it = env_stack.back().value_map.emplace_hint(it, ten, constant);
+    return it->second;
+  } else if (var.isFuture()) {
+    auto fut = var.toFuture();
+    for (size_t i = 0; i < env_stack.size(); ++i) {
+      auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
+      auto it = future_map.find(fut);
+      if (it == future_map.end()) {
+        continue;
+      }
+      return it->second;
+    }
+
+    std::ostringstream oss;
+    oss << "Tried to trace Future that the tracer was not aware of.";
+    throw std::runtime_error(oss.str());
+  } else {
+    std::ostringstream oss;
+    oss << "Unknown type used in value trace lookup!";
+    throw std::runtime_error(oss.str());
+  }
 }
 
 void setValueTrace(const IValue& v, Value* value) {
@@ -114,35 +149,15 @@ void setValueTrace(const IValue& v, Value* value) {
     for (size_t i = 0; i < elements.size(); ++i) {
       setValueTrace(elements[i], unpack_node->outputs()[i]);
     }
+  } else if (v.isFuture()) {
+    auto fut = v.toFuture();
+    getTracingState()->env_stack.back().future_map[fut] = value;
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
        << "Supported types are tensor, tensor list, and tuple of tensors.";
     throw std::runtime_error(os.str());
   }
-}
-
-void setFutureTrace(
-    const c10::intrusive_ptr<c10::ivalue::Future>& fut,
-    Value* value) {
-  getTracingState()->env_stack.back().future_map[fut] = value;
-}
-
-Value* getFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
-  auto& env_stack = getTracingState()->env_stack;
-
-  for (size_t i = 0; i < env_stack.size(); ++i) {
-    auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
-    auto it = future_map.find(fut);
-    if (it == future_map.end()) {=
-      continue;
-    }
-    return it->second;
-  }
-
-  std::ostringstream oss;
-  oss << "Tried to trace Future that the tracer was not aware of.";
-  throw std::runtime_error(oss.str());
 }
 
 void addInputs(Node* n, const char* name, int64_t value) {

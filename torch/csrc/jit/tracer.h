@@ -49,14 +49,7 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-TORCH_API void setFutureTrace(
-    const c10::intrusive_ptr<c10::ivalue::Future>& fut,
-    Value* value);
-
-inline void delValueTrace(const Variable& var) {
-  AT_ASSERT(var.defined());
-  getTracingState()->env_stack.back().value_map.erase(var);
-}
+TORCH_API void delValueTrace(const Variable& var);
 
 inline std::function<void()> pauseTracing() {
   std::shared_ptr<tracer::TracingState> state = getTracingState();
@@ -65,10 +58,7 @@ inline std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
-TORCH_API Value* getValueTrace(const Variable& var);
-
-TORCH_API Value* getFutureTrace(
-    const c10::intrusive_ptr<c10::ivalue::Future>& fut);
+TORCH_API Value* getValueTrace(const IValue& var);
 
 // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
 // One might merge getValueTrace and getNestedValueTrace after checking that
@@ -95,8 +85,7 @@ inline Value* getNestedValueTrace(const IValue& v) {
 
 inline Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
-    const Variable& var,
-    size_t output_no) {
+    const Variable& var) {
   if (!var.defined()) {
     Node* n = state->graph->createUndefined();
     return state->graph->insertNode(n)->output();
@@ -106,7 +95,7 @@ inline Value* getOutputTrace(
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     std::ostringstream os;
-    os << "output " << output_no << " of traced region did not have observable "
+    os << "output of traced region did not have observable "
        << "data dependence with trace inputs; this probably indicates your program "
        << "cannot be understood by the tracer.";
     throw std::runtime_error(os.str());
@@ -116,15 +105,14 @@ inline Value* getOutputTrace(
 
 inline Value* getNestedOutputTrace(
     const std::shared_ptr<TracingState>& state,
-    const IValue& iv,
-    size_t output_no) {
+    const IValue& iv) {
   if (iv.isTensor()) {
-    return getOutputTrace(state, iv.toTensor(), output_no);
+    return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
     auto tuple_node = state->graph->createTuple(
-        fmap(elems, [&state, output_no](const IValue& iv) {
-          return getNestedOutputTrace(state, iv, output_no);
+        fmap(elems, [&state](const IValue& iv) {
+          return getNestedOutputTrace(state, iv);
         }));
     state->graph->insertNode(tuple_node);
     return tuple_node->output();
@@ -189,7 +177,7 @@ inline void exit(const Stack& outputs) {
   auto& state = getTracingState();
   size_t i = 0;
   for (auto& output : outputs) {
-    state->graph->registerOutput(getNestedOutputTrace(state, output, i));
+    state->graph->registerOutput(getNestedOutputTrace(state, output));
     i++;
   }
   setTracingState(nullptr);

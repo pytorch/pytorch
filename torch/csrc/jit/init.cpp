@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
@@ -407,7 +408,7 @@ void initJITBindings(PyObject* module) {
       WithInsertPoint guard(body_block);
       IValue output_ivalue;
       {
-        tracer::WithTracingEnvStack env_guard;
+        tracer::WithNestedTracingFrame env_guard;
 
         // Run the user-supplied function
         py_func_output = f(*args_tup);
@@ -421,26 +422,12 @@ void initJITBindings(PyObject* module) {
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
 
-        // Lambda lift
-
-        auto forked_graph = std::make_shared<Graph>();
-
-        std::unordered_map<Value*, Value*> uncaptures_map;
-        auto env = [&](Value* v) -> Value* {
-          if (!uncaptures_map.count(v)) {
-            uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-            fork_node->addInput(v);
-          }
-          return uncaptures_map[v];
-        };
-        forked_graph->block()->cloneFrom(body_block, env);
-
-        fork_node->g_(attr::Subgraph, forked_graph);
-        fork_node->eraseBlock(0);
+        // Lambda lift into a Subgraph attribute
+        torch::jit::script::lambdaLiftFork(fork_node);
       }
 
       // Record the ivalue in the tracer
-      jit::tracer::setFutureTrace(retval, node_output);
+      jit::tracer::setValueTrace(retval, node_output);
 
       // stuff the ivalue output in the Future
       retval->markCompleted(output_ivalue);
@@ -457,12 +444,9 @@ void initJITBindings(PyObject* module) {
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
 
-      Value* fut_val = jit::tracer::getFutureTrace(fut.fut);
-      auto wait_node = graph->insertNode(
-          graph->create(Symbol::fromQualString("aten::wait"), 1));
-      wait_node->addInput(fut_val);
-      wait_node->output()->setType(fut_val->type()->containedTypes().at(0));
-      jit::tracer::setValueTrace(fut.fut->value(), wait_node->output());
+      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut.fut->value(), output);
     }
     return fut.fut->value();
   });
