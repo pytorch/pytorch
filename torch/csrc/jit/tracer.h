@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/Backtrace.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
@@ -49,7 +49,9 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-TORCH_API void setFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut, Value* value);
+TORCH_API void setFutureTrace(
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut,
+    Value* value);
 
 inline void delValueTrace(const Variable& var) {
   AT_ASSERT(var.defined());
@@ -65,7 +67,8 @@ inline std::function<void()> pauseTracing() {
 
 TORCH_API Value* getValueTrace(const Variable& var);
 
-TORCH_API Value* getFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut);
+TORCH_API Value* getFutureTrace(
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut);
 
 // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
 // One might merge getValueTrace and getNestedValueTrace after checking that

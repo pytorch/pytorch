@@ -17,8 +17,8 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
-#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -376,13 +376,12 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-
   struct PythonFutureWrapper {
-    PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut) : fut(std::move(fut)) {}
+    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+        : fut(std::move(fut)) {}
 
     c10::intrusive_ptr<c10::ivalue::Future> fut;
   };
-
 
   py::class_<PythonFutureWrapper>(m, "Future");
 
@@ -401,7 +400,7 @@ void initJITBindings(PyObject* module) {
       auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
       auto body_block = fork_node->addBlock();
 
-      Value *node_output;
+      Value* node_output;
       py::object py_func_output;
       auto retval = c10::make_intrusive<c10::ivalue::Future>();
       // Insert new trace ops into the fork op's sub-block
@@ -417,9 +416,10 @@ void initJITBindings(PyObject* module) {
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toIValue(py_func_output);
-        Value *out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
-        node_output = fork_node->output()->setType(FutureType::create(out_val->type()));
+        node_output =
+            fork_node->output()->setType(FutureType::create(out_val->type()));
 
         // Lambda lift
 
@@ -457,12 +457,12 @@ void initJITBindings(PyObject* module) {
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
 
-      Value *fut_val = jit::tracer::getFutureTrace(fut.fut);
-      auto wait_node = graph->insertNode(graph->create(Symbol::fromQualString("aten::wait"), 1));
+      Value* fut_val = jit::tracer::getFutureTrace(fut.fut);
+      auto wait_node = graph->insertNode(
+          graph->create(Symbol::fromQualString("aten::wait"), 1));
       wait_node->addInput(fut_val);
       wait_node->output()->setType(fut_val->type()->containedTypes().at(0));
       jit::tracer::setValueTrace(fut.fut->value(), wait_node->output());
-
     }
     return fut.fut->value();
   });

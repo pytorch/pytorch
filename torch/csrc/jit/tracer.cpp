@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/tracer.h>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 
@@ -65,8 +65,9 @@ Value* getValueTrace(const Variable& var) {
   for (size_t i = 0; i < env_stack.size(); ++i) {
     auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
     auto it = value_map.find(var);
-    if (it == value_map.end())
+    if (it == value_map.end()) {
       continue;
+    }
     if (!it->second->hasUniqueName()) {
       auto unique_name = getTracingState()->lookup_var_name_fn(var);
       if (!unique_name.empty()) {
@@ -93,24 +94,23 @@ void setValueTrace(const IValue& v, Value* value) {
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, outputs.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, outputs.size()));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto& outputs = v.toTuple()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createTupleUnpack(value));
+    Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
     auto elements = v.toGenericListRef();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, elements.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {
       setValueTrace(elements[i], unpack_node->outputs()[i]);
     }
@@ -122,7 +122,9 @@ void setValueTrace(const IValue& v, Value* value) {
   }
 }
 
-void setFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut, Value* value) {
+void setFutureTrace(
+    const c10::intrusive_ptr<c10::ivalue::Future>& fut,
+    Value* value) {
   getTracingState()->env_stack.back().future_map[fut] = value;
 }
 
@@ -132,16 +134,16 @@ Value* getFutureTrace(const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   for (size_t i = 0; i < env_stack.size(); ++i) {
     auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
     auto it = future_map.find(fut);
-    if (it == future_map.end())
+    if (it == future_map.end()) {=
       continue;
+    }
     return it->second;
   }
 
-    std::ostringstream oss;
-    oss << "Tried to trace Future that the tracer was not aware of.";
-    throw std::runtime_error(oss.str());
+  std::ostringstream oss;
+  oss << "Tried to trace Future that the tracer was not aware of.";
+  throw std::runtime_error(oss.str());
 }
-
 
 void addInputs(Node* n, const char* name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
@@ -297,7 +299,8 @@ void setTracingState(std::shared_ptr<TracingState> state) {
   detail::tracing_state = std::move(state);
 }
 
-TracingState::TracingState() : env_stack{TracingEnvironmentFrame()}, graph(new Graph()) {}
+TracingState::TracingState()
+    : env_stack{TracingEnvironmentFrame()}, graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
 
