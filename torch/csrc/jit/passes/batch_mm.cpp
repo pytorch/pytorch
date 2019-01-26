@@ -351,7 +351,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
         }
       }
     }
-    return filter(mms, [](Node* n) { return n != nullptr; });
+    return c10::filter(mms, [](Node* n) { return n != nullptr; });
   };
 
   Block* block = value->node()->owningBlock();

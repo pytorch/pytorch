@@ -26,8 +26,6 @@ using at::Scalar;
 using at::IntList;
 using at::TensorList;
 
-using c10::fmap;
-
 namespace torch { namespace autograd { namespace generated {
 
 namespace {

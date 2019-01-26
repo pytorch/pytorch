@@ -61,7 +61,6 @@ using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
 
-using ::c10::filter;
 using ::c10::fmap;
 
 namespace prim {
