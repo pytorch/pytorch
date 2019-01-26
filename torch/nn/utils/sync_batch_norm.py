@@ -1,5 +1,6 @@
 import torch
 
+
 def convert_sync_batchnorm(module, process_group=None):
     r"""Helper function to convert `torch.nn.BatchNormND` layer in the model to
     `torch.nn.SyncBatchNorm` layer.
@@ -10,7 +11,7 @@ def convert_sync_batchnorm(module, process_group=None):
     default is the whole world
 
     Returns:
-        The original module with the converted `torch.nn.SyncBatchNorm` layer 
+        The original module with the converted `torch.nn.SyncBatchNorm` layer
 
     Example::
 
