@@ -49,8 +49,8 @@ struct ConstantFill final {
       ArrayRef<int64_t> shape,
       ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
-      int dtype,
-      IValue value);
+      int64_t dtype,
+      Scalar value);
 
   static constexpr size_t num_outputs() {return 1;}
 
@@ -80,8 +80,8 @@ struct UniformFill final {
       ArrayRef<int64_t> shape,
       ArrayRef<int64_t> extra_shape,
       bool input_as_shape,
-      float min,
-      float max);
+      double min,
+      double max);
 
   static constexpr size_t num_outputs() {return 1;}
 

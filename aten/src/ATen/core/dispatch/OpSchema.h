@@ -159,6 +159,10 @@ template<class... ReturnTypes> struct parse_return_types_<std::tuple<ReturnTypes
   using type = guts::typelist::typelist<ReturnTypes...>;
 };
 
+template<> struct parse_return_types_<void> final {
+  using type = guts::typelist::typelist<>;
+};
+
 /**
  * Wrapper class around a user-provided schema definition some useful information about the schema.
  *

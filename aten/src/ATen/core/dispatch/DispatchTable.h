@@ -1,10 +1,11 @@
 #pragma once
 
-#include <ATen/core/dispatch/OpSchema.h>
+#include <ATen/core/function_schema.h>
 #include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/dispatch/KernelFunction.h>
 
 #include <array>
 #include <atomic>
@@ -70,17 +71,13 @@ class ThreadsafeOperatorTable_ final {
  * consider the operator add(Tensor, Tensor), the dispatch table for this
  * operator may contain implementations for various dynamic tensor types, such
  * as (CPUFloatTensor, CPUFloatTensor), (CUDAFloatTensor, CUDAFloatTensor), etc.
- *
- * @tparam OpSchemaDef The operator signature this dispatch table encodes.
  */
-// TODO: Support dispatch for meta-operators (which apply to all dynamic types)
-template <class OpSchemaDef>
 class DispatchTable final {
- private:
-  using Schema = OpSchema<OpSchemaDef>;
-
  public:
-  DispatchTable() : kernels_() {}
+  DispatchTable(FunctionSchema schema)
+  : schema_(std::move(schema))
+  , kernels_()
+  , index_of_first_tensor_arg_(get_index_of_first_tensor_arg_(schema)) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -90,7 +87,7 @@ class DispatchTable final {
   void registerKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    kernels_.emplace(std::move(dispatch_key), kernel);
+    kernels_.emplace(dispatch_key, kernel);
   }
 
   /**
@@ -113,19 +110,38 @@ class DispatchTable final {
    * @return Kernel function pointing to the right kernel for the given arguments
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
-     auto dispatch_key = Schema::dispatch::dispatch_key(stack);
+     TensorTypeId dispatch_key = torch::jit::peek(
+       *stack,
+       index_of_first_tensor_arg_,
+       schema_.arguments().size()
+     ).toTensor().type_id();
      const DispatchTableEntry* found = kernels_.lookup(dispatch_key);
      if (found == nullptr) {
        // TODO Better error message - include op name and dispatch key (i.e.
        // argument types)
-       AT_ERROR("Didn't find kernel to dispatch to for operator '", Schema::metadata::name(), "'");
+       AT_ERROR("Didn't find kernel to dispatch to for operator '", schema_.name(), "'");
      }
      return *found;
    }
 
  private:
+  static size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
+    for (size_t i = 0; i < schema.arguments().size(); ++i) {
+      if (schema.arguments()[i].type()->kind() == TypeKind::DynamicType) {  // DynamicType means it's a tensor
+        return i;
+      }
+    }
 
+    throw std::logic_error("Tried to create dispatch table for operator schema that doesn't have tensor arguments.");
+  }
+
+
+  FunctionSchema schema_;
   details::ThreadsafeOperatorTable_ kernels_;
+
+  // this is caching the index so we don't have to parse the schema inputs
+  // again and again for each dispatcher lookup.
+  size_t index_of_first_tensor_arg_;
 };
 
 } // namespace c10
@@ -136,4 +152,4 @@ class DispatchTable final {
  * we can't rely on the one-definition-rule.
  */
 template <class OpSchemaDef>
-C10_API c10::DispatchTable<OpSchemaDef>& c10_dispatch_table();
+C10_API c10::DispatchTable& c10_dispatch_table();

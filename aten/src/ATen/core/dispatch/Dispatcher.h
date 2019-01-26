@@ -49,8 +49,6 @@ private:
  */
 template<class OpSchemaDef>
 class Dispatcher final {
-private:
-  using Schema = OpSchema<OpSchemaDef>;
 public:
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash

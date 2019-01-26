@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/dispatch/KernelCache.h>
+#include <ATen/core/stack.h>
 
 namespace c10 {
 
