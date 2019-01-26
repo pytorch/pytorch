@@ -6326,7 +6326,7 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
     def test_upsamplingNearest1d(self):
-        m = nn.Upsample(size=4, mode='nearest')
+        m = nn.functional.interpolate(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
@@ -6340,7 +6340,7 @@ class TestNN(NNTestCase):
 
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 out_t = m(in_t)
@@ -6350,7 +6350,7 @@ class TestNN(NNTestCase):
                 gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
-        m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
+        m = nn.functional.interpolate(scale_factor=3, mode='linear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9)
         in_t_9[:, :, :4].normal_()
         out_t_9 = m(in_t_9)
@@ -6358,7 +6358,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
     def test_upsamplingNearest2d(self):
-        m = nn.Upsample(size=4, mode='nearest')
+        m = nn.functional.interpolate(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
@@ -6376,7 +6376,7 @@ class TestNN(NNTestCase):
 
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 out_t = m(in_t)
@@ -6412,7 +6412,7 @@ class TestNN(NNTestCase):
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
-        m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
+        m = nn.functional.interpolate(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
         in_t_9[:, :, :4, :4].normal_()
         out_t_9 = m(in_t_9)
@@ -6420,7 +6420,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
     def test_upsamplingNearest3d(self):
-        m = nn.Upsample(size=4, mode='nearest')
+        m = nn.functional.interpolate(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
         out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
@@ -6434,7 +6434,7 @@ class TestNN(NNTestCase):
 
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 out_t = m(in_t)
@@ -6448,7 +6448,7 @@ class TestNN(NNTestCase):
                 gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
-        m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
+        m = nn.functional.interpolate(scale_factor=3, mode='trilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9, 9)
         in_t_9[:, :, :4, :4, :4].normal_()
         out_t_9 = m(in_t_9)
@@ -6482,17 +6482,17 @@ class TestNN(NNTestCase):
             for scale_factor in [0.5, 1.5, 2]:
                 for mode in ['nearest', 'area']:
                     kwargs = dict(mode=mode)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs).to(device)
                     for input in [_make_input(1), _make_input(2), _make_input(3)]:
                         _test_interpolate_helper(input, scale_factor, m)
 
                 for align_corners in [True, False]:
                     kwargs = dict(mode='linear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(1), scale_factor, m)
 
                     kwargs = dict(mode='bilinear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(2), scale_factor, m)
 
                     kwargs = dict(mode='bicubic', align_corners=align_corners)
@@ -6502,7 +6502,7 @@ class TestNN(NNTestCase):
                     _test_interpolate_helper(_make_input(2), scale_factor, m)
 
                     kwargs = dict(mode='trilinear', align_corners=align_corners)
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    m = nn.functional.interpolate(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(3), scale_factor, m)
 
     def test_linear_broadcasting(self):

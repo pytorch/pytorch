@@ -773,7 +773,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        model = nn.Upsample(scale_factor=2, mode='nearest')
+        model = nn.functional.interpolate(scale_factor=2, mode='nearest')
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 

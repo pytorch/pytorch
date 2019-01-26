@@ -9837,7 +9837,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 super(UpsampleConvLayer, self).__init__()
                 self.upsample = upsample
                 if upsample:
-                    self.upsample_layer = torch.nn.Upsample(mode='nearest', scale_factor=upsample)
+                    self.upsample_layer = torch.nn.functional.interpolate(mode='nearest', scale_factor=upsample)
                 reflection_padding = kernel_size // 2
                 self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
                 self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
