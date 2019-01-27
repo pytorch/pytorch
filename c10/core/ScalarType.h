@@ -201,11 +201,14 @@ static inline bool canCastSameKind(ScalarType from, ScalarType to) {
   if (from == to) {
     // identity casts are always allowed
     return true;
-  } else if (promoteTypes(from, to) == to) {
+  }
+  if (promoteTypes(from, to) == to) {
     // promotion implies safe casting
     return true;
-  } else if (from == ScalarType::Byte || to == ScalarType::Byte) {
-    // unsigned is considered a separate kind
+  }
+  if (to == ScalarType::Byte ||
+      (from == ScalarType::Byte && to == ScalarType::Char)) {
+    // Sign-loss not allowed.
     return false;
   }
   // Check same kind.

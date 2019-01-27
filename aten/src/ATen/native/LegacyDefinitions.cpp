@@ -6,36 +6,43 @@
 namespace at { namespace native {
 
 namespace {
-Tensor castAndRun(
+ScalarType comparisonType(ScalarTypeSource self, ScalarTypeSource other) {
+  // We need to always use the higher type when comparing, so only using input
+  // types for result type calculation.
+  return resultType({
+      ScalarTypeSource(self.scalarType()),
+      ScalarTypeSource(other.scalarType())});
+}
+Tensor doComparisonOp(
     Tensor (*impl)(const Tensor &, Scalar),
     const Tensor & self_, Scalar other_) {
   Tensor self;
   Scalar other;
-  std::tie(self, other) = castOperandsToResultType(self_, other_);
+  std::tie(self, other) = castOperands(comparisonType(self_, other_), self_, other_);
   return impl(self, other);
 }
-Tensor castAndRun(
+Tensor doComparisonOp(
     Tensor (*impl)(const Tensor &, const Tensor &),
     const Tensor & self_, const Tensor & other_) {
   Tensor self, other;
-  std::tie(self, other) = castOperandsToResultType(self_, other_);
+  std::tie(self, other) = castOperands(comparisonType(self_, other_), self_, other_);
   return impl(self, other);
 }
-Tensor & castAndRun(
+Tensor & doComparisonOp(
     Tensor & (*impl)(Tensor &, Scalar),
     Tensor & self, Scalar other_) {
   Scalar other;
   std::tie(other) = castOperands(self.scalar_type(), other_);
   return impl(self, other);
 }
-Tensor & castAndRun(
+Tensor & doComparisonOp(
     Tensor & (*impl)(Tensor &, const Tensor &),
     Tensor & self, const Tensor & other_) {
   Tensor other;
   std::tie(other) = castOperands(self.scalar_type(), other_);
   return impl(self, other);
 }
-Tensor & castAndRun(
+Tensor & doComparisonOp(
     Tensor & (*impl)(Tensor &, const Tensor &, Scalar),
     Tensor & result, const Tensor & self_, Scalar other_) {
   Tensor self;
@@ -43,7 +50,7 @@ Tensor & castAndRun(
   std::tie(self, other) = castOperands(result.scalar_type(), self_, other_);
   return impl(result, self, other);
 }
-Tensor & castAndRun(
+Tensor & doComparisonOp(
     Tensor & (*impl)(Tensor &, const Tensor &, const Tensor &),
     Tensor & result, const Tensor & self_, const Tensor & other_) {
   Tensor self, other;
@@ -123,51 +130,51 @@ Tensor & scatter_add_(Tensor& self, int64_t dim, const Tensor & index, const Ten
 }
 
 Tensor & lt_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_lt_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt_, self, other);
 }
 
 Tensor & lt_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_lt_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt_, self, other);
 }
 
 Tensor & gt_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_gt_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt_, self, other);
 }
 
 Tensor & gt_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_gt_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt_, self, other);
 }
 
 Tensor & le_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_le_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le_, self, other);
 }
 
 Tensor & le_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_le_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le_, self, other);
 }
 
 Tensor & ge_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ge_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge_, self, other);
 }
 
 Tensor & ge_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ge_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge_, self, other);
 }
 
 Tensor & eq_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_eq_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq_, self, other);
 }
 
 Tensor & eq_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_eq_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq_, self, other);
 }
 
 Tensor & ne_(Tensor& self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ne_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne_, self, other);
 }
 
 Tensor & ne_(Tensor& self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ne_, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne_, self, other);
 }
 
 Tensor & lgamma_(Tensor& self) {
@@ -317,99 +324,99 @@ Tensor trace(const Tensor & self) {
 }
 
 Tensor & ne_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ne_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne_out, result, self, other);
 }
 
 Tensor ne(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ne, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne, self, other);
 }
 
 Tensor & ne_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ne_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne_out, result, self, other);
 }
 
 Tensor ne(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ne, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ne, self, other);
 }
 
 Tensor & eq_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_eq_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq_out, result, self, other);
 }
 
 Tensor eq(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_eq, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq, self, other);
 }
 
 Tensor & eq_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_eq_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq_out, result, self, other);
 }
 
 Tensor eq(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_eq, self, other);
+  return doComparisonOp(&at::legacy::th::_th_eq, self, other);
 }
 
 Tensor & ge_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ge_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge_out, result, self, other);
 }
 
 Tensor ge(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_ge, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge, self, other);
 }
 
 Tensor & ge_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ge_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge_out, result, self, other);
 }
 
 Tensor ge(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_ge, self, other);
+  return doComparisonOp(&at::legacy::th::_th_ge, self, other);
 }
 
 Tensor & le_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_le_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le_out, result, self, other);
 }
 
 Tensor le(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_le, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le, self, other);
 }
 
 Tensor & le_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_le_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le_out, result, self, other);
 }
 
 Tensor le(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_le, self, other);
+  return doComparisonOp(&at::legacy::th::_th_le, self, other);
 }
 
 Tensor & gt_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_gt_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt_out, result, self, other);
 }
 
 Tensor gt(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_gt, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt, self, other);
 }
 
 Tensor & gt_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_gt_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt_out, result, self, other);
 }
 
 Tensor gt(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_gt, self, other);
+  return doComparisonOp(&at::legacy::th::_th_gt, self, other);
 }
 
 Tensor & lt_out(Tensor & result, const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_lt_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt_out, result, self, other);
 }
 
 Tensor lt(const Tensor & self, Scalar other) {
-  return castAndRun(&at::legacy::th::_th_lt, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt, self, other);
 }
 
 Tensor & lt_out(Tensor & result, const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_lt_out, result, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt_out, result, self, other);
 }
 
 Tensor lt(const Tensor & self, const Tensor & other) {
-  return castAndRun(&at::legacy::th::_th_lt, self, other);
+  return doComparisonOp(&at::legacy::th::_th_lt, self, other);
 }
 
 Tensor & take_out(Tensor & result, const Tensor & self, const Tensor & index) {
