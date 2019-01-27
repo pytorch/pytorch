@@ -1716,20 +1716,19 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
   }
 }
 
-Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
+Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
   auto signdet_val = signdet.item<double>();
   if (signdet_val != 0 /* det != 0, invertible */) {
-    return grads[1] * self.inverse().t();
+    return grad_logabsdet * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
-    auto gsigma = grads[1].div(sigma);
+    auto gsigma = grad_logabsdet.div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
