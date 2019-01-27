@@ -9971,6 +9971,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertFalse(torch._can_cast(torch.uint8, torch.int8))
         self.assertTrue(torch._can_cast(torch.uint8, torch.int16))
         self.assertTrue(torch._can_cast(torch.uint8, torch.int64))
+        self.assertTrue(torch._can_cast(torch.uint8, torch.float32))
+        self.assertFalse(torch._can_cast(torch.float32, torch.uint8))
 
     def test_casting(self):
         def test(op, out_type=None):
