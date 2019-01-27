@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/symbolic_variable.h>
 
 #include <unordered_map>
+#include <queue>
 
 namespace torch {
 namespace jit {
