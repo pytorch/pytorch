@@ -2231,9 +2231,15 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
     ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
+    # Only get needs to be transformed this way; all the other ones can go
+    # straight to the normal versions hip::HIPCachingAllocator
+    ("cuda::CUDACachingAllocator::get", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("CUDACachingAllocator::get", ("HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+
     # TODO: Undo this special-case; see the header for motivation behind this
     # hack.  It's VERY important this is only applied to PyTorch HIPify.
     ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
+    ("c10/cuda/CUDACachingAllocator.h", ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
@@ -2300,6 +2306,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
     ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
+    ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
     ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
@@ -2320,6 +2327,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
     ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
     ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
+    ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
+    ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them

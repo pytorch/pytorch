@@ -1,6 +1,6 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/utils/functional.h>
@@ -63,8 +63,8 @@ void BlockToONNX(
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
     auto it = env.find(n);
-    JIT_ASSERTM(it != env.end(), "Dangling node reference");
-    JIT_ASSERTM(it->second, "Unused node was subsequently used");
+    AT_CHECK(it != env.end(), "Dangling node reference");
+    AT_CHECK(it->second, "Unused node was subsequently used");
     return it->second;
   };
 
@@ -199,13 +199,13 @@ void BlockToONNX(
     for (auto arg_type : op->cconv) {
       py::object obj;
       if (arg_type == 'c') {
-        JIT_ASSERTM(
+        AT_CHECK(
             scalar_it != op->scalar_args.end(),
             "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(
             py::handle((scalar_it++)->get()));
       } else if (arg_type == 'd') {
-        JIT_ASSERTM(node_it != inputs.end(), "expected too many inputs");
+        AT_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
         throw std::runtime_error("unexpected calling convention");

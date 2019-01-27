@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/ir.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/operator.h>
 
 #include <algorithm>
