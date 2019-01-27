@@ -44,13 +44,6 @@ using at::DeviceGuard;
 
 namespace {
 
-inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
-  if(N == 0)
-    return c10::nullopt;
-  auto t = (stack.end() - N)->toTensor();
-  return c10::make_optional(t.device());
-}
-
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
   std::array<bool, N> res;

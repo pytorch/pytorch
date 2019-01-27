@@ -157,10 +157,6 @@ void testCodeTemplate() {
   }
 }
 
-Value* appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(kind, inputs))->output();
-}
-
 void testFusion() {
   auto testSimple = [&] {
     Graph graph;
@@ -865,12 +861,6 @@ void testADFormulas() {
   }
 }
 
-std::string toString(std::shared_ptr<Graph>& graph) {
-  std::ostringstream s;
-  s << *graph;
-  return s.str();
-}
-
 void testDifferentiate(std::ostream& out = std::cout) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
@@ -896,6 +886,11 @@ void testDifferentiate(std::ostream& out = std::cout) {
   out << *grad_spec.f;
   out << *grad_spec.df;
   out << "\n";
+}
+
+void testProto() {
+  ::ONNX_NAMESPACE::ModelProto proto;
+  proto.set_producer_name("foo");
 }
 
 void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
@@ -1247,11 +1242,6 @@ void testIValue() {
   ASSERT_TRUE(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
   ASSERT_EQ(tv.use_count(), 2);
-}
-
-void testProto() {
-  ::ONNX_NAMESPACE::ModelProto proto;
-  proto.set_producer_name("foo");
 }
 
 void testCustomOperators() {
@@ -2059,7 +2049,7 @@ void testAliasAnalysis() {
     auto usesB = graph->insert(aten::add, {b, fresh});
     auto aliasesB = graph->insert(aten::select, {a, constant, constant});
     auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
-    auto c = graph->insert(aten::add, {fresh, aliasesB});
+    graph->insert(aten::add, {fresh, aliasesB});
     graph->lint();
 
     auto aliasDb = AliasAnalysis(graph);

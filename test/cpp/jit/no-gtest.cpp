@@ -29,6 +29,10 @@ std::string runJITCPPTests() {
   testTopologicalIndex();
   testTopologicalMove();
   testSubgraphUtils();
+  testTHNNConv();
+  testATenNativeBatchNorm();
+  testRegisterFusionCachesKernel();
+  testAliasAnalysis();
   return out.str();
 }
 
