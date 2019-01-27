@@ -152,7 +152,8 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
   for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPUtils_checkLong(obj)) {
-      result = applySelect(result, dim, THPUtils_unpackLong(obj));
+      result = applySelect(self, dim, THPUtils_unpackLong(obj));
+      dim++;
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
       dim++;
