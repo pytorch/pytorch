@@ -244,7 +244,6 @@ def build_caffe2(version,
                   build_python,
                   build_test,
                   build_dir)
-
     if IS_WINDOWS:
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
@@ -258,7 +257,8 @@ def build_caffe2(version,
         if USE_NINJA:
             check_call(['ninja', 'install'], cwd=build_dir)
         else:
-            check_call(['make', '-j', str(multiprocessing.cpu_count()), 'install'], cwd=build_dir)
+            max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir)
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
