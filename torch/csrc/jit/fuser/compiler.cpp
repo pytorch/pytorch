@@ -189,7 +189,7 @@ void processGradSumToSize(KernelSpec& spec) {
       continue;
     }
     bool success = trackSingleGradSumToSizeToOutputs(node->output(), &outputGradSumToSizes);
-    JIT_ASSERT(success); // check that we didn't hit anything unknown
+    AT_ASSERT(success); // check that we didn't hit anything unknown
 
     // remove the GradSumToSize node, a new node outside the fusion graph
     // will be inserted below
@@ -205,7 +205,7 @@ void processGradSumToSize(KernelSpec& spec) {
   // for each fusion group output, record the corresponding kernel
   // output and possibly a _grad_sum_to_size for that output
   auto& outputMapAndSizes = spec.outputMapAndSizes();
-  JIT_ASSERT(outputMapAndSizes.empty());
+  AT_ASSERT(outputMapAndSizes.empty());
   std::unordered_map<const Value*, int64_t> reduced_output_indices;
   int64_t newo = 0;
   for (auto osize : outputGradSumToSizes) {

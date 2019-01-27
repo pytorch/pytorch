@@ -1108,7 +1108,7 @@ struct GraphFuser {
         }
         any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
-        JIT_ASSERT(maybe_group && maybe_group == fused_cat);
+        AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
         sorted_inputs = sortReverseTopological(fused_cat->inputs());
