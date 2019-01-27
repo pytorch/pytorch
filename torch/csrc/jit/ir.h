@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
-#include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
@@ -32,6 +31,21 @@ namespace jit {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 using ::c10::Symbol;
+
+using ::c10::ivalue::List;
+using ::c10::ivalue::Shared;
+
+using ::c10::IValue;
+using ::c10::ivalue::Future;
+using ::c10::ivalue::Tuple;
+
+using ::c10::ivalue::BoolList;
+using ::c10::ivalue::DoubleList;
+using ::c10::ivalue::GenericList;
+using ::c10::ivalue::IntList;
+using ::c10::ivalue::TensorList;
+
+using ::c10::ivalue::ConstantString;
 
 #define C10_USING(T) using ::c10::T;
 C10_FORALL_TYPES(C10_USING)

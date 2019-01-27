@@ -83,10 +83,10 @@ Value* tryConvertToType(
 
   if (value->type()->isSubtypeOf(NoneType::get()) &&
       !concrete_type->isSubtypeOf(NoneType::get())) {
-    if (concrete_type->cast<OptionalType>()) {
-      value->setType(concrete_type);
-    } else {
-      value->setType(OptionalType::create(concrete_type));
+    if (auto optional_type = concrete_type->cast<OptionalType>()) {
+      value =
+          graph.insertNode(graph.createNone(optional_type->getElementType()))
+              ->output();
     }
   }
 

@@ -193,7 +193,12 @@ struct DifferentiableGraphOp {
         // Note: we have to set this up in place, or we have to throw away and
         // reallocate variables that were already created in wrapTensors. We
         // should add an API for this.
-        Variable output = toOptionalTensor(outputs[idx]);
+
+        // XXX: undefined tensor syntax in autograd
+        Variable output;
+        if (!outputs[idx].isNone()) {
+          output = outputs[idx].toTensor();
+        }
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.

@@ -51,6 +51,35 @@ inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
   return c10::make_optional(t.device());
 }
 
+// TODO: remove the toOptionalTensor and toListOfOptionalTensor
+// when we remove the undefined tensor semantic from TH
+
+// XXX: This function is to specialize IValue for tensor type in
+// interpreter, it should only be used in this file
+at::Tensor toOptionalTensor(const IValue& v) {
+  if (v.isNone()) {
+    return at::Tensor();
+  }
+  return v.toTensor();
+}
+
+// XXX: This function is to specialize IValue for list of optional
+// tensor type in interpreter, it should only be used in this file
+std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
+  // If v is just a TensorList, return the ArrayRef
+  if (v.isTensorList()) {
+    return v.toTensorListRef();
+  }
+  // v is a list of optional tensor
+  auto vlist = v.toGenericListRef();
+  std::vector<Tensor> res;
+
+  for (const IValue &v: vlist) {
+    res.emplace_back(toOptionalTensor(v));
+  }
+  return res;
+}
+
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
   std::array<bool, N> res;

@@ -1909,7 +1909,7 @@ struct to_ir {
           type,
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
-      if (!type->isSubtypeOf(expr->type())) {
+      if (!expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str();

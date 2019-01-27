@@ -63,6 +63,17 @@ TYPE_MAP = {
 }
 
 
+def optional_type_of(arg, typ):
+    # optional type special handling for Tensor?[] and Tensor
+    # types that is missing a optional annotation
+    if arg.get('is_nullable') and '?' not in typ:
+        if typ == 'TensorList' or typ == 'Tensor[]':
+            typ = 'Tensor?[]'
+        else:
+            typ = '{}?'.format(typ)
+    return typ
+
+
 def jit_type_of(arg):
     # override for when viewing ops have already set
     # annotated jit types
@@ -72,11 +83,7 @@ def jit_type_of(arg):
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
 
-    if arg.get('is_nullable') and '?' not in typ:
-        if typ == 'Tensor[]':
-            typ = 'Tensor?[]'
-        else:
-            typ = '{}?'.format(typ)
+    typ = optional_type_of(arg, typ)
     return typ
 
 
@@ -92,6 +99,7 @@ FROM_IVALUE = {
     'ScalarType?': '{}.toOptional<ScalarType>()',
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
+    'Tensor?[]': 'toListOfOptionalTensor({})',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
     'double': '{}.toDouble()',
@@ -106,11 +114,8 @@ FROM_IVALUE = {
 
 
 def from_ivalue(arg, value):
-    simple_type = arg['simple_type']
-
-    if arg.get('is_nullable') and '?' not in simple_type and simple_type != 'TensorList':
-        simple_type = '{}?'.format(simple_type)
-    return FROM_IVALUE[simple_type].format(value)
+    typ = optional_type_of(arg, arg['simple_type'])
+    return FROM_IVALUE[typ].format(value)
 
 
 CALL_NAMESPACE = CodeTemplate("""\

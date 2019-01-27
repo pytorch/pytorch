@@ -775,14 +775,13 @@ RegisterOperators reg({
             return listConstruct<double>(num_inputs);
           } else if (lt->getElementType() == BoolType::get()) {
             return listConstruct<bool>(num_inputs);
-          } else if (lt->getElementType()->isSubtypeOf(
-                         OptionalType::ofTensor())) {
+          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
               std::vector<at::Tensor> vals;
               vals.reserve(num_inputs);
               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                vals.emplace_back(toOptionalTensor(std::move(stack[i])));
+                vals.emplace_back(std::move(stack[i]).toTensor());
               }
               drop(stack, num_inputs);
               push(stack, std::move(vals));
