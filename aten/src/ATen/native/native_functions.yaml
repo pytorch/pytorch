@@ -629,19 +629,17 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-- func: cumsum(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
-  matches_jit_signature: True
+- func: cumsum_out(Tensor result, Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
 
-- func: cumprod(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
-  matches_jit_signature: True
+- func: cumprod_out(Tensor result, Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean) -> Tensor
   matches_jit_signature: True
@@ -1190,7 +1188,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-- func: log_softmax(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
+- func: log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
@@ -1257,11 +1255,11 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: mean(Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
+- func: mean_out(Tensor result, Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   matches_jit_signature: True
@@ -1730,7 +1728,7 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: softmax(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
+- func: softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
@@ -1839,34 +1837,11 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: sum(Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
-
-- func: sum(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: sum_out(Tensor result, Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-
-- func: sum_out(Tensor result, Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-
-- func: sum_out(Tensor result, Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
->>>>>>> master
+- func: sum_out(Tensor result, Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
@@ -1902,11 +1877,11 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: prod(Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
+- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
+- func: prod_out(Tensor result, Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
 
 - func: t(Tensor self) -> Tensor
   device_guard: False
