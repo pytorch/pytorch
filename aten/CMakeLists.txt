@@ -76,6 +76,9 @@ elseif(USE_CUDA)
 else()
   message("disabling CUDA because USE_CUDA is set false")
   SET(AT_CUDA_ENABLED 0)
+  # we still parse THCUNN even if cuda is disabled to make sure to
+  # install it
+  INSTALL(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
 endif()
 
 if(NOT USE_NNPACK)
