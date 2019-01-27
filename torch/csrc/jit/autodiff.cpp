@@ -1035,7 +1035,6 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
 // temporaries).
 static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   auto& graph = *grad_desc.f;
-  auto primal_block = graph.block();
   auto reverse_block = rev_info.reverse_block;
 
   // --------------------------------------------------------------------------
