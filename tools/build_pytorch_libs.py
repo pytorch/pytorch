@@ -291,8 +291,8 @@ def build_caffe2(version,
 
 
 def printenv():
-    envs = map(lambda k, v: k + '=' + v, os.environ.keys(), os.environ.values())
-    print('\n'.join(envs))
+    envs = map(lambda k, v: k + '=' + v + '\n', os.environ.keys(), os.environ.values())
+    print(''.join(envs))
 
 
 def escape_path(path):
