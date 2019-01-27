@@ -39,11 +39,24 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+// Hack to emulate a lambda with move capture on non-c++11 targets
+// This is to make clang-tidy happy about copying the TracingState shared
+// ptr.
+struct ResumeTracingFunctor {
+  ResumeTracingFunctor(std::shared_ptr<tracer::TracingState> &&state) : state_(state) {}
+  void operator() () {
+    tracer::setTracingState(state_);
+  }
+
+ private:
+   std::shared_ptr<tracer::TracingState> state_;
+};
+
 TORCH_API std::function<void()> pauseTracing() {
-  const std::shared_ptr<tracer::TracingState>& state = getTracingState();
+  std::shared_ptr<tracer::TracingState> state = getTracingState();
   tracer::setTracingState(nullptr);
 
-  return [state]() { tracer::setTracingState(state); };
+  return ResumeTracingFunctor(std::move(state));
 }
 
  void delValueTrace(const Variable& var) {
