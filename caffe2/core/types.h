@@ -9,7 +9,7 @@
 #include "caffe2/core/logging.h"
 #include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
-#include <ATen/core/Half.h>
+#include <c10/util/Half.h>
 
 namespace caffe2 {
 
@@ -42,7 +42,7 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 }  // namespace caffe2
 
 ///////////////////////////////////////////////////////////////////////////////
-// at::Half is defined in ATen/core/Half.h. Currently half float operators are
+// at::Half is defined in c10/util/Half.h. Currently half float operators are
 // mainly on CUDA gpus.
 // The reason we do not directly use the cuda __half data type is because that
 // requires compilation with nvcc. The float16 data type should be compatible

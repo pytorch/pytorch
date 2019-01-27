@@ -60,9 +60,10 @@ OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     const std::vector<c10::IValue>& inputs,
     const std::vector<c10::IValue*>& outputs)
-    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
+    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       ivalue_inputs_(inputs),
       ivalue_outputs_(outputs) {
+  input_tensors_.resize(ivalue_inputs_.size());
   output_tensors_.resize(ivalue_outputs_.size());
 }
 
@@ -320,6 +321,23 @@ unique_ptr<OperatorBase> CreateOperator(
     }
     throw;
   }
+}
+
+void RunOperator(
+    c10::Symbol name,
+    std::vector<c10::IValue>& inputs,
+    std::vector<c10::IValue*>& outputs) {
+  auto fn_wrap =
+      caffe2::FunctionSchemaRegistry()->Create(name.toUnqualString());
+  CAFFE_ENFORCE(
+      fn_wrap,
+      "Operator not registered with FunctionSchema constructor.",
+      name.toUnqualString());
+  auto fn = fn_wrap->getSchema();
+  auto op = caffe2::FunctionSchemaOperatorRegistry()->Create(
+      name.toUnqualString(), fn, inputs, outputs);
+
+  op->Run();
 }
 
 std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {

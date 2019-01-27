@@ -1,25 +1,27 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 #include "caffe2/core/context_base.h"
+#include <ATen/core/ivalue.h>
+#include <ATen/core/blob.h>
 
 namespace caffe2 {
 namespace ops {
 
 struct ExpandDims final {
   struct State {
-    std::vector<int> dims;
+    std::vector<int64_t> dims;
     bool initialized = false;
   };
 
   static constexpr const char* name = "expand_dims";
 
   using Signature = void(
-      const C10Tensor& input,
-      const C10Tensor& output,
-      const std::vector<int>& dims,
-      State* state);
+      const at::Tensor& input,
+      const at::Tensor& output,
+      ArrayRef<int64_t> dims,
+      intrusive_ptr<Blob> state);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 

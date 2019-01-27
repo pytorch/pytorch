@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <ATen/ExpandUtils.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -125,7 +125,7 @@ RegisterOperators reg_bn_unsqueeze({Operator(
         const int64_t ndim = pop(stack).toInt();
         auto self = pop(stack).toTensor();
         c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-        JIT_ASSERT(self.dim() == 1);
+        AT_ASSERT(self.dim() == 1);
         sizes.at(1) = self.size(0);
         push(stack, self.reshape(sizes));
         return 0;
@@ -157,7 +157,7 @@ bool isFusableBatchNorm(Node* batch_norm) {
 }
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
-  JIT_ASSERT(!sizes.empty());
+  AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
@@ -239,7 +239,7 @@ struct GraphFuser {
   }
 
   Graph& getSubgraph(Node* n) {
-    JIT_ASSERT(n->kind() == prim::FusionGroup);
+    AT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
   }
 
@@ -268,7 +268,7 @@ struct GraphFuser {
         },
         &bn_graph);
 
-    JIT_ASSERT(isFusableBatchNorm(batch_norm));
+    AT_ASSERT(isFusableBatchNorm(batch_norm));
     WithInsertPoint insert_guard{batch_norm};
     Value* input = batch_norm->namedInput(attr::input);
     Value* input_dim = graph_->insert(aten::dim, {input});
@@ -358,14 +358,14 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    JIT_ASSERT(n->kind() != prim::FusionGroup);
+    AT_ASSERT(n->kind() != prim::FusionGroup);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
     size_t tensor_insert_idx = 0;
-    JIT_ASSERT(group->inputs().size() == subgraph.inputs().size());
+    AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
       if (input->type()->isSubtypeOf(DynamicType::get()))
@@ -396,7 +396,7 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
-          JIT_ASSERT(input->node()->kind() == prim::Constant);
+          AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
                 throw std::runtime_error("unexpected input");
@@ -503,7 +503,7 @@ struct GraphFuser {
       mergeFusionGroups(group, producer->node());
       return group;
     }
-    JIT_ASSERT(producer->node()->outputs().size() == 1);
+    AT_ASSERT(producer->node()->outputs().size() == 1);
     Node* merged = mergeNodeIntoGroup(group, producer->node());
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
@@ -544,7 +544,7 @@ struct GraphFuser {
   }
 
   c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
-    JIT_ASSERT(group->kind() == prim::FusionGroup);
+    AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
       return c10::nullopt;
@@ -555,7 +555,7 @@ struct GraphFuser {
     // If subgraph_input is an input to prim::ConstantChunk, it will have 1 use
     auto* node = subgraph_input->uses().at(0).user;
     if (node->kind() == prim::ConstantChunk) {
-      JIT_ASSERT(subgraph_input->uses().size() == 1);
+      AT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
     return c10::nullopt;
@@ -593,8 +593,8 @@ struct GraphFuser {
   // input.
   graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
     auto* chunk = producer->node();
-    JIT_ASSERT(consumer->kind() == prim::FusionGroup);
-    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    AT_ASSERT(consumer->kind() == prim::FusionGroup);
+    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     // if producer's input is already an input to a prim::ConstantChunk node,
     // we cannot add a new prim::ConstantChunk node because of invariant (2).
@@ -648,14 +648,14 @@ struct GraphFuser {
     auto new_tensors_it = new_tensors.begin();
     for (size_t i = 0; i < node->inputs().size(); ++i) {
       if (node->inputs()[i]->type()->isSubtypeOf(DynamicType::get())) {
-        JIT_ASSERT(new_tensors_it != new_tensors.end());
+        AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
     }
   }
 
   Node* promoteChunkToBroadcastingChunk(Node* chunk) {
-    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     size_t nchunks = chunk->i(attr::chunks);
     Node* bchunk =
@@ -770,7 +770,7 @@ struct GraphFuser {
     }
     // multiple return operators
     Node* producer_for_chunk_node = producer_for_chunk->node();
-    JIT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
+    AT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
 
     // Convert chunk to bchunk, if it isn't one already. The bchunk represents a
     // broadcast and one or more chunk operations.
@@ -838,7 +838,7 @@ struct GraphFuser {
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
         if (original_input->type()->isSubtypeOf(DynamicType::get())) {
-          JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
+          AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
@@ -866,7 +866,7 @@ struct GraphFuser {
       auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
         return v->owningGraph()->insert(aten::size, {v});
       });
-      JIT_ASSERT(!tensor_sizes.empty());
+      AT_ASSERT(!tensor_sizes.empty());
       Value* output_size = tensor_sizes.size() == 1
           ? tensor_sizes[0]
           : broadcastSizes(tensor_sizes);
@@ -957,7 +957,7 @@ struct GraphFuser {
 
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
-    JIT_ASSERT(inputs.size() == sinputs.size());
+    AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
       if (inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
         shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
@@ -970,7 +970,7 @@ struct GraphFuser {
     // beginning of the kernel.
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
-    JIT_ASSERT(outputs.size() == soutputs.size());
+    AT_ASSERT(outputs.size() == soutputs.size());
     for (size_t i = 0; i < outputs.size(); ++i) {
       if (usedOnlyInSize(outputs[i]))
         continue;
@@ -1011,7 +1011,7 @@ struct GraphFuser {
       });
       auto shapes =
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
-      JIT_ASSERT(!shapes.empty());
+      AT_ASSERT(!shapes.empty());
       shape_of.emplace(
           n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
     }
@@ -1035,7 +1035,7 @@ struct GraphFuser {
       if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
         auto uses = output->uses();
         for (Use u : uses) {
-          JIT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
           u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
           u.user->destroy();
         }
@@ -1072,7 +1072,7 @@ struct GraphFuser {
   }
 
   Node* createFusedConcat(Node* node) {
-    JIT_ASSERT(node->kind() == aten::cat);
+    AT_ASSERT(node->kind() == aten::cat);
 
     Graph* graph = node->owningGraph();
     Node* list_construct = node->namedInput(attr::tensors)->node();

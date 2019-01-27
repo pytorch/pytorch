@@ -280,10 +280,10 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
   // height and width.
   const uint8_t* Xdata = X.template data<uint8_t>();
 
-  col_buffer_.Resize(buffer_shape);
-  uint8_t* col_buffer_data = col_buffer_.template mutable_data<uint8_t>();
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
+    col_buffer->Resize(buffer_shape);
+    uint8_t* col_buffer_data = col_buffer->template mutable_data<uint8_t>();
 
-  auto f = [&](vector<int32_t>* Y_int32) {
     Y_int32->resize(M * output_image_size * dnnlowp_get_max_threads());
     vector<int> buffer_shape_per_thread(
         buffer_shape.begin() + 1, buffer_shape.end());
@@ -387,11 +387,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
     } // for each image_id
   }; // f
 
-  if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    this->RunWithSharedInt32Buffer_(f);
-  } else {
-    f(&(this->Y_int32_));
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &(this->Y_int32_), f);
 
   PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
 
@@ -637,7 +633,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
   // The col buffer is stored in HWC order as well - kernel_dim, and the height
   // and width.
 
-  auto f = [&](vector<int32_t>* Y_int32) {
+  auto f = [&](Tensor* col_buffer, vector<int32_t>* Y_int32) {
     Y_int32->resize(Y->numel());
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -647,119 +643,107 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
     bool no_im2col = this->NoIm2ColNHWC_();
 
     // Im2Col, followed by gemm.
-    auto f2 = [&](Tensor* col_buffer_) {
-      const uint8_t* Xdata = X.template data<uint8_t>();
-      const uint8_t* col_buffer_data =
-          no_im2col ? Xdata : this->Im2ColNHWC_(col_buffer_);
+    const uint8_t* Xdata = X.template data<uint8_t>();
+    const uint8_t* col_buffer_data =
+        no_im2col ? Xdata : this->Im2ColNHWC_(col_buffer);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      t_end = chrono::system_clock::now();
-      dt = chrono::duration<double>(t_end - t_begin).count();
-      LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
-      t_begin = chrono::system_clock::now();
+    t_end = chrono::system_clock::now();
+    dt = chrono::duration<double>(t_end - t_begin).count();
+    LOG(INFO) << "this=" << this << " im2col: " << dt * 1e3 << " ms";
+    t_begin = chrono::system_clock::now();
 #endif
 
-      using namespace fbgemm;
-      int row_offset_size_per_thread = -1;
-      int x_pack_buf_size_per_thread = -1;
-      if (Wq_acc16_packed_) {
-        row_offset_size_per_thread =
-            PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
-        x_pack_buf_size_per_thread =
-            PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
-        row_offsets_.resize(
-            dnnlowp_get_max_threads() * row_offset_size_per_thread);
-        X_pack_buf_.resize(
-            dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
-      }
+    using namespace fbgemm;
+    int row_offset_size_per_thread = -1;
+    int x_pack_buf_size_per_thread = -1;
+    if (Wq_acc16_packed_) {
+      row_offset_size_per_thread =
+          PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
+      x_pack_buf_size_per_thread =
+          PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
+      row_offsets_.resize(
+          dnnlowp_get_max_threads() * row_offset_size_per_thread);
+      X_pack_buf_.resize(
+          dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
+    }
 
-      uint8_t* Y_uint8_data = Y->template mutable_data<uint8_t>();
+    uint8_t* Y_uint8_data = Y->template mutable_data<uint8_t>();
 
-      // Main GEMM for non-outlier
-      if (Wq_acc16_packed_)
+    // Main GEMM for non-outlier
+    if (Wq_acc16_packed_)
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-      {
-        // fast path
-        int tid = dnnlowp_get_thread_num();
+    {
+      // fast path
+      int tid = dnnlowp_get_thread_num();
 
-        // no im2col fusion
-        PackAWithRowOffset<uint8_t, int16_t> packA(
-            matrix_op_t::NoTranspose,
-            N * output_image_size,
-            group_ * kernel_dim,
-            col_buffer_data,
-            group_ * kernel_dim,
-            X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-            group_,
-            row_offsets_.data() + tid * row_offset_size_per_thread);
+      // no im2col fusion
+      PackAWithRowOffset<uint8_t, int16_t> packA(
+          matrix_op_t::NoTranspose,
+          N * output_image_size,
+          group_ * kernel_dim,
+          col_buffer_data,
+          group_ * kernel_dim,
+          X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+          group_,
+          row_offsets_.data() + tid * row_offset_size_per_thread);
 
-        if (this->quantize_groupwise_) {
-          DispatchFBGEMM_<QuantizationGranularity::GROUP>(
-              packA, col_buffer_data, Y_int32, Y_uint8_data);
-        } else {
-          DispatchFBGEMM_<QuantizationGranularity::TENSOR>(
-              packA, col_buffer_data, Y_int32, Y_uint8_data);
-        }
+      if (this->quantize_groupwise_) {
+        DispatchFBGEMM_<QuantizationGranularity::GROUP>(
+            packA, col_buffer_data, Y_int32, Y_uint8_data);
       } else {
-        // slow path
-        conv_nhwc_acc16_ref_(
-            group_,
-            N,
-            output_image_size,
-            M,
-            kernel_dim,
-            col_buffer_data,
-            W_quantized_.data(),
-            Y_int32->data()
-#ifdef DNNLOWP_ACC16_IN_SLOW_PATH
-                ,
-            this
-#endif
-        );
-      } // slow path
-
-#ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      t_end = chrono::system_clock::now();
-      dt = chrono::duration<double>(t_end - t_begin).count();
-      double ops = 2. * N * output_image_size * M * kernel_dim;
-      double gops = ops / dt / 1e9;
-      LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms " << gops
-                << " gops";
-      t_begin = chrono::system_clock::now();
-#endif
-
-      if (!Wq_acc16_packed_) {
-        ConvOutlier_(col_buffer_data, Y_int32);
+        DispatchFBGEMM_<QuantizationGranularity::TENSOR>(
+            packA, col_buffer_data, Y_int32, Y_uint8_data);
       }
-
-#ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-      t_end = chrono::system_clock::now();
-      dt = chrono::duration<double>(t_end - t_begin).count();
-      LOG(INFO) << "this=" << this << " out-lier: " << dt * 1e3 << " ms";
-      t_begin = chrono::system_clock::now();
-#endif
-
-      if (!Wq_acc16_packed_) {
-        this->RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
-      } else {
-        PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-      }
-    }; // f2
-
-    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
-      runWithSharedBuffer<CPUContext>(this->ws_, f2);
     } else {
-      f2(&(this->col_buffer_));
+      // slow path
+      conv_nhwc_acc16_ref_(
+          group_,
+          N,
+          output_image_size,
+          M,
+          kernel_dim,
+          col_buffer_data,
+          W_quantized_.data(),
+          Y_int32->data()
+#ifdef DNNLOWP_ACC16_IN_SLOW_PATH
+              ,
+          this
+#endif
+      );
+    } // slow path
+
+#ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
+    t_end = chrono::system_clock::now();
+    dt = chrono::duration<double>(t_end - t_begin).count();
+    double ops = 2. * N * output_image_size * M * kernel_dim;
+    double gops = ops / dt / 1e9;
+    LOG(INFO) << "this=" << this << " GEMM: " << dt * 1e3 << " ms " << gops
+              << " gops";
+    t_begin = chrono::system_clock::now();
+#endif
+
+    if (!Wq_acc16_packed_) {
+      ConvOutlier_(col_buffer_data, Y_int32);
+    }
+
+#ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
+    t_end = chrono::system_clock::now();
+    dt = chrono::duration<double>(t_end - t_begin).count();
+    LOG(INFO) << "this=" << this << " out-lier: " << dt * 1e3 << " ms";
+    t_begin = chrono::system_clock::now();
+#endif
+
+    if (!Wq_acc16_packed_) {
+      this->RunOnDeviceEpilogueNHWC_(col_buffer_data, Y_int32->data());
+    } else {
+      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
   }; // f
 
-  if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    this->RunWithSharedInt32Buffer_(f);
-  } else {
-    f(&(this->Y_int32_));
-  }
+  this->RunWithSharedBuffer_(&col_buffer_, &(this->Y_int32_), f);
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
   t_end = chrono::system_clock::now();

@@ -199,7 +199,7 @@ struct SymbolicVariable {
     return create(aten::cat, {input_list, dim})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
-    JIT_ASSERT(inputs.size() > 0);
+    AT_ASSERT(inputs.size() > 0);
     return SymbolicVariable::cat(inputs, inputs[0].insertConstant(dim));
   }
   static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, Value* dim) {
@@ -212,12 +212,12 @@ struct SymbolicVariable {
     return create(aten::stack, {input_list, dim})[0];
   }
   static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int dim) {
-    JIT_ASSERT(inputs.size() > 0);
+    AT_ASSERT(inputs.size() > 0);
     return SymbolicVariable::stack(inputs, inputs[0].insertConstant(dim));
   }
   static std::vector<SymbolicVariable> broadcast_tensors(
       ArrayRef<SymbolicVariable> inputs) {
-    JIT_ASSERT(inputs.size() > 0);
+    AT_ASSERT(inputs.size() > 0);
     Graph* g = inputs[0].value()->owningGraph();
     auto value_inputs =
         fmap(inputs, [](const SymbolicVariable& v) { return v.value(); });

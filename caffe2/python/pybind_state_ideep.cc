@@ -180,7 +180,8 @@ public:
           cpu_tensor_feeder.FeedTensor(
               option,
               original_array,
-              BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+              BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+              true);
         } else {
           blob->Reset<Tensor>(new Tensor(
                                   cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
