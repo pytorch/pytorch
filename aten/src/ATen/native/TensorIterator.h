@@ -253,6 +253,7 @@ struct TensorIterator::Builder {
   }
 
   void add_input(const Tensor& input, const Type* type=nullptr) {
+    if (type == nullptr) type = &input.type();
     iter_->operands_.emplace_back(input, type);
   }
 
