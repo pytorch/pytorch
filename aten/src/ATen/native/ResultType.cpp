@@ -9,11 +9,9 @@ ScalarType resultType(ArrayRef<ScalarTypeSource> inputs) {
 
   // Operands of the highest kind determine result type.
   static const std::vector<ParticipatesFunction> kind_participation_order = {
-         [](const ScalarTypeSource& s) { return true; }
-  // TODO: add actual kind rules when it works for all binary ops
-  //     [](const ScalarTypeSource& s) { return isComplexType(s.scalarType()); },
-  //     [](const ScalarTypeSource& s) { return isFloatingType(s.scalarType()); },
-  //     [](const ScalarTypeSource& s) { return isIntegralType(s.scalarType()); },
+      [](const ScalarTypeSource& s) { return isComplexType(s.scalarType()); },
+      [](const ScalarTypeSource& s) { return isFloatingType(s.scalarType()); },
+      [](const ScalarTypeSource& s) { return isIntegralType(s.scalarType()); },
   };
 
   // Priority amongst the operands of the same kind.

@@ -368,7 +368,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype.is_floating_point:
             return self.reciprocal() * other
         else:
-            return (self.double().reciprocal() * other).type_as(self)
+            return (self.double().reciprocal() * other).to(torch._result_type(self, other))
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__

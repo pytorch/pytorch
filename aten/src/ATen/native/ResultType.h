@@ -45,6 +45,7 @@ static inline T castToType(ScalarType type, const T& arg) {
   static_assert(
       std::is_same<T, Tensor>::value || std::is_same<T, Scalar>::value,
       "castOperands accepts Tensors or Scalars.");
+  return T();
 }
 
 template<>
@@ -113,8 +114,10 @@ CAFFE2_API ScalarType resultType(ArrayRef<ScalarTypeSource> inputs);
 //
 // This interface is suited to pass an optional dtype parameter from a native
 // function implementation.
-template<typename... T>
-static inline std::tuple<T...> castOperands(c10::optional<ScalarType> dtype, T... args) {
+template <typename... T>
+static inline std::tuple<T...> castOperands(
+    c10::optional<ScalarType> dtype,
+    T... args) {
   SmallVector<ScalarTypeSource, sizeof...(args)> type_sources = {args...};
   if (!dtype) {
     dtype = resultType(type_sources);

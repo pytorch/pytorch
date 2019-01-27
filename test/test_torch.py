@@ -9972,6 +9972,36 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(torch._can_cast(torch.uint8, torch.int16))
         self.assertTrue(torch._can_cast(torch.uint8, torch.int64))
 
+    def test_casting(self):
+        def test(op, out_type=None):
+            tensor1 = torch.ones([2, 2]) * 5
+            tensor2 = torch.ones([2, 2]) * 7
+            tensor3 = torch.ones([]) * 9
+            scalar = torch.ones([]).item() * 11
+            self.assertEqual(op(tensor1, tensor2).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1.to(torch.long), tensor2).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1, tensor2.to(torch.long)).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1.to(torch.long), tensor2.to(torch.int)).dtype, out_type or torch.long)
+            self.assertEqual(op(tensor1, tensor3).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1, tensor3.to(torch.long)).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1.to(torch.int), tensor3.to(torch.long)).dtype, out_type or torch.int)
+            self.assertEqual(op(tensor1, scalar).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1, int(scalar)).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1.to(torch.long), scalar).dtype, out_type or torch.double)
+            self.assertEqual(op(tensor1.to(torch.long), int(scalar)).dtype, out_type or torch.long)
+            pass
+
+        test(torch.le, torch.uint8)
+        test(torch.lt, torch.uint8)
+        test(torch.ge, torch.uint8)
+        test(torch.gt, torch.uint8)
+        test(torch.eq, torch.uint8)
+        test(torch.ne, torch.uint8)
+        test(torch.add)
+        test(torch.sub)
+        test(torch.mul)
+        test(torch.div)
+
     def test_allow_tensor_metadata_change(self):
         def do_test(t):
             with self.assertRaisesRegex(
