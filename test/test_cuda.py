@@ -1931,15 +1931,15 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')
         y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.FloatTensor'):
+        with self.assertRaisesRegex(RuntimeError, 'Casting between devices.'
+                                    ' Expected torch.FloatTensor but got'
+                                    ' torch.cuda.FloatTensor.'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
-        # makeing sure half to float promotion is also properly working.
+        # making sure half to float promotion is also properly working.
         x = x.half()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.HalfTensor'):
+        with self.assertRaisesRegex(RuntimeError, 'Casting between devices.'
+                                    ' Expected torch.FloatTensor but got'
+                                    ' torch.cuda.HalfTensor.'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm

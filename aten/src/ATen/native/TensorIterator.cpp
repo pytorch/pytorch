@@ -103,8 +103,13 @@ void TensorIterator::compute_types() {
       if (op.is_output) {
         AT_ERROR("output with type ", op.tensor.type().toString(),
                  " doesn't match the desired type ", op.type->toString());
-      } else {
+      } else if (
+          op.tensor.dim() == 0 ||
+          (op.tensor.type().device_type() == op.type->device_type())) {
         op.tensor = op.tensor.to(*op.type);
+      } else {
+        AT_ERROR("Casting between devices. Expected ", op.type->toString(),
+                 " but got ", op.tensor.type().toString(), ".");
       }
     }
   }
