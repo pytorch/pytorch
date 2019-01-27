@@ -54,7 +54,7 @@ if platform.system() == 'Windows':
             return ''
 
     py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library\\bin')
-    th_dll_path = _dl_flags.path.dirname(__file__) + '\\lib\\'
+    th_dll_path = _dl_flags.path.dirname(__file__) + '\\bin\\'
 
     dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
 
