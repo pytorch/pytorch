@@ -71,8 +71,7 @@ except ImportError:
     USE_NINJA = False
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-torch_lib_dir = base_dir + "/torch/lib"
-install_dir = base_dir + "/torch/lib/tmp_install"
+install_dir = base_dir + "/torch"
 build_type = "Release"
 if DEBUG:
     build_type = "Debug"
@@ -195,43 +194,6 @@ def run_cmake(version,
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
-def copy_files(build_test):
-    def copy_all(pattern, dst):
-        for file in glob(pattern):
-            if os.path.isdir(file):
-                copy_tree(file, dst, update=True)
-            else:
-                copy_file(file, dst, update=True)
-
-    shutil.rmtree(install_dir + '/lib/cmake', ignore_errors=True)
-    shutil.rmtree(install_dir + '/lib/python', ignore_errors=True)
-    copy_all(install_dir + '/lib/*', torch_lib_dir)
-    if os.path.exists(install_dir + '/lib64'):
-        copy_all(install_dir + '/lib64/*', torch_lib_dir)
-    copy_file(base_dir + '/aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
-    copy_file(base_dir + '/aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
-
-    copy_tree(install_dir + '/include', torch_lib_dir + '/include', update=True)
-    if os.path.exists(install_dir + '/bin/'):
-        copy_all(install_dir + '/bin/*', torch_lib_dir)
-
-    if build_test:
-        # Copy the test files to pytorch/caffe2 manually
-        # They were built in pytorch/torch/lib/tmp_install/test
-        # Why do we do this? So, setup.py has this section called 'package_data' which
-        # you need to specify to include non-default files (usually .py files).
-        # package_data takes a map from 'python package' to 'globs of files to
-        # include'. By 'python package', it means a folder with an __init__.py file
-        # that's not excluded in the find_packages call earlier in setup.py. So to
-        # include our cpp_test into the site-packages folder in
-        # site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
-        # root caffe2 folder and then tell setup.py to include them. Having another
-        # folder like site-packages/caffe2_cpp_test would also be possible by adding a
-        # caffe2_cpp_test folder to pytorch with an __init__.py in it.
-        mkdir_p(base_dir + '/caffe2/cpp_test/')
-        copy_tree(install_dir + '/test', base_dir + '/caffe2/cpp_test', update=True)
-
-
 def build_caffe2(version,
                  cmake_python_library,
                  build_python,
@@ -279,5 +241,3 @@ def build_caffe2(version,
         for proto_file in glob('build/caffe2/proto/*.py'):
             if proto_file != 'build/caffe2/proto/__init__.py':
                 shutil.copyfile(proto_file, "caffe2/proto/" + os.path.basename(proto_file))
-
-    copy_files(build_test)
