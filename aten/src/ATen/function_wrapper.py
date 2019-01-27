@@ -395,7 +395,6 @@ THFormal = TypedDict('THFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
     'declared_type': str,
@@ -422,13 +421,31 @@ AtFormal = TypedDict('AtFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
 }, total=False)
 
+# Note [field_name versus name]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# What is the difference between "field_name" and "name"?
+#
+# Return values of ATen operators always have a name: if it is not
+# explicitly assigned a name inside native_functions.yaml like func:
+# myop() -> (Tensor indices, Tensor value), then the codegen will
+# automatically assign it a name like result0, or name might be
+# specified inside Declarations.cwrap.  We don't want these assigned
+# names to become part of the public API when we return a namedtuple for
+# any such multiple-return function.
+#
+# Thus field_name is like name, but it is defined only when there is a
+# name specified in native_functions.yaml. If field_name is defined,
+# then the codegen would generate code to return namedtuple. Otherwise,
+# it would just return tuple.
+
 ReturnType = TypedDict('ReturnType', {
     'name': str,
+    # See Note [field_name versus name]
+    'field_name': str,
     'type': str,
     'dynamic_type': str,
 }, total=False)
@@ -467,11 +484,14 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
+    # See Note [field_name versus name]
+    'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
     'inferred_type': str,
     'inplace': bool,
+    'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
     # TypeExtendedInterface
     'extended_method': bool,
@@ -486,6 +506,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
+    'schema_string': str,
     'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
@@ -507,6 +528,8 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('matches_jit_signature', bool),
+    ('schema_string', str),
     ('method_prefix_derived', str),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
@@ -619,10 +642,6 @@ def create_generic(top_env, declarations):
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
             translated['default_init'] = argument.get('default_init', default)
-        if 'python_default_init' in argument:
-            assert 'default' not in argument
-            default = translate_default(argument, type_str, argument['python_default_init'])
-            translated['python_default_init'] = default
         if argument.get('output'):
             translated['output'] = True
         if argument.get('size'):
@@ -895,6 +914,8 @@ def create_generic(top_env, declarations):
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            matches_jit_signature=option['matches_jit_signature'],
+            schema_string=option['schema_string'],
             method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
             method_of=method_of,
@@ -973,6 +994,8 @@ def create_generic(top_env, declarations):
 
         return_types = []  # List[ReturnType]
         for t_raw in ret:
+            # See Note [field_name versus name]
+            field_name = None
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
@@ -982,6 +1005,8 @@ def create_generic(top_env, declarations):
             else:
                 t = t_raw['type']
                 name = t_raw['name']
+                if 'field_name' in t_raw:
+                    field_name = t_raw['field_name']
 
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
@@ -996,6 +1021,8 @@ def create_generic(top_env, declarations):
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name
+            if field_name is not None:
+                rtype['field_name'] = field_name
             return_types.append(rtype)
 
         return return_types
@@ -1136,6 +1163,8 @@ def create_generic(top_env, declarations):
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            matches_jit_signature=option["matches_jit_signature"],
+            schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
             method_of=method_of,
@@ -1157,6 +1186,8 @@ def create_generic(top_env, declarations):
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
+            option["matches_jit_signature"] = declaration["matches_jit_signature"]
+            option["schema_string"] = declaration["schema_string"]
             try:
                 if option['mode'] != 'native':
                     process_option(option, output_options)

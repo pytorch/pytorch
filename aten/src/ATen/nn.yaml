@@ -152,14 +152,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
-  cname: SpatialFractionalMaxPooling
-  scalar_check:
-    grad_input: 'false'
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
@@ -184,38 +176,6 @@
 
 - name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
   cname: VolumetricMaxUnpooling
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-# Padding
-
-- name: _thnn_reflection_pad1d(Tensor self, IntList[2] padding)
-  cname: TemporalReflectionPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_reflection_pad2d(Tensor self, IntList[4] padding)
-  cname: SpatialReflectionPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_replication_pad1d(Tensor self, IntList[2] padding)
-  cname: TemporalReplicationPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_replication_pad2d(Tensor self, IntList[4] padding)
-  cname: SpatialReplicationPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_replication_pad3d(Tensor self, IntList[6] padding)
-  cname: VolumetricReplicationPadding
   scalar_check:
     output: 'false'
     grad_input: 'false'

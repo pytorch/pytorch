@@ -7,7 +7,7 @@ from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, utils
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
@@ -43,6 +43,9 @@ class TestGroupConvolution(hu.HypothesisTestCase):
         else:
             # TODO: Group conv in NHWC not implemented for GPU yet.
             assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+        # Group conv not implemented with EIGEN engine.
+        assume(group == 1 or engine != "EIGEN")
+
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
@@ -65,8 +68,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
 

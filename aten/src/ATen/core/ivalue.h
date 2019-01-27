@@ -1,14 +1,15 @@
 #pragma once
 
-#include <ATen/core/Scalar.h>
-#include <ATen/core/Tensor.h>
+#include <condition_variable>
+#include <type_traits>
+
+#include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/thread_pool.h>
 
-#include <type_traits>
+#include <ATen/core/Tensor.h>
 
 namespace c10 {
 struct IValue;
@@ -38,7 +39,7 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 };
 
 template <typename Elem>
-struct C10_EXPORT List : c10::intrusive_ptr_target {
+struct CAFFE2_API List : c10::intrusive_ptr_target {
  private:
   std::vector<Elem> elements_;
 
@@ -66,7 +67,7 @@ struct C10_EXPORT List : c10::intrusive_ptr_target {
 
 struct Future;
 
-struct C10_EXPORT Tuple : public List<IValue> {
+struct CAFFE2_API Tuple : public List<IValue> {
   using List<IValue>::List;
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
@@ -196,23 +197,22 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
-  IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
+  IValue(intrusive_ptr<caffe2::Blob> blob)
+  : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
-    // and
-    //      store it as a Tensor instead.
-    payload.as_intrusive_ptr =
-        c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+    // and store it as a Tensor instead.
+    payload.as_intrusive_ptr = blob.release();
   }
   bool isBlob() const {
     return Tag::Blob == tag;
   }
-  caffe2::Blob& toBlob() & {
+  c10::intrusive_ptr<caffe2::Blob> toBlob() && {
     AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+    return moveToIntrusivePtr<caffe2::Blob>();
   }
-  const caffe2::Blob& toBlob() const& {
+  c10::intrusive_ptr<caffe2::Blob> toBlob() const & {
     AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+    return toIntrusivePtr<caffe2::Blob>();;
   }
 
   // Tuple
@@ -512,6 +512,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  struct CAFFE2_API FutureError final : public std::exception {
+    FutureError(std::string&& error_msg_)
+        : error_msg(std::move(error_msg_)) {}
+
+    FutureError() = default;
+
+    const char* what() const noexcept override {
+      return error_msg.c_str();
+    }
+
+    std::string error_msg;
+  };
+
   /**
   * Wait on the future until it completes.
   */
@@ -552,18 +565,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       value_ = std::move(value);
     }
 
-    // There is no need to protect callbacks anymore.
-    // Once completed_ is set to true, no one can add new callback to the list.
-    for (auto& callback : callbacks) {
-      callback();
+    fireCallbacks();
+  }
+
+  void markCompleted(FutureError&& error_) {
+    {
+      // This is not to protect completed_ but to create a barrier
+      // from possible addCallback() calls
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      has_error = true;
+      error = std::move(error_);
     }
-    callbacks.clear();
+
+    fireCallbacks();
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
+    if (has_error) {
+      throw error;
+    }
     return value_;
   }
 
@@ -593,10 +618,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       const Future& v);
 
  private:
+  void fireCallbacks() {
+    AT_ASSERT(completed());
+    // There is no need to protect callbacks with the lock.
+    // Once completed_ is set to true, no one can add new callback to the list.
+    for (auto& callback : callbacks) {
+      callback();
+    }
+    callbacks.clear();
+  }
+
   std::mutex mutex_;
   IValue value_; // when finished the value
   std::atomic_bool completed_ = {false}; // is this future complete
   std::vector<std::function<void(void)>> callbacks;
+  bool has_error = false;
+  FutureError error;
 };
 
 #undef TORCH_FORALL_TAGS
@@ -637,8 +674,10 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
+DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)

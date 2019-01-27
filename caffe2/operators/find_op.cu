@@ -33,8 +33,8 @@ template <typename T>
 bool FindOp<CUDAContext>::DoRunWithType() {
   auto& idx = Input(0);
   auto& needles = Input(1);
-  auto* res_indices = Output(0);
-  res_indices->ResizeLike(needles);
+
+  auto* res_indices = Output(0, needles.sizes(), at::dtype<int>());
 
   const T* idx_data = idx.data<T>();
   const T* needles_data = needles.data<T>();

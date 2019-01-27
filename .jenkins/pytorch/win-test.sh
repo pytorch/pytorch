@@ -54,7 +54,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3
 )
-pip install ninja future hypothesis
+pip install ninja future hypothesis librosa>=0.6.2 psutil
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
@@ -115,7 +115,7 @@ EOL
 cat >ci_scripts/test_libtorch.bat <<EOL
 call ci_scripts/setup_pytorch_env.bat
 dir
-dir %CD%\\test 
+dir %CD%\\test
 dir %CD%\\test\\torch
 dir %CD%\\test\\torch\\lib
 cd %CD%\\test\\torch\\lib

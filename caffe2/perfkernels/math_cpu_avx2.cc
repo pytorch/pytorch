@@ -7,6 +7,9 @@
 #include <cmath>
 #include <cstdint>
 
+using std::uint64_t;
+using std::uint8_t;
+
 namespace caffe2 {
 
 namespace math {
@@ -16,8 +19,8 @@ static constexpr double QEPSILON = 1e-8;
 void quantize_and_compress__avx2(
     const float* input_data,
     uint8_t* output_data,
-    size_t input_size,
-    size_t bitwidth,
+    uint64_t input_size,
+    uint64_t bitwidth,
     bool random,
     const float* random_buffer) {
   __m256i shuffle_mask_v = _mm256_set_epi8(
@@ -56,10 +59,10 @@ void quantize_and_compress__avx2(
   __m256i permute_mask_v =
       _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
 
-  size_t data_per_byte = 8 / bitwidth;
-  size_t tail = input_size % data_per_byte;
+  uint64_t data_per_byte = 8 / bitwidth;
+  uint64_t tail = input_size % data_per_byte;
   tail = tail ? data_per_byte - tail : 0;
-  size_t segment_size = (input_size + data_per_byte - 1) / data_per_byte;
+  uint64_t segment_size = (input_size + data_per_byte - 1) / data_per_byte;
 
   // basic info
   float minimum_element = INFINITY, maximum_element = -INFINITY;
@@ -77,11 +80,11 @@ void quantize_and_compress__avx2(
   float gap = (maximum_element - minimum_element) / ((1 << bitwidth) - 1.0f);
   float gap_inverse = 1. / (gap + QEPSILON);
   uint8_t max_q = (1 << bitwidth) - 1;
-  size_t bit_start = 0;
+  uint64_t bit_start = 0;
   if (random) {
     for (int start = 0; start < input_size; start += segment_size) {
-      size_t stride = start + segment_size <= input_size ? segment_size
-                                                         : input_size - start;
+      uint64_t stride = start + segment_size <= input_size ? segment_size
+                                                           : input_size - start;
       int i = 0;
       constexpr int VLEN = 8;
       for (; i < stride / VLEN * VLEN; i += VLEN) {
@@ -122,8 +125,8 @@ void quantize_and_compress__avx2(
   } else {
     // !random
     for (int start = 0; start < input_size; start += segment_size) {
-      size_t stride = start + segment_size <= input_size ? segment_size
-                                                         : input_size - start;
+      uint64_t stride = start + segment_size <= input_size ? segment_size
+                                                           : input_size - start;
       int i = 0;
       constexpr int VLEN = 8;
       for (; i < stride / VLEN * VLEN; i += VLEN) {
@@ -165,26 +168,26 @@ void quantize_and_compress__avx2(
 void decompress_and_dequantize__avx2(
     const uint8_t* input_data,
     float* output_data,
-    size_t input_size) {
+    uint64_t input_size) {
   // basic info
   const float minimum_element =
       reinterpret_cast<const float*>(input_data + 2)[0];
   const float maximum_element =
       reinterpret_cast<const float*>(input_data + 2)[1];
-  const size_t bitwidth = input_data[0];
+  const uint64_t bitwidth = input_data[0];
   const float gap =
       (maximum_element - minimum_element) / ((1 << bitwidth) - 1.f) +
       QEPSILON; // for exact recovering
 
-  const size_t tail = input_data[1];
+  const uint64_t tail = input_data[1];
 
-  const size_t output_size = (input_size - 10) * (8 / bitwidth) - tail;
+  const uint64_t output_size = (input_size - 10) * (8 / bitwidth) - tail;
   // decoding
-  size_t bit_start = 0;
-  const size_t segment_size = input_size - 10;
+  uint64_t bit_start = 0;
+  const uint64_t segment_size = input_size - 10;
   for (int start = 0; start < output_size; start += segment_size) {
-    size_t stride = start + segment_size <= output_size ? segment_size
-                                                        : output_size - start;
+    uint64_t stride = start + segment_size <= output_size ? segment_size
+                                                          : output_size - start;
     uint8_t mask = (1 << bitwidth) - 1;
     int i = 0;
     // Can process 8 elements at a time because we need to expand uint8_t

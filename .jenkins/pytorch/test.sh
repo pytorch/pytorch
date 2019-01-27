@@ -76,8 +76,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
+  # ROCm CI is using Caffe2 docker images, which doesn't have several packages
+  # needed in testing. We install them here.
+  pip install -q psutil librosa>=0.6.2 --user
 fi
 
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
@@ -165,13 +166,27 @@ test_custom_script_ops() {
   fi
 }
 
+test_xla() {
+  export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
+  export XRT_WORKERS="localservice:0;grpc://localhost:40934"
+  pushd xla
+  python test/test_operations.py
+  python test/test_train_mnist.py --tidy
+  popd
+}
+
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-  test_torchvision
-  test_python_nn
-  test_python_all_except_nn
-  test_aten
-  test_libtorch
-  test_custom_script_ops
+  if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+    test_torchvision
+    test_xla
+  else
+    test_torchvision
+    test_python_nn
+    test_python_all_except_nn
+    test_aten
+    test_libtorch
+    test_custom_script_ops
+  fi
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
     test_torchvision

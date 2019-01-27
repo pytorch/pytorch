@@ -1,44 +1,65 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
-#include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
-#include "torch/csrc/jit/fuser/interface.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 
-#if USE_CUDA_FUSER
-  #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
-#endif // USE_CUDA_FUSER
-
-#if USE_CPU_FUSER
-  #include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
-#endif // USE_CUDA_FUSER
-
+#include <atomic>
 #include <iostream>
 #include <memory>
-#include <unordered_set>
-#include <utility>
-#include <string>
-#include <atomic>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <tuple>
+#include <unordered_set>
+#include <utility>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
+
+std::mutex fusion_backends_lock_;
+static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
+getFusionBackends() {
+  static std::unordered_map<at::Device::Type, FusedKernelConstructor>
+      fusion_backends;
+  return fusion_backends;
+}
+
+void registerFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  getFusionBackends()[backend_type] = std::move(ctor);
+}
+
+bool hasFusionBackend(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().count(backend_type);
+}
+
+const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().at(backend_type);
+}
+
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
 static std::atomic<size_t> next_kernel_id{0};
 static int debug_fusion{-1};
 
-size_t nCompiledKernels() { return next_kernel_id.load(); }
+size_t nCompiledKernels() {
+  return next_kernel_id.load();
+}
 
 int debugFuser() {
   if (debug_fusion < 0) {
@@ -53,7 +74,7 @@ int debugFuser() {
 static const Node* usedInFusedChunk(const Value* input) {
   const auto& uses = input->uses();
   if (uses.size() == 1) {
-    const Node *user = uses[0].user;
+    const Node* user = uses[0].user;
     if (user->kind() == prim::ConstantChunk) {
       return user;
     }
@@ -65,7 +86,8 @@ static void setInputChunkDescriptors(KernelSpec& spec) {
   spec.inputChunks().reserve((spec.graph())->inputs().size());
   for (const Value* input : (spec.graph())->inputs()) {
     if (const Node* chunk = usedInFusedChunk(input)) {
-      spec.inputChunks().emplace_back(chunk->i(attr::chunks), chunk->i(attr::dim));
+      spec.inputChunks().emplace_back(
+          chunk->i(attr::chunks), chunk->i(attr::dim));
     } else {
       spec.inputChunks().emplace_back(1, 0);
     }
@@ -78,14 +100,15 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
   std::unordered_set<const Value*> inputs;
   std::unordered_set<const Value*> seen;
   while (!queue.empty()) {
-    const Value* val = queue.back(); queue.pop_back();
+    const Value* val = queue.back();
+    queue.pop_back();
     const Node* producer = val->node();
     if (producer->kind() == prim::Param) {
       inputs.insert(val);
       continue;
     }
     for (const Value* input : producer->inputs()) {
-      if (/*bool inserted = */seen.insert(input).second) {
+      if (/*bool inserted = */ seen.insert(input).second) {
         queue.push_back(input);
       }
     }
@@ -103,7 +126,8 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 }
 
 static void setInputBroadcastGroups(KernelSpec& spec) {
-  std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
+  std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>>
+      broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
     if (output->node()->kind() == prim::FusedConcat) {
       for (const Value* concat_input : output->node()->inputs()) {
@@ -114,9 +138,9 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
     }
   }
   std::copy(
-    broadcast_groups.begin()
-  , broadcast_groups.end()
-  , std::back_inserter(spec.inputBroadcastGroups()));
+      broadcast_groups.begin(),
+      broadcast_groups.end(),
+      std::back_inserter(spec.inputBroadcastGroups()));
 }
 
 // Performs "upfront" compilation where storage is known but shapes are not.
@@ -149,17 +173,17 @@ int64_t registerFusion(const Node* fusion_group) {
   // be a valid spec (must have had upfrontCompilation run on it).
   const auto key = store(graph);
   const auto maybe_retrieved_spec = retrieve(key);
-  JIT_ASSERT(maybe_retrieved_spec);
+  AT_ASSERT(maybe_retrieved_spec);
   upfrontCompilation(**maybe_retrieved_spec);
 
   return key;
 }
 
 std::shared_ptr<FusedKernel> compileKernel(
-  const KernelSpec& spec
-, const ArgSpec& arg_spec
-, const std::vector<int64_t>& map_size
-, const at::Device device) {
+    const KernelSpec& spec,
+    const ArgSpec& arg_spec,
+    const std::vector<int64_t>& map_size,
+    const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();
@@ -167,68 +191,77 @@ std::shared_ptr<FusedKernel> compileKernel(
   c10::optional<at::ScalarType> scalar_type;
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
-    graph->inputs()[i]->setType(TensorType::create(desc.scalar_type, device, desc.nDim())); // TODO: nDim is bad, as it is collapsed
+    graph->inputs()[i]->setType(TensorType::create(
+        desc.scalar_type,
+        device,
+        desc.nDim())); // TODO: nDim is bad, as it is collapsed
   }
 
   PropagateInputShapes(graph);
 
-  // Creates output descriptions
-  std::vector<TensorDesc> output_desc;
-  for (const Value* output : graph->outputs()) {
-    std::vector<int64_t> sizes = map_size;
-    if (output->node()->kind() == prim::FusedConcat) {
-      sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
+  // Creates chunk and flattened input descriptions
+  std::vector<PartitionDesc> chunk_desc;
+  std::vector<std::pair<const Value*, const TensorDesc>> flat_inputs;
+  {
+    size_t input_index = 0;
+    for (const auto& p : graph->inputs()) {
+      if (const Node* chunk = usedInFusedChunk(p)) {
+        int64_t dim = chunk->i(attr::dim);
+        int64_t chunks = chunk->i(attr::chunks);
+        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
+        for (const auto* o : chunk->outputs()) {
+          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
+        }
+      } else {
+        chunk_desc.emplace_back();
+        flat_inputs.emplace_back(p, input_desc[input_index++]);
+      }
     }
-    auto scalar_type = output->type()->expect<c10::TensorType const>()->scalarType();
+  }
+
+  // Creates output, concat, and flattened output descriptions
+  std::vector<TensorDesc> output_desc;
+  std::vector<PartitionDesc> concat_desc;
+  std::vector<std::pair<const Value*, const TensorDesc>> flat_outputs;
+  for (const Value* o : graph->outputs()) {
+    // Creates output description
+    std::vector<int64_t> sizes = map_size;
+    if (o->node()->kind() == prim::FusedConcat) {
+      sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
+    }
+    auto scalar_type = o->type()->expect<c10::TensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
-    output_desc.emplace_back(std::move(type));
+    output_desc.emplace_back(type);
+    const auto& desc = output_desc.back();
+
+    // Creates concat and flattened output descriptions (relies on output desc)
+    if (o->node()->kind() != prim::FusedConcat) {
+      concat_desc.emplace_back();
+      flat_outputs.emplace_back(o, desc);
+    } else {
+      const auto cat = o->node();
+      concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+      for (const auto& c : cat->inputs()) {
+        flat_outputs.emplace_back(c, *concat_desc.back().subTensorDesc());
+      }
+    }
   }
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
-  std::string code;
-  std::vector<PartitionDesc> chunk_desc;
-  std::vector<PartitionDesc> concat_desc;
-  bool has_random;
-  std::tie(code, chunk_desc, concat_desc, has_random)
-    = generateKernel(
-        name
-      , *graph
-      , input_desc
-      , output_desc
-      , use_cuda);
-
-  std::shared_ptr<FusedKernel> fused_kernel;
-  if (use_cuda) {
-    #if USE_CUDA_FUSER
-      fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
-        device.index()
-      , name
-      , code
-      , input_desc
-      , output_desc
-      , chunk_desc
-      , concat_desc
-      , has_random);
-    #else
-      throw std::runtime_error("CUDA Fusion is not supported on this build.");
-    #endif // USE_CUDA_FUSER
-  } else {
-    #if USE_CPU_FUSER
-      fused_kernel = std::make_shared<cpu::FusedKernelCPU>(
-        name
-      , code
-      , input_desc
-      , output_desc
-      , chunk_desc
-      , concat_desc
-      , has_random);
-    #else
-      throw std::runtime_error("CPU Fusion is not supported on this build.");
-    #endif // USE_CPU_FUSER
-  }
-
-  return fused_kernel;
+  std::string code =
+      generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
+  const FusedKernelConstructor& kernel_ctor =
+      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
+  return kernel_ctor(
+      device.index(),
+      name,
+      code,
+      input_desc,
+      output_desc,
+      chunk_desc,
+      concat_desc,
+      spec.hasRandom());
 }
 
 } // namespace fuser
