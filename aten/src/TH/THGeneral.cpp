@@ -239,13 +239,19 @@ void THSetNumThreads(int num_threads)
   // See https://github.com/pytorch/pytorch/issues/13757
   mkl_set_dynamic(false);
 #endif
-
+#if !defined(_OPENMP) && !defined(TH_BLAS_MKL)
+  if (num_threads != 1)
+    THError("PyTorch is compiled with neither OpenMP nor MKL. Setting the "
+            "number of threads used to a value other than 1 is not allowed.");
+#endif
 }
 
 int THGetNumThreads(void)
 {
-#ifdef _OPENMP
+#if defined(_OPENMP)
   return omp_get_max_threads();
+#elif defined(TH_BLAS_MKL)
+  return mkl_get_max_threads();
 #else
   return 1;
 #endif
