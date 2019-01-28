@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/Backtrace.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
@@ -49,10 +49,7 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-inline void delValueTrace(const Variable& var) {
-  AT_ASSERT(var.defined());
-  getTracingState()->value_map.erase(var);
-}
+TORCH_API void delValueTrace(const Variable& var);
 
 inline std::function<void()> pauseTracing() {
   std::shared_ptr<tracer::TracingState> state = getTracingState();
@@ -61,43 +58,7 @@ inline std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
-// Given a variable 'var', return the 'node' which represents the instruction
-// which computes the value of this variable in the IR.
-// Here, we interpret untraced variables as constants that are just embedded
-// in the graph.  This is useful to handle code which does things like this
-// (from torch.autograd.variable, now moved to C++):
-//
-//    def mm(self, matrix):
-//      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
-//      return Addmm.apply(output, self, matrix, 0, 1, True)
-//
-// Here, mm fakes up a dummy variable with uninitialized data to do an inplace
-// update on, but subsequently ignores it because the alpha scaling factor is
-// zero. This is one of the cases where a Variable can be created inside of a
-// trace, and if we treat it as a constant, everything will work out.
-inline Value* getValueTrace(const Variable& var) {
-  auto& state = getTracingState();
-  if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
-  }
-
-  auto& value_map = getTracingState()->value_map;
-  auto it = value_map.find(var);
-  if (it == value_map.end()) {
-    Value* constant = state->graph->insertConstant(var.data());
-    recordSourceLocation(constant->node());
-    constant->inferTypeFrom(var.data());
-    it = value_map.emplace_hint(it, var, constant);
-  }
-  if (!it->second->hasUniqueName()) {
-    auto unique_name = getTracingState()->lookup_var_name_fn(var);
-    if (!unique_name.empty()) {
-      it->second->setUniqueName(unique_name);
-    }
-  }
-  return it->second;
-}
+TORCH_API Value* getValueTrace(const IValue& var);
 
 // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
 // One might merge getValueTrace and getNestedValueTrace after checking that
@@ -124,23 +85,41 @@ inline Value* getNestedValueTrace(const IValue& v) {
 
 inline Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
-    const Variable& var,
-    size_t output_no) {
+    const Variable& var) {
   if (!var.defined()) {
     Node* n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
+    return state->graph->insertNode(n)->output();
   }
 
-  auto& value_map = getTracingState()->value_map;
+  auto& value_map = getTracingState()->env_stack.back().value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     std::ostringstream os;
-    os << "output " << output_no << " of traced region did not have observable "
+    os << "output of traced region did not have observable "
        << "data dependence with trace inputs; this probably indicates your program "
        << "cannot be understood by the tracer.";
     throw std::runtime_error(os.str());
   }
   return it->second;
+}
+
+inline Value* getNestedOutputTrace(
+    const std::shared_ptr<TracingState>& state,
+    const IValue& iv) {
+  if (iv.isTensor()) {
+    return getOutputTrace(state, iv.toTensor());
+  } else if (iv.isTuple()) {
+    const auto& elems = iv.toTuple()->elements();
+    auto tuple_node = state->graph->createTuple(
+        fmap(elems, [&state](const IValue& iv) {
+          return getNestedOutputTrace(state, iv);
+        }));
+    state->graph->insertNode(tuple_node);
+    return tuple_node->output();
+  } else {
+    AT_ERROR(
+        "Only tensors or tuples of tensors can be output from traced functions");
+  }
 }
 
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
@@ -159,11 +138,12 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     if (type->isSubtypeOf(DynamicType::get())) {
       auto input_tensor = input.toTensor();
       auto name = Variable(input_tensor).name();
-      if (state->value_map.find(input_tensor) != state->value_map.end()) {
+      auto& value_map = state->env_stack.back().value_map;
+      if (value_map.find(input_tensor) != value_map.end()) {
         input_tensor = input_tensor.view(input_tensor.sizes());
       }
       value->setUniqueName(name);
-      state->value_map[input_tensor] = value;
+      value_map[input_tensor] = value;
       return input_tensor;
     } else if (auto tuple_type = type->cast<TupleType>()) {
       auto unpack_node =
@@ -196,22 +176,8 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
 inline void exit(const Stack& outputs) {
   auto& state = getTracingState();
   size_t i = 0;
-  std::function<Value*(const IValue&)> reduce_ivalue =
-      [&](const IValue& iv) -> Value* {
-    if (iv.isTensor()) {
-      return getOutputTrace(state, iv.toTensor(), i);
-    } else if (iv.isTuple()) {
-      const auto& elems = iv.toTuple()->elements();
-      auto tuple_node = state->graph->createTuple(fmap(elems, reduce_ivalue));
-      state->graph->appendNode(tuple_node);
-      return tuple_node->output();
-    } else {
-      AT_ERROR(
-          "Only tensors or tuples of tensors can be output from traced functions");
-    }
-  };
   for (auto& output : outputs) {
-    state->graph->registerOutput(reduce_ivalue(output));
+    state->graph->registerOutput(getNestedOutputTrace(state, output));
     i++;
   }
   setTracingState(nullptr);
