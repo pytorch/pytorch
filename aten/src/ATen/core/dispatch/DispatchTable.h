@@ -15,7 +15,22 @@
 
 namespace c10 {
 
+/**
+ * The type of a user-supplied function to initialize the kernel cache.
+ * this is stored together with the kernel function in the dispatch table
+ * so we can create a new cache instance when a kernel is looked up
+ * from the dispatch table.
+ */
 using KernelStateCreatorFunction = std::unique_ptr<c10::KernelState> ();
+
+/**
+ * The dispatch table stores a pointer to a kernel function and a pointer
+ * to a function initializing a cache for the kernel. If the kernel wants
+ * to use the cache, they supply the state initializer when the kernel
+ * is registered. When a kernel is looked up from the dispatcher, a new
+ * cache instance is created for it and each call to that kernel will get
+ * this same cache instance.
+ */
 struct DispatchTableEntry final {
   KernelFunction* kernel_func;
   KernelStateCreatorFunction* state_creator_func;

@@ -335,7 +335,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest']
+        executable += ['-m', 'pytest', '--durations=10']
     return executable
 
 
