@@ -42,7 +42,7 @@ using ::c10::ivalue::Tuple;
 using ::c10::ivalue::BoolList;
 using ::c10::ivalue::DoubleList;
 using ::c10::ivalue::GenericList;
-using ::c10::ivalue::IntList;
+using ::c10::ivalue::IntListRef;
 using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;

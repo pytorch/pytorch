@@ -48,11 +48,11 @@ int64_t Variable::Impl::numel() const {
   return data_.numel();
 }
 
-IntList Variable::Impl::sizes() const {
+IntListRef Variable::Impl::sizes() const {
   return data_.sizes();
 }
 
-IntList Variable::Impl::strides() const {
+IntListRef Variable::Impl::strides() const {
   return data_.strides();
 }
 

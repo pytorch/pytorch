@@ -149,10 +149,10 @@ public:
 
   const char * toString() const;
 
-  IntList sizes() const {
+  IntListRef sizes() const {
     return impl_->sizes();
   }
-  IntList strides() const {
+  IntListRef strides() const {
     return impl_->strides();
   }
   int64_t ndimension() const {

@@ -40,8 +40,8 @@ Value* insertConstant(
     n->is_(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
-  } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements());
+  } else if (val.isIntListRef()) {
+    n->is_(attr::value, val.toIntListRef()->elements());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
     n->ts_(

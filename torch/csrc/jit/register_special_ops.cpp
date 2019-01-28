@@ -52,8 +52,8 @@ at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
     return list.toGenericListRef().size();
-  } else if (list.isIntList()) {
-    return list.toIntListRef().size();
+  } else if (list.isIntListRef()) {
+    return list.toIntListRefRef().size();
   } else if (list.isDoubleList()){
     return list.toDoubleListRef().size();
   } else if (list.isBoolList()) {
@@ -125,9 +125,9 @@ void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::Ar
       data += strides[dim] * elementSize;
     }
   } else {
-    AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
-    if (obj.isIntList()) {
-      storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, obj.toIntListRef());
+    AT_ASSERT(obj.isIntListRef() || obj.isDoubleList() || obj.isBoolList());
+    if (obj.isIntListRef()) {
+      storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, obj.toIntListRefRef());
     } else if (obj.isDoubleList()){
       storeLastDimension<double>(data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
     } else {
@@ -143,7 +143,7 @@ RegisterOperators reg({
           autograd::profiler::RecordFunction record("split_with_sizes");
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntList()->elements(),
+              (std::move(peek(stack, 1, 3))).toIntListRef()->elements(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -164,8 +164,8 @@ RegisterOperators reg({
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
-          auto list = peek(stack, 0, 2).toIntListRef();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto list = peek(stack, 0, 2).toIntListRefRef();
+          auto defaults = peek(stack, 1, 2).toIntListRefRef();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -180,8 +180,8 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
+            auto a = pop(stack).toIntListRef()->elements();
+            auto b = pop(stack).toIntListRef()->elements();
             push(stack, at::infer_size(a, b));
             return 0;
           };
@@ -272,8 +272,8 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
+            auto a = pop(stack).toIntListRef()->elements();
+            auto b = pop(stack).toIntListRef()->elements();
             push(stack, at::infer_size(a, b));
             return 0;
           };

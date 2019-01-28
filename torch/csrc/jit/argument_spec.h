@@ -315,13 +315,13 @@ struct CompleteArgumentInfo {
     // See [valid range], it is always valid to ask for offset for (i + 1)
     return (sizes_strides_offset(i + 1) - sizes_strides_offset(i)) / 2;
   }
-  at::IntList sizes() const {
-    return at::IntList(
+  at::IntListRef sizes() const {
+    return at::IntListRef(
         spec.sizes_strides() + sizes_strides_offset(i), ndimension());
   }
-  at::IntList strides() const {
+  at::IntListRef strides() const {
     int ndim = ndimension();
-    return at::IntList(
+    return at::IntListRef(
         spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {

@@ -265,6 +265,6 @@ bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
-using IntList = ArrayRef<int64_t>;
+using IntListRef = ArrayRef<int64_t>;
 
 } // namespace c10

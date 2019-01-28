@@ -120,7 +120,7 @@ Here are the supported default values:
   with an explicit length (e.g., `int[2]`)--in the case of `int[]`
   a number is replicated to fill the length (e.g., `int[2] x=2`
   is equivalent to `int[2] x=[2,2]`.
-* Lists of numbers (e.g., `[0, 0]`) for `IntList`.
+* Lists of numbers (e.g., `[0, 0]`) for `IntListRef`.
 * Booleans (e.g., `True`) for `bool`.
 * Empty initializer lists (e.g., `[]`) for `Tensor` (this implicitly changes
   a `Tensor` argument to accept undefined tensors).

@@ -247,7 +247,7 @@ class ConvPoolOpBase : public Operator<Context> {
   // Helper function that is also called from OperatorSchema. Modified
   // kernel parameters and output output_dims and channel_first.
   static inline void InferOutputSize(
-      at::IntList input_dims,
+      at::IntListRef input_dims,
       int /*output_channel*/,
       StorageOrder order,
       bool global_pooling,

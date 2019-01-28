@@ -275,8 +275,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toBool());
   } else if (ivalue.isString()) {
     return py::cast(ivalue.toStringRef());
-  } else if (ivalue.isIntList()) {
-    return py::cast(ivalue.toIntListRef());
+  } else if (ivalue.isIntListRef()) {
+    return py::cast(ivalue.toIntListRefRef());
   } else if (ivalue.isDoubleList()) {
     return py::cast(ivalue.toDoubleListRef());
   } else if (ivalue.isBoolList()) {

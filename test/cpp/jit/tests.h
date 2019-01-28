@@ -1014,7 +1014,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
+autograd::Variable var(at::Type& t, at::IntListRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
@@ -1025,7 +1025,7 @@ int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
 }
 
-bool isEqual(at::IntList lhs, at::IntList rhs) {
+bool isEqual(at::IntListRef lhs, at::IntListRef rhs) {
   return lhs.size() == rhs.size() &&
       std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
@@ -1205,7 +1205,7 @@ void testControlFlow() {
 }
 
 void testIValue() {
-  Shared<IntList> foo = IntList::create({3, 4, 5});
+  Shared<IntListRef> foo = IntListRef::create({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
   IValue bar{foo};
   ASSERT_EQ(foo.use_count(), 2);
@@ -1213,15 +1213,15 @@ void testIValue() {
   ASSERT_EQ(foo.use_count(), 3);
   auto foo2 = std::move(bar);
   ASSERT_EQ(foo.use_count(), 3);
-  ASSERT_TRUE(foo2.isIntList());
+  ASSERT_TRUE(foo2.isIntListRef());
   ASSERT_TRUE(bar.isNone());
   foo2 = IValue(4.0);
   ASSERT_TRUE(foo2.isDouble());
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
-  ASSERT_TRUE(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3, 4, 5}));
+  ASSERT_TRUE(ArrayRef<int64_t>(baz.toIntListRef()->elements()).equals({3, 4, 5}));
 
-  auto move_it = std::move(baz).toIntList();
+  auto move_it = std::move(baz).toIntListRef();
   ASSERT_EQ(foo.use_count(), 2);
   ASSERT_TRUE(baz.isNone());
   IValue i(4);

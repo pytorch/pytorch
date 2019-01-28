@@ -280,7 +280,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     }
 
     unpack_with_default_methods = {
-        'IntList': 'setDefaultIntlist',
+        'IntListRef': 'setDefaultIntlist',
         'Scalar': 'scalarWithDefault',
         'int64_t': 'toInt64WithDefault',
         'bool': 'setDefaultBool',
@@ -327,8 +327,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
-            if typename.startswith('IntList['):
-                typename = 'IntList'
+            if typename.startswith('IntListRef['):
+                typename = 'IntListRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 

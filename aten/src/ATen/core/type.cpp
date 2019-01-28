@@ -133,7 +133,7 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
     return BoolType::get();
   } else if (value.isString()) {
     return StringType::get();
-  } else if (value.isIntList()) {
+  } else if (value.isIntListRef()) {
     return ListType::ofInts();
   } else if (value.isTensorList()) {
     return ListType::ofTensors();

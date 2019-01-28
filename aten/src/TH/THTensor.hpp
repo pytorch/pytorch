@@ -115,12 +115,12 @@ TH_API void THTensor_free(THTensor *self);
 TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
 
-TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
-TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
+TH_CPP_API void THTensor_resize(THTensor *self, at::IntListRef size, at::IntListRef stride);
+TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntListRef size_, at::IntListRef stride_);
 TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntList oldshape,
-    at::IntList oldstride,
-    at::IntList newshape);
+    at::IntListRef oldshape,
+    at::IntListRef oldstride,
+    at::IntListRef newshape);
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateAllTypes.h>

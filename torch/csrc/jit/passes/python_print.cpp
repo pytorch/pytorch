@@ -667,8 +667,8 @@ struct PythonPrintPass {
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
           stmt, "bool", v.toBoolListRef().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+    } else if (v.isIntListRef()) {
+      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRefRef().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
           stmt, "float", v.toDoubleListRef().size(), v);
