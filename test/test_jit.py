@@ -396,7 +396,6 @@ class JitTestCase(TestCase):
 
         return ge
 
-
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
