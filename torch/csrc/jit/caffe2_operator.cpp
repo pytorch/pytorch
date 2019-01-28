@@ -1,11 +1,10 @@
-#include <jit/custom_operator.h>
+#include <jit/caffe2_operator.h>
+#include <caffe2/core/operator.h>
 
 namespace torch {
 namespace jit {
 
-Operator createOperatorFromC2(
-    const std::string& name
-    ) {
+Operator createOperatorFromCaffe2(const std::string& name) {
   auto symbolic_name = c10::Symbol::fromQualString("caffe2::" + name);
   auto fn_wrap = caffe2::FunctionSchemaRegistry()->Create(symbolic_name.toUnqualString());
   CAFFE_ENFORCE(

@@ -149,7 +149,7 @@ static Tensor dispatch_contiguous(const Tensor & self) {
       auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
-      tracer_state->graph->appendNode(node);
+      tracer_state->graph->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
