@@ -64,6 +64,7 @@ torch/lib/*.lib
 torch/lib/*.so*
 torch/lib/protobuf*.pc
 torch/lib/build
+torch/lib/caffe2/
 torch/lib/cmake
 torch/lib/include
 torch/lib/pkgconfig
