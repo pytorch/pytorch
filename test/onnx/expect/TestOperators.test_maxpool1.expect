@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    output: "2"
     op_type: "MaxPool"
     attribute {
       name: "kernel_shape"
