@@ -4238,13 +4238,17 @@ class TestNN(NNTestCase):
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
 
-    def test_CTCLoss_typecheck(self):
+    def test_CTCLoss_inputcheck(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
             input_lengths = torch.tensor(input_lengths).to(dtype=torch.float)
+            target_lengths = torch.tensor(target_lengths)
+            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        with self.assertRaises(RuntimeError):
+            input_lengths = torch.tensor(input_lengths)
             target_lengths = torch.tensor(target_lengths).to(dtype=torch.float)
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
