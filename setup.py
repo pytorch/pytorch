@@ -158,12 +158,16 @@ import json
 import glob
 import importlib
 
-# If you want to modify flags or environmental variables that is set when
-# building torch, you should do it in tools/setup_helpers/configure.py.
-# Please don't add it here unless it's only used in PyTorch.
-from tools.setup_helpers.configure import *
-import tools.setup_helpers.configure
-
+from tools.build_pytorch_libs import build_caffe2
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
+                                     check_env_flag,
+                                     DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN)
+from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.rocm import USE_ROCM
+from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
+from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+from tools.setup_helpers.dist_check import USE_DISTRIBUTED
 ################################################################################
 # Parameters parsed from environment
 ################################################################################
@@ -173,10 +177,11 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
+RERUN_CMAKE = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == '--cmake':
-        tools.setup_helpers.configure.RERUN_CMAKE = True
+        RERUN_CMAKE = True
         continue
     if arg == 'rebuild' or arg == 'build':
         arg = 'build'  # rebuild is gone, make it build
@@ -268,7 +273,11 @@ def build_deps():
     check_pydep('yaml', 'pyyaml')
     check_pydep('typing', 'typing')
 
-    build_caffe2()
+    build_caffe2(version=version,
+                 cmake_python_library=cmake_python_library,
+                 build_python=True,
+                 rerun_cmake=RERUN_CMAKE,
+                 build_dir='build')
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
@@ -303,38 +312,6 @@ def check_pydep(importname, module):
         importlib.import_module(importname)
     except ImportError:
         raise RuntimeError(missing_pydep.format(importname=importname, module=module))
-
-
-# Calls build_pytorch_libs.sh/bat with the correct env variables
-def build_caffe2():
-    if IS_WINDOWS:
-        build_libs_cmd = ['tools\\build_pytorch_libs.bat']
-    else:
-        build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
-
-    my_env, extra_flags = get_pytorch_env_with_flags()
-    build_libs_cmd.extend(extra_flags)
-    my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
-    my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
-    my_env["PYTORCH_BUILD_VERSION"] = version
-
-    cmake_prefix_path = full_site_packages
-    if "CMAKE_PREFIX_PATH" in my_env:
-        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
-    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
-
-    if VERBOSE_SCRIPT:
-        my_env['VERBOSE_SCRIPT'] = '1'
-    try:
-        os.mkdir('build')
-    except OSError:
-        pass
-
-    kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
-
-    if subprocess.call(build_libs_cmd, env=my_env, **kwargs) != 0:
-        report("Failed to run '{}'".format(' '.join(build_libs_cmd)))
-        sys.exit(1)
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -576,7 +553,7 @@ if IS_WINDOWS:
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
-main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
+main_compile_args = []
 main_libraries = ['shm', 'torch_python']
 main_link_args = []
 main_sources = ["torch/csrc/stub.cpp"]
