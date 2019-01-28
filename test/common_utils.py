@@ -745,6 +745,7 @@ def brute_pdist(inp, p=2):
     inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
     return unroll[..., inds.cumsum(0)]
 
+
 def brute_cdist(x, y, p=2):
     r1 = x.shape[-2]
     r2 = y.shape[-2]
