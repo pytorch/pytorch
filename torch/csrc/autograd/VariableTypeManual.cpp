@@ -249,7 +249,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
       jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
       jit::tracer::addInputs(node, "src", src);
       jit::tracer::addInputs(node, "self", self);
-      graph->appendNode(node);
+      graph->insertNode(node);
       jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
       output = node->output();
     } else {
@@ -332,7 +332,7 @@ Tensor VariableType::detach(const Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
 
   }
   // <NON_GENERATED_CODE>
@@ -352,7 +352,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>

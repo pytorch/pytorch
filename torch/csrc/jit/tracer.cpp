@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/tracer.h>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 
@@ -39,35 +39,119 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+ void delValueTrace(const Variable& var) {
+  AT_ASSERT(var.defined());
+  auto& env_stack = getTracingState()->env_stack;
+  for (size_t i = 0; i < env_stack.size(); ++i) {
+    auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
+
+    auto it = value_map.find(var);
+    if (it == value_map.end()) {
+      continue;
+    }
+    value_map.erase(it);
+  }
+  getTracingState()->env_stack.back().value_map.erase(var);
+}
+
+// Given a variable 'var', return the 'node' which represents the instruction
+// which computes the value of this variable in the IR.
+// Here, we interpret untraced variables as constants that are just embedded
+// in the graph.  This is useful to handle code which does things like this
+// (from torch.autograd.variable, now moved to C++):
+//
+//    def mm(self, matrix):
+//      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
+//      return Addmm.apply(output, self, matrix, 0, 1, True)
+//
+// Here, mm fakes up a dummy variable with uninitialized data to do an inplace
+// update on, but subsequently ignores it because the alpha scaling factor is
+// zero. This is one of the cases where a Variable can be created inside of a
+// trace, and if we treat it as a constant, everything will work out.
+Value* getValueTrace(const IValue& var) {
+  auto& state = getTracingState();
+  auto& env_stack = getTracingState()->env_stack;
+
+  if (var.isTensor()) {
+    auto ten = var.toTensor();
+    if (!ten.defined()) {
+      Node* n = state->graph->createUndefined();
+      return state->graph->insertNode(n)->output();
+    }
+    for (size_t i = 0; i < env_stack.size(); ++i) {
+      auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
+      auto it = value_map.find(ten);
+      if (it == value_map.end()) {
+        continue;
+      }
+      if (!it->second->hasUniqueName()) {
+        auto unique_name = getTracingState()->lookup_var_name_fn(ten);
+        if (!unique_name.empty()) {
+          it->second->setUniqueName(unique_name);
+        }
+      }
+      return it->second;
+    }
+
+    // Didn't find it. Bake in a constant
+    Value* constant = state->graph->insertConstant(ten);
+    recordSourceLocation(constant->node());
+    constant->inferTypeFrom(ten);
+    auto it = env_stack.back().value_map.find(ten);
+    it = env_stack.back().value_map.emplace_hint(it, ten, constant);
+    return it->second;
+  } else if (var.isFuture()) {
+    auto fut = var.toFuture();
+    for (size_t i = 0; i < env_stack.size(); ++i) {
+      auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
+      auto it = future_map.find(fut);
+      if (it == future_map.end()) {
+        continue;
+      }
+      return it->second;
+    }
+
+    std::ostringstream oss;
+    oss << "Tried to trace Future that the tracer was not aware of.";
+    throw std::runtime_error(oss.str());
+  } else {
+    std::ostringstream oss;
+    oss << "Unknown type used in value trace lookup!";
+    throw std::runtime_error(oss.str());
+  }
+}
+
 void setValueTrace(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
     AT_ASSERT(var.defined());
-    getTracingState()->value_map[var] = value;
+    getTracingState()->env_stack.back().value_map[var] = value;
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, outputs.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, outputs.size()));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto& outputs = v.toTuple()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createTupleUnpack(value));
+    Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
     auto elements = v.toGenericListRef();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, elements.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {
       setValueTrace(elements[i], unpack_node->outputs()[i]);
     }
+  } else if (v.isFuture()) {
+    auto fut = v.toFuture();
+    getTracingState()->env_stack.back().future_map[fut] = value;
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
@@ -158,7 +242,7 @@ void addInputs(
 
 void addInputs(Node* n, const char* name, at::TensorList value) {
   Graph* g = n->owningGraph();
-  Node* list_node = g->appendNode(
+  Node* list_node = g->insertNode(
       g->createList(DynamicType::get(), fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
@@ -213,7 +297,7 @@ void setOutput(Value* value, const at::Tensor& output) {
 void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   Value* value = node->addOutput()->setType(ListType::ofTensors());
   Graph* graph = node->owningGraph();
-  Node* unpack_node = graph->appendNode(
+  Node* unpack_node = graph->insertNode(
       graph->create(prim::ListUnpack, {value}, outputs.size()));
   for (size_t i = 0; i < outputs.size(); ++i) {
     Value* output_val = unpack_node->outputs()[i];
@@ -230,7 +314,8 @@ void setTracingState(std::shared_ptr<TracingState> state) {
   detail::tracing_state = std::move(state);
 }
 
-TracingState::TracingState() : graph(new Graph()) {}
+TracingState::TracingState()
+    : env_stack{TracingEnvironmentFrame()}, graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
 
@@ -241,7 +326,6 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var =
       autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
   auto* value = getValueTrace(var);
-  WithInsertPoint ipoint{graph->block()};
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());
   auto* node = graph->insertNode(graph->create(aten::size, {value, dim_val}));
@@ -249,7 +333,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   node->output()->setType(jit::IntType::get());
 
   auto ten =
-      graph->appendNode(graph->createNumToTensor(node->output()))->output();
+      graph->insertNode(graph->createNumToTensor(node->output()))->output();
   setValueTrace(size_var, ten);
   return size_var;
 }

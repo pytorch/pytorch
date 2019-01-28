@@ -1068,7 +1068,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = 0;
   }
 
-  /**
+   /**
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
@@ -1080,6 +1080,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * The source tensor should already have its data allocated.
    */
+  // To be deprecated
   void ShareData(const TensorImpl& src) {
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add
