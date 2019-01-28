@@ -141,7 +141,6 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
 
 Examples::
 

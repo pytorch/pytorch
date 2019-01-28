@@ -9,6 +9,8 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 namespace torch {
 namespace jit {
 
@@ -83,10 +85,41 @@ using StringsAttr = VectorAttributeValue<std::string, AttributeKind::ss>;
 using TensorAttr = ScalarAttributeValue<at::Tensor, AttributeKind::t>;
 using TensorsAttr = VectorAttributeValue<at::Tensor, AttributeKind::ts>;
 struct Graph;
-using GraphAttr =
-    ScalarAttributeValue<std::shared_ptr<Graph>, AttributeKind::g>;
-using GraphsAttr =
-    VectorAttributeValue<std::shared_ptr<Graph>, AttributeKind::gs>;
+
+// We special case Graph attributes like this because we want to ensure that
+// Graph::copy() is called when we clone() these attributes.
+struct GraphAttr : public AttributeValue {
+  using ConstructorType = std::shared_ptr<Graph>;
+  using ValueType = std::shared_ptr<Graph>;
+  GraphAttr(Symbol name, ConstructorType value_)
+      : AttributeValue(name), value_(value_) {}
+  ValueType& value() {
+    return value_;
+  }
+  TORCH_API Ptr clone() const override;
+  AttributeKind kind() const override {
+    return AttributeKind::g;
+  }
+ private:
+  std::shared_ptr<Graph> value_;
+};
+
+struct GraphsAttr : public AttributeValue {
+  using ConstructorType = std::vector<std::shared_ptr<Graph>>;
+  using ValueType = std::vector<std::shared_ptr<Graph>>;
+  GraphsAttr(Symbol name, ConstructorType value_)
+      : AttributeValue(name), value_(std::move(value_)) {}
+  ValueType& value() {
+    return value_;
+  }
+  AttributeKind kind() const override {
+    return AttributeKind::gs;
+  }
+  TORCH_API std::unique_ptr<AttributeValue> clone() const override;
+
+ private:
+  ValueType value_;
+};
 
 struct AttributeError : public std::exception {
   AttributeError(Symbol name, bool defined) {

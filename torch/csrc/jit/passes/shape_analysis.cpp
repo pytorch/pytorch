@@ -1603,6 +1603,9 @@ void EraseShapeInformation(Block* b) {
     for (Block* sb : n->blocks()) {
       EraseShapeInformation(sb);
     }
+    if (n->hasAttribute(attr::Subgraph)) {
+      EraseShapeInformation(n->g(attr::Subgraph));
+    }
   }
 }
 
