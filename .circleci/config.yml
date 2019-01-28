@@ -1229,6 +1229,11 @@ jobs:
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+          # Save the docs build so we can debug any problems
+          export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
+          docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
+          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+
   pytorch_macos_10_13_py3_build:
     macos:
       xcode: "9.0"
