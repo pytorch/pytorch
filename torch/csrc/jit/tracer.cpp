@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/tracer.h>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 
@@ -47,24 +47,23 @@ void setValueTrace(const IValue& v, Value* value) {
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, outputs.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, outputs.size()));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto& outputs = v.toTuple()->elements();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createTupleUnpack(value));
+    Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
     auto elements = v.toGenericListRef();
     auto graph = getTracingState()->graph;
-    Node* unpack_node = graph->insertNode(
-      graph->createListUnpack(value, elements.size()));
+    Node* unpack_node =
+        graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {
       setValueTrace(elements[i], unpack_node->outputs()[i]);
     }
@@ -158,8 +157,18 @@ void addInputs(
 
 void addInputs(Node* n, const char* name, at::TensorList value) {
   Graph* g = n->owningGraph();
-  Node* list_node = g->appendNode(
-      g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  TypePtr typ = DynamicType::get();
+  // NB: for TensorList, we create the node depending on the values inside,
+  // if any of the value in tensor list is undefined, create the type of
+  // List[Optional[Tensor]] instead of List[Tensor]
+  for (const at::Tensor v : value) {
+    if (!v.defined()) {
+      typ = OptionalType::ofTensor();
+      break;
+    }
+  }
+  Node* list_node =
+      g->appendNode(g->createList(typ, fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
 

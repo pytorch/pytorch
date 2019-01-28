@@ -1,5 +1,5 @@
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/functional.h>
@@ -18,7 +18,7 @@ Value* insertConstant(
     at::Tensor ref = val.toTensor();
     if (!ref.defined()) {
       n->destroy();
-      return g.insertNode(g.createUndefined())->output();
+      return g.insertNode(g.createNone(DynamicType::get()))->output();
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();

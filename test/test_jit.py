@@ -10290,10 +10290,6 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
 
-    # This fails because undefined tensor syntax
-    # TODO: remove it when we remove undefined tensor syntax in tracer
-    'test___getitem___adv_index_mid',
-    'test___getitem___adv_index_end',
 }
 
 EXCLUDE_TYPE_CHECK = {

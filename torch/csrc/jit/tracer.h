@@ -63,7 +63,7 @@ inline std::function<void()> pauseTracing() {
 inline Value* getValueTrace(const Variable& var) {
   auto& state = getTracingState();
   if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
+    Node* n = state->graph->createNone(DynamicType::get());
     return state->graph->appendNode(n)->output();
   }
 
@@ -112,7 +112,7 @@ inline Value* getOutputTrace(
     const Variable& var,
     size_t output_no) {
   if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
+    Node* n = state->graph->createNone(DynamicType::get());
     return state->graph->appendNode(n)->output();
   }
 
