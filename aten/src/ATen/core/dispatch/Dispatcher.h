@@ -30,6 +30,7 @@ public:
    */
   void call(Stack* stack) {
     if (cache_.get() == nullptr) {
+      AT_ASSERT(cache_creator_ != nullptr);
       cache_ = (*cache_creator_)();
     }
     return (*kernel_)(stack, cache_.get());
