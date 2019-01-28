@@ -170,7 +170,7 @@ if (jit::tracer::isTracing()) {
   node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  tracer_state->graph->appendNode(node);
+  tracer_state->graph->insertNode(node);
   ${inplace_guard}
   jit::tracer::setTracingState(nullptr);
 }
