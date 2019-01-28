@@ -332,7 +332,7 @@ void RunOperator(
   CAFFE_ENFORCE(
       fn_wrap,
       "Operator not registered with FunctionSchema constructor.",
-      name);
+      name.toUnqualString());
   auto fn = fn_wrap->getSchema();
   auto op = caffe2::FunctionSchemaOperatorRegistry()->Create(
       name.toUnqualString(), fn, inputs, outputs);
