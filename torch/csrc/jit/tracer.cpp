@@ -39,7 +39,7 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
- void delValueTrace(const Variable& var) {
+void delValueTrace(const Variable& var) {
   AT_ASSERT(var.defined());
   auto& env_stack = getTracingState()->env_stack;
   for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -246,7 +246,7 @@ void addInputs(Node* n, const char* name, at::TensorList value) {
   // NB: for TensorList, we create the node depending on the values inside,
   // if any of the value in tensor list is undefined, create the type of
   // List[Optional[Tensor]] instead of List[Tensor]
-  for (const at::Tensor v : value) {
+  for (const at::Tensor& v : value) {
     if (!v.defined()) {
       typ = OptionalType::ofTensor();
       break;
