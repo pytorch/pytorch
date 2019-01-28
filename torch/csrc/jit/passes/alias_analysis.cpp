@@ -431,13 +431,19 @@ void AliasDb::analyze(Node* node) {
     AT_ASSERT(formal->containedTypes().size() == 0);
 
     for (const auto& formalAlias : formal->sets()) {
+      // If we encounter an alias annotation that wasn't in the inputs:
       if (!formalToActual.count(formalAlias)) {
-        // This means that the output is being assigned to a fresh tensor.
-        // We can just ignore it in this case, since either:
-        // 1. It is the only annotation, in which case it's equivalent to no
-        //    annotation.
-        // 2. It is of the form `a|fresh`, in which case we can be conservative
-        //    and say that it must alias the non-fresh tensor.
+        // If this alias is not seen elsewhere and is the only annotation on
+        // the output, it's equivalent to being fresh:
+        //   e.g. foo(Tensor(a) self) -> Tensor(b)
+        if (formal->sets().size() == 1) {
+          giveFreshAlias(actual);
+        }
+        // Or it is the form of a|fresh, which we can ignore, taking the
+        // conservative assumption that the output must alias `a`, e.g
+        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
+
+        // Don't assign an alias set in that case.
         continue;
       }
 
