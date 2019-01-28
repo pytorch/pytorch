@@ -2300,6 +2300,9 @@ struct to_ir {
       const SourceRange& loc,
       Value* input,
       at::ArrayRef<Value*> indices) {
+    // NB: the index of aten::index can either be a type of TensorList or
+    // List[Optional[Tensor]], this is to support the case like t[:, :, 1]
+    // where : here indicates a None/undefined tensor(optional tensor)
     auto* index =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
@@ -2339,6 +2342,7 @@ struct to_ir {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        // NB:index type can either be a Tensor or : (None of Optional Tensor)
         handle_tensor(index);
         continue;
       }
@@ -2598,7 +2602,6 @@ void lambdaLiftFork(Node* fork_node) {
   // Separate the subgraph and clean up the orignal one
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
-
 }
 
 } // namespace script
