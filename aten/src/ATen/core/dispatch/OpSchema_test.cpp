@@ -12,9 +12,9 @@ static_assert(!details::is_tensor_arg<int>::value, "");
 
 struct SchemaDef final {
   using Signature = bool(int, Tensor, float, Tensor, Tensor, unsigned int);
-  static constexpr guts::array<const char*, 6> parameter_names = {{
-      "1", "2", "3", "4", "5", "6"
-  }};
+  static constexpr guts::array<const char*, 6> parameter_names() {
+    return {"1", "2", "3", "4", "5", "6"};
+  }
   static constexpr size_t num_dispatch_args() {return 3;}
   static constexpr size_t num_outputs() {return 0;}
 };
