@@ -1231,7 +1231,6 @@ class _TestTorchMixin(object):
             for dtype in [torch.float32, torch.float64]:
                 test_pdist_single((1000, 2), device, 2, dtype, False)
 
-
     def test_cdist_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
