@@ -430,17 +430,28 @@ void AliasDb::analyze(Node* node) {
     // We don't support composite types for alias analysis yet.
     AT_ASSERT(formal->containedTypes().size() == 0);
 
-    const auto& formalAlias = formal->set();
-    auto outputAlias = formalToActual.at(formalAlias);
-
-    // Record writes
-    for (const auto& alias : outputAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
+    for (const auto& formalAlias : formal->sets()) {
+      if (!formalToActual.count(formalAlias)) {
+        // This means that the output is being assigned to a fresh tensor.
+        // We can just ignore it in this case, since either:
+        // 1. It is the only annotation, in which case it's equivalent to no
+        //    annotation.
+        // 2. It is of the form `a|fresh`, in which case we can be conservative
+        //    and say that it must alias the non-fresh tensor.
+        continue;
       }
-    }
 
-    addAlias(actual, outputAlias);
+      auto outputAlias = formalToActual.at(formalAlias);
+
+      // Record writes
+      for (const auto& alias : outputAlias.sets()) {
+        if (formal->isWrite()) {
+          aliasToWrites_[alias].insert(node);
+        }
+      }
+
+      addAlias(actual, outputAlias);
+    }
   }
   // Keep the wildcard index up to date.
   if (hasWildcardImpl(node)) {
