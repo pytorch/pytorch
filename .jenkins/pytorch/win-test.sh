@@ -155,6 +155,7 @@ run_tests() {
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && $TMP_DIR/ci_scripts/test_custom_script_ops.bat && $TMP_DIR/ci_scripts/test_libtorch.bat
         fi
     fi
+    assert_git_not_dirty
 }
 
 run_tests && echo "TEST PASSED"

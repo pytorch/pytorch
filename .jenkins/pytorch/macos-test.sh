@@ -52,6 +52,7 @@ fi
 test_python_all() {
   echo "Ninja version: $(ninja --version)"
   python test/run_test.py --verbose
+  assert_git_not_dirty
 }
 
 test_cpp_api() {
@@ -77,6 +78,8 @@ test_cpp_api() {
   export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
   export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
   "$CPP_BUILD"/caffe2/bin/test_api
+
+  assert_git_not_dirty
 }
 
 test_custom_script_ops() {
@@ -96,6 +99,7 @@ test_custom_script_ops() {
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt
   popd
+  assert_git_not_dirty
 }
 
 
