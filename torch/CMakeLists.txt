@@ -710,6 +710,8 @@ if (BUILD_PYTHON)
   endif()
 
   add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
+  # For Declarations.yaml dependency
+  add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
   add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
