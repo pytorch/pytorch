@@ -1484,6 +1484,8 @@
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   matches_jit_signature: True
 
+- func: cdist(Tensor x1, Tensor x2, double p=2) -> Tensor
+    
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
 
