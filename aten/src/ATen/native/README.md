@@ -50,6 +50,13 @@ signature.
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s.)
+  `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
+  In general annotations can be defined via the following four situtations
+  `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
+  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
+  For more details on when and why this needs to happen, please see the section on annotations.
 - Tensors of specific types.  At the moment, valid type names are:
     - `IntegerTensor` (a.k.a. `LongTensor`)
     - `BoolTensor` (a.k.a. `ByteTensor`)
@@ -58,13 +65,6 @@ signature.
   don't commit them to memory.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
-- `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
-  In general annotations can be defined via the following four situtations
-  `Tensor(a)` - Tensor is in set a
-  `Tensor(a!)` - it is also written to
-  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
-  `Tensor(a! -> a|b)` - Tensor is in set a, written to, and after the write is in set a AND b.
-  For more details on when and why this needs to happen, please see the section on variants.
 - `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
@@ -194,6 +194,8 @@ signatue schema, we must introduce features that allow us to increase compliance
 One of these features are Tensor annotations. As of now we use naming conventions
 to indicate whether an argument of a function is going to be mutated and returned.
 
+### `annotations`
+
 There are two typical situations in which we mutate the memory of an argument in the Python
 frontend:
 a) For an inplace operations such as `self.abs_()`
@@ -211,14 +213,13 @@ If two Tensors carry the same annotation, they both *may* represent the same mem
 A write annotation, as indicated by an exclamation mark, indicates that they both *may*
 also be written to.
 
-Let's revisit the previous three situtations
+Let's revisit the previous native function declarations and see the conventions of adding annotations.
   - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
   - `abs_(Tensor(a!) self) -> Tensor(a!)`
-    self may be written to and returned. The annotation indicates that the return value.
-    This indicates an inplace function and by convention ends in a single '\_'. Moving forward
-    we won't need the '\_', but we preserve it for now.
+    `self` may be written to and returned. Further, the annotation indicates that the return value
+    may alias the input. This indicates an inplace function and by convention ends in a single '\_'.
   - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
-    In the Python frontend out can be passed as a keyword argument and if so may be written to. 
+    In the Python frontend `out` can be passed as a keyword argument and may be written to. 
     In this case it indicates the schema for a function that must accept `out` as this does not
     provide a default argument. The idea behind representing this as a optional argument is to
     document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
@@ -227,10 +228,11 @@ Let's revisit the previous three situtations
 
 There is also another situtation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
-    An alias to the memory represented by self may be also returned, however it is not mutated.
+    An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
-We check that the user uses these annotations and throw asserts if she doesn't. If this causes
-a lot of confusion please add @cpuhrsch to your PR.
+We have some asserts to check whether a developer uses these annotations correctly and throw asserts
+if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
+ If this causes a lot of confusion please add @cpuhrsch to your PR.
 
 ### `dispatch`
 
