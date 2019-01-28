@@ -111,18 +111,56 @@ class TestTypeHints(TestCase):
         fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
-        try:
-            # TODO: I'm not sure we actually need to start a new process
-            # for mypy itself haha
-            result = subprocess.run([
-                sys.executable,
-                '-mmypy',
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
-                fn],
-                check=True)
-        except subprocess.CalledProcessError as e:
-            raise AssertionError("mypy failed.  Look above this error for mypy's output.")
+
+        # OK, so here's the deal.  mypy treats installed packages
+        # and local modules differently: if a package is installed,
+        # mypy will refuse to use modules from that package for type
+        # checking unless the module explicitly says that it supports
+        # type checking. (Reference:
+        # https://mypy.readthedocs.io/en/latest/running_mypy.html#missing-imports
+        # )
+        #
+        # Now, PyTorch doesn't support typechecking, and we shouldn't
+        # claim that it supports typechecking (it doesn't.) However, not
+        # claiming we support typechecking is bad for this test, which
+        # wants to use the partial information we get from the bits of
+        # PyTorch which are typed to check if it typechecks.  And
+        # although mypy will work directly if you are working in source,
+        # some of our tests involve installing PyTorch and then running
+        # its tests.
+        #
+        # The guidance we got from Michael Sullivan and Joshua Oreman,
+        # and also independently developed by Thomas Viehmann,
+        # is that we should create a fake directory and add symlinks for
+        # the packages that should typecheck.  So that is what we do
+        # here.
+        #
+        # If you want to run mypy by hand, and you run from PyTorch
+        # root directory, it should work fine to skip this step (since
+        # mypy will preferentially pick up the local files first).  The
+        # temporary directory here is purely needed for CI.  For this
+        # reason, we also still drop the generated file in the test
+        # source folder, for ease of inspection when there are failures.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.symlink(
+                    os.path.dirname(torch.__file__),
+                    os.path.join(tmp_dir, 'torch'),
+                    target_is_directory=True
+                )
+            except OSError:
+                raise unittest.SkipTest('cannot symlink')
+            try:
+                subprocess.run([
+                    sys.executable,
+                    '-mmypy',
+                    '--follow-imports', 'silent',
+                    '--check-untyped-defs',
+                    os.path.abspath(fn)],
+                    cwd=tmp_dir,
+                    check=True)
+            except subprocess.CalledProcessError as e:
+                raise AssertionError("mypy failed.  Look above this error for mypy's output.")
 
 
 if __name__ == '__main__':
