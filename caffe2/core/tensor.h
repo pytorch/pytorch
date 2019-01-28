@@ -442,14 +442,14 @@ class CAFFE2_API Tensor final {
   /**
    * Returns the number of dimensions of the data.
    */
-  inline int dim() const {
+  inline int64_t dim() const {
     return impl_->dim();
   }
 
   /**
    * (To be deprecated) Returns the number of dimensions of the data.
    */
-  inline int ndim() const {
+  inline int64_t ndim() const {
     return impl_->dim();
   }
 
@@ -488,15 +488,15 @@ class CAFFE2_API Tensor final {
     return impl_.get()->sizes();
   }
 
-  inline int64_t size_from_dim(int k) const {
+  inline int64_t size_from_dim(int64_t k) const {
     return size_from_dim_(k, impl_->sizes());
   }
 
-  inline int64_t size_to_dim(int k) const {
+  inline int64_t size_to_dim(int64_t k) const {
     return size_to_dim_(k, impl_->sizes());
   }
 
-  inline int64_t size_between_dim(int k, int l) const {
+  inline int64_t size_between_dim(int64_t k, int64_t l) const {
     return size_between_dim_(k, l, impl_->sizes());
   }
 
@@ -511,7 +511,7 @@ class CAFFE2_API Tensor final {
    *        the second to last if index == -2, etc.
    *        Dies on out of range index.
    */
-  inline int canonical_axis_index(int axis_index) const {
+  inline int64_t canonical_axis_index(int64_t axis_index) const {
     return canonical_axis_index_(axis_index, impl_->dim());
   }
 
@@ -557,7 +557,7 @@ class CAFFE2_API Tensor final {
    * the typedef could be int64. If you want int64 dim values, make sure you
    * call dim() instead.
    */
-  inline int dim32(const int i) const {
+  inline int dim32(const int64_t i) const {
 #ifndef NDEBUG
     CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
@@ -567,12 +567,12 @@ class CAFFE2_API Tensor final {
     return static_cast<int>(s);
   }
 
-  inline int64_t size(const int i) const {
+  inline int64_t size(const int64_t i) const {
     return impl_->size(i);
   }
 
   // To be deprecated
-  inline int64_t dim(const int i) const {
+  inline int64_t dim(const int64_t i) const {
     return impl_->size(i);
   }
 
