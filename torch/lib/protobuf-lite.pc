@@ -1,0 +1,11 @@
+prefix=/data/users/iuriiz/pytorch/torch/lib/tmp_install
+exec_prefix=/data/users/iuriiz/pytorch/torch/lib/tmp_install
+libdir=/data/users/iuriiz/pytorch/torch/lib/tmp_install/lib64
+includedir=/data/users/iuriiz/pytorch/torch/lib/tmp_install/include
+
+Name: Protocol Buffers
+Description: Google's Data Interchange Format
+Version: 3.6.1
+Libs: -L${libdir} -lprotobuf-lite -pthread
+Cflags: -I${includedir} -pthread
+Conflicts: protobuf

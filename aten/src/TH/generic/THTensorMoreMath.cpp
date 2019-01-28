@@ -1238,14 +1238,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
-{
-  THTensor* inputs[2];
-  inputs[0] = ta;
-  inputs[1] = tb;
-  THTensor_(catArray)(r_, inputs, 2, dimension);
-}
-
 void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension);
 inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension)
 {
@@ -1522,14 +1514,6 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 */
 
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
-
-#if defined(TH_REAL_IS_LONG)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
-#endif /* int64_t only part */
-
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
-#endif /* int only part */
 
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)

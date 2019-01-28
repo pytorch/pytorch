@@ -173,11 +173,6 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
   }
 }
 
-void THTensor_(csub)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
-{
-  THTensor_(cadd)(r_, t, -value, src);
-}
-
 void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
