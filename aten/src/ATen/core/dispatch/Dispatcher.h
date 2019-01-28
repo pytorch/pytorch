@@ -30,6 +30,7 @@ public:
    */
   IValue call(ArrayRef<IValue> args) {
     if (state_.get() == nullptr) {
+      AT_ASSERT(state_creator_ != nullptr);
       state_ = (*state_creator_)();
     }
     return (*kernel_)(args, state_.get());
