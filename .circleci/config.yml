@@ -742,7 +742,7 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
             set +x
             echo 'If there is no more output then logging into Anaconda failed'
             timeout 30 \
-                anaconda login \
+                yes | anaconda login \
                     --username '"$CONDA_USERNAME"' \
                     --password '"$CONDA_PASSWORD"' \
                     >/dev/null 2>&1
@@ -910,7 +910,7 @@ binary_mac_upload: &binary_mac_upload
           set +x
           echo 'If there is no more output then logging into Anaconda failed'
           /usr/local/bin/gtimeout 30 \
-              anaconda login \
+              yes | anaconda login \
                   --username '"$CONDA_USERNAME"' \
                   --password '"$CONDA_PASSWORD"' \
                   >/dev/null 2>&1
