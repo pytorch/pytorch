@@ -235,6 +235,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return t;
   }
 
+  Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    return BlobSetTensor(OutputBlob(idx),
+                  src.Alias());
+  }
+
+
   template <typename T>
   inline T* Output(int idx, T* allocated) {
     outputs_.at(idx)->Reset(allocated);
@@ -801,7 +807,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
   /* using override */ using OperatorBase::OutputSize;              \
-  /* using override */ using OperatorBase::IsInputOutputAlias
+  /* using override */ using OperatorBase::IsInputOutputAlias;      \
+  /* using override */ using OperatorBase::OutputTensorAlias
 
 #define USE_OPERATOR_FUNCTIONS(context)                     \
   USE_OPERATOR_BASE_FUNCTIONS;                              \
@@ -1098,7 +1105,7 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
   struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
     c10::FunctionSchema getSchema() override {                                \
-      return c10::FunctionSchema(#name, inputs, outputs);                     \
+      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);         \
     }                                                                         \
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
