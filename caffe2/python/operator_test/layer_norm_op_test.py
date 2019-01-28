@@ -117,7 +117,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
     def test_layer_norm_op_c10(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
