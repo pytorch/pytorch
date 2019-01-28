@@ -110,6 +110,18 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+if TEST_WITH_ROCM:
+    float64_cuda0 = torch.ones(10, device='cuda:0', dtype=torch.float64)
+    float32_cuda1 = torch.zeros(10, device='cuda:1', dtype=torch.float32)
+    print("float64_cuda0", float64_cuda0)
+    print("float32_cuda1", float32_cuda1)
+    print("float64_cuda0.to(float32_cuda1)", float64_cuda0.to(float32_cuda1))
+    print("float64_cuda0.to(float32_cuda1.device)", float64_cuda0.to(float32_cuda1.device))
+    print("float64_cuda0.to(float32_cuda1.dtype)", float64_cuda0.to(float32_cuda1.dtype))
+    print("float64_cuda0.to(float32_cuda1.device, float32_cuda1.dtype)", float64_cuda0.to(float32_cuda1.device, float32_cuda1.dtype))
+    print("float64_cuda0.to(float32_cuda1.device).to(float32_cuda1.dtype)", float64_cuda0.to(float32_cuda1.device).to(float32_cuda1.dtype))
+    print("float64_cuda0.to(float32_cuda1.dtype).to(float32_cuda1.device)", float64_cuda0.to(float32_cuda1.dtype).to(float32_cuda1.device))
+    raise RuntimeError('failed?')
 
 def skipIfRocm(fn):
     @wraps(fn)
