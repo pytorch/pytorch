@@ -61,13 +61,12 @@ class SyncBatchNorm(Function):
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
             # TODO: move div_ into batch_norm_backward_elemt kernel
-            if torch.distributed.is_initialized():
-                torch.distributed.all_reduce(
-                    mean_dy, torch.distributed.ReduceOp.SUM, process_group)
-                mean_dy.div_(world_size)
-                torch.distributed.all_reduce(
-                    mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group)
-                mean_dy_xmu.div_(world_size)
+            torch.distributed.all_reduce(
+                mean_dy, torch.distributed.ReduceOp.SUM, process_group)
+            mean_dy.div_(world_size)
+            torch.distributed.all_reduce(
+                mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group)
+            mean_dy_xmu.div_(world_size)
             # backward pass for gradient calculation
             grad_input = torch.batch_norm_backward_elemt(
                 grad_output,
