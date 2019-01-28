@@ -46,6 +46,16 @@ cmake --version
 # TODO: Don't run this...
 pip install -q -r requirements.txt || true
 
+# TODO: Don't install this here
+if ! which conda; then
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    pip install -q mkl mkl-devel
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
@@ -84,16 +94,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
   exit 0
-fi
-
-# TODO: Don't install this here
-if ! which conda; then
-  pip install -q mkl mkl-devel
-  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
-    export USE_MKLDNN=1
-  else
-    export USE_MKLDNN=0
-  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
