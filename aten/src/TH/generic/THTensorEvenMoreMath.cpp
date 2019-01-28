@@ -356,6 +356,32 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   THTensor_(freeCopyTo)(dst, r_);
 }
 
+void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
+{
+  THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
+    "src should have the same number of elements as index");
+
+  index = THLongTensor_newContiguous(index);
+  src = THTensor_(newContiguous)(src);
+  scalar_t* data = tensor->data<scalar_t>();
+  ptrdiff_t numel = THTensor_(nElement)(tensor);
+  int is_contiguous = THTensor_(isContiguous)(tensor);
+
+  TH_TENSOR_APPLY2(int64_t, index, scalar_t, src,
+    THTensor_(checkLinearIndex)(*index_data, numel);
+    int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
+    int64_t dataOffset = is_contiguous ? linearIndex : THTensor_(dataOffset)(tensor, linearIndex);
+    if (accumulate) {
+      data[dataOffset] += *src_data;
+    } else {
+      data[dataOffset] = *src_data;
+    }
+  );
+
+  c10::raw::intrusive_ptr::decref(src);
+  THLongTensor_free(index);
+}
+
 void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;

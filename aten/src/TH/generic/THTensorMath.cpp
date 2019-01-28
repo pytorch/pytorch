@@ -173,6 +173,11 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
   }
 }
 
+void THTensor_(csub)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
+{
+  THTensor_(cadd)(r_, t, -value, src);
+}
+
 void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
@@ -283,6 +288,38 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
   }
   if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = THTensor_(powOne)(*t_data, *src_data););
+  }
+}
+
+void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
+{
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int64_t srcSize = THTensor_(nElement)(src);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  int srcContig = THTensor_(isContiguous)(src);
+  int serial_path = 0;
+  if (srcSize == r_Size){
+    if (r_Contig && tContig && srcContig) {
+      TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cdiv)(r__data, t_data, src_data, r__len););
+    } else {
+#if _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      }
+#else
+      serial_path = 1;
+#endif
+    }
+  } else {
+    serial_path = 1;
+  }
+  if (serial_path) {
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;);
   }
 }
 
@@ -843,6 +880,48 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   }
 
   #undef LDA_COND
+}
+
+void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
+{
+  int64_t N1 = m1->size(0);
+  int64_t N2 = m2->size(0);
+  int64_t dim;
+  scalar_t *m1_p;
+  scalar_t *m2_p;
+  scalar_t *r_p;
+  int64_t i;
+
+  THTensor_(resize2d)(r_, N1, N2);
+
+  m1 = THTensor_(newContiguous)(m1);
+  m2 = THTensor_(newContiguous)(m2);
+
+  THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
+  THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
+
+  dim = m1->size(1);
+  THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
+
+  m1_p = m1->data<scalar_t>();
+  m2_p = m2->data<scalar_t>();
+  r_p = r_->data<scalar_t>();
+
+#pragma omp parallel for private(i)
+  for (i=0; i<N1; i++) {
+    int64_t j,k;
+    for (j=0; j<N2; j++) {
+      scalar_t sum = 0;
+      for (k=0; k<dim; k++) {
+        scalar_t term = m1_p[ i*dim + k ] - m2_p[ j*dim + k ];
+        sum += term*term;
+      }
+      r_p[ i*N2 + j ] = gain * sum;
+    }
+  }
+
+  c10::raw::intrusive_ptr::decref(m1);
+  c10::raw::intrusive_ptr::decref(m2);
 }
 
 void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *m1, THTensor *m2)
