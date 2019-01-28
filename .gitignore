@@ -152,6 +152,9 @@ docs/source/scripts/activation_images/
 # OSX dir files
 .DS_Store
 
+# GDB history
+.gdb_history
+
 ## Caffe2
 
 # build, distribute, and bins (+ python proto bindings)
