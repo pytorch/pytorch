@@ -18,7 +18,7 @@ namespace c10 {
  * argument. It must inherit from KernelState so the call site knows how to
  * store and destruct it.
  */
-class KernelState {
+class CAFFE2_API KernelState {
 public:
   virtual ~KernelState() = default;
 };
