@@ -581,20 +581,17 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     if stride is None:
         stride = kernel_size
     r, indices = g.op("MaxPool", input, outputs=2,
-             kernel_shape_i=_single(kernel_size),
-             pads_i=_single(padding) * 2,
-             strides_i=_single(stride))
-
+                      kernel_shape_i=_single(kernel_size),
+                      pads_i=_single(padding) * 2,
+                      strides_i=_single(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     _, flattened_indices = g.op("MaxPool", input, outputs=2,
-             kernel_shape_i=[1],
-             strides_i=[1])
-
+                                kernel_shape_i=[1],
+                                strides_i=[1])
     # convert indices to have non-flattened indices values
     s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
     indices = sub(g, indices, s)
-
     return r, indices
 
 
@@ -607,20 +604,17 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     if not stride:
         stride = kernel_size
     r, indices = g.op("MaxPool", input, outputs=2,
-             kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding) * 2,
-             strides_i=_pair(stride))
-
+                      kernel_shape_i=_pair(kernel_size),
+                      pads_i=_pair(padding) * 2,
+                      strides_i=_pair(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     _, flattened_indices = g.op("MaxPool", input, outputs=2,
-            kernel_shape_i=[1, 1],
-            strides_i=[1, 1])
-
+                                kernel_shape_i=[1, 1],
+                                strides_i=[1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1]) 
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
     indices = sub(g, indices, s)
-
     return r, indices
 
 
@@ -633,20 +627,17 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     if not stride:
         stride = kernel_size
     r, indices = g.op("MaxPool", input, outputs=2,
-             kernel_shape_i=_triple(kernel_size),
-             pads_i=_triple(padding) * 2,
-             strides_i=_triple(stride))
-
+                      kernel_shape_i=_triple(kernel_size),
+                      pads_i=_triple(padding) * 2,
+                      strides_i=_triple(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     _, flattened_indices = g.op("MaxPool", input, outputs=2,
-            kernel_shape_i=[1, 1, 1],
-            strides_i=[1, 1, 1])
-
+                                kernel_shape_i=[1, 1, 1],
+                                strides_i=[1, 1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1]) 
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
     indices = sub(g, indices, s)
-
     return r, indices
 
 
