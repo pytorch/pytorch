@@ -63,6 +63,16 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
+function assert_git_not_dirty() {
+    git_status=$(git status --porcelain)
+    if [[ $git_status ]]; then
+        echo "Build left local git repository checkout dirty"
+        echo "`git status --porcelain`:"
+        echo "${git_status}"
+        exit 1
+    fi
+}
+
 if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
