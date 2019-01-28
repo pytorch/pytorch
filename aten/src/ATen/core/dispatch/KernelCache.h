@@ -9,7 +9,7 @@ namespace c10 {
  * argument. It must inherit from KernelCache so the call site knows how to
  * store and destruct it.
  */
-class KernelCache {
+class CAFFE2_API KernelCache {
 public:
   virtual ~KernelCache() = default;
 };
