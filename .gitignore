@@ -62,6 +62,7 @@ torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
 torch/lib/*.so*
+torch/lib/protobuf*.pc
 torch/lib/build
 torch/lib/cmake
 torch/lib/include
@@ -69,6 +70,7 @@ torch/lib/pkgconfig
 torch/lib/protoc
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
+torch/lib/site-packages/
 torch/lib/python*
 torch/share/
 torch/version.py

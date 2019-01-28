@@ -166,6 +166,9 @@ if not "%USE_CUDA%"=="0" (
 EOL
 
 ci_scripts/build_pytorch.bat
+
+assert_git_not_dirty
+
 if [ ! -f $IMAGE_COMMIT_TAG.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
     exit 1
 fi
