@@ -9,7 +9,7 @@ import types
 import re
 import argparse
 
-from ..autograd.utils import CodeTemplate, write
+from ..autograd.utils import YamlLoader, CodeTemplate, write
 from ..autograd.gen_python_functions import get_py_torch_functions, get_py_variable_methods
 from ..autograd.gen_autograd import load_aten_declarations
 
@@ -318,8 +318,6 @@ def gen_pyi(declarations_path, out):
     # checking.  If you are update this, consider if your change
     # also needs to update the other file.
 
-    yaml_loader = getattr(yaml, 'CLoader', yaml.loader)
-
     # Load information from YAML
     declarations = load_aten_declarations(declarations_path)
 
@@ -346,11 +344,13 @@ def gen_pyi(declarations_path, out):
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                   .format(FACTORY_PARAMS)],
-        'arange': ['def arange(start: Number, end: Number, step: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
+        'arange': ['def arange(start: Number, end: Number, step: Number, *,'
+                   ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS),
                    'def arange(start: Number, end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS),
-                   'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
+                   'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                   .format(FACTORY_PARAMS)],
         'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
@@ -375,8 +375,8 @@ def gen_pyi(declarations_path, out):
 
     # TODO: Maybe we shouldn't generate type hints for deprecated
     # functions :)  However, examples like those addcdiv rely on these.
-    deprecated = yaml.load(open('tools/autograd/deprecated.yaml'),
-                           Loader=yaml_loader)
+    with open('tools/autograd/deprecated.yaml', 'r') as f:
+        deprecated = yaml.load(f, Loader=YamlLoader)
     for d in deprecated:
         name, sig = re.match(r"^([^\(]+)\(([^\)]*)", d['name']).groups()
         sig = ['*' if p.strip() == '*' else p.split() for p in sig.split(',')]

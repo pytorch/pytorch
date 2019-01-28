@@ -36,7 +36,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip install -q hypothesis --user
 
   if [[ "$BUILD_ENVIRONMENT" != py2-clang7-rocmdeb-ubuntu16.04 ]] && [[ "$BUILD_ENVIRONMENT" != *-py2.7* ]]; then
-    pip install -q mypy --user
+    pip install mypy --user
   fi
 fi
 
