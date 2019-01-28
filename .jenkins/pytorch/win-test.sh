@@ -8,9 +8,11 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
-mkdir -p ci_scripts/
+export TMP_DIR="${PWD}/build/win_build_tmp"
 
-cat >ci_scripts/download_image.py << EOL
+mkdir -p $TMP_DIR/ci_scripts/
+
+cat >$TMP_DIR/ci_scripts/download_image.py << EOL
 
 import os
 import sys
@@ -34,7 +36,7 @@ except botocore.exceptions.ClientError as e:
 
 EOL
 
-cat >ci_scripts/setup_pytorch_env.bat <<EOL
+cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
@@ -46,8 +48,8 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
-    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-    .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR%\\Miniconda3-latest-Windows-x86_64.exe
+    %TMP_DIR%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
@@ -71,7 +73,7 @@ set PYTHONPATH=%CD%\\test;%PYTHONPATH%
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd test/
-    python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
+    python %TMP_DIR%\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
     7z x %IMAGE_COMMIT_TAG%.7z
     cd ..
 ) else (
@@ -80,8 +82,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 
 EOL
 
-cat >ci_scripts/test_python_nn.bat <<EOL
-call ci_scripts/setup_pytorch_env.bat
+cat >$TMP_DIR/ci_scripts/test_python_nn.bat <<EOL
+call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 :: Some smoke tests
 cd test/
 :: Checking that caffe2.python is available
@@ -105,13 +107,13 @@ cd ..
 cd test/ && python run_test.py --include nn --verbose && cd ..
 EOL
 
-cat >ci_scripts/test_python_all_except_nn.bat <<EOL
-call ci_scripts/setup_pytorch_env.bat
+cat >$TMP_DIR/ci_scripts/test_python_all_except_nn.bat <<EOL
+call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 cd test/ && python run_test.py --exclude nn --verbose && cd ..
 EOL
 
-cat >ci_scripts/test_custom_script_ops.bat <<EOL
-call ci_scripts/setup_pytorch_env.bat
+cat >$TMP_DIR/ci_scripts/test_custom_script_ops.bat <<EOL
+call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 
 cd test/custom_operator
 
@@ -132,8 +134,8 @@ set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\
 test_custom_ops.exe model.pt
 EOL
 
-cat >ci_scripts/test_libtorch.bat <<EOL
-call ci_scripts/setup_pytorch_env.bat
+cat >$TMP_DIR/ci_scripts/test_libtorch.bat <<EOL
+call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 dir
 dir %CD%\\test
 dir %CD%\\test\\torch
@@ -145,12 +147,12 @@ EOL
 
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat && ci_scripts/test_libtorch.bat
+        $TMP_DIR/ci_scripts/test_python_nn.bat && $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && $TMP_DIR/ci_scripts/test_custom_script_ops.bat && $TMP_DIR/ci_scripts/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-            ci_scripts/test_python_nn.bat
+            $TMP_DIR/ci_scripts/test_python_nn.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat && ci_scripts/test_libtorch.bat
+            $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && $TMP_DIR/ci_scripts/test_custom_script_ops.bat && $TMP_DIR/ci_scripts/test_libtorch.bat
         fi
     fi
 }
