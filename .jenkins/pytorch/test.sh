@@ -93,10 +93,12 @@ fi
 
 test_python_nn() {
   time python test/run_test.py --include nn --verbose
+  assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
   time python test/run_test.py --exclude nn --verbose
+  assert_git_not_dirty
 }
 
 test_aten() {
@@ -120,6 +122,7 @@ test_aten() {
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
+    assert_git_not_dirty
   fi
 }
 
@@ -139,19 +142,21 @@ test_torchvision() {
   #time python setup.py install
   pip install -q --user .
   popd
+  rm -rf vision
 }
 
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-     echo "Testing libtorch"
-     CPP_BUILD="$PWD/../cpp-build"
-     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/caffe2/bin/test_jit
-     else
-       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
-     fi
-     python tools/download_mnist.py --quiet -d mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+    echo "Testing libtorch"
+    CPP_BUILD="$PWD/../cpp-build"
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      "$CPP_BUILD"/caffe2/bin/test_jit
+    else
+      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+    fi
+    python tools/download_mnist.py --quiet -d mnist
+    OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+    assert_git_not_dirty
   fi
 }
 
@@ -167,6 +172,7 @@ test_custom_script_ops() {
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
     popd
+    assert_git_not_dirty
   fi
 }
 
@@ -177,6 +183,7 @@ test_xla() {
   python test/test_operations.py
   python test/test_train_mnist.py --tidy
   popd
+  assert_git_not_dirty
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
