@@ -198,17 +198,16 @@ public:
    */
   static constexpr size_t num_tensor_args = guts::typelist::count_if<details::is_tensor_arg, parameter_types>::value;
 
-  static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
+  static constexpr size_t num_output_parameters = OpSchemaDef::num_output_parameters();
 
   template<class CacheTypeOrVoid> using func_type_with_cache = typename add_ptr_parameter_if_not_void<func_type, CacheTypeOrVoid>::type;
 
   template<class CacheTypeOrVoid, func_type_with_cache<CacheTypeOrVoid>* kernel>
   static void wrap_kernel(Stack* stack, KernelCache* cache) {
     constexpr size_t num_inputs = guts::typelist::size<parameter_types>::value;
-    constexpr size_t num_outputs = 1; // TODO allow multiple outputs if it's a tuple
 
-    ArrayRef<IValue> inputs = torch::jit::peekSlice(*stack, 0, num_inputs + num_outputs, num_inputs);
-    ArrayRef<IValue> outputs = torch::jit::peekSlice(*stack, 0, num_outputs, num_outputs);
+    ArrayRef<IValue> inputs = torch::jit::peekSlice(*stack, 0, num_inputs + num_output_parameters, num_inputs);
+    ArrayRef<IValue> outputs = torch::jit::peekSlice(*stack, 0, num_output_parameters, num_output_parameters);
 
     call_kernel_with_ivalue_args<CacheTypeOrVoid, func_type_with_cache<CacheTypeOrVoid>>::call(kernel, inputs, outputs, cache);
   }

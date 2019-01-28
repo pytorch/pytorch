@@ -11,7 +11,7 @@ struct EnforceFinite final {
 
   using Signature = void(const at::Tensor& input);
 
-  static constexpr size_t num_outputs() {return 0;}
+  static constexpr size_t num_output_parameters() {return 0;}
 
   static constexpr c10::guts::array<const char*, 1> parameter_names() {
     return {"input"};

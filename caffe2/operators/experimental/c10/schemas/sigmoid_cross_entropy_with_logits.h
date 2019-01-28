@@ -16,7 +16,7 @@ struct SigmoidCrossEntropyWithLogits final {
       bool log_D_trick,
       bool unjoined_lr_loss);
 
-  static constexpr size_t num_outputs() {return 1;}
+  static constexpr size_t num_output_parameters() {return 1;}
 
   static constexpr c10::guts::array<const char*, 5> parameter_names() {
     return {"input1", "input2", "output", "log_d_trick", "unjoined_lr_loss"};
