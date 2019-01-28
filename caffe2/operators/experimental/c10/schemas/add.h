@@ -10,14 +10,12 @@ namespace ops {
 struct Add final {
   static constexpr const char* name = "add";
 
-  using Signature = void(
+  using Signature = at::Tensor (
       const at::Tensor& input1,
       const at::Tensor& input2,
       const at::Tensor& output,
       bool legacy_broadcast,
       int64_t axis);
-
-  static constexpr size_t num_dispatch_args() {return 2;}
 
   static constexpr size_t num_outputs() {return 1;}
 

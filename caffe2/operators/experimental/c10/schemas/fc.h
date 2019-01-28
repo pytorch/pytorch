@@ -20,8 +20,6 @@ struct FullyConnected final {
       int64_t axis,
       int64_t axis_w);
 
-  static constexpr size_t num_dispatch_args() {return 3;}
-
   static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 6> parameter_names() {

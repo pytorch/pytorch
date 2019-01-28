@@ -15,8 +15,6 @@ struct SparseLengthsSum final {
       const at::Tensor& lengths,
       const at::Tensor& output);
 
-  static constexpr size_t num_dispatch_args() {return 3;}
-
   static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 4> parameter_names() {

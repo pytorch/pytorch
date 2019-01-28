@@ -23,8 +23,6 @@ struct LayerNorm final {
       const at::optional<at::Tensor>& output_mean,
       const at::optional<at::Tensor>& output_stdev);
 
-  static constexpr size_t num_dispatch_args() {return 1;}
-
   static constexpr size_t num_outputs() {return 3;}
 
   static constexpr c10::guts::array<const char*, 6> parameter_names() {

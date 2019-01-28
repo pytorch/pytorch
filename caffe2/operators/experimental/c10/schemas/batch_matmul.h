@@ -20,8 +20,6 @@ struct BatchMatmul final {
       int64_t trans_b,
       int64_t broadcast);
 
-  static constexpr size_t num_dispatch_args() {return 2;}
-
   static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 6> parameter_names() {

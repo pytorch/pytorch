@@ -15,8 +15,6 @@ struct BatchGather final {
       const at::Tensor& indices,
       const at::Tensor& output);
 
-  static constexpr size_t num_dispatch_args() {return 2;}
-
   static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 3> parameter_names() {
