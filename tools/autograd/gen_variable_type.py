@@ -295,7 +295,7 @@ def format_trace_inputs(declaration):
         trace_name = uninplace_api_name(declaration['api_name'])
         has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
         if has_factory_name:
-            outplace = ADD_TRACE_INPUT.substitute(name='result', input='result.options()')
+            outplace = ADD_TRACE_INPUT.substitute(name='out', input='out.options()')
         else:
             outplace = ''
 
