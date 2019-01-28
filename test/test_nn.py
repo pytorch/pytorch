@@ -4238,18 +4238,33 @@ class TestNN(NNTestCase):
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
 
-    def test_CTCLoss_inputcheck(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
+    def test_CTCLoss_typechecks(self):
+        target_lengths = torch.tensor([30, 25, 20])
+        input_lengths =  torch.tensor([50, 50, 50])
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
-            input_lengths = torch.tensor(input_lengths).to(dtype=torch.float)
-            target_lengths = torch.tensor(target_lengths)
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            _input_lengths = input_lengths.to(dtype=torch.float)
+            torch.nn.functional.ctc_loss(log_probs, targets, _input_lengths, target_lengths)
         with self.assertRaises(RuntimeError):
-            input_lengths = torch.tensor(input_lengths)
-            target_lengths = torch.tensor(target_lengths).to(dtype=torch.float)
+            target_lengths = target_lengths.to(dtype=torch.float)
+            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_lengthchecks_cuda(self):
+        target_lengths = [30, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (3, 29), dtype=torch.int).to(dtype=torch.cuda.FloatTensor)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2).to(dtype=torch.cuda.FloatTensor)
+        with self.assertRaises(RuntimeError):
+            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    def test_CTCLoss_lengthchecks_cpu(self):
+        target_lengths = [30, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     def test_RNN_cell_no_broadcasting(self):
