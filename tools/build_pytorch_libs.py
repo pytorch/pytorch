@@ -41,7 +41,7 @@ def which(thefile):
 
 
 def cmake_version(cmd):
-    for line in check_output([cmd, '--version']).split('\n'):
+    for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
         if 'version' in line:
             return LooseVersion(line.strip().split(' ')[2])
     raise Exception('no version found')
