@@ -30,6 +30,7 @@ public:
    */
   void call(Stack* stack) {
     if (state_.get() == nullptr) {
+      AT_ASSERT(state_creator_ != nullptr);
       state_ = (*state_creator_)();
     }
     return (*kernel_)(stack, state_.get());
