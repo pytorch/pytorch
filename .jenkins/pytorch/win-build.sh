@@ -153,7 +153,7 @@ if not "%USE_CUDA%"=="0" (
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
-  python setup.py install && sccache --show-stats && (
+  python setup.py install --cmake && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
