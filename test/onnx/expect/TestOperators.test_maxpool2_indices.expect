@@ -51,17 +51,19 @@ graph {
     output: "5"
     op_type: "Slice"
     attribute {
+      name: "axes"
+      ints: 2
+      ints: 3
+      type: INTS
+    }
+    attribute {
       name: "ends"
-      ints: 20
-      ints: 16
       ints: 1
       ints: 1
       type: INTS
     }
     attribute {
       name: "starts"
-      ints: 0
-      ints: 0
       ints: 0
       ints: 0
       type: INTS
