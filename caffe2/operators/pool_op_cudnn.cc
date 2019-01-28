@@ -99,11 +99,11 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, C);
+    auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, C);
+    auto* Y = Output(0, sizes, at::dtype<T>());
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
 
