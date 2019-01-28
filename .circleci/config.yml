@@ -3281,6 +3281,10 @@ workflows:
       - binary_linux_manywheel_2.7mu_cpu_test:
           requires:
               - binary_linux_manywheel_2.7mu_cpu_build
+      - binary_linux_manywheel_3.6m_cpu_build
+      - binary_linux_manywheel_3.6m_cpu_test:
+          requires:
+              - binary_linux_manywheel_3.6m_cpu_build
       - binary_linux_conda_3.7_cu100_build
       - binary_linux_conda_3.7_cu100_test:
           requires:
