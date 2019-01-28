@@ -30,7 +30,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             for r in ret:
                 r = r.strip()
                 self.assertEqual(len(r.split()), 1,
-                                 'only whitelisted operators are allowedto have named return type, got ' + name)
+                                 'only whitelisted operators are allowed to have named return type, got ' + name)
         file.close()
 
 
