@@ -75,7 +75,8 @@ set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
     python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
-    7z x %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
+    :: 7z: `-aos` skips if exists because this .bat can be called multiple times
+    7z x %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z -aos
     cd %WORKING_DIR%
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
@@ -122,7 +123,7 @@ cd test/custom_operator
 mkdir build
 cd build
 :: Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
-cmake -DCMAKE_PREFIX_PATH=%CD%\\..\\..\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..
+cmake -DCMAKE_PREFIX_PATH=%TMP_DIR_WIN%\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..
 ninja -v
 cd ..
 
@@ -131,7 +132,7 @@ python test_custom_ops.py -v
 python model.py --export-script-module="build/model.pt"
 :: Run tests C++-side and load the exported script module.
 cd build
-set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
+set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%TMP_DIR_WIN%\\build\\torch\\lib;%PATH%
 test_custom_ops.exe model.pt
 EOL
 
@@ -142,21 +143,25 @@ dir %TMP_DIR_WIN%\\build
 dir %TMP_DIR_WIN%\\build\\torch
 dir %TMP_DIR_WIN%\\build\\torch\\lib
 cd %TMP_DIR_WIN%\\build\\torch\\lib
-set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
+set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%TMP_DIR_WIN%\\build\\torch\\lib;%PATH%
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        $TMP_DIR/ci_scripts/test_python_nn.bat && $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && $TMP_DIR/ci_scripts/test_custom_script_ops.bat && $TMP_DIR/ci_scripts/test_libtorch.bat
+        $TMP_DIR/ci_scripts/test_python_nn.bat && \
+        $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
+        $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
+        $TMP_DIR/ci_scripts/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && $TMP_DIR/ci_scripts/test_custom_script_ops.bat && $TMP_DIR/ci_scripts/test_libtorch.bat
+            $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
+            $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
+            $TMP_DIR/ci_scripts/test_libtorch.bat
         fi
     fi
-    assert_git_not_dirty
 }
 
-run_tests && echo "TEST PASSED"
+run_tests && assert_git_not_dirty && echo "TEST PASSED"
