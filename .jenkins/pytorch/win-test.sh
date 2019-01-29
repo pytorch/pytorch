@@ -8,10 +8,10 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
-export TMP_DIR="${PWD}/build/win_build_tmp"
+export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
-
 mkdir -p $TMP_DIR/ci_scripts/
+mkdir -p $TMP_DIR/build/torch
 
 cat >$TMP_DIR/ci_scripts/download_image.py << EOL
 
@@ -57,7 +57,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf
 )
-pip install ninja future hypothesis "librosa>=0.6.2" psutil
+pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
@@ -70,15 +70,15 @@ set NVTOOLSEXT_PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt
 set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\lib\\x64
 set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
-set PYTHONPATH=%CD%\\test;%PYTHONPATH%
+set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    cd test/
-    python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
-    7z x %IMAGE_COMMIT_TAG%.7z
-    cd ..
+    cd %TMP_DIR_WIN%\\build
+    python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
+    7z x %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
+    cd %WORKING_DIR%
 ) else (
-    xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch .\\test\\torch\\
+    xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
 
 EOL
@@ -138,10 +138,10 @@ EOL
 cat >$TMP_DIR/ci_scripts/test_libtorch.bat <<EOL
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 dir
-dir %CD%\\test
-dir %CD%\\test\\torch
-dir %CD%\\test\\torch\\lib
-cd %CD%\\test\\torch\\lib
+dir %TMP_DIR_WIN%\\build
+dir %TMP_DIR_WIN%\\build\\torch
+dir %TMP_DIR_WIN%\\build\\torch\\lib
+cd %TMP_DIR_WIN%\\build\\torch\\lib
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL

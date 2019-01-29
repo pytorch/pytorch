@@ -17,7 +17,7 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
-export TMP_DIR="${PWD}/build/win_build_tmp"
+export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
 mkdir -p $TMP_DIR/ci_scripts/
@@ -100,13 +100,14 @@ if "%REBUILD%"=="" (
 )
 
 :: Install ninja
-if "%REBUILD%"=="" ( pip install ninja )
+if "%REBUILD%"=="" ( pip install -q ninja )
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 cd %WORKING_DIR%
 
+git submodule sync --recursive
 git submodule update --init --recursive
 
 set PATH=%TMP_DIR_WIN%\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
@@ -172,7 +173,7 @@ $TMP_DIR/ci_scripts/build_pytorch.bat
 
 assert_git_not_dirty
 
-if [ ! -f $IMAGE_COMMIT_TAG.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
+if [ ! -f ${TMP_DIR}/${IMAGE_COMMIT_TAG}.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
     exit 1
 fi
 echo "BUILD PASSED"
