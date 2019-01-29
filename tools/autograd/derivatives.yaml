@@ -729,7 +729,8 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grads, self, result0, result1)
+  self: slogdet_backward(grad, self, result0, result1)
+  output_differentiability: [false, true]
 
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: index_select_backward(grad, dim, result1, self.sizes(), true)

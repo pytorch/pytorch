@@ -21,35 +21,32 @@ template <class Key>
 class ThreadsafeOperatorTable_ final {
  public:
   template <class Key_>
-  void emplace(Key_&& key, KernelFunction value) {
-    bool res = map_.write([&](ska::flat_hash_map<Key, KernelFunction>& map) -> bool {
+  void emplace(Key_&& key, KernelFunction* value) {
+    bool res = map_.write([&](ska::flat_hash_map<Key, KernelFunction*>& map) -> bool {
       auto result = map.emplace(std::forward<Key>(key), std::move(value));
       return result.second;
     });
     if (!res) {
-      std::ostringstream msg;
-      msg << "Tried to register conflicting kernels to the dispatcher: " << key;
-      throw std::logic_error(msg.str());
+      AT_ERROR("Tried to register conflicting kernels to the dispatcher: ", key);
     }
   }
 
   void erase(const Key& key) {
     auto num_removed =
-        map_.write([&](ska::flat_hash_map<Key, KernelFunction>& map) -> size_t {
+        map_.write([&](ska::flat_hash_map<Key, KernelFunction*>& map) -> size_t {
           return map.erase(key);
         });
     assert(num_removed <= 1); // This is not a multi-map
     if (num_removed == 0) {
-      throw std::logic_error(
-          "Tried to deregister a kernel that isn't registered.");
+      AT_ERROR("Tried to deregister a kernel that isn't registered.");
     }
   }
 
-  const KernelFunction* lookup(const Key& key) const {
-    return map_.read([&](const ska::flat_hash_map<Key, KernelFunction>& map) -> const KernelFunction* {
+  KernelFunction* lookup(const Key& key) const {
+    return map_.read([&](const ska::flat_hash_map<Key, KernelFunction*>& map) -> KernelFunction* {
       auto found = map.find(key);
       if (found != map.end()) {
-        return &found->second;
+        return found->second;
       } else {
         return nullptr;
       }
@@ -57,7 +54,7 @@ class ThreadsafeOperatorTable_ final {
   }
 
  private:
-  LeftRight<ska::flat_hash_map<Key, KernelFunction>> map_;
+  LeftRight<ska::flat_hash_map<Key, KernelFunction*>> map_;
 };
 } // namespace details
 
@@ -87,9 +84,9 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected
    */
   void registerKernel(
-      KernelFunction func,
+      KernelFunction* func,
       typename Schema::dispatch::dispatch_key_type dispatch_key) {
-    kernels_.emplace(std::move(dispatch_key), std::move(func));
+    kernels_.emplace(std::move(dispatch_key), func);
   }
 
   /**
@@ -106,35 +103,25 @@ class DispatchTable final {
   }
 
   /**
-   * Perform a dynamic dispatch on this table.
+   * Perform a dynamic dispatch on this table and find the kernel to call
+   * for the given arguments.
    *
-   * @tparam Args Perfect forwarding template arguments to the dispatch
    * @param args Arguments to invoke the function with
-   * @return Returned value of the operator
+   * @return Kernel function pointing to the right kernel for the given arguments
    */
-  IValue call(ArrayRef<IValue> args) const {
-    // TODO Better error message, but need to take care that reference arguments
-    // match non-reference arguments and so on.
-    //      static_assert(std::is_same<typename Schema::return_type (Args...),
-    //      typename Schema::func_type>::value, "Argument types don't match
-    //      operator signature");
-    const auto& kernel_func = lookupKernelFunc_(args);
-    return kernel_func(args);
-  }
+   KernelFunction* lookup(ArrayRef<IValue> args) const {
+     auto dispatch_key = Schema::dispatch::dispatch_key(args);
+     KernelFunction* found = kernels_.lookup(dispatch_key);
+     if (found == nullptr) {
+       // TODO Better error message - include op name and dispatch key (i.e.
+       // argument types)
+       AT_ERROR("Didn't find kernel to dispatch to for operator '", Schema::metadata::name(), "'");
+     }
+     return found;
+   }
 
  private:
-  const KernelFunction& lookupKernelFunc_(ArrayRef<IValue> args) const {
-    auto dispatch_key = Schema::dispatch::dispatch_key(args);
-    const KernelFunction* found = kernels_.lookup(dispatch_key);
-    if (found == nullptr) {
-      // TODO Better error message - include op name and dispatch key (i.e.
-      // argument types)
-      throw std::logic_error(
-          std::string() + "Didn't find kernel to dispatch to for operator '" +
-          Schema::metadata::name() + "'");
-    }
-    return *found;
-  }
+
 
   details::ThreadsafeOperatorTable_<
       typename Schema::dispatch::dispatch_key_type>

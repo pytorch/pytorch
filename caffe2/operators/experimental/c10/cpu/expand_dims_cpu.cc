@@ -54,7 +54,7 @@ void expand_dims_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::ExpandDims)
-    .kernel(&caffe2::expand_dims_op_cpu_impl<float>)
+    .kernel<&caffe2::expand_dims_op_cpu_impl<float>>()
     .dispatchKey({DeviceTypeId::CPU,
                   LayoutId(0),
                   caffe2::TypeMeta::Id<float>()});
