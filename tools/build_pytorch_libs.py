@@ -101,11 +101,10 @@ def run_cmake(version,
         get_cmake_command(),
         base_dir
     ]
-    generator = os.getenv('CMAKE_GENERATOR')
-    if generator:
-        cmake_args.append('-G' + generator)
-    elif USE_NINJA:
+    if USE_NINJA:
         cmake_args.append('-GNinja')
+    elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017 Win64')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
