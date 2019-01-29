@@ -4100,27 +4100,28 @@ class _TestTorchMixin(object):
 
     def test_cat(self):
         SIZE = 10
-        for dim in range(-3, 3):
-            pos_dim = dim if dim >= 0 else 3 + dim
-            x = torch.rand(13, SIZE, SIZE).transpose(0, pos_dim)
-            y = torch.rand(17, SIZE, SIZE).transpose(0, pos_dim)
-            z = torch.rand(19, SIZE, SIZE).transpose(0, pos_dim)
+        for dtype in (torch.half, torch.double, torch.int):
+            for dim in range(-3, 3):
+                pos_dim = dim if dim >= 0 else 3 + dim
+                x = torch.randint(low=-100, high=100, size=(13, SIZE, SIZE)).to(dtype).transpose(0, pos_dim)
+                y = torch.randint(low=-100, high=100, size=(17, SIZE, SIZE)).to(dtype).transpose(0, pos_dim)
+                z = torch.randint(low=-100, high=100, size=(19, SIZE, SIZE)).to(dtype).transpose(0, pos_dim)
 
-            res1 = torch.cat((x, y, z), dim)
-            self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
-            self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
-            self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
+                res1 = torch.cat((x, y, z), dim)
+                self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
+                self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
+                self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
 
-        x = torch.randn(20, SIZE, SIZE)
-        self.assertEqual(torch.cat(torch.split(x, 7)), x)
-        self.assertEqual(torch.cat(torch.chunk(x, 7)), x)
+            x = torch.randint(low=-100, high=100, size=(20, SIZE, SIZE)).to(dtype)
+            self.assertEqual(torch.cat(torch.split(x, 7)), x)
+            self.assertEqual(torch.cat(torch.chunk(x, 7)), x)
 
-        y = torch.randn(1, SIZE, SIZE)
-        z = torch.cat([x, y])
-        self.assertEqual(z.size(), (21, SIZE, SIZE))
+            y = torch.randint(low=-100, high=100, size=(1, SIZE, SIZE)).to(dtype)
+            z = torch.cat([x, y])
+            self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-        self.assertRaises(RuntimeError, lambda: torch.cat([]))
-        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
+            self.assertRaises(RuntimeError, lambda: torch.cat([]))
+            self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1)
@@ -4227,38 +4228,40 @@ class _TestTorchMixin(object):
                 self.assertEqual(sz, y.size())
 
     def test_stack(self):
-        x = torch.rand(2, 3, 4)
-        y = torch.rand(2, 3, 4)
-        z = torch.rand(2, 3, 4)
-        for dim in range(4):
-            res = torch.stack((x, y, z), dim)
-            res_neg = torch.stack((x, y, z), dim - 4)
-            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
-            self.assertEqual(res, res_neg)
-            self.assertEqual(res.size(), expected_size)
-            self.assertEqual(res.select(dim, 0), x, 0)
-            self.assertEqual(res.select(dim, 1), y, 0)
-            self.assertEqual(res.select(dim, 2), z, 0)
+        for dtype in (torch.half, torch.double, torch.int):
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            for dim in range(4):
+                res = torch.stack((x, y, z), dim)
+                res_neg = torch.stack((x, y, z), dim - 4)
+                expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+                self.assertEqual(res, res_neg)
+                self.assertEqual(res.size(), expected_size)
+                self.assertEqual(res.select(dim, 0), x, 0)
+                self.assertEqual(res.select(dim, 1), y, 0)
+                self.assertEqual(res.select(dim, 2), z, 0)
 
     def test_stack_out(self):
-        x = torch.rand(2, 3, 4)
-        y = torch.rand(2, 3, 4)
-        z = torch.rand(2, 3, 4)
-        for dim in range(4):
-            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
-            res_out = x.new(expected_size)
-            res_neg_out = x.new(expected_size)
-            res_out_dp = res_out.data_ptr()
-            res_out_neg_dp = res_neg_out.data_ptr()
-            torch.stack((x, y, z), dim, out=res_out)
-            torch.stack((x, y, z), dim - 4, out=res_neg_out)
-            self.assertEqual(res_out, res_neg_out)
-            self.assertEqual(res_out.size(), expected_size)
-            self.assertEqual(res_out_dp, res_out.data_ptr())
-            self.assertEqual(res_out_neg_dp, res_neg_out.data_ptr())
-            self.assertEqual(res_out.select(dim, 0), x, 0)
-            self.assertEqual(res_out.select(dim, 1), y, 0)
-            self.assertEqual(res_out.select(dim, 2), z, 0)
+        for dtype in (torch.half, torch.double, torch.int):
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            for dim in range(4):
+                expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+                res_out = x.new(expected_size)
+                res_neg_out = x.new(expected_size)
+                res_out_dp = res_out.data_ptr()
+                res_out_neg_dp = res_neg_out.data_ptr()
+                torch.stack((x, y, z), dim, out=res_out)
+                torch.stack((x, y, z), dim - 4, out=res_neg_out)
+                self.assertEqual(res_out, res_neg_out)
+                self.assertEqual(res_out.size(), expected_size)
+                self.assertEqual(res_out_dp, res_out.data_ptr())
+                self.assertEqual(res_out_neg_dp, res_neg_out.data_ptr())
+                self.assertEqual(res_out.select(dim, 0), x, 0)
+                self.assertEqual(res_out.select(dim, 1), y, 0)
+                self.assertEqual(res_out.select(dim, 2), z, 0)
 
     def test_unbind(self):
         x = torch.rand(2, 3, 4, 5)
