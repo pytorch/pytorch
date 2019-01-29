@@ -27,22 +27,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-# RPATH stuff
-# see https://cmake.org/Wiki/CMake_RPATH_handling
-if (APPLE)
-  set(CMAKE_MACOSX_RPATH ON)
-  set(_rpath_portable_origin "@loader_path")
-else()
-  set(_rpath_portable_origin $ORIGIN)
-endif(APPLE)
-# Use separate rpaths during build and install phases
-set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-# Don't use the install-rpath during the build phase
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-# Automatically add all linked folders that are NOT in the build directory to
-# the rpath (per library?)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # Get the correct Python executable
 if (DEFINED ENV{PYTORCH_PYTHON})

@@ -107,14 +107,8 @@ def run_cmake(version,
 
     cflags = os.getenv('CFLAGS') or ""
     ldflags = os.getenv('LDFLAGS') or ""
-    if IS_DARWIN:
-        ldflags += " -Wl,-rpath,@loader_path"
-    elif USE_ROCM:
-        ldflags += " -Wl,-rpath,\\\\\\$ORIGIN"
-    elif IS_WINDOWS:
+    if IS_WINDOWS:
         cflags += " /EHa"
-    else:
-        ldflags += " -Wl,-rpath,$ORIGIN"
 
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
