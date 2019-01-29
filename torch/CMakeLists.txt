@@ -713,7 +713,25 @@ if (BUILD_PYTHON)
     endif()
   endif()
 
+  add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
+  # For Declarations.yaml dependency
+  add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
+  add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/__init__.pyi"
+    COMMAND
+    ${PYCMD} -mtools.pyi.gen_pyi
+      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    DEPENDS
+    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    "${TORCH_SRC_DIR}/__init__.pyi.in"
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+    )
+
   add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+  add_dependencies(torch_python torch_python_stubs)
 
   target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 

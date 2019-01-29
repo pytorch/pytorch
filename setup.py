@@ -731,6 +731,7 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
+                '__init__.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
