@@ -215,8 +215,9 @@ __global__ void LpPoolBackwardNHWC(
 template <>
 bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
+  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
+  auto* Y = Output(0, sizes, at::dtype<float>());
+
   int output_size = Y->size();
   LpPoolForwardNCHW<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -245,8 +246,9 @@ bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
+  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(3));
+  auto* Y = Output(0, sizes, at::dtype<float>());
+
   int output_size = Y->size();
   LpPoolForwardNHWC<float>
       <<<CAFFE_GET_BLOCKS(output_size),
