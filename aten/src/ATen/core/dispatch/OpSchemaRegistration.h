@@ -16,4 +16,4 @@
     static c10::OperatorHandle singleton =                                      \
         c10::Dispatcher::singleton().registerSchema(Schema);                    \
     return singleton;                                                           \
-  }                                                                             \
+  }
