@@ -10,6 +10,9 @@
 #include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
+#if defined(__HIP_COMPILER_HCC__)
+__launch_bounds__(1024)
+#endif
 __global__ void bicubic_interp2d_kernel(
   const int num_elements,
   const Acctype height_scale,
@@ -83,6 +86,9 @@ __global__ void bicubic_interp2d_kernel(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_COMPILER_HCC__)
+__launch_bounds__(1024)
+#endif
 __global__ void bicubic_interp2d_backward_kernel(
   const int num_elements,
   const Acctype height_scale,

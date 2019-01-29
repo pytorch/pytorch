@@ -293,8 +293,7 @@ public:
    */
   using dispatch = details::OpDispatchKeySchema<OpSchemaDef>;
 
-
-  static FunctionSchema create_function_schema() {
+  static CAFFE2_API FunctionSchema create_function_schema() {
     return FunctionSchema(
       metadata::name(),
       _create_jit_types<typename signature::parameter_types>(),
