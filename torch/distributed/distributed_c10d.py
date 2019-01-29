@@ -351,7 +351,7 @@ def init_process_group(backend,
         elif world_size != -1:
             url += "?world_size={}".format(world_size)
 
-        store, rank, world_size = next(rendezvous(url))
+        store, rank, world_size = next(rendezvous(url, timeout=timeout))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
