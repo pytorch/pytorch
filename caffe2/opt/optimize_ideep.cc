@@ -22,14 +22,19 @@ void OptimizeForIdeep(
 #else
 USE_IDEEP_DEF_ALIASES();
 
+Blob* getBlob(const std::string name, caffe2::Workspace* ws) {
+  CAFFE_ENFORCE(ws->HasBlob(name), "Blob ", name, " not in workspace");
+  return ws->GetBlob(name);
+}
+
 Blob* getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace* ws) {
   auto tensor = repr::nn::get<repr::Tensor>(node);
   CAFFE_ENFORCE(ws->HasBlob(tensor->getName()), "Blob not in workspace");
-  return ws->GetBlob(tensor->getName());
+  return getBlob(tensor->getName(), ws);
 }
 
 template <class T>
-T* getTensor(Blob* blob) {
+T *getMutableTensor(Blob *blob) {
   CAFFE_ENFORCE(blob, "Blob is invalid");
   if (blob && blob->template IsType<T>()) {
     return blob->template GetMutable<T>();
@@ -53,6 +58,12 @@ caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
   return dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
 }
 
+bool isOnIdeepDevice(const repr::NeuralNetOperator &nnOp) {
+  // We only want to fuse for IDEEP convs
+  const auto &op = getOpDef(nnOp);
+  return op.device_option().device_type() == DeviceTypeProto::PROTO_IDEEP;
+}
+
 bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
   if (!repr::nn::is<repr::NeuralNetOperator>(nodeRef)) {
     return false;
@@ -62,10 +73,19 @@ bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
   return opDef.type() == typeName;
 }
 
-bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
-  // We only want to fuse for IDEEP convs
-  const auto& op = getOpDef(nnOp);
-  return op.device_option().device_type() == DeviceTypeProto::PROTO_IDEEP;
+bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+  auto conv = repr::nn::get<repr::Conv>(convNode);
+  auto &op = getOpDef(*conv);
+
+  if (op.type() == "ConvFusion") {
+    for (const auto &arg : op.arg()) {
+      if (arg.name() == "fusion_type") {
+        return arg.i() == fusion_type;
+      }
+    }
+  }
+
+  return false;
 }
 
 bool shouldFuseConv(const repr::Conv& conv) {
@@ -73,19 +93,10 @@ bool shouldFuseConv(const repr::Conv& conv) {
 }
 
 void removeStopGradientForInference(repr::NNModule *nn) {
-  auto isStopGradientNode = [](const repr::NNGraph::NodeRef& node) {
-    if (!repr::nn::is<repr::NeuralNetOperator>(node)) {
-      return false;
-    }
-    auto maybeStopGrad = repr::nn::get<repr::NeuralNetOperator>(node);
-    auto maybeStopGradDef = getOpDef(*maybeStopGrad);
-    return maybeStopGradDef.type() == "StopGradient";
-  };
-
   auto allNodes = nn->dataFlow.getMutableNodes();
   for (int i = 0; i < allNodes.size(); ++i) {
     auto node = allNodes[i];
-    if (!isStopGradientNode(node)) {
+    if (!isOpType(node, "StopGradient")) {
       continue;
     }
 
@@ -102,11 +113,6 @@ void removeStopGradientForInference(repr::NNModule *nn) {
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   auto conv = repr::nn::get<repr::Conv>(convNode);
-  auto annotation = conv->getMutableAnnotation();
-  if (!annotation || !isa<Caffe2Annotation>(annotation)) {
-    return;
-  }
-
   auto* op = getMutableOpDef(*conv);
   if (op == nullptr) {
     return;
@@ -121,7 +127,7 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
         return;
       }
     }
-    return;
+    CAFFE_THROW("Can not find fusion type in ConvFusion");
   }
 
   CAFFE_ENFORCE(fusion_type < FUSION_CONV_SUM_RELU, "Invalid fusion type");
@@ -131,16 +137,47 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   arg->set_i(fusion_type);
 }
 
-bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
-  auto isAffineChannelNode = [](const repr::NNGraph::NodeRef& node) {
-    if (!repr::nn::is<repr::NeuralNetOperator>(node)) {
-      return false;
+void removeArg(repr::NeuralNetOperator &nnOp, std::string argName) {
+  auto *op = getMutableOpDef(nnOp);
+  auto &opArgs = *op->mutable_arg();
+  auto remove_arg = [](decltype(opArgs) &args, std::string &name) {
+    for (auto it = args.begin(); it != args.end(); it ++) {
+      if (it->name() == name) {
+        args.erase(it);
+        return true;
+      }
     }
-    auto maybeAffCh = repr::nn::get<repr::NeuralNetOperator>(node);
-    auto maybeAffChDef = getOpDef(*maybeAffCh);
-    return maybeAffChDef.type() == "AffineChannel";
+    return false;
   };
+  while(remove_arg(opArgs, argName));
+}
 
+void moveOpArg(caffe2::Workspace *ws, std::string argName,
+    repr::NeuralNetOperator *srcOp, repr::NeuralNetOperator *dstOp) {
+  if (argName.empty()
+      || srcOp == nullptr
+      || dstOp == nullptr
+      || srcOp == dstOp)
+    return;
+  removeArg(*dstOp, argName);
+
+  auto &src = getOpDef(*srcOp);
+  auto &src_args = src.arg();
+  auto src_it = src_args.begin();
+  for (; src_it != src_args.end(); src_it ++) {
+    if (src_it->name() == argName)
+      break;
+  }
+  if (src_it == src_args.end())
+    return;
+
+  auto *dst = getMutableOpDef(*dstOp);
+  auto *arg = dst->add_arg();
+  *arg = *src_it;
+  arg->set_name(argName);
+}
+
+bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     bool no_bias = false;
     repr::NNGraph::NodeRef convNode;
@@ -152,8 +189,8 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       continue;
     }
 
-    const auto& op = getOpDef(*conv);
-    if (op.type() == "ConvFusion") {
+    const auto& convOp = getOpDef(*conv);
+    if (convOp.type() == "ConvFusion") {
       continue;
     }
 
@@ -168,11 +205,12 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
     auto consumer = consumers.front();
     if (repr::nn::is<repr::BatchNormalization>(consumer)) {
       isBN = true;
-    } else if (isAffineChannelNode(consumer)) {
+    } else if (isOpType(consumer, "AffineChannel")) {
       isBN = false;
     } else {
       continue;
     }
+
     auto bnOrAffChNode = consumer;
     auto bn = isBN ? repr::nn::get<repr::BatchNormalization>(bnOrAffChNode) : nullptr;
     auto bnOrAffChOutput = repr::nn::getOutputs(bnOrAffChNode).front();
@@ -204,7 +242,7 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
   itensor name##Tensor;                                                  \
   float* name##Data = nullptr;                                           \
   if (need_init) {                                                       \
-    name = getTensor<itensor>(getBlob(nodes[index], ws));                \
+    name = getMutableTensor<itensor>(getBlob(nodes[index], ws));         \
     if (name == nullptr) {                                               \
       LOG(WARNING) << #name " not a IDEEP tensor";                       \
       continue;                                                          \
@@ -263,23 +301,28 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
 }
 
 void fuseConvBNAndAffChForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
-  while (fuseConvBNAndAffChHelperForIdeep(nn, ws)) {
-  }
+  while (fuseConvBNAndAffChHelperForIdeep(nn, ws)) {}
 }
 
 void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
   // Assume the order of nodes from getMutableNodes conforms to
   // the original topo order of operators
   auto allNodes = nn->dataFlow.getMutableNodes();
-  for (int i = 0; i < allNodes.size(); i++) {
+  for (int i = allNodes.size() - 1; i > 0; i--) {
     auto sumNode = allNodes[i];
     if (!repr::nn::hasInputs(sumNode)) {
       continue;
     }
 
-    // CAUTION: On IDEEP device, only element-wise Add operator is
+    // [Caution] on IDEEP device, only element-wise Add operator is
     // supported yet. It totally works as element-wise sum without scalar broadcast.
-    if (!repr::nn::is<repr::Sum>(sumNode) && !isOpType(sumNode, "Add")) {
+    bool is_dnnlowp_sum = false;
+    if (isOpType(sumNode, "Int8Sum")
+        || isOpType(sumNode, "Int8SumRelu")
+        || isOpType(sumNode, "Int8AddRelu")) {
+      is_dnnlowp_sum = true;
+    } else if (!repr::nn::is<repr::Sum>(sumNode)
+        && !isOpType(sumNode, "Add")) {
       continue;
     }
 
@@ -307,18 +350,18 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    int j = i - 1;
     repr::NNGraph::NodeRef convNode = nullptr;
-    while (j-- >= 0) {
+    while (--i >= 0) {
       if (!repr::nn::hasInputs(sumNode)) {
         continue;
       }
 
       // Find the nearest Op before Sum
-      if (repr::nn::is<repr::NeuralNetOperator>(allNodes[j])) {
+      if (repr::nn::is<repr::NeuralNetOperator>(allNodes[i])) {
         // The Op must be a Conv
-        if (repr::nn::is<repr::Conv>(allNodes[j])) {
-          convNode = allNodes[j];
+        if (repr::nn::is<repr::Conv>(allNodes[i])
+            || isOpType(allNodes[i], "Int8Conv")) {
+          convNode = allNodes[i];
         }
         break;
       }
@@ -327,9 +370,22 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    auto conv = repr::nn::get<repr::Conv>(convNode);
-    if (!shouldFuseConv(*conv)) {
+    auto conv = repr::nn::get<repr::NeuralNetOperator>(convNode);
+    if (!isOnIdeepDevice(*conv)) {
       LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    auto group = 1;
+    auto *convOp = getMutableOpDef(*conv);
+    for (const auto &arg : convOp->arg()) {
+      if (arg.name() == "group") {
+        group = arg.i();
+        break;
+      }
+    }
+    if (group > 1) {
+      LOG(WARNING) << "Not support conv sum fusion with grouped filter";
       continue;
     }
 
@@ -337,24 +393,51 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     repr::NNGraph::NodeRef sumInputX =
         (sumInputs[0] == convOutput ? sumInputs[1] : sumInputs[0]);
     CAFFE_ENFORCE(sumInputX != nullptr, "Invalid sum inputs");
+    if (sumInputX->getInEdges().size() <= 0) {
+      continue;
+    }
 
     auto preNode = repr::nn::getProducer(sumInputX);
-    if (preNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
+    if (preNode == nullptr ||
+        !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
       LOG(WARNING) << "Can not fuse Conv Sum";
       continue;
     }
 
-    auto newOutputName = repr::nn::get<repr::Tensor>(sumInputX)->getName();
+    nn->dataFlow.createEdge(sumInputX, convNode);
+    auto newOutputName = repr::nn::get<repr::Tensor>(sumInputX)->getName()
+      + "_fusion_fix_" + std::to_string(i);
+
+    auto newInputTensor = util::make_unique<repr::Tensor>(newOutputName);
+    auto newInput = nn->dataFlow.createNode(
+        unique_dyn_cast<repr::NeuralNetData>(newInputTensor));
+
+    nn->dataFlow.replaceNode(sumInputX, newInput);
+    nn->dataFlow.deleteNode(sumInputX);
+
     auto newOutputTensor = util::make_unique<repr::Tensor>(newOutputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
 
     auto sumOutput = repr::nn::getOutputs(sumNode).front();
     nn->dataFlow.replaceNode(sumOutput, newOutput);
-
-    resetConvForFusion(convNode, FUSION_CONV_SUM);
-    nn->dataFlow.createEdge(sumInputX, convNode);
     nn->dataFlow.createEdge(convNode, newOutput);
+
+    if (!is_dnnlowp_sum) {
+      resetConvForFusion(convNode, FUSION_CONV_SUM);
+    } else {
+      moveOpArg(ws, "Y_scale", sum, conv);
+      moveOpArg(ws, "Y_zero_point", sum, conv);
+
+      if (isOpType(sumNode, "Int8Sum")) {
+        CAFFE_THROW("Unimplemented conv sum fusion");
+      } else if (isOpType(sumNode, "Int8SumRelu")
+          || isOpType(sumNode, "Int8AddRelu")) {
+        convOp->set_type("Int8ConvSumRelu");
+      } else {
+        CAFFE_THROW("Unsupport operator in conv fusion");
+      }
+    }
 
     nn->dataFlow.deleteNode(sumNode);
     nn->dataFlow.deleteNode(sumOutput);
@@ -369,36 +452,32 @@ void fuseActivationForIdeep(repr::NNModule* nn) {
   fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
 }
 
-void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
+bool enforceInplaceInSumFusion(repr::NNModule *nn, caffe2::Workspace *ws) {
   // For fusions of Conv+Sum or Conv+Sum+ReLU, the last input and output must
   // be inplaced. To enforce inplace, here to re-check whole graph and correct
   // the ConvFusion Ops.
-  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef convNode;
-    repr::Conv* conv;
-    std::tie(conv, convNode) = node_pair;
+  bool ret = false;
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  for (int i = allNodes.size() - 1; i > 0; i--) {
+    auto convNode = allNodes[i];
+    if (convNode == nullptr
+      || !repr::nn::is<repr::NeuralNetOperator>(convNode)) {
+      continue;
+    }
 
+    auto conv = repr::nn::get<repr::NeuralNetOperator>(convNode);
     if (!isOnIdeepDevice(*conv)) {
       LOG(WARNING) << "Not a IDEEP operator";
       continue;
     }
 
-    const auto& op = getOpDef(*conv);
-    if (op.type() != "ConvFusion") {
-      continue;
-    }
-
-    bool enforce_inplace = false;
-    for (const auto& arg : op.arg()) {
-      if (arg.name() == "fusion_type"
-          && (arg.i() == FUSION_CONV_SUM || arg.i() == FUSION_CONV_SUM_RELU)) {
-        enforce_inplace = true;
-        break;
-      }
-    }
-
-    if (!enforce_inplace) {
-      continue;
+    if (repr::nn::is<repr::Conv>(convNode)) {
+      if (!isConvFusion(convNode, FUSION_CONV_SUM)
+          && !isConvFusion(convNode, FUSION_CONV_SUM_RELU))
+        continue;
+    } else if (!isOpType(convNode, "Int8ConvSum")
+        && !isOpType(convNode, "Int8ConvSumRelu")) {
+        continue;
     }
 
     auto convInput = repr::nn::getInputs(convNode).back();
@@ -412,16 +491,22 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
     auto consumer = repr::nn::getConsumers(convInput).back();
     if (consumer != convNode) {
       LOG(ERROR) << "Can not enforce to inplace for fusion";
-      return;
+      return false;
     }
 
     auto newOutputTensor = util::make_unique<repr::Tensor>(inputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
     nn->dataFlow.replaceNode(convOutput, newOutput);
-
     nn->dataFlow.deleteNode(convOutput);
+
+    ret = true;
   }
+  return ret;
+}
+
+void enforceFusionInplaceForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
+  while (enforceInplaceInSumFusion(nn, ws)) {}
 }
 
 void setPoolingInferenceMode(repr::NNModule *nn) {
@@ -470,7 +555,7 @@ void OptimizeForIdeep(
 
   fuseActivationForIdeep(nn);
 
-  enforceFusionInplaceForIdeep(nn);
+  enforceFusionInplaceForIdeep(nn, ws);
 
   setPoolingInferenceMode(nn);
 }
