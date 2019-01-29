@@ -14,6 +14,12 @@ except ImportError:
     from tools.shared.module_loader import import_module
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
+# You should use these lines, rather than doing it manually.
+# Especially if you see this error!
+#
+#     File "/usr/local/lib/python2.7/dist-packages/yaml/__init__.py", line 69, in load
+#       loader = Loader(stream)
+#     TypeError: 'module' object is not callable
 try:
     # use faster C loader if available
     from yaml import CLoader as YamlLoader
