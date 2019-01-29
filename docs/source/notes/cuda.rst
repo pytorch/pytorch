@@ -74,9 +74,9 @@ You can force synchronous computation by setting environment variable
 operation is actually executed, so the stack trace does not show where it was
 requested.)
 
-As an exception, several functions such as :meth:`~torch.Tensor.to` and 
-:meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument, 
-which lets the caller bypass synchronization when it is unnecessary.  
+As an exception, several functions such as :meth:`~torch.Tensor.to` and
+:meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
+which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
 
 CUDA streams
@@ -118,7 +118,7 @@ unused memory managed by the allocator will still show as if used in
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_cached` and
 :meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
+allocator. Calling :meth:`~torch.cuda.empty_cache` releases all **unused**
 cached memory from PyTorch so that those can be used by other GPU applications.
 However, the occupied GPU memory by tensors will not be freed so it can not
 increase the amount of GPU memory available for PyTorch.

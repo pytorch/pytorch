@@ -1,9 +1,8 @@
 #include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
-#include <c10/core/dispatch/OpSchemaRegistration.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 #include "caffe2/core/operator_c10wrapper.h"
 
 using caffe2::CPUContext;
-using caffe2::Tensor;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::SigmoidCrossEntropyWithLogits);
 
@@ -31,7 +30,6 @@ struct UnjoinedLRLossParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::SigmoidCrossEntropyWithLogits,
-    void,
     C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet,
     ParameterHelper<LogDTrickParameter>,
     ParameterHelper<UnjoinedLRLossParameter>)

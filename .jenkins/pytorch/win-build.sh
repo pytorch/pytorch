@@ -29,8 +29,8 @@ IMAGE_COMMIT_TAG = os.getenv('IMAGE_COMMIT_TAG')
 
 session = boto3.session.Session()
 s3 = session.resource('s3')
-data = open(sys.argv[1], 'rb')
-s3.Bucket('ossci-windows-build').put_object(Key='pytorch/'+IMAGE_COMMIT_TAG+'.7z', Body=data)
+with open(sys.argv[1], 'rb') as data:
+  s3.Bucket('ossci-windows-build').put_object(Key='pytorch/'+IMAGE_COMMIT_TAG+'.7z', Body=data)
 object_acl = s3.ObjectAcl('ossci-windows-build','pytorch/'+IMAGE_COMMIT_TAG+'.7z')
 response = object_acl.put(ACL='public-read')
 
@@ -153,12 +153,12 @@ if not "%USE_CUDA%"=="0" (
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
-  python setup.py install && sccache --show-stats && (
+  python setup.py install --cmake && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
       mv %CD%\\build\\bin\\test_api.exe %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch\\lib
-      7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+      7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\caffe2 && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
     )
   )
 )

@@ -1,10 +1,12 @@
 #include "caffe2/operators/experimental/c10/schemas/filler.h"
-#include <c10/core/dispatch/OpSchemaRegistration.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/cast.h"
 
 using caffe2::CPUContext;
-using caffe2::Tensor;
+using c10::C10Tensor;
+using c10::ivalue::IntList;
+using c10::intrusive_ptr;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::ConstantFill);
 C10_DEFINE_OP_SCHEMA(caffe2::ops::UniformFill);
@@ -15,15 +17,15 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::GivenTensorFill<int64_t>);
 
 namespace {
 struct ShapeParameter final {
-  using type = std::vector<int64_t>;
-  static std::vector<int64_t> parse(const caffe2::ArgumentHelper& helper) {
-    return helper.GetRepeatedArgument<int64_t>("shape");
+  using type = intrusive_ptr<IntList>;
+  static intrusive_ptr<IntList> parse(const caffe2::ArgumentHelper& helper) {
+    return IntList::create(helper.GetRepeatedArgument<int64_t>("shape"));
   }
 };
 struct ExtraShapeParameter final {
-  using type = std::vector<int>;
-  static std::vector<int> parse(const caffe2::ArgumentHelper& helper) {
-    return helper.GetRepeatedArgument<int>("extra_shape");
+  using type = intrusive_ptr<IntList>;
+  static intrusive_ptr<IntList> parse(const caffe2::ArgumentHelper& helper) {
+    return IntList::create(helper.GetRepeatedArgument<int64_t>("extra_shape"));
   }
 };
 struct InputAsShapeParameter final {
@@ -54,20 +56,20 @@ struct DTypeParameter final {
   }
 };
 struct ValueParameter final {
-  using type = caffe2::ops::ConstantFill::Value;
-  static caffe2::ops::ConstantFill::Value parse(
+  using type = c10::IValue;
+  static c10::IValue parse(
       const caffe2::ArgumentHelper& helper) {
-    caffe2::ops::ConstantFill::Value result;
+    c10::IValue result;
     if (helper.HasSingleArgumentOfType<float>("value")) {
-      result.as_float = helper.GetSingleArgument<float>("value", 0);
+      result = helper.GetSingleArgument<float>("value", 0);
     } else if (helper.HasSingleArgumentOfType<int32_t>("value")) {
-      result.as_int32 = helper.GetSingleArgument<int32_t>("value", 0);
+      result = helper.GetSingleArgument<int32_t>("value", 0);
     } else if (helper.HasSingleArgumentOfType<int64_t>("value")) {
-      result.as_int64 = helper.GetSingleArgument<int64_t>("value", 0);
+      result = helper.GetSingleArgument<int64_t>("value", 0);
     } else if (helper.HasSingleArgumentOfType<bool>("value")) {
-      result.as_bool = helper.GetSingleArgument<bool>("value", false);
+      result = helper.GetSingleArgument<bool>("value", false);
     } else {
-      result.as_float = 0.0;
+      result = 0.0;
     }
     return result;
   }
@@ -86,8 +88,8 @@ struct MaxParameter final {
 };
 template <class T>
 struct ValuesParameter final {
-  using type = Tensor;
-  static Tensor parse(const caffe2::ArgumentHelper& helper) {
+  using type = at::Tensor;
+  static at::Tensor parse(const caffe2::ArgumentHelper& helper) {
     if (!std::is_same<T, float>::value || !helper.HasArgument("dtype")) {
       return ExtractValues<T>(helper);
     } else {
@@ -115,17 +117,17 @@ struct ValuesParameter final {
 
  private:
   template <typename Type>
-  static Tensor ExtractValues(
+  static at::Tensor ExtractValues(
       const caffe2::ArgumentHelper& helper) {
     auto source_values = helper.GetRepeatedArgument<Type>("values");
-    Tensor values{caffe2::CPU};
+    caffe2::Tensor values{caffe2::CPU};
     values.Resize(source_values.size());
     Type* values_data = values.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
     }
     // body_ = &GivenTensorFillOp::FillWithType<Type>;
-    return values;
+    return at::Tensor(C10Tensor(values));
   }
 };
 } // namespace
@@ -133,7 +135,6 @@ struct ValuesParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::ConstantFill,
-    void,
     C10ConstantFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -142,7 +143,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValueParameter)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::UniformFill,
-    void,
     C10UniformFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -152,7 +152,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<float>,
-    void,
     C10GivenTensorFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -160,7 +159,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValuesParameter<float>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<int>,
-    void,
     C10GivenTensorIntFill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,
@@ -168,7 +166,6 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ValuesParameter<int>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::GivenTensorFill<int64_t>,
-    void,
     C10GivenTensorInt64Fill_DontUseThisOpYet,
     ShapeParameter,
     ExtraShapeParameter,

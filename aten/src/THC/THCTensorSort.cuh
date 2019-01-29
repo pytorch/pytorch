@@ -15,17 +15,17 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct ThrustGTOp {
   __device__ bool operator()(const T& lhs, const T& rhs) const {
-    return THCNumerics<T>::gt(lhs, rhs);
+    return (handleNaN && THCNumerics<T>::isnan(lhs) && !THCNumerics<T>::isnan(rhs)) || THCNumerics<T>::gt(lhs, rhs);
   }
 };
 
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct ThrustLTOp {
   __device__ bool operator()(const T& lhs, const T& rhs) const {
-    return THCNumerics<T>::lt(lhs, rhs);
+    return (handleNaN && THCNumerics<T>::isnan(rhs) && !THCNumerics<T>::isnan(lhs)) || THCNumerics<T>::lt(lhs, rhs);
   }
 };
 

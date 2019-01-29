@@ -9,6 +9,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
+      type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -30,23 +31,9 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     const auto value = pr.first;
     const auto& aliasInfo = pr.second;
     // We don't support composite types yet
-    JIT_ASSERT(aliasInfo.containedTypes().size() == 0);
+    AT_ASSERT(aliasInfo.containedTypes().size() == 0);
     for (const auto aliasSet : aliasInfo.sets()) {
       aliasToValue_[aliasSet].insert(value);
-    }
-  }
-  // - Set of all nodes with a wildcard
-  buildWildcardIndex(graph_->block());
-}
-
-void AliasDb::buildWildcardIndex(const Block* b) {
-  for (const auto node : b->nodes()) {
-    for (const auto block : node->blocks()) {
-      buildWildcardIndex(block);
-    }
-
-    if (hasWildcardImpl(node)) {
-      wildcardNodes_.insert(node);
     }
   }
 }
@@ -80,7 +67,7 @@ bool AliasDb::writesTo(Node* n, const Value* v) const {
   }
 
   const auto& aliasInfo = valueToAlias_.at(v);
-  JIT_ASSERT(aliasInfo.sets().size() > 0);
+  AT_ASSERT(aliasInfo.sets().size() > 0);
   // We only need to check one alias set, since if this value belongs to
   // multiple alias sets they are all written to
   const auto& aliasSet = *aliasInfo.sets().begin();
@@ -92,6 +79,26 @@ bool AliasDb::writesTo(Node* n, const Value* v) const {
 
   const auto& writers = aliasToWrites_.at(aliasSet);
   return writers.count(n) != 0;
+}
+
+bool AliasDb::hasWriters(const Node* n) const {
+  if (hasWildcard(n)) {
+    // If `n` has a wildcard, any write in the graph may write to it.
+    // So the only way we know there are no writers is if there are no writes
+    // at all.
+    return !aliasToWrites_.empty();
+  }
+  return getWriters(n).size() != 0;
+}
+
+bool AliasDb::hasWritersBefore(const Node* n) const {
+  if (hasWildcard(n)) {
+    return true;
+  }
+  const auto writers = getWriters(n);
+  return std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
+    return isBeforeSameGraph(writer, n);
+  });
 }
 
 bool AliasDb::hasWrites(Node* n) const {
@@ -164,6 +171,15 @@ std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
       }
     }
   }
+
+  // A write to the wildcard set should be considered a write to `n`
+  if (aliasToWrites_.count(AliasInfo::wildcardSet())) {
+    const auto& wildcardWriters = aliasToWrites_.at(AliasInfo::wildcardSet());
+    for (auto writer : wildcardWriters) {
+      writers.insert(writer);
+    }
+  }
+
   return writers;
 }
 
@@ -272,7 +288,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       }
       addAlias(input, tupleTypeAliases.at(tupleType));
     } else {
-      JIT_ASSERT(!shouldAnnotate(input));
+      AT_ASSERT(!shouldAnnotate(input));
     }
   }
 
@@ -366,11 +382,16 @@ void AliasDb::analyze(Node* node) {
       continue;
     }
 
+    // If this type cannot alias, continue. Can occur with a VarType schema
+    if (!shouldAnnotate(actualValue)) {
+      continue;
+    }
+
     // We don't support composite types for alias analysis yet.
-    JIT_ASSERT(formal->containedTypes().size() == 0);
+    AT_ASSERT(formal->containedTypes().size() == 0);
     // TODO neither unions nor wildcards make sense on an input. We should
     // disallow them in function schema
-    JIT_ASSERT(!formal->isWildcard())
+    AT_ASSERT(!formal->isWildcard())
     const auto& formalAlias = formal->set();
 
     // skip if we've already bound this alias
@@ -401,20 +422,46 @@ void AliasDb::analyze(Node* node) {
       continue;
     }
 
-    // We don't support composite types for alias analysis yet.
-    JIT_ASSERT(formal->containedTypes().size() == 0);
-
-    const auto& formalAlias = formal->set();
-    auto outputAlias = formalToActual.at(formalAlias);
-
-    // Record writes
-    for (const auto& alias : outputAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
-      }
+    // If this type cannot alias, continue. Can occur with a VarType schema
+    if (!shouldAnnotate(actual)) {
+      continue;
     }
 
-    addAlias(actual, outputAlias);
+    // We don't support composite types for alias analysis yet.
+    AT_ASSERT(formal->containedTypes().size() == 0);
+
+    for (const auto& formalAlias : formal->sets()) {
+      // If we encounter an alias annotation that wasn't in the inputs:
+      if (!formalToActual.count(formalAlias)) {
+        // If this alias is not seen elsewhere and is the only annotation on
+        // the output, it's equivalent to being fresh:
+        //   e.g. foo(Tensor(a) self) -> Tensor(b)
+        if (formal->sets().size() == 1) {
+          giveFreshAlias(actual);
+        }
+        // Or it is the form of a|fresh, which we can ignore, taking the
+        // conservative assumption that the output must alias `a`, e.g
+        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
+
+        // Don't assign an alias set in that case.
+        continue;
+      }
+
+      auto outputAlias = formalToActual.at(formalAlias);
+
+      // Record writes
+      for (const auto& alias : outputAlias.sets()) {
+        if (formal->isWrite()) {
+          aliasToWrites_[alias].insert(node);
+        }
+      }
+
+      addAlias(actual, outputAlias);
+    }
+  }
+  // Keep the wildcard index up to date.
+  if (hasWildcardImpl(node)) {
+    wildcardNodes_.insert(node);
   }
 }
 
@@ -442,8 +489,8 @@ void AliasDb::analyzeLoop(Node* node) {
   const auto loopCarriedInputs = node->inputs().slice(2); // skip max, cond
   const auto blockInputs = bodyBlock->inputs().slice(1); // skip trip
   const auto blockOutputs = bodyBlock->outputs().slice(1); // skip trip
-  JIT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
-  JIT_ASSERT(blockOutputs.size() == node->outputs().size());
+  AT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
+  AT_ASSERT(blockOutputs.size() == node->outputs().size());
 
   // Run alias analysis on the loop body, iterating until the block output
   // alias info converges.
@@ -466,7 +513,7 @@ void AliasDb::analyzeLoop(Node* node) {
 
       // Check whether or not this would change anything
       if (valueToAlias_.count(input) != 0) {
-        JIT_ASSERT(valueToAlias_.count(output) != 0)
+        AT_ASSERT(valueToAlias_.count(output) != 0)
         if (!valueToAlias_[output].isSubsetOf(valueToAlias_[input])) {
           notConverged = true;
         }
@@ -477,7 +524,11 @@ void AliasDb::analyzeLoop(Node* node) {
 }
 
 void AliasDb::analyzeSubgraph(Node* node) {
-  const auto subgraphBlock = node->g(attr::Subgraph)->block();
+  const auto subgraph = node->g(attr::Subgraph).get();
+
+  subgraphToOwner_.insert({subgraph, node});
+
+  const auto subgraphBlock = subgraph->block();
   mapAliases(subgraphBlock->inputs(), node->inputs());
 
   analyze(subgraphBlock);
@@ -485,7 +536,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
   // TODO(suo): the subgraph outputs and node outputs are NOT NECESSARILY the
   // same length. Autodifferentiation maybe capture additional outputs in the
   // subgraph block.
-  JIT_ASSERT(subgraphBlock->outputs().size() >= node->outputs().size());
+  AT_ASSERT(subgraphBlock->outputs().size() >= node->outputs().size());
   for (size_t i = 0; i < node->outputs().size(); i++) {
     addAlias(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
@@ -571,14 +622,14 @@ void AliasDb::addAlias(const Value* value, Symbol alias) {
 // Union the alias info of `value` with `from`
 void AliasDb::addAlias(const Value* value, const Value* from) {
   if (!shouldAnnotate(value)) {
-    JIT_ASSERT(!shouldAnnotate(from));
+    AT_ASSERT(!shouldAnnotate(from));
     return;
   }
   addAlias(value, valueToAlias_.at(from));
 }
 
 void AliasDb::mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from) {
-  JIT_ASSERT(to.size() == from.size());
+  AT_ASSERT(to.size() == from.size());
   for (size_t i = 0; i < to.size(); i++) {
     addAlias(to[i], from[i]);
   }
@@ -591,6 +642,359 @@ void AliasDb::giveFreshAlias(const Value* value) {
     return;
   }
   addAlias(value, getFreshAlias());
+}
+
+bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
+  return tryMove(n, movePoint, MoveSide::AFTER, /*dryRun=*/false);
+}
+
+bool AliasDb::couldMoveAfterTopologically(Node* n, Node* movePoint) {
+  return tryMove(n, movePoint, MoveSide::AFTER, /*dryRun=*/true);
+}
+
+bool AliasDb::moveBeforeTopologicallyValid(Node* n, Node* movePoint) {
+  // We have to distinguish the move side (instead of just moving after
+  // n->prev()). Consider the following example:
+  // If the dependency graph looks like
+  //   n -> movePoint -> o
+  // then moveBefore(o) will end up with
+  //   n, o, movePoint
+  // but moveAfter(n) will return false.
+  return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/false);
+}
+
+bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
+  return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
+}
+
+// Helper for topologically-safe node moves. See `tryMove()` for details.
+class AliasDb::WorkingSet {
+ public:
+  explicit WorkingSet(Node* mover, const AliasDb& aliasDb) : aliasDb_(aliasDb) {
+    add(mover);
+  }
+
+  // Add `n` to the working set
+  void add(Node* n) {
+    nodes_.push_back(n);
+    for (const auto user : getUsersSameBlock(n)) {
+      users_[user]++;
+    }
+
+    for (const auto& writer : getWritersSameBlock(n)) {
+      writers_[writer]++;
+    }
+    if (aliasDb_.hasWildcard(n)) {
+      numWildcards_++;
+    }
+    if (aliasDb_.hasWrites(n)) {
+      numWriterNodes_++;
+    }
+  }
+
+  void eraseMover() {
+    auto mover = nodes_.front();
+    for (const auto user : getUsersSameBlock(mover)) {
+      // If this user node only uses the mover, we can remove it
+      if (users_[user] == 1) {
+        users_.erase(user);
+      }
+    }
+
+    for (const auto& writer : getWritersSameBlock(mover)) {
+      if (writers_[writer] == 1) {
+        writers_.erase(writer);
+      }
+    }
+    if (aliasDb_.hasWildcard(mover)) {
+      numWildcards_--;
+    }
+    if (aliasDb_.hasWrites(mover)) {
+      numWriterNodes_--;
+    }
+    nodes_.pop_front();
+  }
+
+  const std::list<Node*>& nodes() {
+    return nodes_;
+  }
+
+  // Does the working set depend on `n`?
+  bool dependsOn(Node* n) const {
+    if (nodes_.empty()) {
+      return false;
+    }
+
+    return hasDataDependency(n) || hasMutabilityDependency(n);
+  }
+
+ private:
+  bool hasDataDependency(Node* n) const {
+    if (n->isAfter(nodes_.front())) {
+      return producesFor(n);
+    } else {
+      return consumesFrom(n);
+    }
+  }
+
+  bool hasMutabilityDependency(Node* n) const {
+    // 1. Handle wildcard dependencies:
+    // If the working set has a wildcard, `n` can't write to anything.
+    if (numWildcards_ > 0 && aliasDb_.hasWrites(n)) {
+      return true;
+    }
+
+    // If `n` has a wildcard, the working set can't write to anything.
+    if (aliasDb_.hasWildcard(n) && numWriterNodes_ > 0) {
+      return true;
+    }
+
+    // 2. Handle regular mutable dependencies
+    // Check that this node does not write to anything used by the working set
+    if (writers_.count(n) != 0) {
+      return true;
+    }
+
+    // Check that the working set does not write to anything used by this node
+    const auto writersToNode = getWritersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return writersToNode.count(node) != 0;
+    });
+  }
+
+  // Does the working set produce any values consumed by `n`?
+  bool producesFor(Node* n) const {
+    // This equivalent to asking: does the total use-set of all the nodes in the
+    // working set include `n`?
+    return users_.count(n) != 0;
+  }
+
+  // Does the working set consume any values produced by `n`?
+  bool consumesFrom(Node* n) const {
+    const auto users = getUsersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return users.count(node) != 0;
+    });
+  }
+
+  // Get all users of outputs of `n`, in the same block as `n`.
+  // This means if there is an `if` node that uses an output of `n` in some
+  // inner sub-block, we will consider the whole `if` node a user of `n`.
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
+    std::unordered_set<Node*> users;
+    for (const auto output : n->outputs()) {
+      for (const auto& use : output->uses()) {
+        if (auto sameBlock = findSameBlock(use.user, n)) {
+          users.insert(sameBlock);
+        }
+      }
+    }
+    return users;
+  }
+
+  std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
+    std::unordered_set<Node*> writers;
+    for (const auto writer : aliasDb_.getWriters(n)) {
+      if (auto sameBlock = findSameBlock(writer, n)) {
+        writers.insert(sameBlock);
+      }
+    }
+    return writers;
+  }
+
+  // Traverse `target`'s blockchain upward until we find a node that shares a
+  // block with `n`.
+  //
+  // If one can't be found (say, because `n` is an inner block and target is
+  // outside), then return nullptr. Since we can only reorder nodes within a
+  // block, `target` would be irrelevant.
+  static Node* findSameBlock(Node* target, Node* n) {
+    AT_ASSERT(target->owningGraph() == n->owningGraph());
+    if (target->owningBlock() == n->owningBlock()) {
+      return target;
+    } else {
+      // This user is in a sub-block. Traverse the blockchain upward until
+      // we arrive at a node that shares a block with `this`
+      auto curNode = target;
+      while (curNode->owningBlock() != n->owningBlock()) {
+        curNode = curNode->owningBlock()->owningNode();
+        if (curNode == nullptr) {
+          return curNode;
+        }
+      }
+      return curNode;
+    }
+  }
+
+  const AliasDb& aliasDb_;
+  std::list<Node*> nodes_;
+  // users => # of working set nodes it uses
+  std::unordered_map<Node*, size_t> users_;
+  std::unordered_map<Node*, size_t> writers_;
+  size_t numWildcards_ = 0;
+  size_t numWriterNodes_ = 0;
+};
+
+// Try to move `toMove` before/after `movePoint` while preserving value
+// dependencies. Returns false iff such a move could not be made.
+//
+// If `dryRun` is set, don't actually execute the move, just check if the move
+// is possible
+//
+// The basic approach is: have a "working set" that we are moving forward, one
+// node at a time. When we can't move past a node (because it depends on the
+// working set), then add it to the working set and keep moving until we hit
+// `moveAfter`.
+bool AliasDb::tryMove(
+    Node* toMove,
+    Node* movePoint,
+    MoveSide moveSide,
+    bool dryRun) {
+  AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  if (toMove == movePoint) {
+    return true;
+  }
+
+  // 1. Move from `this` toward movePoint, building up the working set of
+  // dependencies
+  WorkingSet workingSet(toMove, *this);
+
+  int direction;
+  if (toMove->isAfter(movePoint)) {
+    direction = kPrevDirection;
+  } else {
+    direction = kNextDirection;
+  }
+
+  auto curNode = toMove->next_in_graph[direction];
+  // Move forward one node at a time
+  while (curNode != movePoint) {
+    if (workingSet.dependsOn(curNode)) {
+      // If we can't move past this node, add it to the working set
+      workingSet.add(curNode);
+    }
+    curNode = curNode->next_in_graph[direction];
+  }
+
+  // 2. Decide whether we can move it all to `movePoint`.
+
+  // Say we are moving directly before movePoint and `toMove` starts before
+  // movePoint in the graph. The move looks like
+  //
+  //  `toMove`            `toMove`         |
+  //  <dependencies>  ->  `movePoint`      | `toMove` and deps are split
+  //  `movePoint`         <dependencies>   |
+  //
+  // Contrast with the case where `toMove` starts AFTER movePoint:
+  //
+  //  `movePoint`           <dependencies>   |
+  //  <dependencies>  ->    `toMove`         | `toMove` and deps are together
+  //  `toMove`              `movePoint`      |
+  //
+  // In the first case, we need to split `this` off from its dependencies, so we
+  // can move the dependencies below `movePoint` and keep `toMove` above.
+  const bool splitToMoveAndDeps =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+
+  if (splitToMoveAndDeps) {
+    // remove `this` from dependencies to be moved past `movePoint`
+    workingSet.eraseMover();
+  }
+
+  // Check if we can move the working set past the move point
+  if (workingSet.dependsOn(movePoint)) {
+    // if we can't, then there are intermediate dependencies between the
+    // `this` and `movePoint`, so we can't do the move
+    return false;
+  }
+
+  if (dryRun) {
+    return true;
+  }
+
+  // 3. Execute the move
+  AT_ASSERT(curNode == movePoint);
+  if (splitToMoveAndDeps) {
+    // Move `toMove`
+    move(toMove, movePoint, moveSide);
+
+    // Then move all of its dependencies on the other side of `movePoint`
+    const auto reversed =
+        moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
+    for (auto n : workingSet.nodes()) {
+      move(n, curNode, reversed);
+      curNode = n;
+    }
+  } else {
+    // Just append/prepend everything to `movePoint`
+    for (auto n : workingSet.nodes()) {
+      move(n, curNode, moveSide);
+      curNode = n;
+    }
+  }
+  return true;
+}
+
+// Helper function so we can generalize `tryMove`
+void AliasDb::move(Node* toMove, Node* movePoint, MoveSide moveSide) {
+  switch (moveSide) {
+    case MoveSide::BEFORE:
+      toMove->moveBefore(movePoint);
+      break;
+    case MoveSide::AFTER:
+      toMove->moveAfter(movePoint);
+      break;
+  }
+}
+
+c10::optional<const Node*> AliasDb::getLastWildcard() const {
+  auto it = std::max_element(
+      wildcardNodes_.cbegin(),
+      wildcardNodes_.cend(),
+      [this](const Node* a, const Node* b) { return isBeforeSameGraph(a, b); });
+  if (it != wildcardNodes_.end()) {
+    return *it;
+  } else {
+    return c10::nullopt;
+  }
+}
+
+bool AliasDb::hasUntrackedEffects(Node* node) const {
+  bool touchesWildcard = false;
+  if (const auto lastWildcard = getLastWildcard()) {
+    touchesWildcard = hasWrites(node) &&
+        (isBeforeSameGraph(node, *lastWildcard) || node == *lastWildcard);
+  }
+
+  return writesToInputAlias(node) || touchesWildcard;
+}
+
+// Nodes must be in the same graph in order to do `isBefore` or `isAfter`. This
+// traverses the subgraph "chain" upward until we find two nodes that share an
+// owning graph.
+//
+// NOTE: this is n^2 in subgraph depth. Right now the maximum depth is like 2,
+// but if we ever do huge nested subgraphs we'll need to reconsider this.
+bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
+  auto lhs = a;
+  while (true) {
+    auto rhs = b;
+    while (true) {
+      if (lhs->owningGraph() == rhs->owningGraph()) {
+        return lhs->isBefore(rhs);
+      }
+      if (!subgraphToOwner_.count(rhs->owningGraph())) {
+        break;
+      }
+      rhs = subgraphToOwner_.at(rhs->owningGraph());
+    }
+    if (!subgraphToOwner_.count(lhs->owningGraph())) {
+      break;
+    }
+    lhs = subgraphToOwner_.at(lhs->owningGraph());
+  }
+  AT_ASSERT(false);
 }
 } // namespace jit
 } // namespace torch

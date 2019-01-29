@@ -3,12 +3,12 @@
 // it now to implement correct semantic checking for script
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/function_schema.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/function_schema.h>
 
 #include <functional>
 #include <initializer_list>
@@ -20,6 +20,8 @@
 
 namespace torch {
 namespace jit {
+
+using ::c10::FunctionSchema;
 
 TORCH_API FunctionSchema parseSchema(const std::string& schema);
 
@@ -94,6 +96,7 @@ TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
+
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
@@ -102,6 +105,9 @@ inline Operation getOperation(const Node* node) {
   // true so the call to selectVariant is always valid.
   return getOperatorFor(node).getOperation(node);
 }
+
+
+TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
 

@@ -4,10 +4,11 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -22,6 +23,10 @@ using at::UndefinedTensorImpl;
  * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
+ private:
+  enum Unsafe { IDoWantAliasing };
+  Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
+
  protected:
   using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
   TensorImplPtr impl_;
@@ -35,12 +40,31 @@ class CAFFE2_API Tensor final {
     }
   }
 
+  // caffe2::Tensor is explicitly marked as moveable-only because before
+  // the refactoring the class used to be a value type and a lot of user code
+  // is written this way. With PyTorch unification, caffe2::Tensor actually
+  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
+  // accidental mistakes when changing legacy code we keep caffe2::Tensor
+  // to have movable semantics.
+  //
+  // If you need to get a pointer to the same Tensor instance (not to be
+  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
+  // the same behavior as `at::Tensor a = b`.
+  Tensor(const Tensor&) = delete;
+  Tensor& operator=(const Tensor&) = delete;
+  Tensor(Tensor&&) = default;
+  Tensor& operator=(Tensor&&) = default;
+
   operator bool() const {
     return impl_.defined();
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  Tensor UnsafeSharedInstance() const {
+    return Tensor(*this, IDoWantAliasing);
   }
 
   /**
@@ -82,6 +106,7 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -96,9 +121,53 @@ class CAFFE2_API Tensor final {
     CopyFrom(src);
   }
 
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
+
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
+  }
+
   Tensor Clone() const {
     Tensor x(GetDevice());
     x.CopyFrom(*this);
+    return x;
+  }
+
+  /**
+   * Clone self as a Tensor that share the same Storage,
+   * that is, both Tensors are views on the same Storage.
+   * If we change the sizes or strides of one Tensor, it
+   * does not affect the other Tensor that it shares Storage
+   * with.
+   * A similar yet different usage is `Tensor x = y;`, this
+   * will make x and y pointing to the same Tensor and resizing
+   * one of them will resize the other as well.
+   *
+   * TODO: Deduplicate this with THTensor_(newWithTensor)
+   * (exposed in ATen as at::alias but not otherwise available)
+   */
+  Tensor Alias() const {
+    Tensor x(sizes(), GetDevice());
+    if (!dtype_initialized()) {
+      C10_LOG_EVERY_MS(WARNING, 1000) <<
+                   "Cloning a tensor that don't have a data type (did you call mutable_data<T> on the tensor?)";
+    }
+    AT_ASSERTM(
+        storage_initialized(),
+        "Cloning a tensor that has no content and has size > 0");
+    // set_storage already sets data_type_ of TensorImpl
+    x.impl_->set_storage(storage());
+    x.impl_->set_storage_offset(impl_->storage_offset());
+    x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
   }
 
@@ -124,7 +193,7 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());
+    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
@@ -271,14 +340,7 @@ class CAFFE2_API Tensor final {
     return ss.str();
   }
 
-  // NB: a.swap(b) is not equivalent to std::swap(a, b);
-  // swap method swaps the CONTENTS of the tensors, while std::swap
-  // swaps the POINTERS.
-  void swap(const Tensor& other) const noexcept {
-    // NB: use get() to get a non-const pointer!
-    std::swap(*impl_.get(), *other.impl_.get());
-  }
-
+  // To be deprecated
   void ShareData(const Tensor& src) const {
     impl_.get()->ShareData(*src.impl_.get());
   }
@@ -333,16 +395,20 @@ class CAFFE2_API Tensor final {
     return impl_;
   }
 
+  bool defined() const {
+    return impl_;
+  }
+
   /**
-   * Returns a const raw void* pointer of the underlying storage. mutable_data()
+   * Returns a raw void* pointer of the underlying storage. mutable_data()
    * or raw_mutable_data() must have been called prior to this function call.
    */
-  inline const void* raw_data() const {
+  inline void* raw_data() const {
     return impl_->data();
   }
 
   template <typename T>
-  inline const T* data() const {
+  inline T* data() const {
     return impl_.get()->data<T>();
   }
 
@@ -422,11 +488,6 @@ class CAFFE2_API Tensor final {
     return impl_.get()->sizes();
   }
 
-  // To be deprecated
-  inline at::IntList dims() const {
-    return impl_.get()->sizes();
-  }
-
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }
@@ -458,7 +519,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::IntList strides() {
+  inline at::IntList strides() const {
     return impl_.get()->strides();
   }
 
@@ -532,6 +593,11 @@ class CAFFE2_API Tensor final {
   }
 };
 
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
 CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(
