@@ -2,6 +2,27 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 
+namespace c10 {
+namespace detail {
+class OpSchemaRegistrar final {
+public:
+  OpSchemaRegistrar(FunctionSchema schema)
+  : opHandle_(c10::Dispatcher::singleton().registerSchema(std::move(schema))) {}
+
+  ~OpSchemaRegistrar() {
+    c10::Dispatcher::singleton().deregisterSchema(opHandle_);
+  }
+
+  const c10::OperatorHandle& opHandle() const {
+    return opHandle_;
+  }
+
+private:
+  c10::OperatorHandle opHandle_;
+};
+}
+}
+
 /**
  * Macro for defining an operator schema.  Every operator schema must
  * invoke C10_DECLARE_OP_SCHEMA in a header and C10_DEFINE_OP_SCHEMA in one (!)
@@ -13,7 +34,6 @@
 
 #define C10_DEFINE_OP_SCHEMA(Name, Schema)                                      \
   C10_EXPORT const c10::OperatorHandle& Name() {                                \
-    static c10::OperatorHandle singleton =                                      \
-        c10::Dispatcher::singleton().registerSchema(Schema);                    \
-    return singleton;                                                           \
+    static ::c10::detail::OpSchemaRegistrar registrar(Schema);                  \
+    return registrar.opHandle();                                                \
   }                                                                             \

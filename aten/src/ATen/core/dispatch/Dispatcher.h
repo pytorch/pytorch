@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/dispatch/DispatchTable.h>
+#include <c10/util/Exception.h>
 #include <mutex>
 #include <list>
 
@@ -95,6 +96,16 @@ public:
 
     operators_.emplace_back(std::move(schema));
     return OperatorHandle(--operators_.end());
+  }
+
+  void deregisterSchema(OperatorHandle op) {
+    // we need a lock to avoid concurrent writes
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!op.dispatchTable_->isEmpty()) {
+      AT_ERROR("Tried to deregister op schema that still has kernels registered");
+    }
+    operators_.erase(op.dispatchTable_);
   }
 
   /**

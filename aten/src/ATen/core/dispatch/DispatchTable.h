@@ -72,6 +72,12 @@ class ThreadsafeOperatorTable_ final {
     });
   }
 
+  bool isEmpty() const {
+    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
+      return map.size() == 0;
+    });
+  }
+
  private:
   LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
 };
@@ -140,6 +146,10 @@ class DispatchTable final {
 
    const FunctionSchema& schema() const {
      return schema_;
+   }
+
+   bool isEmpty() const {
+     return kernels_.isEmpty();
    }
 
  private:
