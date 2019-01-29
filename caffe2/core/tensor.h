@@ -23,6 +23,10 @@ using at::UndefinedTensorImpl;
  * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
+ private:
+  enum Unsafe { IDoWantAliasing };
+  Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
+
  protected:
   using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
   TensorImplPtr impl_;
@@ -36,12 +40,31 @@ class CAFFE2_API Tensor final {
     }
   }
 
+  // caffe2::Tensor is explicitly marked as moveable-only because before
+  // the refactoring the class used to be a value type and a lot of user code
+  // is written this way. With PyTorch unification, caffe2::Tensor actually
+  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
+  // accidental mistakes when changing legacy code we keep caffe2::Tensor
+  // to have movable semantics.
+  //
+  // If you need to get a pointer to the same Tensor instance (not to be
+  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
+  // the same behavior as `at::Tensor a = b`.
+  Tensor(const Tensor&) = delete;
+  Tensor& operator=(const Tensor&) = delete;
+  Tensor(Tensor&&) = default;
+  Tensor& operator=(Tensor&&) = default;
+
   operator bool() const {
     return impl_.defined();
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  Tensor UnsafeSharedInstance() const {
+    return Tensor(*this, IDoWantAliasing);
   }
 
   /**
@@ -83,6 +106,7 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -106,6 +130,10 @@ class CAFFE2_API Tensor final {
 
   explicit operator C10Tensor() && {
     return C10Tensor(std::move(impl_));
+  }
+
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
   }
 
   Tensor Clone() const {
@@ -165,7 +193,7 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());
+    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
@@ -312,12 +340,9 @@ class CAFFE2_API Tensor final {
     return ss.str();
   }
 
-  // NB: a.swap(b) is not equivalent to std::swap(a, b);
-  // swap method swaps the CONTENTS of the tensors, while std::swap
-  // swaps the POINTERS.
-  void swap(const Tensor& other) const noexcept {
-    // NB: use get() to get a non-const pointer!
-    std::swap(*impl_.get(), *other.impl_.get());
+  // To be deprecated
+  void ShareData(const Tensor& src) const {
+    impl_.get()->ShareData(*src.impl_.get());
   }
 
   /**
@@ -370,16 +395,20 @@ class CAFFE2_API Tensor final {
     return impl_;
   }
 
+  bool defined() const {
+    return impl_;
+  }
+
   /**
-   * Returns a const raw void* pointer of the underlying storage. mutable_data()
+   * Returns a raw void* pointer of the underlying storage. mutable_data()
    * or raw_mutable_data() must have been called prior to this function call.
    */
-  inline const void* raw_data() const {
+  inline void* raw_data() const {
     return impl_->data();
   }
 
   template <typename T>
-  inline const T* data() const {
+  inline T* data() const {
     return impl_.get()->data<T>();
   }
 
@@ -456,11 +485,6 @@ class CAFFE2_API Tensor final {
   }
 
   inline at::IntList sizes() const {
-    return impl_.get()->sizes();
-  }
-
-  // To be deprecated
-  inline at::IntList dims() const {
     return impl_.get()->sizes();
   }
 
@@ -569,6 +593,11 @@ class CAFFE2_API Tensor final {
   }
 };
 
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
 CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(

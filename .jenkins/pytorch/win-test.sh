@@ -52,9 +52,9 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3
+    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf
 )
-pip install ninja future hypothesis
+pip install ninja future hypothesis librosa>=0.6.2 psutil
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
@@ -82,6 +82,26 @@ EOL
 
 cat >ci_scripts/test_python_nn.bat <<EOL
 call ci_scripts/setup_pytorch_env.bat
+:: Some smoke tests
+cd test/
+:: Checking that caffe2.python is available
+python -c "from caffe2.python import core"
+if ERRORLEVEL 1 exit /b 1
+:: Checking that MKL is available
+python -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
+if ERRORLEVEL 1 exit /b 1
+:: Checking that CUDA archs are setup correctly
+python -c "import torch; torch.randn([3,5]).cuda()"
+if ERRORLEVEL 1 exit /b 1
+:: Checking that magma is available
+python -c "import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)"
+if ERRORLEVEL 1 exit /b 1
+:: Checking that CuDNN is available
+python -c "import torch; exit(0 if torch.backends.cudnn.is_available() else 1)"
+if ERRORLEVEL 1 exit /b 1
+cd ..
+
+:: Run nn tests
 cd test/ && python run_test.py --include nn --verbose && cd ..
 EOL
 
@@ -115,7 +135,7 @@ EOL
 cat >ci_scripts/test_libtorch.bat <<EOL
 call ci_scripts/setup_pytorch_env.bat
 dir
-dir %CD%\\test 
+dir %CD%\\test
 dir %CD%\\test\\torch
 dir %CD%\\test\\torch\\lib
 cd %CD%\\test\\torch\\lib

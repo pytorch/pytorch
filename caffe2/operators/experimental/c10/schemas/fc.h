@@ -1,8 +1,10 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 #include "caffe2/core/tensor.h"
+#include <ATen/core/blob.h>
+#include <ATen/core/dispatch/OpSchema.h>
 
 namespace caffe2 {
 namespace ops {
@@ -10,27 +12,20 @@ namespace ops {
 struct FullyConnected final {
   static constexpr const char* name = "FC";
 
-  struct Cache final {
-    vector<int64_t> Y_shape_cache_;
-    C10Tensor bias_multiplier_ = C10Tensor(Tensor{CPU});
-  };
-
   using Signature = void(
-      const C10Tensor& X,
-      const C10Tensor& W,
-      const C10Tensor& b,
-      const C10Tensor& output,
+      const at::Tensor& X,
+      const at::Tensor& W,
+      const at::Tensor& b,
+      const at::Tensor& output,
       int axis,
-      int axis_w,
-      Cache* cache,
-      BaseContext* context);
+      int axis_w);
 
   static constexpr size_t num_dispatch_args() {return 3;}
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
-      {"X", "W", "b", "output", "axis", "axis_w", "cache", "context"}};
+  static constexpr c10::guts::array<const char*, 6> parameter_names = {
+      {"X", "W", "b", "output", "axis", "axis_w"}};
 };
 
 } // namespace ops

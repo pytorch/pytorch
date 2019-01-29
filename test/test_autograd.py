@@ -10,7 +10,7 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul, itemgetter
 from functools import reduce, wraps
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
@@ -203,6 +203,26 @@ class TestAutograd(TestCase):
         # Accumulate out-of-place when create_graph is False
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
+
+    def test_slogdet_sign(self):
+        a = torch.randn(3, 3, requires_grad=True)
+        s, logdet = a.slogdet()
+
+        # test that sign should not require grad
+        self.assertFalse(s.requires_grad)
+
+        # test that backward through computation involving sign works
+        def sign_mul_logdet(mat):
+            s, logdet = mat.slogdet()
+            return s * logdet
+
+        u, s, v = a.detach().svd()
+        s.abs_().clamp_(0.0001)
+        for sign in (-1, 1):
+            s[-1] = sign
+            mat = torch.chain_matmul(u, s.diag(), v.t()).requires_grad_()
+            gradcheck(sign_mul_logdet, mat)
+            gradgradcheck(sign_mul_logdet, mat)
 
     def test_sum_to_with_empty_dim_grad(self):
         a = torch.rand(4, 0, requires_grad=True)
@@ -2226,6 +2246,23 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    @skipIfRocm
+    def test_pdist_large(self):
+        def func(x):
+            return torch.pdist(x, p=2)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+            # is currently limited to smaller sizes (see issue above); this is just testing
+            # a floor.
+            shape = (1000, 1)
+            x = torch.randn(shape, device=device).requires_grad_()
+            output = torch.pdist(x, p=2)
+            # just run a single backward, as gradcheck/gradgradcheck is expensive here
+            output.sum().backward()
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
@@ -2881,7 +2918,7 @@ def add_test(
                 output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                    if not isinstance(output_tensor, torch.Tensor) and not isinstance(output_tensor, tuple):
+                    if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops

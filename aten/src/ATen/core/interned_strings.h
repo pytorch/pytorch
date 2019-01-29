@@ -71,6 +71,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
   _(aten, __round_to_zero_floordiv)\
@@ -87,6 +88,8 @@ namespace c10 {
   _(aten, index_put_)              \
   _(aten, device)                  \
   _(aten, len)                     \
+  _(aten, wait)                    \
+  _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -116,6 +119,7 @@ namespace c10 {
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
   _(onnx, Split)                   \
+  _(onnx, ConstantOfShape)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \

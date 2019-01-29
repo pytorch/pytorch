@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIP__)
 #define MATH_UTILS_DECL inline __host__ __device__
 #else
 #define MATH_UTILS_DECL inline
@@ -11,6 +11,7 @@
 
 namespace caffe2 {
 namespace math {
+
 namespace utils {
 
 MATH_UTILS_DECL bool Not(const bool x) {
@@ -62,6 +63,9 @@ CAFFE2_API int GetIndexFromDims(const int n, const int* dims, const int* index);
 
 // Checks if the input permutation is an identity permutation;
 CAFFE2_API bool IsIdentityPermutation(const int n, const int* perm);
+
+CAFFE2_API bool
+CheckReduceDims(const int ndim, const int* X_dims, const int* Y_dims);
 
 CAFFE2_API bool IsRowwiseReduce(
     const int ndim,
@@ -128,6 +132,9 @@ CAFFE2_API void ComputeTransposeAxesForReduceOp(
     const int* reduce_axes,
     int* transpose_axes);
 
+CAFFE2_API void
+ComputeTransposeAxesForReduceOp(const int ndim, const int* dims, int* axes);
+
 CAFFE2_API void ComputeTransposedStrides(
     const int ndim,
     const int* dims,
@@ -135,6 +142,34 @@ CAFFE2_API void ComputeTransposedStrides(
     int* strides);
 
 } // namespace utils
+
+// Calculates ceil(a / b). User must be careful to ensure that there
+// is no overflow or underflow in the calculation.
+template <typename T>
+constexpr T DivUp(const T a, const T b) {
+  return (a + b - T(1)) / b;
+}
+
+// Rounds a up to the next highest multiple of b. User must be careful
+// to ensure that there is no overflow or underflow in the calculation
+// of divUp.
+template <typename T>
+constexpr T RoundUp(const T a, const T b) {
+  return DivUp<T>(a, b) * b;
+}
+
+// Returns log2(n) for a positive integer type
+template <typename T>
+constexpr int IntegerLog2(T n, int p = 0) {
+  return (n <= 1) ? p : IntegerLog2(n / 2, p + 1);
+}
+
+// Returns the next highest power-of-2 for an integer type
+template <typename T>
+constexpr T IntegerNextHighestPowerOf2(T v) {
+  return (IntegerIsPowerOf2(v) ? T(2) * v : (T(1) << (IntegerLog2(v) + 1)));
+}
+
 } // namespace math
 } // namespace caffe2
 

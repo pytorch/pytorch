@@ -115,6 +115,16 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
   }
 
+  Tensor* OutputTensorCPU_(int idx, at::IntList dims, at::TensorOptions options) {
+    if (dequantize_output_) {
+      return Output(idx, dims, options.device(CPU));
+    } else {
+      auto* t = &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+      ReinitializeTensor(t, dims, options.device(CPU));
+      return t;
+    }
+  }
+
   T* GetQuantizedOutputData_() {
     if (dequantize_output_) {
       out_temp_.resize(Output(0)->numel());
@@ -135,8 +145,8 @@ class DNNLowPOp : public Operator<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      fbgemm::Dequantize<float>(
-          OutputTensorCPU_(0)->template data<float>(),
+      fbgemm::Dequantize<T>(
+          OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
           out_qparams_);

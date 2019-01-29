@@ -1,10 +1,7 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/arg_spec.h>
-#include <torch/csrc/jit/fuser/config.h>
 #include <torch/csrc/jit/fuser/fused_kernel.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
@@ -36,8 +33,28 @@ TORCH_API size_t nCompiledKernels();
 
 TORCH_API int debugFuser();
 
+using FusedKernelConstructor = std::function<std::shared_ptr<FusedKernel>(
+    int16_t device,
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random)>;
+
+TORCH_API void registerFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor);
+TORCH_API bool hasFusionBackend(at::Device::Type backend_type);
+struct TORCH_API RegisterFusionBackend {
+  RegisterFusionBackend(
+      at::Device::Type backend_type,
+      FusedKernelConstructor ctor) {
+    registerFusionBackend(backend_type, std::move(ctor));
+  }
+};
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER
