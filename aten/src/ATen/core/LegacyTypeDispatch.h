@@ -176,20 +176,9 @@ struct CAFFE2_API AutoNonVariableTypeMode {
 inline Type& legacyTensorType(const TensorImpl& tensor) {
   // NB: It's valid to use getTypeRaw here, because the TensorImpl
   // could not have been created without initializing the Type first.
-  // NB: This is not actually true via the Caffe2 codepath! But we call
-  // initializeLegacyTypeDispatchFor in the right place.
-  return *globalLegacyTypeDispatch().getTypeRaw(
-      tensorTypeIdToBackend(tensor.type_id()),
-      typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
-}
-
-inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
-  // getType calls the right initialization
-  globalLegacyTypeDispatch().getType(
-      tensorTypeIdToBackend(tensor.type_id()),
-      typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+  // TODO: This is not actually true via the Caffe2 codepath!  Make
+  // it so.
+  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
 }
 
 } // namespace at
