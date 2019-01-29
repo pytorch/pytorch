@@ -241,7 +241,7 @@ void THCTensor_(cadd)(THCState *state, THCTensor *self_, THCTensor* src1, scalar
 #else
   auto alpha = value;
 #endif
-  at::add_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
+  at::add_out(out, retainTensorImpl(src1), retainTensorImpl(src2), alpha);
 }
 
 void THCTensor_(csub)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
