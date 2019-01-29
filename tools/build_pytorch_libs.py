@@ -103,6 +103,8 @@ def run_cmake(version,
     ]
     if USE_NINJA:
         cmake_args.append('-GNinja')
+    elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017 Win64')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
@@ -127,12 +129,12 @@ def run_cmake(version,
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    my_env['PYTORCH_PYTHON'] = sys.executable
+    my_env['PYTORCH_PYTHON'] = escape_path(sys.executable)
     if USE_CUDNN:
-        my_env['CUDNN_LIBRARY'] = CUDNN_LIBRARY
-        my_env['CUDNN_INCLUDE_DIR'] = CUDNN_INCLUDE_DIR
+        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
+        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
     if USE_CUDA:
-        my_env['CUDA_BIN_PATH'] = CUDA_HOME
+        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     mkdir_p(install_dir)
     mkdir_p(build_dir)
