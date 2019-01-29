@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
-#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -1144,27 +1143,43 @@ struct Graph {
   TORCH_API void freeBlock(Block* b);
 };
 
-struct WithInsertPoint : public ResourceGuard {
-  WithInsertPoint(Node* n)
-      : ResourceGuard([this] { prev->owningGraph()->setInsertPoint(prev); }),
-        prev(n->owningGraph()->insertPoint()) {
+/** \brief An utility class for setting temporary insertion points.
+ *
+ * When an object of this class is created, it stores the current insertion
+ * point, sets the new one, and restores the original insertion point  when the
+ * object is destroyed.
+ */
+struct WithInsertPoint {
+  WithInsertPoint(Node* n) : prev_(n->owningGraph()->insertPoint()) {
     n->owningGraph()->setInsertPoint(n);
   }
   WithInsertPoint(Block* b) : WithInsertPoint(b->return_node()) {}
 
- private:
-  Node* prev;
-};
-
-struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph& g, ScopePtr scope)
-      : ResourceGuard([&g, this]() { g.set_current_scope(prev_scope); }),
-        prev_scope(g.current_scope()) {
-    g.set_current_scope(std::move(scope));
+  ~WithInsertPoint() {
+    prev_->owningGraph()->setInsertPoint(prev_);
   }
 
  private:
-  ScopePtr prev_scope;
+  Node* prev_;
+};
+
+/** \brief An utility class for setting temporary scopes.
+ *
+ * When an object of this class is created, it stores the current scope, sets
+ * the new one, and restores the original scope when the object is destroyed.
+ */
+struct WithCurrentScope {
+  WithCurrentScope(Graph& g, ScopePtr scope)
+      : graph_(&g), prev_scope_(g.current_scope()) {
+    g.set_current_scope(std::move(scope));
+  }
+  ~WithCurrentScope() {
+    graph_->set_current_scope(prev_scope_);
+  }
+
+ private:
+  Graph* graph_;
+  ScopePtr prev_scope_;
 };
 
 inline Value::Value(Node* node_, size_t offset_)
