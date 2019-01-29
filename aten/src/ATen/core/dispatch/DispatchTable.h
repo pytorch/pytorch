@@ -138,15 +138,19 @@ class DispatchTable final {
      return *found;
    }
 
+   const FunctionSchema& schema() const {
+     return schema_;
+   }
+
  private:
-  static size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
+  size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
       if (schema.arguments()[i].type()->kind() == TypeKind::DynamicType) {  // DynamicType means it's a tensor
         return i;
       }
     }
 
-    throw std::logic_error("Tried to create dispatch table for operator schema that doesn't have tensor arguments.");
+    throw std::logic_error("Tried to create dispatch table for operator schema " + schema_.name() + " that doesn't have tensor arguments.");
   }
 
 
@@ -159,11 +163,3 @@ class DispatchTable final {
 };
 
 } // namespace c10
-
-/*
- * Use this to access the dispatch table singleton for a given op schema.
- * It has an implementation for each op schema def in a cpp file, because
- * we can't rely on the one-definition-rule.
- */
-template <class OpSchemaDef>
-C10_API c10::DispatchTable& c10_dispatch_table();

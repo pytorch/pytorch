@@ -90,6 +90,6 @@ void cast_op_cpu(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu>()
+    .kernel<decltype(caffe2::cast_op_cpu), &caffe2::cast_op_cpu>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

@@ -68,6 +68,6 @@ void batch_gather_op_cpu(const at::Tensor& data,
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
-    .kernel<&caffe2::batch_gather_op_cpu>()
+    .kernel<decltype(caffe2::batch_gather_op_cpu), &caffe2::batch_gather_op_cpu>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

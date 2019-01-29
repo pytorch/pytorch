@@ -28,7 +28,7 @@ namespace {
 RegisterOperators reg({
   Operator(
     //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output = None, Tensor? output_mean = None, Tensor? output_stdev = None) -> (Tensor, Tensor, Tensor)
-    c10::OpSchema<c10::core::opschema::LayerNorm>::create_function_schema(),
+    c10::core::opschema::LayerNorm().schema(),
     [](Stack& stack) {
         Tensor tensor_input = std::move(stack[stack.size()-6]).toTensor();
         if (tensor_input.requires_grad()) {
@@ -48,7 +48,7 @@ RegisterOperators reg({
         }
 
         // call caffe2 kernel
-        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(&stack).call(&stack);
+        c10::Dispatcher::singleton().lookup(c10::core::opschema::LayerNorm(), &stack).call(&stack);
 
         // wrap outputs into Variable
         for (int i = 0; i < 3; ++i) {

@@ -1,19 +1,19 @@
 #pragma once
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/dispatch/OpSchema.h>
-
-// TODO Better error message when this definition is missing
 
 /**
- * Macro for defining an operator schema.  Every user-defined OpSchemaDef struct must
- * invoke this macro on it.  Internally, this arranges for the dispatch table for
+ * Macro for defining an operator schema.  Every operator schema must
+ * invoke C10_DECLARE_OP_SCHEMA in a header and C10_DEFINE_OP_SCHEMA in one (!)
+ * cpp file.  Internally, this arranges for the dispatch table for
  * the operator to be created.
  */
-#define C10_DEFINE_OP_SCHEMA(OpSchemaDef)                                                        \
-  template<>                                                                                     \
-  C10_EXPORT c10::DispatchTable& c10_dispatch_table<OpSchemaDef>() {                             \
-    static c10::DispatchTable singleton(c10::OpSchema<OpSchemaDef>::create_function_schema());   \
-    return singleton;                                                                            \
-  }
-// TODO Also register unboxed calling API here
+#define C10_DECLARE_OP_SCHEMA(Name)                                             \
+  CAFFE2_API const c10::OperatorHandle& Name();                                 \
+
+#define C10_DEFINE_OP_SCHEMA(Name, Schema)                                      \
+  C10_EXPORT const c10::OperatorHandle& Name() {                                \
+    static c10::OperatorHandle singleton =                                      \
+        c10::Dispatcher::singleton().registerSchema(Schema);                    \
+    return singleton;                                                           \
+  }                                                                             \

@@ -75,6 +75,6 @@ void mul_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Mul)
-    .kernel<&caffe2::mul_op_cpu_impl<float>>()
+    .kernel<decltype(caffe2::mul_op_cpu_impl<float>), &caffe2::mul_op_cpu_impl<float>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

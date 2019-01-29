@@ -2,7 +2,6 @@
 
 #include <c10/util/Optional.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/dispatch/OpSchema.h>
 
 /**
  * To register your own kernel for an operator, do in one (!) cpp file:
@@ -25,22 +24,19 @@ namespace c10 {
  *
  * @tparam OpSchemaDef
  */
-template<class OpSchemaDef>
 class KernelRegistrar final {
-private:
-    using Schema = OpSchema<OpSchemaDef>;
 public:
   /**
    * @param kernel The concrete function implementation to register
    * @param dispatch_key  The dispatch key to register the function to
    */
-  KernelRegistrar(TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
-  : dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
-    Dispatcher<OpSchemaDef>::registerKernel(dispatch_key_, kernel, cache_creator);
+  KernelRegistrar(const OperatorHandle& (*op)(), TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
+  : op_(std::move(op)), dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
+    Dispatcher::singleton().registerKernel(op_(), dispatch_key_, kernel, cache_creator);
   }
 
   KernelRegistrar(KernelRegistrar&& rhs)
-  : dispatch_key_(std::move(rhs.dispatch_key_)), owns_registration_(true) {
+  : op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), owns_registration_(true) {
     rhs.owns_registration_ = false;
   }
 
@@ -49,16 +45,96 @@ public:
 
   ~KernelRegistrar() {
     if (owns_registration_) {
-      Dispatcher<OpSchemaDef>::deregisterKernel(dispatch_key_);
+      Dispatcher::singleton().deregisterKernel(op_(), dispatch_key_);
     }
   }
 
 private:
+  const OperatorHandle& (*op_)();
   const TensorTypeId dispatch_key_;
   bool owns_registration_;
 
   C10_DISABLE_COPY_AND_ASSIGN(KernelRegistrar);
 };
+
+namespace detail {
+template<class T>
+struct ivalue_to_arg_type {
+  static T call(const IValue& v) {
+    return std::move(v).to<T>();
+  }
+};
+template<class T>
+struct ivalue_to_arg_type<ArrayRef<T>> {
+  static ArrayRef<T> call(const IValue& v) {
+    return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
+  }
+};
+
+template<class FuncType, FuncType* func, class... ExtraArgs, size_t... ivalue_arg_indices>
+typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>, ExtraArgs&&... extra_args) {
+  using IValueArgTypes = typename guts::function_traits<FuncType>::parameter_types;
+  return (*func)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])..., std::forward<ExtraArgs>(extra_args)...);
+}
+
+template<class FuncType, FuncType* func, class... ExtraArgs>
+typename guts::function_traits<FuncType>::return_type call_with_ivalue_args(ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args) {
+  constexpr size_t num_ivalue_args = guts::function_traits<FuncType>::number_of_parameters - sizeof...(ExtraArgs);
+  return call_with_ivalue_args_<FuncType, func>(ivalue_args, guts::make_index_sequence<num_ivalue_args>(), std::forward<ExtraArgs>(extra_args)...);
+}
+
+template<class OutputType>
+struct push_outputs final {
+  static void call(OutputType&& output, Stack* stack) {
+    push_outputs<std::tuple<OutputType>>(std::tuple<OutputType>(std::move(output)), stack);
+  }
+};
+template<class... OutputTypes>
+struct push_outputs<std::tuple<OutputTypes...>> final {
+  static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
+    for (size_t i = 0; i < sizeof...(OutputTypes); ++i) {
+      torch::jit::push(return_type_to_ivalue(std::move(output)));
+    }
+  }
+};
+
+// SFINAE over (1) does the operator kernel have a cache and (2) does it return a value or void
+template<class CacheTypeOrVoid, class FuncType, FuncType* kernel, class Enable = void> struct wrap_kernel {};
+// SFINAE version for kernels with output and with cache
+template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
+struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(Stack* stack, KernelCache* cache) {
+    constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters - 1; // -1 because it takes the kernel cache as last argument
+    auto output = call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs), static_cast<CacheTypeOrVoid*>(cache));
+    push_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), stack);
+  }
+};
+// SFINAE version for kernels with output and without a cache
+template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
+struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* /*cache*/) {
+    constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters;
+    auto output = call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs));
+    push_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), stack);
+  }
+};
+// SFINAE version for kernels without output and with a cache
+template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
+struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* cache) {
+    constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters - 1; // -1 because it takes the kernel cache as last argument
+    call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs), static_cast<CacheTypeOrVoid*>(cache));
+  }
+};
+// SFINAE version for kernels without output and without a cache
+template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
+struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* /*cache*/) {
+    constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters;
+    call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs));
+  }
+};
+}
 
 /**
  * Helper class for building a KernelRegistrar.  This permits "keyword-argument" like syntax
@@ -80,11 +156,9 @@ private:
  * @tparam OpSchemaDef The operator schema this is building a KernelRegistration for
  * @tparam FieldsPresentFlags Remembers which fields are already set in the builder
  */
-template<class OpSchemaDef, class CacheTypeOrVoid, uint64_t FieldsPresentFlags>
+template<class CacheTypeOrVoid, uint64_t FieldsPresentFlags>
 class KernelRegistrationBuilder final {
 private:
-  using Schema = OpSchema<OpSchemaDef>;
-
   static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 0;
   static constexpr uint64_t KERNEL_PRESENT = 0x01 << 1;
   static constexpr uint64_t CACHE_PRESENT = 0x01 << 2;
@@ -99,29 +173,31 @@ private:
     return guts::make_unique<Cache>();
   }
 
+  const OperatorHandle& (*op_)();
   c10::optional<TensorTypeId> dispatch_key_;
   KernelFunction* kernel_;
   KernelCacheCreatorFunction* cache_creator_;
 
  public:
-  constexpr KernelRegistrationBuilder()
-      : KernelRegistrationBuilder(c10::nullopt, nullptr, &defaultCacheCreator) {}
+  constexpr KernelRegistrationBuilder(const OperatorHandle& (*op)())
+      : KernelRegistrationBuilder(std::move(op), c10::nullopt, nullptr, &defaultCacheCreator) {}
 
   constexpr KernelRegistrationBuilder(
+      const OperatorHandle& (*op)(),
       c10::optional<TensorTypeId> dispatch_key,
       KernelFunction* kernel,
       KernelCacheCreatorFunction* cache_creator)
-      : dispatch_key_(std::move(dispatch_key)), kernel_(kernel), cache_creator_(cache_creator)  {}
+      : op_(std::move(op)), dispatch_key_(std::move(dispatch_key)), kernel_(kernel), cache_creator_(cache_creator)  {}
 
   /**
-   * Implicit coercion to KernelRegistrar<OpSchemaDef> that finalizes the builder and
+   * Implicit coercion to KernelRegistrar that finalizes the builder and
    * creates the object.
    * @return Produced KernelRegistrar
    */
-  operator KernelRegistrar<OpSchemaDef>() && {
+  operator KernelRegistrar() && {
     static_assert(FieldsPresentFlags & KERNEL_PRESENT, "Forgot to call .kernel() in kernel registration");
     static_assert(FieldsPresentFlags & DISPATCH_KEY_PRESENT, "Forgot to call .dispatchKey() in kernel registration");
-    return KernelRegistrar<OpSchemaDef>(std::move(*dispatch_key_), kernel_, cache_creator_);
+    return KernelRegistrar(op_, std::move(*dispatch_key_), kernel_, cache_creator_);
   }
 
   /**
@@ -129,9 +205,9 @@ private:
    * @param dispatch_key dispatch key to register the function to
    * @return "this" for method chaining
    */
-  constexpr KernelRegistrationBuilder<OpSchemaDef, CacheTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(TensorTypeId dispatch_key) && {
+  constexpr KernelRegistrationBuilder<CacheTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(TensorTypeId dispatch_key) && {
     static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, CacheTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(dispatch_key), kernel_, cache_creator_);
+    return KernelRegistrationBuilder<CacheTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(op_), std::move(dispatch_key), kernel_, cache_creator_);
   }
 
   /**
@@ -140,10 +216,10 @@ private:
    * @return "this" for method chaining
    */
   template<KernelFunction* kernel_func>
-  constexpr KernelRegistrationBuilder<OpSchemaDef, CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+  constexpr KernelRegistrationBuilder<CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
     static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Tried to define kernel twice in same op registration");
     // TODO Better error message when kernel function mismatches, one common mismatch is missing cache parameter or cache parameter present while not expected.
-    return KernelRegistrationBuilder<OpSchemaDef, CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT>(std::move(dispatch_key_), kernel_func, cache_creator_);
+    return KernelRegistrationBuilder<CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT>(std::move(op_), std::move(dispatch_key_), kernel_func, cache_creator_);
   }
 
   /**
@@ -151,9 +227,10 @@ private:
    * @param kernel concrete function implementation to be registered
    * @return "this" for method chaining
    */
-  template<typename Schema::signature::template func_type_with_cache<CacheTypeOrVoid>* kernel_func>
-  constexpr KernelRegistrationBuilder<OpSchemaDef, CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
-    return std::move(*this).template kernel<&Schema::signature::template wrap_kernel<CacheTypeOrVoid, kernel_func>>();
+  template<class FuncType, FuncType* kernel_func>
+  constexpr KernelRegistrationBuilder<CacheTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+    // TODO Better error message if FuncType is not a func type
+    return std::move(*this).template kernel<&detail::wrap_kernel<CacheTypeOrVoid, FuncType, kernel_func>::call>();
   }
 
   /**
@@ -162,19 +239,18 @@ private:
    * @return "this" for method chaining
    */
   template<class Cache>
-  constexpr KernelRegistrationBuilder<OpSchemaDef, Cache, FieldsPresentFlags | CACHE_PRESENT> withCache() && {
+  constexpr KernelRegistrationBuilder<Cache, FieldsPresentFlags | CACHE_PRESENT> withCache() && {
     static_assert(!(FieldsPresentFlags & CACHE_PRESENT), "Tried to define cache twice in same op registration");
     static_assert(std::is_base_of<c10::KernelCache, Cache>::value, "Cache must inherit from c10::KernelCache");
 
     static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Cannot set the cache after the kernel function is already set. Please call .withCache() first and .kernel() later in the chain.");
 
-    return KernelRegistrationBuilder<OpSchemaDef, Cache, FieldsPresentFlags | CACHE_PRESENT>(std::move(dispatch_key_), kernel_, &cacheCreator<Cache>);
+    return KernelRegistrationBuilder<Cache, FieldsPresentFlags | CACHE_PRESENT>(std::move(op_), std::move(dispatch_key_), kernel_, &cacheCreator<Cache>);
   }
 };
 
 } // namespace c10
 
-// TODO Can the builder logic be moved to compile time?
 // NB: Semicolon after applying this macro is MANDATORY
-#define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \
-  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, void, 0>()
+#define C10_REGISTER_KERNEL(OperatorHandle)                                                           \
+  static KernelRegistrar MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<void, 0>(OperatorHandle)

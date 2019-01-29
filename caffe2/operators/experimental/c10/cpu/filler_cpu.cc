@@ -148,22 +148,22 @@ void uniform_fill_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::ConstantFill)
-    .kernel<&caffe2::constant_fill_op_cpu_impl>()
+    .kernel<decltype(caffe2::constant_fill_op_cpu_impl), &caffe2::constant_fill_op_cpu_impl>()
     .dispatchKey(CPUTensorId());
 
 C10_REGISTER_KERNEL(caffe2::ops::UniformFill)
-    .kernel<&caffe2::uniform_fill_op_cpu_impl>()
+    .kernel<decltype(caffe2::uniform_fill_op_cpu_impl), &caffe2::uniform_fill_op_cpu_impl>()
     .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<float>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>>()
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<int>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>>()
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorIntFill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>>()
     .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<int64_t>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>>()
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorInt64Fill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

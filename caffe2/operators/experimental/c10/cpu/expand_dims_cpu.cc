@@ -60,6 +60,6 @@ void expand_dims_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::ExpandDims)
     .withCache<caffe2::Cache>()
-    .kernel<&caffe2::expand_dims_op_cpu_impl<float>>()
+    .kernel<decltype(caffe2::expand_dims_op_cpu_impl<float>), &caffe2::expand_dims_op_cpu_impl<float>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

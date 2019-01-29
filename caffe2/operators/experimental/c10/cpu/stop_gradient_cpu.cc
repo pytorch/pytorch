@@ -23,6 +23,6 @@ void stop_gradient_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::StopGradient)
-    .kernel<&caffe2::stop_gradient_op_cpu_impl<float>>()
+    .kernel<decltype(caffe2::stop_gradient_op_cpu_impl<float>), &caffe2::stop_gradient_op_cpu_impl<float>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10

@@ -49,6 +49,6 @@ void averaged_loss_op_cpu_impl(
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::AveragedLoss)
     .withCache<caffe2::Cache>()
-    .kernel<&caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>>()
+    .kernel<decltype(caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(CPUTensorId());
 } // namespace c10
