@@ -8,10 +8,7 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::AveragedLoss);
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(ops::AveragedLoss::State);
-
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::AveragedLoss,
-    ops::AveragedLoss::State,
     C10AveragedLoss_DontUseThisOpYet)
 }

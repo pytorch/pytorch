@@ -130,8 +130,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       createSharedBuffer<Context>(ws_);
     }
   }
-  // Sets the output size. The output channel is manually specified.
-  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
+  // Gets the output size. The output channel is manually specified.
+  std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
     CAFFE_ENFORCE(4 == input.dim());
     CAFFE_ENFORCE(input.numel() > 0);
     int N = input.dim32(0);
@@ -171,14 +171,16 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         &pads_[1],
         &pads_[3],
         &output_width);
+    std::vector<int64_t> sizes;
     if (channel_first) {
-      output->Resize(N, output_channel, output_height, output_width);
+      sizes = {N, output_channel, output_height, output_width};
     } else {
-      output->Resize(N, output_height, output_width, output_channel);
+      sizes = {N, output_height, output_width, output_channel};
     }
     VLOG(2) << "In: N " << N << " M " << M << " H " << H << " W " << W;
     VLOG(2) << "Out: output_channel " << output_channel << " H "
             << output_height << " W " << output_width;
+    return sizes;
   }
 
   bool RunOnDevice() override {

@@ -10,14 +10,17 @@ using std::vector;
 namespace caffe2 {
 namespace {
 
+struct State final : public c10::KernelState {
+  at::Tensor scratch = at::Tensor(C10Tensor(empty({}, CPU)));
+};
+
 template <class T, class Context>
 void averaged_loss_op_cpu_impl(
     const at::Tensor& X_,
     const at::Tensor& sum_,
-    intrusive_ptr<Blob> state_) {
+    State* state) {
   Tensor X{C10Tensor(X_)};
   Tensor sum{C10Tensor(sum_)};
-  caffe2::ops::AveragedLoss::State* state = state_->GetMutable<caffe2::ops::AveragedLoss::State>();
   CPUContext context;
 
   sum.Resize(vector<int64_t>());
@@ -45,6 +48,7 @@ void averaged_loss_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::AveragedLoss)
+    .withState<caffe2::State>()
     .kernel<&caffe2::averaged_loss_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
         DeviceTypeId::CPU,

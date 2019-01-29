@@ -17,22 +17,32 @@ namespace c10 {
  */
 class OpKernel final {
 public:
-  explicit constexpr OpKernel(KernelFunction* kernel): kernel_(kernel) {}
+  explicit OpKernel(KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
+  : kernel_(kernel), state_creator_(state_creator) {}
 
   OpKernel(OpKernel&&) = default;
   OpKernel& operator=(OpKernel&&) = default;
   OpKernel(const OpKernel&) = delete;
   OpKernel& operator=(const OpKernel&) = delete;
 
-  IValue call(ArrayRef<IValue> args) const {
-    return (*kernel_)(args);
+  /**
+   * Call the operator kernel with the given arguments.
+   */
+  IValue call(ArrayRef<IValue> args) {
+    if (state_.get() == nullptr) {
+      AT_ASSERT(state_creator_ != nullptr);
+      state_ = (*state_creator_)();
+    }
+    return (*kernel_)(args, state_.get());
   }
 
 private:
-  // TODO Store kernel state
   // The kernel function is a global C function, not a std::function.
   // That is, ownership is not an issue.
   KernelFunction* kernel_;
+
+  KernelStateCreatorFunction* state_creator_;
+  std::unique_ptr<c10::KernelState> state_;
 };
 
 /**
@@ -50,9 +60,9 @@ public:
   /**
    * Register an operator to the dispatch table for some operator schema.
    */
-  static void registerKernel(KernelFunction kernel_func, typename Schema::dispatch::dispatch_key_type dispatch_key) {
+  static void registerKernel(typename Schema::dispatch::dispatch_key_type dispatch_key, KernelFunction* kernel_func, KernelStateCreatorFunction* state_creator_func) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return dispatch_table_for_this_op.registerKernel(std::move(kernel_func), std::move(dispatch_key));
+    return dispatch_table_for_this_op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, state_creator_func});
   }
 
   /**
@@ -68,7 +78,8 @@ public:
    */
   static OpKernel lookup(ArrayRef<IValue> args) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return OpKernel(dispatch_table_for_this_op.lookup(args));
+    const DispatchTableEntry& kernel = dispatch_table_for_this_op.lookup(args);
+    return OpKernel(kernel.kernel_func, kernel.state_creator_func);
   }
 
 };
