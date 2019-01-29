@@ -9,6 +9,7 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
 fi
 
 export TMP_DIR="${PWD}/build/win_build_tmp"
+export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
 mkdir -p $TMP_DIR/ci_scripts/
 
@@ -48,15 +49,15 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
-    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR%\\Miniconda3-latest-Windows-x86_64.exe
-    %TMP_DIR%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe
+    %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf
 )
-pip install ninja future hypothesis librosa>=0.6.2 psutil
+pip install ninja future hypothesis "librosa>=0.6.2" psutil
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
@@ -73,7 +74,7 @@ set PYTHONPATH=%CD%\\test;%PYTHONPATH%
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd test/
-    python %TMP_DIR%\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
+    python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
     7z x %IMAGE_COMMIT_TAG%.7z
     cd ..
 ) else (

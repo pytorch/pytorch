@@ -93,6 +93,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+
+  # TODO: we should add an option to `build_amd.py` that reverts the repo to
+  #       unmodified state.
+  git reset --hard HEAD
+  assert_git_not_dirty
   exit 0
 fi
 
@@ -131,9 +136,6 @@ else
 fi
 
 assert_git_not_dirty
-
-# Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
 
 # Test documentation build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
