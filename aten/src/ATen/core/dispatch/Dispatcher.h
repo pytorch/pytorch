@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/DispatchTable.h>
 #include <mutex>
+#include <list>
 
 namespace c10 {
 
