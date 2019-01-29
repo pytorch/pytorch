@@ -282,8 +282,8 @@ class CAFFE2_API DBReader {
   unique_ptr<DB> db_;
   unique_ptr<Cursor> cursor_;
   mutable std::mutex reader_mutex_;
-  uint32_t num_shards_;
-  uint32_t shard_id_;
+  uint32_t num_shards_{};
+  uint32_t shard_id_{};
 
   C10_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
