@@ -746,6 +746,14 @@ def brute_pdist(inp, p=2):
     return unroll[..., inds.cumsum(0)]
 
 
+def brute_cdist(x, y, p=2):
+    r1 = x.shape[-2]
+    r2 = y.shape[-2]
+    if r1 == 0 or r2 == 0:
+        return torch.empty(r1, r2, device=x.device)
+    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
+
+
 def do_test_dtypes(self, dtypes, layout, device):
     for dtype in dtypes:
         if dtype != torch.float16:

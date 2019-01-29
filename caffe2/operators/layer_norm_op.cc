@@ -186,8 +186,13 @@ to the end.)
 
 // Register layer norm with c10
 namespace {
+struct State final : public c10::KernelState {
+    at::optional<at::Tensor> scale = at::nullopt;
+    at::optional<at::Tensor> bias = at::nullopt;
+};
+
 template <class DataType>
-c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
+c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs, c10::KernelState* state) { // TODO Pass in correct state type
   caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
   caffe2::Tensor Y{c10::C10Tensor(inputs[1].toTensor())};
   caffe2::Tensor mean{c10::C10Tensor(inputs[2].toTensor())};
@@ -195,7 +200,7 @@ c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
   int64_t axis = inputs[4].toInt();
   float epsilon = inputs[5].toDouble();
   caffe2::CPUContext context;
-  c10::core::opschema::LayerNorm::Cache* cache = inputs[6].toBlob()->GetMutable<c10::core::opschema::LayerNorm::Cache>();
+  State* cache = static_cast<State*>(state);
   if (!cache->scale.has_value()) {
     cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }
@@ -219,6 +224,7 @@ c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
 }
 namespace c10 {
 C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
+    .withState<State>()
     .kernel<&layer_norm_c10<float>>()
     .dispatchKey(c10::DispatchKey<1>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
