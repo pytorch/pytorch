@@ -18,6 +18,7 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
 fi
 
 export TMP_DIR="${PWD}/build/win_build_tmp"
+export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
 mkdir -p $TMP_DIR/ci_scripts/
 
@@ -45,37 +46,37 @@ set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\
 :: Install MKL
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output %TMP_DIR%\\mkl.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output %TMP_DIR_WIN%\\mkl.7z
   ) else (
-    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z %TMP_DIR%\\mkl.7z --quiet
+    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z %TMP_DIR_WIN%\\mkl.7z --quiet
   )
-  7z x -aoa %TMP_DIR%\\mkl.7z -o%TMP_DIR%\\mkl
+  7z x -aoa %TMP_DIR_WIN%\\mkl.7z -o%TMP_DIR_WIN%\\mkl
 )
-set CMAKE_INCLUDE_PATH=%TMP_DIR%\\mkl\\include
-set LIB=%TMP_DIR%\\mkl\\lib;%LIB
+set CMAKE_INCLUDE_PATH=%TMP_DIR_WIN%\\mkl\\include
+set LIB=%TMP_DIR_WIN%\\mkl\\lib;%LIB
 
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output %TMP_DIR%\\magma_2.4.0_cuda90_release.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z %TMP_DIR%\\magma_2.4.0_cuda90_release.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z --quiet
   )
-  7z x -aoa %TMP_DIR%\\magma_2.4.0_cuda90_release.7z -o%TMP_DIR%\\magma
+  7z x -aoa %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z -o%TMP_DIR_WIN%\\magma
 )
-set MAGMA_HOME=%TMP_DIR%\\magma
+set MAGMA_HOME=%TMP_DIR_WIN%\\magma
 
 :: Install sccache
-mkdir %TMP_DIR%\\bin
+mkdir %TMP_DIR_WIN%\\bin
 if "%REBUILD%"=="" (
   :check_sccache
-  %TMP_DIR%\\bin\\sccache.exe --show-stats || (
+  %TMP_DIR_WIN%\\bin\\sccache.exe --show-stats || (
     taskkill /im sccache.exe /f /t || ver > nul
-    del %TMP_DIR%\\bin\\sccache.exe
+    del %TMP_DIR_WIN%\\bin\\sccache.exe
     if "%BUILD_ENVIRONMENT%"=="" (
-      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %TMP_DIR%\\bin\\sccache.exe
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %TMP_DIR_WIN%\\bin\\sccache.exe
     ) else (
-      aws s3 cp s3://ossci-windows/sccache.exe %TMP_DIR%\\bin\\sccache.exe
+      aws s3 cp s3://ossci-windows/sccache.exe %TMP_DIR_WIN%\\bin\\sccache.exe
     )
     goto :check_sccache
   )
@@ -89,8 +90,8 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if "%REBUILD%"=="" (
   IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
-  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR%\\Miniconda3-latest-Windows-x86_64.exe
-  %TMP_DIR%\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe
+  %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if "%REBUILD%"=="" (
@@ -108,7 +109,7 @@ cd %WORKING_DIR%
 
 git submodule update --init --recursive
 
-set PATH=%TMP_DIR%\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
+set PATH=%TMP_DIR_WIN%\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
 set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDA_PATH_V9_0=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set NVTOOLSEXT_PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt
@@ -148,10 +149,10 @@ if not "%USE_CUDA%"=="0" (
         del /S /Q %%i
       )
     )
-    copy %TMP_DIR%\\bin\\sccache.exe %TMP_DIR%\\bin\\nvcc.exe
+    copy %TMP_DIR_WIN%\\bin\\sccache.exe %TMP_DIR_WIN%\\bin\\nvcc.exe
   )
 
-  set CUDA_NVCC_EXECUTABLE=%TMP_DIR%\\bin\\nvcc
+  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\\bin\\nvcc
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
@@ -160,7 +161,7 @@ if not "%USE_CUDA%"=="0" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
       mv %CD%\\build\\bin\\test_api.exe %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch\\lib
-      7z a %TMP_DIR%\\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\caffe2 && python %TMP_DIR%\\ci_scripts\\upload_image.py %TMP_DIR%\\%IMAGE_COMMIT_TAG%.7z
+      7z a %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\caffe2 && python %TMP_DIR_WIN%\\ci_scripts\\upload_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
     )
   )
 )

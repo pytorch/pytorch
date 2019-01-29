@@ -82,7 +82,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
   # ROCm CI is using Caffe2 docker images, which doesn't have several packages
   # needed in testing. We install them here.
-  pip install -q psutil librosa>=0.6.2 --user
+  pip install -q psutil "librosa>=0.6.2" --user
 fi
 
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
@@ -154,8 +154,8 @@ test_libtorch() {
     else
       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
     fi
-    python tools/download_mnist.py --quiet -d mnist
-    OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     assert_git_not_dirty
   fi
 }
