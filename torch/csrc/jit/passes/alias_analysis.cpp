@@ -430,17 +430,34 @@ void AliasDb::analyze(Node* node) {
     // We don't support composite types for alias analysis yet.
     AT_ASSERT(formal->containedTypes().size() == 0);
 
-    const auto& formalAlias = formal->set();
-    auto outputAlias = formalToActual.at(formalAlias);
+    for (const auto& formalAlias : formal->sets()) {
+      // If we encounter an alias annotation that wasn't in the inputs:
+      if (!formalToActual.count(formalAlias)) {
+        // If this alias is not seen elsewhere and is the only annotation on
+        // the output, it's equivalent to being fresh:
+        //   e.g. foo(Tensor(a) self) -> Tensor(b)
+        if (formal->sets().size() == 1) {
+          giveFreshAlias(actual);
+        }
+        // Or it is the form of a|fresh, which we can ignore, taking the
+        // conservative assumption that the output must alias `a`, e.g
+        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
 
-    // Record writes
-    for (const auto& alias : outputAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
+        // Don't assign an alias set in that case.
+        continue;
       }
-    }
 
-    addAlias(actual, outputAlias);
+      auto outputAlias = formalToActual.at(formalAlias);
+
+      // Record writes
+      for (const auto& alias : outputAlias.sets()) {
+        if (formal->isWrite()) {
+          aliasToWrites_[alias].insert(node);
+        }
+      }
+
+      addAlias(actual, outputAlias);
+    }
   }
   // Keep the wildcard index up to date.
   if (hasWildcardImpl(node)) {

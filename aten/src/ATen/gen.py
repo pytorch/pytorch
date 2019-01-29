@@ -210,9 +210,9 @@ def postprocess_output_declarations(output_declarations):
                 if decl.inplace:
                     ret['name'] = 'self'
                 elif len(decl.returns) == 1:
-                    ret['name'] = 'result'
+                    ret['name'] = 'out'
                 else:
-                    ret['name'] = 'result' + str(n)
+                    ret['name'] = 'out' + str(n)
             else:
                 has_named_ret = True
 

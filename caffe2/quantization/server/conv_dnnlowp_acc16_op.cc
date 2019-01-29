@@ -102,8 +102,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     const Tensor& X = InputTensorCPU_(INPUT);
     int N = X.dim32(0);
 
-    Tensor* Y = OutputTensorCPU_(0);
-    this->SetOutputSize(X, Y, filter.dim32(0));
+    auto sizes = this->GetOutputSize(X, filter.dim32(0));
+    Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<uint8_t>());
     const int output_image_size = this->GetDimsSize(*Y);
 
     if (N * output_image_size < FLAGS_caffe2_dnnlowp_acc16_m_threshold) {
@@ -228,7 +228,6 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
-  Tensor* Y = OutputTensorCPU_(0);
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
@@ -246,7 +245,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
       0,
       "The number of output channels is not divisible by group.");
 
-  this->SetOutputSize(X, Y, filter.dim32(0));
+  auto sizes = this->GetOutputSize(X, filter.dim32(0));
+  Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<uint8_t>());
 
   const vector<int> input_dims = GetDims(X);
   const vector<int> output_dims = GetDims(*Y);
@@ -618,14 +618,14 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
-  Tensor* Y = OutputTensorCPU_(0);
   const int N = X.dim32(0), C = X.dim32(X.ndim() - 1);
 
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(filter.dim32(filter.ndim() - 1), C / group_);
 
-  this->SetOutputSize(X, Y, filter.dim32(0));
+  auto sizes = this->GetOutputSize(X, filter.dim32(0));
+  Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<uint8_t>());
   // The dimension of each kernel
   const int kernel_dim = this->KernelDim_();
   // The output image size is the spatial size of the output.
