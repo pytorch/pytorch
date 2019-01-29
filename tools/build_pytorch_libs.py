@@ -243,7 +243,10 @@ def build_caffe2(version,
                  rerun_cmake,
                  build_dir):
     build_test = not check_negative_env_flag('BUILD_TEST')
-    if rerun_cmake or not os.path.exists('build/CMakeCache.txt'):
+    cmake_cache_file = 'build/CMakeCache.txt'
+    if rerun_cmake and os.path.isfile(cmake_cache_file):
+        os.remove(cmake_cache_file)
+    if not os.path.exists(cmake_cache_file) or (USE_NINJA and not os.path.exists('build/build.ninja')):
         run_cmake(version,
                   cmake_python_library,
                   build_python,
