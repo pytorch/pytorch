@@ -65,15 +65,15 @@ class MIOPENConvTransposeOp final : public MIOPENConvTransposeOpBase {
             OperatorBase::GetSingleArgument<int>("returnedAlgoCount_", 1)),
         bestAlgoFound_(
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound_", false)),
-        fwdConvWs_(nullptr),
-        fwdConvWsSize_(0),
-        fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {}
+        bwdDataWs_(nullptr),
+        bwdDataWsSize_(0),
+        bwdDataAlgo_(miopenConvolutionBwdDataAlgoGEMM) {}
 
   ~MIOPENConvTransposeOp() {
-    if (fwdConvWs_) {
-      hipFree(fwdConvWs_);
-      fwdConvWs_ = nullptr;
-      fwdConvWsSize_ = 0;
+    if (bwdDataWs_) {
+      hipFree(bwdDataWs_);
+      bwdDataWs_ = nullptr;
+      bwdDataWsSize_ = 0;
     }
   }
 
@@ -83,9 +83,9 @@ class MIOPENConvTransposeOp final : public MIOPENConvTransposeOpBase {
   const int requestAlgoCount_;
   int returnedAlgoCount_;
   bool bestAlgoFound_;
-  char* fwdConvWs_;
-  size_t fwdConvWsSize_;
-  miopenConvFwdAlgorithm_t fwdAlgo_;
+  char* bwdDataWs_;
+  size_t bwdDataWsSize_;
+  miopenConvBwdDataAlgorithm_t bwdDataAlgo_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -105,27 +105,27 @@ class MIOPENConvTransposeGradientOp final : public MIOPENConvTransposeOpBase {
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
         bestWeightAlgoFound_(
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
+        fwdAlgo_(miopenConvolutionFwdAlgoGEMM),
         bwdWeiAlgo_(miopenConvolutionBwdWeightsAlgoGEMM),
-        bwdDataAlgo_(miopenConvolutionBwdDataAlgoGEMM),
+        fwdWsSize_(0),
         bwdWeightWsSize_(0),
-        bwdDataWsSize_(0),
-        bwdWeightWs_(nullptr),
-        bwdDataWs_(nullptr) {
+        fwdWs_(nullptr),
+        bwdWeightWs_(nullptr) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
   }
 
   ~MIOPENConvTransposeGradientOp() {
+    if (fwdWs_) {
+      hipFree(fwdWs_);
+      fwdWs_ = nullptr;
+      fwdWsSize_ = 0;
+    }
     if (bwdWeightWs_) {
       hipFree(bwdWeightWs_);
       bwdWeightWs_ = nullptr;
       bwdWeightWsSize_ = 0;
-    }
-    if (bwdDataWs_) {
-      hipFree(bwdDataWs_);
-      bwdDataWs_ = nullptr;
-      bwdDataWsSize_ = 0;
     }
   }
 
@@ -138,11 +138,11 @@ class MIOPENConvTransposeGradientOp final : public MIOPENConvTransposeOpBase {
   bool bestDataAlgoFound_;
   bool bestWeightAlgoFound_;
   miopenConvBwdWeightsAlgorithm_t bwdWeiAlgo_;
-  miopenConvBwdDataAlgorithm_t bwdDataAlgo_;
+  miopenConvFwdAlgorithm_t fwdAlgo_;
+  size_t fwdWsSize_;
   size_t bwdWeightWsSize_;
-  size_t bwdDataWsSize_;
+  char* fwdWs_;
   char* bwdWeightWs_;
-  char* bwdDataWs_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
@@ -195,7 +195,7 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          miopenTranspose,
+          miopenConvolution,
           pad_t(),
           pad_l(),
           stride_h(),
@@ -223,19 +223,19 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
     while (!bestAlgoFound_) {
       miopenConvAlgoPerf_t perf;
 
-      MIOPEN_ENFORCE(miopenConvolutionForwardGetWorkSpaceSize(
+      MIOPEN_ENFORCE(miopenConvolutionBackwardDataGetWorkSpaceSize(
           miopen_wrapper_.inline_miopen_handle(),
-          weight_desc_,
           bottom_desc_,
+          weight_desc_,
           conv_desc_,
           top_desc_,
-          &fwdConvWsSize_));
-      if ((fwdConvWsSize_ > 0) && (fwdConvWs_ == nullptr)) {
-          HIP_CHECK(hipMalloc(&fwdConvWs_, fwdConvWsSize_));
+          &bwdDataWsSize_));
+      if ((bwdDataWsSize_ > 0) && (bwdDataWs_ == nullptr)) {
+          HIP_CHECK(hipMalloc(&bwdDataWs_, bwdDataWsSize_));
       }
 
       miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenFindConvolutionForwardAlgorithm(
+          MIOPEN_ENFORCE(miopenFindConvolutionBackwardDataAlgorithm(
             state->miopen_handle(),
             bottom_desc_,
             X.template data<T>(),
@@ -247,17 +247,17 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
             requestAlgoCount_,
             &returnedAlgoCount_,
             &perf,
-            fwdConvWs_,
-            fwdConvWsSize_,
+            bwdDataWs_,
+            bwdDataWsSize_,
             false));
       });
       bestAlgoFound_ = true;
-      fwdAlgo_ = perf.fwd_algo;
+      bwdDataAlgo_ = perf.bwd_data_algo;;
     }
   }
 
   miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-      MIOPEN_ENFORCE(miopenConvolutionForward(
+      MIOPEN_ENFORCE(miopenConvolutionBackwardData(
         state->miopen_handle(),
         &alpha_,
         bottom_desc_,
@@ -265,12 +265,12 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
         weight_desc_,
         Weight.template data<T>(),
         conv_desc_,
-        fwdAlgo_,
+        bwdDataAlgo_,
         &beta_,
         top_desc_,
         Y->template mutable_data<T>(),
-        fwdConvWs_,
-        fwdConvWsSize_));
+        bwdDataWs_,
+        bwdDataWsSize_));
   });
 
   if (InputSize() == 3) {
@@ -339,7 +339,7 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          miopenTranspose,
+          miopenConvolution,
           pad_t(),
           pad_l(),
           stride_h(),
@@ -367,19 +367,19 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
     while ((!bestDataAlgoFound_) && doBwdDataComputation) {
       miopenConvAlgoPerf_t perf;
 
-      MIOPEN_ENFORCE(miopenConvolutionBackwardDataGetWorkSpaceSize(
+      MIOPEN_ENFORCE(miopenConvolutionForwardGetWorkSpaceSize(
           miopen_wrapper_.inline_miopen_handle(),
-          top_desc_,
           weight_desc_,
+          top_desc_,
           conv_desc_,
           bottom_desc_,
-          &bwdDataWsSize_));
-      if ((bwdDataWsSize_ > 0) && (bwdDataWs_ == nullptr)) {
-          HIP_CHECK(hipMalloc(&bwdDataWs_, bwdDataWsSize_));
+          &fwdWsSize_));
+      if ((fwdWsSize_ > 0) && (fwdWs_ == nullptr)) {
+          HIP_CHECK(hipMalloc(&fwdWs_, fwdWsSize_));
       }
 
       miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-        MIOPEN_ENFORCE(miopenFindConvolutionBackwardDataAlgorithm(
+        MIOPEN_ENFORCE(miopenFindConvolutionForwardAlgorithm(
           state->miopen_handle(),
           top_desc_,
           dY.template data<T>(),
@@ -391,13 +391,13 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
           requestAlgoCount_,
           &returnedAlgoCount_,
           &perf,
-          bwdDataWs_,
-          bwdDataWsSize_,
+          fwdWs_,
+          fwdWsSize_,
           false));
       });
 
       bestDataAlgoFound_ = true;
-      bwdDataAlgo_ = perf.bwd_data_algo;
+      fwdAlgo_ = perf.fwd_algo;
   }
 
     while (!bestWeightAlgoFound_) {
@@ -405,8 +405,8 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
 
         MIOPEN_ENFORCE(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
             miopen_wrapper_.inline_miopen_handle(),
-            top_desc_,
             bottom_desc_,
+            top_desc_,
             conv_desc_,
             weight_desc_,
             &bwdWeightWsSize_));
@@ -417,10 +417,10 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
         miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
           MIOPEN_ENFORCE(miopenFindConvolutionBackwardWeightsAlgorithm(
             state->miopen_handle(),
-            top_desc_,
-            dY.template data<T>(),
             bottom_desc_,
             X.template data<T>(),
+            top_desc_,
+            dY.template data<T>(),
             conv_desc_,
             weight_desc_,
             dW->template mutable_data<T>(),
@@ -437,7 +437,7 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
   }
   if (doBwdDataComputation) {
       miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-        MIOPEN_ENFORCE(miopenConvolutionBackwardData(
+        MIOPEN_ENFORCE(miopenConvolutionForward(
           state->miopen_handle(),
           &alpha_,
           top_desc_,
@@ -445,12 +445,12 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
           weight_desc_,
           Weight.template data<T>(),
           conv_desc_,
-          bwdDataAlgo_,
+          fwdAlgo_,
           &beta_,
           bottom_desc_,
           dX->template mutable_data<T>(),
-          bwdDataWs_,
-          bwdDataWsSize_));
+          fwdWs_,
+          fwdWsSize_));
         });
   }
 
@@ -458,10 +458,10 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
     MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
       state->miopen_handle(),
       &alpha_,
-      top_desc_,
-      dY.template data<T>(),
       bottom_desc_,
       X.template data<T>(),
+      top_desc_,
+      dY.template data<T>(),
       conv_desc_,
       bwdWeiAlgo_,
       &beta_,
