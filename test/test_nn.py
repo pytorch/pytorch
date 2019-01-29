@@ -4255,7 +4255,7 @@ class TestNN(NNTestCase):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
