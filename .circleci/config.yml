@@ -1218,8 +1218,10 @@ jobs:
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
             export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
-          # stable release docs push. We keep an eternal PR open for merging
-          # v1.0.1 -> master; everytime v1.0.1 is updated the following is run.
+          # stable release docs push. Due to some circleci limitations, we keep
+          # an eternal PR open (#16502) for merging v1.0.1 -> master for this job.
+          # XXX: The following code is only run on the v1.0.1 branch, which might
+          # not be exactly the same as what you see here.
           elif [[ "${CIRCLE_BRANCH}" == "v1.0.1" ]]; then
             export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.0.0") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
