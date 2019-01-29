@@ -74,6 +74,17 @@ inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
     }
   }
 }
+
+inline void checkTupleNames(py::handle obj, const std::vector<std::string> &names) {
+  // TODO: this is not done yet
+  return;
+  // https://docs.python.org/3/c-api/object.html
+  PyObject *p = obj.ptr();
+  PyTypeObject *type = p->ob_type;
+  for (int i = 0; i < names.size(); i++) {
+    std::cout << names[i] << std::endl;
+  }
+}
 } // namespace detail
 
 inline IValue toIValue(py::handle input) {
@@ -145,9 +156,12 @@ inline IValue toIValue(
       if (!PyTuple_Check(obj.ptr()))
         throw py::cast_error(); // note: the py::cast does not throw cast_error
                                 // because it attempts to iterate a non-tuple
+      auto tupletype = type->cast<TupleType>();
+      if (tupletype->hasNames())
+        detail::checkTupleNames(obj, tupletype->names());
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
-      const auto& elem_types = type->cast<TupleType>()->elements();
+      const auto& elem_types = tupletype->elements();
       if (elem_types.size() != tuple_size) {
         throw py::cast_error();
       }

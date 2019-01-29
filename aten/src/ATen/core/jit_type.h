@@ -587,6 +587,7 @@ struct CAFFE2_API TupleType : public Type {
       if(i > 0)
         ss << ", ";
       ss << elements()[i]->str();
+      if (hasNames() && names()[i].length() > 0) ss << " " << names()[i];
     }
     ss << ")";
     return ss.str();

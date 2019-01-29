@@ -148,6 +148,39 @@ c10::optional<std::string> parseBaseTypeName(const Expr& expr) {
   return at::nullopt;
 }
 
+// Parse NamedTuple following the grammar like below:
+// NamedTuple('Employee', [('name', str), ('id', int)])
+// See also: https://docs.python.org/3/library/typing.html#typing.NamedTuple
+TypePtr parseNamedTuple(const Expr& expr) {
+  auto apply = Apply(expr);
+  auto callee = apply.callee();
+  if (callee.kind() != TK_VAR || Var(callee).name().name() != "NamedTuple") {
+    throw ErrorReport(callee.range()) << "Unknown type expression";
+  }
+  auto inputs = apply.inputs();
+  if (inputs.size() != 2 || inputs[0].kind() != TK_STRINGLITERAL ||
+      inputs[1].kind() != TK_LIST_LITERAL)
+  {
+    throw ErrorReport(inputs.range()) << "Bad NamedTuple construct";
+  }
+  auto names_and_types = ListLiteral(inputs[1]).inputs();
+  std::vector<TypePtr> types(names_and_types.size());
+  std::vector<std::string> names(names_and_types.size());
+  int index = 0;
+  for (auto i : names_and_types) {
+    if (i.kind() != TK_TUPLE_LITERAL) {
+      throw ErrorReport(i.range()) << "Bad NamedTuple construct";
+    }
+    auto name_and_type = TupleLiteral(i).inputs();
+    if (name_and_type.size() != 2 || name_and_type[0].kind() != TK_STRINGLITERAL) {
+      throw ErrorReport(name_and_type.range()) << "Bad NamedTuple construct";
+    }
+    names[index] = StringLiteral(name_and_type[0]).text();
+    types[index++] = parseTypeFromExpr(name_and_type[1]);
+  }
+  return TupleType::create(types, names);
+}
+
 TypePtr parseTypeFromExpr(const Expr& expr) {
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
@@ -161,6 +194,8 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
           << "Unknown type constructor " << *value_name;
     }
     return subscript_to_type_fns().at(*value_name)(subscript);
+  } else if (expr.kind() == TK_APPLY) {
+    return parseNamedTuple(expr);
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = ident_to_type_lut().find(*name);
     if (itr != ident_to_type_lut().end()) {

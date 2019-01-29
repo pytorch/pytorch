@@ -18,6 +18,7 @@ from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps
+from collections import namedtuple
 import os
 import io
 import itertools
@@ -33,6 +34,7 @@ import math
 import types
 import pickle
 import copy
+import re
 
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -8261,6 +8263,58 @@ a")
             def g2(x):
                 print((x, x, x).__doc__)
                 return x
+
+    def test_namedtuple_input(self):
+        def f(x):
+            # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('a', int)]))]))
+            x_b = x.b
+            x_b_a = x_b.a
+            x_0 = x[0]
+            x_1 = x[1]
+            x_1_a = x_1.a
+            return x.a, x.b.a, x_b, x_b_a, x_0, x_1, x_1_a
+
+        T2 = namedtuple('T2', ['a'])
+        T1 = namedtuple('T1', ['a', 'b'])
+        input_ = T1(a=torch.randn(5,5), b=T2(a=25))
+        self.checkScript(f, (input_,), optimize=True)
+
+        # test that name is preserved on return
+        @torch.jit.script
+        def g1(x):
+            # type: (NamedTuple('T2', [('a', int)]))
+            return x.a
+
+        @torch.jit.script
+        def g2(x):
+            # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('a', int)]))]))
+            return g1(x.b)
+
+        self.assertEqual(g2(input_), input_.b.a)
+
+        # test that a namedtuple could be used wherever a tuple is required
+        input_ = T1(a=1, b=2)
+        def h(x):
+            # type: (Tuple[int, int])
+            return x
+        self.checkScript(h, (input_,), optimize=True)
+
+        # test that a tuple could not be used when a namedtuple is required
+        @torch.jit.script
+        def p1(x):
+            # type: (NamedTuple('T1', [('a', int), ('b', int)]))
+            return x.a, x.b
+
+        error = re.escape("expected a value of type (int a, int b) for argument 'x' but found")
+        with self.assertRaisesRegex(RuntimeError, error):
+            @torch.jit.script
+            def p2(x):
+                return p1((1, 2))
+
+        # FIXME: p1 shouldn't accept unnamed tuple
+        # error = re.escape('expected value of type (int a, int b)')
+        # with self.assertRaisesRegex(RuntimeError, error):
+        #     p1((1, 2))
 
     def test_tuple_slicing(self):
         def tuple_slice(a):
