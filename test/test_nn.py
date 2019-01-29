@@ -4240,7 +4240,7 @@ class TestNN(NNTestCase):
 
     def test_CTCLoss_typechecks(self):
         target_lengths = torch.tensor([30, 25, 20])
-        input_lengths =  torch.tensor([50, 50, 50])
+        input_lengths = torch.tensor([50, 50, 50])
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
         with self.assertRaises(RuntimeError):
