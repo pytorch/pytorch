@@ -299,19 +299,31 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
   }
-  auto return_types = fmap(schema.returns(), [&](const Argument& r) {
+
+  const auto &returns = schema.returns();
+  auto return_types = fmap(returns, [&](const Argument& r) {
     return evalTypeVariables(r.type(), type_env);
   });
-  return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
+  // Codegen does not support return of namedtuples with undefined field names.
+  // Therefore, either all or none returns has field names.
+  bool return_has_field_names = std::all_of(returns.begin(), returns.end(),
+    [&](const Argument& r) { return r.name().length() > 0; });
+  c10::OptNameList return_field_names = c10::nullopt;
+  if (return_has_field_names) {
+    return_field_names = fmap(returns, [&](const Argument& r) {
+      return r.name();
+    });
+  }
+  return MatchedSchema{std::move(positional_inputs), std::move(return_types), std::move(return_field_names)};
 }
 
 // pack outputs of a function following python rules. If there is a single value
 // return a SimpleValue, otherwise pack all the values into a Tuple.
-Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
+Value* packOutputs(Graph& g, at::ArrayRef<Value*> values, c10::OptNameList field_names) {
   if (values.size() == 1) {
     return values[0];
   }
-  return g.insertNode(g.createTuple(values))->output();
+  return g.insertNode(g.createTuple(values, std::move(field_names)))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node
@@ -332,7 +344,7 @@ static Value* emitBuiltinNode(
   // otherwise schema and dispatch are not in sync
   getOperation(n);
 
-  return packOutputs(graph, n->outputs());
+  return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }
 
 static std::string prefixLine(
