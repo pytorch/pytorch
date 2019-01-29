@@ -53,6 +53,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
+        kernel_(at::nullopt),
         state_(make_intrusive<Blob>()),
         parameters_(parse_parameters_(
             operator_def,
@@ -109,13 +110,12 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     state_->GetMutable<State>(); // initialize state if not initialized yet
-    c10::Dispatcher<OpSchemaDef>::call(
-      ArrayRef<IValue>{
-        IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...,
-        IValue(state_)
-      });
+    call_(ArrayRef<IValue>{
+      IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...,
+      IValue(state_)
+    });
   }
 
   template <
@@ -130,13 +130,12 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        // TODO Make outputs be returned, not passed in
-        ArrayRef<IValue>{
-          IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-          IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-          IValue(std::get<ParameterIndex>(parameters_))...
-        });
+    // TODO Make outputs be returned, not passed in
+    call_(ArrayRef<IValue>{
+      IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...
+    });
   }
 
   template <
@@ -152,14 +151,13 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     state_->GetMutable<State>(); // initialize state if not initialized yet
-    c10::Dispatcher<OpSchemaDef>::call(
-      // TODO Make outputs be returned, not passed in
-      ArrayRef<IValue>{
-        IValue(at::ArrayRef<at::Tensor>(array_inputs_())),
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...,
-        IValue(state_)
-      });
+    // TODO Make outputs be returned, not passed in
+    call_(ArrayRef<IValue>{
+      IValue(at::ArrayRef<at::Tensor>(array_inputs_())),
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...,
+      IValue(state_)
+    });
   }
 
   template <
@@ -174,12 +172,19 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-      ArrayRef<IValue>{
-        IValue(ivalue::TensorList(array_inputs_())),
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...
-      });
+    call_(ArrayRef<IValue>{
+      IValue(ivalue::TensorList(array_inputs_())),
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...
+    });
+  }
+
+  void call_(ArrayRef<IValue> args) {
+    if (!kernel_.has_value()) {
+      // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
+      kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(args);
+    }
+    kernel_->call(args);
   }
 
   std::vector<at::Tensor> array_inputs_() {
@@ -191,7 +196,8 @@ class C10OperatorWrapper final : public Operator<Context> {
     return result;
   }
 
-  intrusive_ptr<Blob> state_;
+  c10::optional<OpKernel> kernel_;
+  intrusive_ptr<Blob> state_; // TODO remove this, move state to OpKernel.
 
   ParameterTuple parameters_;
 };

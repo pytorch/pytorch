@@ -497,7 +497,7 @@ def Train(args):
     test_model = None
     if (args.test_data is not None):
         log.info("----- Create test net ----")
-        if use_ideep:
+        if args.use_ideep:
             test_arg_scope = {
                 'use_cudnn': False,
                 'cudnn_exhaustive_search': False,
