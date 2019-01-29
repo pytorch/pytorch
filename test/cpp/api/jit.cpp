@@ -33,3 +33,37 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   ASSERT_EQ(2, module->run_method("test_len", list).toInt());
 
 }
+
+
+TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
+  auto module = torch::jit::compile(R"JIT(
+      def nested_loop(a: List[List[Tensor]], b: int):
+        return torch.tensor(1.0) + b
+    )JIT");
+
+  auto b = 3;
+
+  std::vector<torch::Tensor> list = {torch::rand({4, 4})};
+
+  std::vector<torch::jit::IValue> list_of_lists;
+  list_of_lists.push_back(list);
+  module->run_method("nested_loop", list_of_lists, b);
+
+  std::vector<torch::jit::IValue> generic_list;
+  std::vector<torch::jit::IValue> empty_generic_list;
+  empty_generic_list.push_back(generic_list);
+  module->run_method("nested_loop", empty_generic_list, b);
+
+  std::vector<torch::jit::IValue> too_many_lists;
+  too_many_lists.push_back(empty_generic_list);
+  try {
+    module->run_method("nested_loop", too_many_lists, b);
+    AT_ASSERT(false);
+  } catch (const c10::Error& error) {
+    AT_ASSERT(
+        std::string(error.what_without_backtrace())
+            .find("Expected value of type Tensor[][] for argument 'a' in "
+                  "position 0, but instead got value of type t[][][]") == 0);
+
+  };
+}
