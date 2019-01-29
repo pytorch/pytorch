@@ -2872,6 +2872,7 @@
   name: _th_cat
   cname: catArray
   variants: [function]
+  cpu_half: True
   return: self
   arguments:
     - arg: THTensor* self
