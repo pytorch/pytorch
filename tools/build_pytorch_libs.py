@@ -41,7 +41,7 @@ def which(thefile):
 
 
 def cmake_version(cmd):
-    for line in check_output([cmd, '--version']).split('\n'):
+    for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
         if 'version' in line:
             return LooseVersion(line.strip().split(' ')[2])
     raise Exception('no version found')
@@ -185,7 +185,8 @@ def run_cmake(version,
         CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
-        USE_GFLAGS=os.getenv('USE_GFLAGS'))
+        USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        WERROR=os.getenv('WERROR'))
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
@@ -243,7 +244,10 @@ def build_caffe2(version,
                  rerun_cmake,
                  build_dir):
     build_test = not check_negative_env_flag('BUILD_TEST')
-    if rerun_cmake or not os.path.exists('build/CMakeCache.txt'):
+    cmake_cache_file = 'build/CMakeCache.txt'
+    if rerun_cmake and os.path.isfile(cmake_cache_file):
+        os.remove(cmake_cache_file)
+    if not os.path.exists(cmake_cache_file) or (USE_NINJA and not os.path.exists('build/build.ninja')):
         run_cmake(version,
                   cmake_python_library,
                   build_python,
