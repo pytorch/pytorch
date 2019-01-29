@@ -10,7 +10,7 @@ namespace ops {
 struct Add final {
   static constexpr const char* name = "add";
 
-  using Signature = at::Tensor (
+  using Signature = void (
       const at::Tensor& input1,
       const at::Tensor& input2,
       const at::Tensor& output,
