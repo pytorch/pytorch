@@ -57,42 +57,43 @@ void validateBlock(
   throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
-    IR_IF(node, PythonOp)
-    auto py_node = static_cast<torch::jit::PythonOp*>(value);
-    FAIL_EXPORT(
-        "Couldn't export Python operator " + py_node->name() +
-        "\n\nDefined at:\n" + getNodeStackTraceString(node))
-    IR_ELSE()
-    // Special error messages for certain types of operators
-    if (node->kind() == aten::expand) {
-      if (operator_export_type ==
-          onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-        WithInsertPoint guard(node);
-        auto* new_node = b->owningGraph()->insertNode(b->owningGraph()->create(
-            Symbol(::c10::onnx::ATen),
-            node->inputs(),
-            node->outputs().size()));
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-          node->output(i)->replaceAllUsesWith(new_node->output(i));
+    if (node->kind() == prim::PythonOp) {
+      auto py_node = static_cast<PythonOp*>(node);
+      FAIL_EXPORT(
+          "Couldn't export Python operator " + py_node->name() +
+          "\n\nDefined at:\n" + getNodeStackTraceString(node))
+    } else {
+      // Special error messages for certain types of operators
+      if (node->kind() == aten::expand) {
+        if (operator_export_type ==
+            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+          WithInsertPoint guard(node);
+          auto* new_node =
+              b->owningGraph()->insertNode(b->owningGraph()->create(
+                  Symbol(::c10::onnx::ATen),
+                  node->inputs(),
+                  node->outputs().size()));
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(new_node->output(i));
+          }
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
-        new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+      }
+      if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
+        FAIL_EXPORT(
+            "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
+            getNodeStackTraceString(node));
+      }
+      bool is_aten_enabled = operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+      if (!node->kind().is_onnx() && !is_aten_enabled &&
+          node->kind() != prim::Undefined) {
+        FAIL_EXPORT(
+            "Couldn't export operator " + node->kind().toDisplayString() +
+            "\n\nDefined at:\n" + getNodeStackTraceString(node));
       }
     }
-    if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
-      FAIL_EXPORT(
-          "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
-          getNodeStackTraceString(node));
-    }
-    bool is_aten_enabled = operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-        operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-    if (!node->kind().is_onnx() && !is_aten_enabled &&
-        node->kind() != prim::Undefined) {
-      FAIL_EXPORT(
-          "Couldn't export operator " + node->kind().toDisplayString() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node));
-    }
-    IR_END()
 #undef FAIL_EXPORT
   }
 }

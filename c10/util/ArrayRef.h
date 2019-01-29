@@ -18,6 +18,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 
 #include <array>
 #include <iterator>
@@ -266,5 +267,10 @@ bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
 }
 
 using IntListRef = ArrayRef<int64_t>;
+
+
+// This alias is deprecated, because the name does not make the ownership
+// semantics (non-owning) obvious at call sites.
+using IntList = ArrayRef<int64_t>;
 
 } // namespace c10

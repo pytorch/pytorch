@@ -21,7 +21,6 @@ struct ToParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::Cast,
-    void,
     C10Cast_DontUseThisOpYet,
     ToParameter)
 }

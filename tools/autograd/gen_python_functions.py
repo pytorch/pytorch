@@ -277,6 +277,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'bool': 'toBool',
         'double': 'toDouble',
         'std::string': 'string',
+        'IntListRef': 'intlist',
     }
 
     unpack_with_default_methods = {

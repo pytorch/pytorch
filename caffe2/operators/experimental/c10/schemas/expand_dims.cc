@@ -19,11 +19,8 @@ struct DimsParameter final {
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(ops::ExpandDims::State);
-
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::ExpandDims,
-    ops::ExpandDims::State,
     C10ExpandDims_DontUseThisOpYet,
     DimsParameter)
 }
