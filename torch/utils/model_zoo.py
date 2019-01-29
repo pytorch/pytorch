@@ -68,17 +68,21 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
+    file_size = None
     if requests_available:
         u = urlopen(url, stream=True)
-        file_size = int(u.headers["Content-Length"])
+        if hasattr(u.headers, "Content-Length"):
+            file_size = int(u.headers["Content-Length"])
         u = u.raw
     else:
         u = urlopen(url)
         meta = u.info()
         if hasattr(meta, 'getheaders'):
-            file_size = int(meta.getheaders("Content-Length")[0])
+            content_length = meta.getheaders("Content-Length")
         else:
-            file_size = int(meta.get_all("Content-Length")[0])
+            content_length = meta.get_all("Content-Length")
+        if content_length is not None and len(content_length) > 0:
+            file_size = int(content_length[0])
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
@@ -121,7 +125,10 @@ if tqdm is None:
                 return
 
             self.n += n
-            sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
+            if self.total is None:
+                sys.stderr.write("\r{0:.1f} bytes".format(self.n))
+            else:
+                sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
             sys.stderr.flush()
 
         def __enter__(self):
