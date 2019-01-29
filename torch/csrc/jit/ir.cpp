@@ -368,37 +368,47 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  IR_IF(this, Constant)
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Return)
-  // Return uses is zero
-  AT_ASSERT(outputs().size() == 0);
-  IR_ELSEIF(Param)
-  // Param inputs is zero
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIFM_CONST(PythonOp)
-  // Python operator cconv is correct
-  size_t n_scalars = 0, n_tensors = 0;
-  for (auto c : value->cconv) {
-    if (c == 'c') {
-      n_scalars++;
-    } else if (c == 'd') {
-      n_tensors++;
-    } else {
-      AT_ASSERT(0);
+  switch (kind()) {
+    case prim::Constant:
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::Return:
+      // Return uses is zero
+      AT_ASSERT(outputs().size() == 0);
+      break;
+    case prim::Param:
+      // Param inputs is zero
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::PythonOp: {
+      // Python operator cconv is correct
+      size_t n_scalars = 0, n_tensors = 0;
+      auto* value = static_cast<const PythonOp*>(this);
+      for (auto c : value->cconv) {
+        if (c == 'c') {
+          n_scalars++;
+        } else if (c == 'd') {
+          n_tensors++;
+        } else {
+          AT_ASSERT(0);
+        }
+        AT_ASSERT(static_cast<bool>(value->pyobj));
+      }
+      AT_ASSERT(n_scalars == value->scalar_args.size());
+      AT_ASSERT(n_tensors == inputs_.size());
+      break;
     }
-    AT_ASSERT(static_cast<bool>(value->pyobj));
+    case prim::Eval:
+      // TODO: add invariants
+      // TODO: It's not good for these ops to be top-level, it makes cases
+      // longer.
+      break;
+    case prim::FusionGroup:
+      checkSameDevice(this);
+      // TODO: Typecheck the parameters
+      g(attr::Subgraph)->lint();
+      break;
   }
-  AT_ASSERT(n_scalars == value->scalar_args.size());
-  AT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIF(Eval)
-  // TODO: add invariants
-  // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(FusionGroup)
-  checkSameDevice(value);
-  // TODO: Typecheck the parameters
-  value->g(attr::Subgraph)->lint();
-  IR_END()
 }
 
 // TODO: When lint fails, give better indication about which

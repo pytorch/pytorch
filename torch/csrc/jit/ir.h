@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -1192,49 +1191,6 @@ inline Graph* Value::owningGraph() {
 inline const Graph* Value::owningGraph() const {
   return node()->owningGraph();
 }
-
-// Helper macros for constructing switch statements over Node types
-// instead of heavy-weight visitors
-// read 'between' these defines to see how they turn into a big switch
-// statement
-
-// Mutable case
-// The IFM/ELSEIFM indicate that subclass *refinement* occurs.
-// This is only valid for node types for which we have subclasses.
-#define IR_IFM(x, Kind) GENERIC_IF(, prim::Kind, x, Kind)
-#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(, prim::Kind, Kind)
-
-#define IR_IFM_CONST(x, Kind) GENERIC_IF(const, prim::Kind, x, Kind)
-#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const, prim::Kind, Kind)
-
-#define IR_IF(x, Kind)           \
-  auto&& __match_key = x;        \
-  switch (__match_key->kind()) { \
-    case ::c10::prim::Kind: {    \
-      auto* value = __match_key; \
-      (void)value;
-#define IR_ELSEIF(Kind)        \
-  }                            \
-  break;                       \
-  case ::c10::prim::Kind: {    \
-    auto* value = __match_key; \
-    (void)value;
-
-#define IR_ELSE() GENERIC_ELSE()
-#define IR_END() GENERIC_END()
-
-/* example:
-  Node * n = ...;
-  IR_IF(n,Select)
-    cout << "Select of" << value->input() << "\n";
-  IR_ELSEIF(PythonOp)
-    cout << value->pyobj << "\n";
-  IR_ELSEIF(Add)
-    cout << "Add" << \n";
-  IR_ELSE() // optional
-    cout << "something else\n";
-  IR_END()
-*/
 
 /************* All nodes not required to be defined before Graph **************/
 
