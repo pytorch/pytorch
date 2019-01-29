@@ -1,8 +1,9 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <ATen/core/opschema/layer_norm.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include <ATen/core/dispatch/KernelRegistration.h>
 #include <c10/core/Tensor.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
 
@@ -181,6 +182,22 @@ to the end.)
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
+C10_DEFINE_OP_SCHEMA(LayerNorm, FunctionSchema(
+    "caffe2::layer_norm_dont_use_this_op_yet",
+    (std::vector<c10::Argument>{
+      c10::Argument("input"),
+      c10::Argument("axis", IntType::get()),
+      c10::Argument("epsilon", FloatType::get()),
+      c10::Argument("output", OptionalType::ofTensor(), nullopt, IValue()),
+      c10::Argument("output_mean", OptionalType::ofTensor(), nullopt, IValue()),
+      c10::Argument("output_stdev", OptionalType::ofTensor(), nullopt, IValue())
+    }), (std::vector<c10::Argument>{
+      c10::Argument("output"),
+      c10::Argument("mean"),
+      c10::Argument("stdev")
+    })
+));
+
 } // namespace caffe2
 
 
@@ -253,9 +270,10 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
 
   return;
 }
+
 }
 namespace c10 {
-C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
+C10_REGISTER_KERNEL(caffe2::LayerNorm)
     .withCache<Cache>()
     .kernel<&layer_norm_c10<float>>()
     .dispatchKey(CPUTensorId());
