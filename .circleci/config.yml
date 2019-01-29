@@ -2980,7 +2980,7 @@ workflows:
   build:
     jobs:
       # Pytorch linux builds
-      - pytorch_linux_trusty_py2_7_9_build
+      - pytorch_linux_trusty_py2_7_9_build:
           filters:
             branches:
               only:
@@ -2996,7 +2996,7 @@ workflows:
       - pytorch_linux_trusty_py2_7_test:
           requires:
             - pytorch_linux_trusty_py2_7_build
-      - pytorch_linux_trusty_py3_5_build
+      - pytorch_linux_trusty_py3_5_build:
           filters:
             branches:
               only:
@@ -3008,7 +3008,7 @@ workflows:
                 - master
           requires:
             - pytorch_linux_trusty_py3_5_build
-      - pytorch_linux_trusty_py3_6_gcc4_8_build
+      - pytorch_linux_trusty_py3_6_gcc4_8_build:
           filters:
             branches:
               only:
@@ -3020,7 +3020,7 @@ workflows:
                 - master
           requires:
             - pytorch_linux_trusty_py3_6_gcc4_8_build
-      - pytorch_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_linux_trusty_py3_6_gcc5_4_build:
           filters:
             branches:
               only:
@@ -3032,7 +3032,7 @@ workflows:
                 - master
           requires:
             - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_linux_trusty_py3_6_gcc7_build
+      - pytorch_linux_trusty_py3_6_gcc7_build:
           filters:
             branches:
               only:
