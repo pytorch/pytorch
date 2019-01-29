@@ -226,11 +226,11 @@ void BlockToONNX(
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    IR_IFM(node, PythonOp)
-    callPySymbolicMethod(value);
-    IR_ELSE()
-    callPySymbolicFunction(node);
-    IR_END()
+    if (node->kind() == prim::PythonOp) {
+      callPySymbolicMethod(static_cast<PythonOp*>(node));
+    } else {
+      callPySymbolicFunction(node);
+    }
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
