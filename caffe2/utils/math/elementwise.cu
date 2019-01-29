@@ -28,9 +28,8 @@ __global__ void AffineChannelNCHWCUDAKernel<float>(
     const float* bias,
     float* Y) {
   const int nc = blockIdx.x / K;
-  const int block = blockIdx.x % K;
   const int c = nc % C;
-  const int w = block * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  const int w = blockIdx.x % K * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (w < HxW) {
     const int index = nc * HxW + w;
 #if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
@@ -56,7 +55,8 @@ __global__ void AffineChannelNHWCCUDAKernel<float>(
     const float* scale,
     const float* bias,
     float* Y) {
-  for (int c = threadIdx.x; c < C; c += blockDim.x) {
+  const int c = blockIdx.y * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (c < C) {
     const int index = blockIdx.x * C + c;
 #if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
     Y[index] = fmaf(__ldg(X + index), __ldg(scale + c), __ldg(bias + c));
@@ -94,9 +94,12 @@ __global__ void AffineChannelNHWCCUDAKernel<float>(
       const T* bias,                                                         \
       T* Y,                                                                  \
       CUDAContext* context) {                                                \
+    const int K = DivUp(C, CAFFE_CUDA_NUM_THREADS);                          \
     AffineChannelNHWCCUDAKernel<T>                                           \
-        <<<N * HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(    \
-            C, X, scale, bias, Y);                                           \
+        <<<dim3(N* HxW, K),                                                  \
+           CAFFE_CUDA_NUM_THREADS,                                           \
+           0,                                                                \
+           context->cuda_stream()>>>(C, X, scale, bias, Y);                  \
   }
 CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float)
 #undef CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL
