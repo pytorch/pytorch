@@ -185,7 +185,8 @@ def run_cmake(version,
         CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
-        USE_GFLAGS=os.getenv('USE_GFLAGS'))
+        USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        WERROR=os.getenv('WERROR'))
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
