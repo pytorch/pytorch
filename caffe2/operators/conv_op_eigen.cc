@@ -34,14 +34,14 @@ template <typename T>
 bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(4 == filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) == C);
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
+  auto* Y = Output(0, sizes, at::dtype<T>());
   Eigen::array<int64_t, 4> kernel_shuffles
       { {int64_t(2), int64_t(3), int64_t(1), int64_t(0)} };
   Eigen::array<int64_t, 4> input_shuffles
@@ -128,14 +128,14 @@ template <typename T>
 bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto* Y = Output(0);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
   CAFFE_ENFORCE(4 == filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
   CAFFE_ENFORCE(filter.dim32(3) == C);
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
+  auto* Y = Output(0, sizes, at::dtype<T>());
   // Eigen expects filter to be of shape (kernel_h, kernel_w, C, M) for
   // optimization purposes, so we will create a temp one.
   Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic> temp_filter(
