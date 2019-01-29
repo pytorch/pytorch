@@ -64,12 +64,16 @@ declare -f -t trap_add
 trap_add cleanup EXIT
 
 function assert_git_not_dirty() {
-    git_status=$(git status --porcelain)
-    if [[ $git_status ]]; then
-        echo "Build left local git repository checkout dirty"
-        echo "git status --porcelain:"
-        echo "${git_status}"
-        exit 1
+    # TODO: we should add an option to `build_amd.py` that reverts the repo to
+    #       an unmodified state.
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+        git_status=$(git status --porcelain)
+        if [[ $git_status ]]; then
+            echo "Build left local git repository checkout dirty"
+            echo "git status --porcelain:"
+            echo "${git_status}"
+            exit 1
+        fi
     fi
 }
 
