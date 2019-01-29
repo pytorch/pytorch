@@ -9,6 +9,8 @@
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
+#include <Python.h>
+#include <structmember.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -75,14 +77,17 @@ inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
   }
 }
 
-inline void checkTupleNames(py::handle obj, const std::vector<std::string> &names) {
-  // TODO: this is not done yet
-  return;
-  // https://docs.python.org/3/c-api/object.html
-  PyObject *p = obj.ptr();
-  PyTypeObject *type = p->ob_type;
+inline void checkTupleNames(const py::tuple& tuple, const std::vector<std::string> &names) {
+  auto type = tuple.attr("__class__");
+  if (!py::hasattr(type, "_fields"))
+    throw py::cast_error();
+  auto fields = type.attr("_fields").cast<py::tuple>();
+  if (py::len(fields) != names.size())
+    throw py::cast_error();
   for (int i = 0; i < names.size(); i++) {
-    std::cout << names[i] << std::endl;
+    auto field = fields[i].cast<std::string>();
+    if (field != names[i])
+      throw py::cast_error();
   }
 }
 } // namespace detail
@@ -157,14 +162,14 @@ inline IValue toIValue(
         throw py::cast_error(); // note: the py::cast does not throw cast_error
                                 // because it attempts to iterate a non-tuple
       auto tupletype = type->cast<TupleType>();
-      if (tupletype->hasNames())
-        detail::checkTupleNames(obj, tupletype->names());
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
       const auto& elem_types = tupletype->elements();
       if (elem_types.size() != tuple_size) {
         throw py::cast_error();
       }
+      if (tupletype->hasNames())
+        detail::checkTupleNames(tuple, tupletype->names());
       std::vector<IValue> values;
       values.reserve(tuple_size);
       for (size_t i = 0; i < tuple_size; ++i) {

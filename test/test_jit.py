@@ -8276,7 +8276,7 @@ a")
 
         T2 = namedtuple('T2', ['a'])
         T1 = namedtuple('T1', ['a', 'b'])
-        input_ = T1(a=torch.randn(5,5), b=T2(a=25))
+        input_ = T1(a=torch.randn(5, 5), b=T2(a=25))
         self.checkScript(f, (input_,), optimize=True)
 
         # test that name is preserved on return
@@ -8294,6 +8294,7 @@ a")
 
         # test that a namedtuple could be used wherever a tuple is required
         input_ = T1(a=1, b=2)
+
         def h(x):
             # type: (Tuple[int, int])
             return x
@@ -8311,10 +8312,14 @@ a")
             def p2(x):
                 return p1((1, 2))
 
-        # FIXME: p1 shouldn't accept unnamed tuple
-        # error = re.escape('expected value of type (int a, int b)')
-        # with self.assertRaisesRegex(RuntimeError, error):
-        #     p1((1, 2))
+        error = re.escape('expected value of type (int a, int b)')
+        with self.assertRaisesRegex(RuntimeError, error):
+            p1((1, 2))
+
+        # test that JIT successfully reject a namedtuple with different field names
+        T3 = namedtuple('T3', ['c', 'd'])
+        with self.assertRaisesRegex(RuntimeError, error):
+            p1(T3(c=1, d=2))
 
     def test_tuple_slicing(self):
         def tuple_slice(a):
