@@ -311,7 +311,7 @@ else()
 endif()
 
 if (MSVC)
-elseif ($ENV{WERROR})
+elseif (WERROR)
   target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
 endif()
 

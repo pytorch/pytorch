@@ -31,7 +31,6 @@ using extract_type_t = typename ParameterDef::type;
 template <
     class OpSchemaDef,
     class Context,
-    class State,
     bool use_array_input,
     class ParameterDefTuple>
 class C10OperatorWrapper final : public Operator<Context> {
@@ -48,19 +47,15 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  static constexpr bool op_has_state_argument =
-      !std::is_same<void, State>::value;
-
   C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        state_(make_intrusive<Blob>()),
+        kernel_(at::nullopt),
         parameters_(parse_parameters_(
             operator_def,
             c10::guts::make_index_sequence<num_parameters()>())) {}
 
   static constexpr size_t num_inputs() {
-    return Schema::signature::num_args - num_outputs() - num_parameters() -
-        (op_has_state_argument ? 1 : 0);
+    return Schema::signature::num_args - num_outputs() - num_parameters();
   }
 
   static constexpr size_t num_parameters() {
@@ -102,20 +97,17 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
       details::true_t<InputIndex...>::value &&
-          op_has_state_argument && !use_array_input,
+          !use_array_input,
       void>
   RunOnDevice_(
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    state_->GetMutable<State>(); // initialize state if not initialized yet
-    c10::Dispatcher<OpSchemaDef>::call(
-      ArrayRef<IValue>{
-        IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...,
-        IValue(state_)
-      });
+    call_({
+      IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...,
+    });
   }
 
   template <
@@ -124,62 +116,26 @@ class C10OperatorWrapper final : public Operator<Context> {
       size_t... ParameterIndex>
   c10::guts::enable_if_t<
       details::true_t<InputIndex...>::value &&
-          !op_has_state_argument && !use_array_input,
+          use_array_input,
       void>
   RunOnDevice_(
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-        // TODO Make outputs be returned, not passed in
-        ArrayRef<IValue>{
-          IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-          IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-          IValue(std::get<ParameterIndex>(parameters_))...
-        });
+    // TODO Make outputs be returned, not passed in
+    call_(ArrayRef<IValue>{
+      IValue(ivalue::TensorList::create(array_inputs_())),
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
+      IValue(std::get<ParameterIndex>(parameters_))...,
+    });
   }
 
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value &&
-          op_has_state_argument && use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    state_->GetMutable<State>(); // initialize state if not initialized yet
-    c10::Dispatcher<OpSchemaDef>::call(
-      // TODO Make outputs be returned, not passed in
-      ArrayRef<IValue>{
-        IValue(at::ArrayRef<at::Tensor>(array_inputs_())),
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...,
-        IValue(state_)
-      });
-  }
-
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value &&
-          !op_has_state_argument && use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    c10::Dispatcher<OpSchemaDef>::call(
-      ArrayRef<IValue>{
-        IValue(ivalue::TensorList(array_inputs_())),
-        IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-        IValue(std::get<ParameterIndex>(parameters_))...
-      });
+  void call_(ArrayRef<IValue> args) {
+    if (!kernel_.has_value()) {
+      // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
+      kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(args);
+    }
+    kernel_->call(args);
   }
 
   std::vector<at::Tensor> array_inputs_() {
@@ -191,7 +147,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     return result;
   }
 
-  intrusive_ptr<Blob> state_;
+  c10::optional<OpKernel> kernel_;
 
   ParameterTuple parameters_;
 };
@@ -213,40 +169,38 @@ C10_DECLARE_REGISTRY(
 
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, State, Name) \
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, Name)        \
   C10_REGISTER_CLASS(                                                       \
       C10OperatorRegistry,                                                  \
       Name,                                                                 \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, State, false, std::tuple<>>)
+      C10OperatorWrapper<OpSchemaDef, CPUContext, false, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
-    OpSchemaDef, State, Name, ...)                                 \
+    OpSchemaDef, Name, ...)                                        \
   C10_REGISTER_CLASS(                                              \
       C10OperatorRegistry,                                         \
       Name,                                                        \
       C10OperatorWrapper<                                          \
           OpSchemaDef,                                             \
           CPUContext,                                              \
-          State,                                                   \
           false,                                                   \
           std::tuple<__VA_ARGS__>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
-    OpSchemaDef, State, Name)                                       \
+    OpSchemaDef, Name)                                              \
   C10_REGISTER_CLASS(                                               \
       C10OperatorRegistry,                                          \
       Name,                                                         \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, State, true, std::tuple<>>)
+      C10OperatorWrapper<OpSchemaDef, CPUContext, true, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
-    OpSchemaDef, State, Name, ...)                                                 \
+    OpSchemaDef, Name, ...)                                                        \
   C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \
           OpSchemaDef,                                                             \
           CPUContext,                                                              \
-          State,                                                                   \
           true,                                                                    \
           std::tuple<__VA_ARGS__>>)
 

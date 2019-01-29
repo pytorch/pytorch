@@ -28,15 +28,20 @@ import shutil
 def which(thefile):
     path = os.environ.get("PATH", os.defpath).split(os.pathsep)
     for dir in path:
-        name = os.path.join(dir, thefile)
-        if (os.path.exists(name) and os.access(name, os.F_OK | os.X_OK)
-                and not os.path.isdir(name)):
-            return name
+        fname = os.path.join(dir, thefile)
+        fnames = [fname]
+        if IS_WINDOWS:
+            exts = os.environ.get('PATHEXT', '').split(os.sep)
+            fnames += [fname + ext for ext in exts]
+        for name in fnames:
+            if (os.path.exists(name) and os.access(name, os.F_OK | os.X_OK)
+                    and not os.path.isdir(name)):
+                return name
     return None
 
 
 def cmake_version(cmd):
-    for line in check_output([cmd, '--version']).split('\n'):
+    for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
         if 'version' in line:
             return LooseVersion(line.strip().split(' ')[2])
     raise Exception('no version found')
@@ -127,9 +132,9 @@ def run_cmake(version,
 
     cmake_defines(
         cmake_args,
-        PYTHON_EXECUTABLE=sys.executable,
-        PYTHON_LIBRARY=cmake_python_library,
-        PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
+        PYTHON_EXECUTABLE=escape_path(sys.executable),
+        PYTHON_LIBRARY=escape_path(cmake_python_library),
+        PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
         BUILDING_WITH_TORCH_LIBS="ON",
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
@@ -145,7 +150,7 @@ def run_cmake(version,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
         USE_NUMPY=USE_NUMPY,
-        NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
+        NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
         NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
         NCCL_ROOT_DIR=NCCL_ROOT_DIR,
@@ -170,10 +175,11 @@ def run_cmake(version,
         THD_SO_VERSION="1",
         CMAKE_PREFIX_PATH=os.getenv('CMAKE_PREFIX_PATH') or distutils.sysconfig.get_python_lib(),
         BLAS=os.getenv('BLAS'),
-        CUDA_NVCC_EXECUTABLE=os.getenv('CUDA_NVCC_EXECUTABLE'),
+        CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
-        USE_GFLAGS=os.getenv('USE_GFLAGS'))
+        USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        WERROR=os.getenv('WERROR'))
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
@@ -184,7 +190,7 @@ def run_cmake(version,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    check_call(['printenv'])
+    pprint(os.environ)
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
@@ -194,7 +200,10 @@ def build_caffe2(version,
                  rerun_cmake,
                  build_dir):
     build_test = not check_negative_env_flag('BUILD_TEST')
-    if rerun_cmake or not os.path.exists('build/CMakeCache.txt'):
+    cmake_cache_file = 'build/CMakeCache.txt'
+    if rerun_cmake and os.path.isfile(cmake_cache_file):
+        os.remove(cmake_cache_file)
+    if not os.path.exists(cmake_cache_file) or (USE_NINJA and not os.path.exists('build/build.ninja')):
         run_cmake(version,
                   cmake_python_library,
                   build_python,
@@ -233,5 +242,13 @@ def build_caffe2(version,
 
     if build_python:
         for proto_file in glob('build/caffe2/proto/*.py'):
+            if os.path.sep != '/':
+                proto_file = proto_file.replace(os.path.sep, '/')
             if proto_file != 'build/caffe2/proto/__init__.py':
                 shutil.copyfile(proto_file, "caffe2/proto/" + os.path.basename(proto_file))
+
+
+def escape_path(path):
+    if os.path.sep != '/' and path is not None:
+        return path.replace(os.path.sep, '/')
+    return path

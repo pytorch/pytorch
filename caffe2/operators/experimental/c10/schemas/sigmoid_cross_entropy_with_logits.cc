@@ -30,7 +30,6 @@ struct UnjoinedLRLossParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::SigmoidCrossEntropyWithLogits,
-    void,
     C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet,
     ParameterHelper<LogDTrickParameter>,
     ParameterHelper<UnjoinedLRLossParameter>)

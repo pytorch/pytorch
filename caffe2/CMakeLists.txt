@@ -418,7 +418,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ Check if warnings should be errors.
-if ($ENV{WERROR})
+if (WERROR)
   target_compile_options(caffe2 PRIVATE -Werror)
   if(USE_CUDA)
     target_compile_options(caffe2_gpu PRIVATE -Werror)
