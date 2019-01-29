@@ -27,6 +27,9 @@ class TestReShapeOps(TestCase):
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False)
 
+    def test_int64_reshape_input(self):
+        _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4), arg_shape=False, shape_dtype=np.int64)
+
     def test_missing_dim(self):
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8))
         _test_reshape(old_shape=(4, 2, 1), new_shape=(-1, 8), arg_shape=False)
@@ -107,7 +110,7 @@ class TestReShapeOps(TestCase):
 
 
 def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
-                  in_place=False):
+                  in_place=False, shape_dtype=np.int32):
     devices = [core.DeviceOption(caffe2_pb2.IDEEP, 0)]
 
     for device_opt in devices:
@@ -128,7 +131,7 @@ def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
                 op = core.CreateOperator('Reshape',
                                          [blob_in, 'new_shape'],
                                          [blob_out, 'old_shape'])
-                workspace.FeedBlob('new_shape', np.asarray(new_shape, dtype=np.int32),
+                workspace.FeedBlob('new_shape', np.asarray(new_shape, dtype=shape_dtype),
                                    core.DeviceOption(caffe2_pb2.CPU, 0))
 
             workspace.FeedBlob(blob_in, X)
