@@ -101,7 +101,10 @@ def run_cmake(version,
         get_cmake_command(),
         base_dir
     ]
-    if USE_NINJA:
+    generator = os.getenv('CMAKE_GENERATOR')
+    if generator:
+        cmake_args.append('-G' + generator)
+    elif USE_NINJA:
         cmake_args.append('-GNinja')
     try:
         import numpy as np
