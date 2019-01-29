@@ -1030,6 +1030,7 @@ endif()
 if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
+  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config
   ############################################
