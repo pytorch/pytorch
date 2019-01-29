@@ -556,18 +556,21 @@ struct CAFFE2_API TupleType : public Type {
   bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const TypePtr a, const TypePtr b) {
       return *a == *b;
-    }) && compare_names(rhs);
+    }) && names_ == dynamic_cast<const TupleType &>(rhs).names_;
+    // `compare` guarantees that rhs is always a TupleType, so the
+    // dynamic_cast above always success.
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (Type::isSubtypeOf(rhs))
+  bool isSubtypeOf(const TypePtr rhs_) const override {
+    if (Type::isSubtypeOf(rhs_))
       return true;
-    if(rhs->kind() != kind())
+    auto rhs = rhs_->cast<TupleType>();
+    if (!rhs)
       return false;
     // unnamed tuple is not a subtype of nametuple
-    if (!hasNames() && rhs->cast<TupleType>()->hasNames())
+    if (!hasNames() && rhs->hasNames())
       return false;
     // namedtuple may be a subtype of unnamed tuple
-    bool names_match = !rhs->cast<TupleType>()->hasNames() || compare_names(*rhs);
+    bool names_match = !rhs->hasNames() || names() == rhs->names();
     // co-variant rules for tuples
     return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
@@ -637,24 +640,6 @@ private:
       return false;
     for(size_t i = 0; i < l_elements.size(); ++i) {
       if(!fn(l_elements[i], r_elements[i]))
-        return false;
-    }
-    return true;
-  }
-
-  bool compare_names(const Type& rhs) const {
-    if(rhs.kind() != kind())
-      return false;
-    if (!hasNames() && !rhs.cast<TupleType>()->hasNames())
-      return true;
-    if (!hasNames() || !rhs.cast<TupleType>()->hasNames())
-      return false;
-    const auto & l_names = names();
-    const auto & r_names = rhs.cast<TupleType>()->names();
-    if(l_names.size() != r_names.size())
-      return false;
-    for(size_t i = 0; i < l_names.size(); ++i) {
-      if(l_names[i] != r_names[i])
         return false;
     }
     return true;
