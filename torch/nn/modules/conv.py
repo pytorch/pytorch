@@ -471,7 +471,6 @@ class _ConvTransposeMixin(object):
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
-            output_size = torch.jit._unwrap_optional(output_size)
             k = input.dim() - 2
             if len(output_size) == k + 2:
                 output_size = output_size[2:]

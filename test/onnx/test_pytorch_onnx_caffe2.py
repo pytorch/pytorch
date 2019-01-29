@@ -589,6 +589,16 @@ class TestCaffe2Backend(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_erf(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, input):
+                return input.erf()
+        input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
     def test_trigonometry(self):
         def test_func(name):
             class MyModel(torch.nn.Module):

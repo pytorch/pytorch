@@ -448,7 +448,7 @@ class JitTestCase(TestCase):
                 vs = vs[:-drop]
             # we don't want all the grad for all the outputs to be the same
             # so we multiply each by a constant
-            return sum([math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None])
+            return sum(math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None)
         if input_tensors is None:
             input_tensors = reference_tensors
 
@@ -647,6 +647,21 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m2(input))
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
+
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_shared_storage_on_cuda(self):
+        whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
+        m = torch.jit.ScriptModule()
+        m.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
+        m.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+        m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertTrue(m2.p0.is_cuda)
+        self.assertTrue(m2.b0.is_cuda)
+        self.assertTrue(m2.p0.is_shared())
+        self.assertTrue(m2.b0.is_shared())
+        self.assertEqual(m2.b0.storage().data_ptr(), m2.p0.storage().data_ptr())
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -1138,7 +1153,7 @@ class TestJit(JitTestCase):
             float(z)  # Warning 4.
             z.tolist()  # Warning 5.
             z.numpy()  # Warning 6.
-            for elem in torch.ones(4, 4):  # Warning 7.
+            for _ in torch.ones(4, 4):  # Warning 7.
                 pass
             return z + 4
 
@@ -1719,11 +1734,25 @@ class TestJit(JitTestCase):
         graph_str = str(constant_prop.graph)
         self.assertTrue(graph_str.count("prim::None") == 0)
 
+    def test_constant_prop_if_inline(self):
+        @torch.jit.script
+        def constant_prop():
+            cond = True
+            a = 1
+            if cond:
+                a = 1 * 2
+            else:
+                a = 1 // 0
+            return a
+
+        # testing that 1 // 0 error is not thrownn
+        self.run_pass('constant_propagation', constant_prop.graph)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
             quick_brown_fox = torch.neg(baz)
-            for i in range(20):
+            for _ in range(20):
                 yeet = quick_brown_fox - 3.14
             return yeet
 
@@ -1759,16 +1788,49 @@ class TestJit(JitTestCase):
 
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
-        def constant_prop():
+        def constant_prop(cond, iter):
+            # type: (bool, int) -> int
             b = 0
             while True:
-                b = 1
+                print("stays")
+            for _ in range(2):
+                print("stays")
+            for _ in range(iter):
+                print("stays")
+            while cond:
+                print("stays")
             while False:
-                b = 2
+                print("removed")
+            for _i in range(0):
+                print("removed")
+            for _i in range(-4):
+                print("removed")
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = canonical(constant_prop.graph)
+        self.assertTrue(graph.count("removed") == 0)
+        self.assertTrue(graph.count("stays") == 1)  # constant gets pooled
+        self.assertTrue(graph.count("prim::Print") == 4)
+
+    def test_constant_prop_remove_output(self):
+        @torch.jit.script
+        def constant_prop(iter):
+            # type: (int) -> None
+            a = 1
+            b = 1
+            c = 1
+            for i in range(iter):
+                if False:
+                    a = 10
+                if i == 5:
+                    b = 2
+                    c = 3
+            print(a, b, c)
+
+        graph = constant_prop.graph
+        self.run_pass('constant_propagation', graph)
+        self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
     def test_trace_detach(self):
         def foo(x, w):
@@ -2857,7 +2919,7 @@ class TestScript(JitTestCase):
 
         def bar():
             a = torch.jit.annotate(List[int], [])
-            for i in range(10):
+            for _ in range(10):
                 a.append(4)
             return a
 
@@ -3366,45 +3428,45 @@ a")
         inp = consec((4, 8, 5))
         to_check = [
             # [[0, 2], [1, 3]]
-            ['[i, j]', dict(i=[0, 2], j=[1, 3])],
+            ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
             # [[0, 2], [1, 3], [1, 1]]
-            ['[i, j, k]', dict(i=[0, 2], j=[1, 3], k=[1, 1])],
+            ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
             # [[0, 2], 1, [1, 1]]
-            ['[i, j, k]', dict(i=[0, 2], j=1, k=[1, 1])],
+            ['[i, j, k]', {'i': [0, 2], 'j': 1, 'k': [1, 1]}],
             # [:, :, [0, 3, 4]]
-            ['[:, :, i]', dict(i=[0, 3, 4])],
+            ['[:, :, i]', {'i': [0, 3, 4]}],
             # [:, [2, 4, 5, 7], 2:4]
-            ['[:, i, 2:4]', dict(i=[0, 2, 3])],
+            ['[:, i, 2:4]', {'i': [0, 2, 3]}],
             # [[2, 3], :, :]
-            ['[i, :, :]', dict(i=[2, 3])],
+            ['[i, :, :]', {'i': [2, 3]}],
             # [:, [0, 2, 3], [1, 3, 4]]
-            ['[:, i, j]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            ['[:, i, j]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
             # [:, [0], [1, 2, 4]]
-            ['[:, i, j]', dict(i=[0], j=[1, 2, 4])],
+            ['[:, i, j]', {'i': [0], 'j': [1, 2, 4]}],
             # [:, [0, 1, 3], [4]]
-            ['[:, i, j]', dict(i=[0, 1, 3], j=[4])],
+            ['[:, i, j]', {'i': [0, 1, 3], 'j': [4]}],
             # [:, [[0, 1], [1, 0]], [[2, 3]]]
-            ['[:, i, j]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            ['[:, i, j]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
             # [:, [[0, 1], [2, 3]], [[0]]]
-            ['[:, i, j]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            ['[:, i, j]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
             # [:, [[5, 6]], [[0, 3], [4, 4]]]
-            ['[:, i, j]', dict(i=[[5, 6]], j=[[0, 3], [4, 4]])],
+            ['[:, i, j]', {'i': [[5, 6]], 'j': [[0, 3], [4, 4]]}],
             # [[0, 2, 3], [1, 3, 4], :]
-            ['[i, j, :]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            ['[i, j, :]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
             # [0, [1, 2, 4], :]
-            ['[i, j, :]', dict(i=0, j=[1, 2, 4])],
+            ['[i, j, :]', {'i': 0, 'j': [1, 2, 4]}],
             # [[0, 1, 3], 4, :]
-            ['[i, j, :]', dict(i=[0, 1, 3], j=4)],
+            ['[i, j, :]', {'i': [0, 1, 3], 'j': 4}],
             # [[[0, 1], [1, 0]], [[2, 1], [3, 5]], :]
-            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 1], [3, 5]])],
+            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 1], [3, 5]]}],
             # [[[0, 1], [1, 0]], [[2, 3]], :]
-            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
             # [[[0, 1], [2, 3]], [[0]], :]
-            ['[i, j, :]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            ['[i, j, :]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
             # [[[2, 1]], [[0, 3], [4, 4]], :]
-            ['[i, j, :]', dict(i=[[2, 1]], j=[[0, 3], [4, 4]])],
+            ['[i, j, :]', {'i': [[2, 1]], 'j': [[0, 3], [4, 4]]}],
             # [[[2]], [[0, 3], [4, 1]], 0:2]
-            ['[i, j, 0:2]', dict(i=[[2]], j=[[0, 3], [4, 1]])],
+            ['[i, j, 0:2]', {'i': [[2]], 'j': [[0, 3], [4, 1]]}],
         ]
 
         for expr, argdict in to_check:
@@ -3838,7 +3900,7 @@ a")
     def test_mutable_list_function_inline(self):
         @torch.jit.script
         def bar(y):
-            # type: (List[int])
+            # type: (List[int]) -> None
             y.append(4)
 
         @torch.jit.script
@@ -4122,6 +4184,107 @@ a")
                     b = b + 1
                 return a + b
             ''')
+
+    def test_optional_refinement(self):
+        @torch.jit.script
+        def test_if_none_assignment(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                x = 1
+            return x + 1
+
+        self.assertEqual(test_if_none_assignment(1), 2)
+
+        @torch.jit.script
+        def test_ternary(x):
+            # type: (Optional[int]) -> int
+            x = x if x is not None else 2
+            return x
+
+        @torch.jit.script
+        def test_not_none(x):
+            # type: (Optional[int]) -> None
+            if x is not None:
+                print(x + 1)
+
+        @torch.jit.script
+        def test_and(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if x is not None and y is not None:
+                print(x + y)
+
+        @torch.jit.script
+        def test_not(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if not (x is not None and y is not None):
+                pass
+            else:
+                print(x + y)
+
+        @torch.jit.script
+        def test_bool_expression(x):
+            # type: (Optional[int]) -> None
+            if x is not None and x < 2:
+                print(x + 1)
+
+        @torch.jit.script
+        def test_nested_bool_expression(x, y):
+            # type: (Optional[int], Optional[int]) -> int
+            if x is not None and x < 2 and y is not None:
+                x = x + y
+            else:
+                x = 5
+            return x + 2
+
+        @torch.jit.script
+        def test_or(x, y):
+            # type: (Optional[int], Optional[int]) -> None
+            if y is None or x is None:
+                pass
+            else:
+                print(x + y)
+
+        # backwards compatibility
+        @torch.jit.script
+        def test_manual_unwrap_opt(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                x = 1
+            else:
+                x = torch.jit._unwrap_optional(x)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def or_error(x, y):
+                # type: (Optional[int], Optional[int]) -> int
+                if x is None or y is None:
+                    print(x + y)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def and_error(x, y):
+                # type: (Optional[int], Optional[int]) -> int
+                if x is None and y is None:
+                    pass
+                else:
+                    print(x + y)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def named_var(x):
+                # type: (Optional[int]) -> None
+                x_none = x is not None
+                if x_none:
+                    print(x + 1)
+
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def named_var_and(x, y):
+                # type: (Optional[int], Optional[int]) -> None
+                x_none = x is not None
+                if y is not None and x_none:
+                    print(x + y)
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
@@ -5017,7 +5180,7 @@ a")
 
                     @torch.jit.script_method
                     def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]
                         return self.cell(x, hiddens)
             else:
 
@@ -5028,7 +5191,7 @@ a")
 
                     @torch.jit.script_method
                     def forward(self, x, hiddens):
-                        # type: (torch.Tensor, torch.Tensor)
+                        # type: (torch.Tensor, torch.Tensor) -> torch.Tensor
                         return self.cell(x, hiddens)
 
             cell = ScriptWrapper(cell)
@@ -5953,10 +6116,12 @@ a")
                 # type: (BroadcastingListx[int]) -> List[int]
                 return x
 
+        # TODO: the type comment in this seems to trip up flake8 for some reason
+        # even though we have a noqa comment. Figure out why
         with self.assertRaisesRegex(RuntimeError, "Unknown type constructor"):
             @torch.jit.script
             def nested(x, y):
-                # type: (int, Tuple[int, int[2]]) -> List[int]
+                # type: (int, Tuple[int, int[2]]) -> List[int] # noqa: T484
                 return x
 
     def test_ntuple_builtins(self):
@@ -5980,10 +6145,10 @@ a")
 
         @torch.jit.script
         def embedding_norm_script(input, embedding_matrix, max_norm):
-            # type: (Tensor, Tensor, float)
+            # type: (Tensor, Tensor, float) -> None
             F.embedding(input, embedding_matrix, max_norm=0.01)
 
-        for fun in [embedding_norm, embedding_norm_script]:
+        for _ in [embedding_norm, embedding_norm_script]:
             input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
             embedding_matrix = torch.randn(10, 3)
 
@@ -6522,6 +6687,19 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    def test_trace_nested_datatypes(self):
+        @torch.jit.script
+        def foo(x):
+            return [[x + 1, x - 1], [x + 2, x - 2]]
+
+        def bar(x):
+            list_stuff = foo(x)
+            return list_stuff[0][0], list_stuff[1][1]
+
+        traced = torch.jit.trace(bar, torch.rand(3, 4))
+        x = torch.rand(5, 6)
+        self.assertEqual(bar(x), traced(x))
 
     @suppress_warnings
     def test_onnx_export_func_with_warnings(self):
@@ -7151,7 +7329,7 @@ a")
     def test_loop_unrolling_const(self):
         def fn():
             y = 0
-            for i in range(10):
+            for _ in range(10):
                 y += 1
             return y
 
@@ -7173,7 +7351,7 @@ a")
     def test_loop_unrolling_nested(self):
         def fn(x):
             y = 0
-            for i in range(10):
+            for _ in range(10):
                 for j in range(int(x)):
                     y += j
             return y
@@ -7186,7 +7364,7 @@ a")
     def test_loop_unroll_unused_counter(self):
         def fn(x):
             y = 0
-            for i in range(int(x)):
+            for _ in range(int(x)):
                 y += 1
             return y
 
@@ -7197,7 +7375,7 @@ a")
     def test_loop_unroll_negative(self):
         def fn(x):
             y = 0
-            for i in range(int(x)):
+            for _ in range(int(x)):
                 y += 1
             return y
 
@@ -7226,7 +7404,7 @@ a")
             class ReassignSelfLHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
-                    for i in range(20):
+                    for _ in range(20):
                         self = x
                     return self
 
@@ -7238,7 +7416,7 @@ a")
             class ReassignSelfRHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
-                    for i in range(20):
+                    for _ in range(20):
                         x = self
                     return self
 
@@ -7277,7 +7455,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
             @torch.jit.script
             def range_no_arg(x):
-                for i in range():
+                for _ in range():
                     x += 1
                 return x
 
@@ -9402,10 +9580,52 @@ a")
         with self.assertRaisesRegex(RuntimeError, "from a loop"):
             @torch.jit.script
             def nest_for_ret(x):
-                for i in range(3):
+                for _ in range(3):
                     if bool(x < 3):
                         return 4
                 return 5
+
+    def test_overloading(self):
+        @torch._jit_internal.weak_module
+        class W(torch.nn.Module):
+            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
+
+            def __init__(self):
+                super(W, self).__init__()
+
+            @torch._jit_internal.weak_script_method
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            def forward(self, x):
+                # manually do argument switching
+                if isinstance(x, tuple):
+                    return self.forward_tuple(x)
+                else:
+                    return self.forward_tensor(x)
+
+            @torch._jit_internal.weak_script_method
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x) + self.weak((x, x))
+
+        s = S()
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20 + 5 + x)
+
+        w = W()
+        self.assertEqual(w((x, x)), x + 5)
+        self.assertEqual(w((x)), x + 20)
 
     def test_select_after_chunk(self):
         def foo(x):
@@ -9426,6 +9646,17 @@ a")
             return python_list_op(lst)
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
+    def test_view_write(self):
+        def fn(x, y):
+            l = []
+            l.append(x)
+            x_view = l[0]
+            a = x + x
+            x_view.add_(y)
+            b = x + x
+            return a == b
+        self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
 
 
 class MnistNet(nn.Module):
@@ -10242,9 +10473,9 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     def allSum(vs):
         if isinstance(vs, torch.Tensor):
             vs = (vs,)
-        return sum([(i + 1) * v.sum()
-                    for i, v in enumerate(vs)
-                    if v is not None and v.dtype.is_floating_point])
+        return sum((i + 1) * v.sum()
+                   for i, v in enumerate(vs)
+                   if v is not None and v.dtype.is_floating_point)
 
     def clone_inputs(requires_grad):
         inputs = [
@@ -11488,27 +11719,27 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 # additional modules test
 # TODO: delete this list once we make all nn_tests work
 additional_module_tests = [
-    dict(
-        module_name='Bilinear',
-        constructor_args=(S, S, M),
-        input_size=(S, S),
-        extra_args=((S, S),)
-    ),
-    dict(
-        module_name='RNNCell',
-        constructor_args=(S, S),
-        input_size=(S, S),
-    ),
-    dict(
-        module_name='LSTMCell',
-        constructor_args=(S, S),
-        input_size=(S, S),
-    ),
-    dict(
-        module_name='GRUCell',
-        constructor_args=(S, S),
-        input_size=(S, S),
-    ),
+    {
+        'module_name': 'Bilinear',
+        'constructor_args': (S, S, M),
+        'input_size': (S, S),
+        'extra_args': ((S, S),)
+    },
+    {
+        'module_name': 'RNNCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
+    {
+        'module_name': 'LSTMCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
+    {
+        'module_name': 'GRUCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
 ]
 
 
@@ -11677,7 +11908,7 @@ def add_nn_module_test(*args, **kwargs):
     module_name = name.split("_")[0]
 
     module = getattr(torch.nn, module_name, None)
-    if module is None or torch._jit_internal._weak_types.get(module) is None:
+    if module is None or torch._jit_internal.weak_types.get(module) is None:
         return
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
@@ -11960,7 +12191,7 @@ class TestAsync(JitTestCase):
                 super(Traced, self).__init__()
 
             def forward(self, x):
-                return tuple([torch.neg(x), x])
+                return (torch.neg(x), x)
 
         class Module(torch.jit.ScriptModule):
             def __init__(self):
@@ -12005,7 +12236,7 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=3, consider_subgraphs=True)
 
         y = torch.neg(x)
-        self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
+        self.assertEqual(module(x), (y, y, y, y, x, x))
 
     def test_async_script_error(self):
         x = torch.rand(3, 4)
@@ -12038,6 +12269,113 @@ class TestAsync(JitTestCase):
         x = torch.rand(3, 4, 5)
         with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
             wait_script_nest(x)
+
+    def test_async_grad_guard_with_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.enable_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, True)
+        self.assertEqual(after_wait, True)
+
+    def test_async_grad_guard_no_grad(self):
+        @torch.jit.script
+        def foo(x):
+            y = x * 2
+            return y.requires_grad
+
+        @torch.jit.script
+        def bar(x):
+            fut = torch.jit._fork(foo, x)
+            requires_grad_in_fork = torch.jit._wait(fut)
+            z = x * 2
+            return (requires_grad_in_fork, z.requires_grad)
+
+        x = torch.randn(3, requires_grad=True)
+
+        with torch.no_grad():
+            (inside_fork, after_wait) = bar(x)
+
+        self.assertEqual(inside_fork, False)
+        self.assertEqual(after_wait, False)
+
+    def test_trace_fork_wait(self):
+        def fork_body(x):
+            return x.neg(), x.neg() + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            vals = torch.jit._wait(fut)
+            return vals[0], vals[1], x - 1
+
+        traced = torch.jit.trace(fn, (torch.rand(3, 4),))
+        x = torch.rand(3, 4)
+        self.assertEqual(fn(x), traced(x))
+
+        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=1)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
+
+    def test_trace_fork_wait_leaking(self):
+        my_list = []
+
+        def fork_body(x):
+            my_list.append(x + 1)
+            return x + 1
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            val = torch.jit._wait(fut)
+            return my_list[0]
+
+        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; '
+                                                  'this probably indicates your program cannot be understood '
+                                                  'by the tracer.'):
+            traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
+
+    def test_trace_fork_wait_inline(self):
+        def fork_body(x):
+            return x + 1, x + 2
+
+        def fn(x):
+            fut = torch.jit._fork(fork_body, x)
+            val = torch.jit._wait(fut)
+            return val[1]
+
+        traced = torch.jit.trace(fn, (torch.rand(3, 4),))
+        torch._C._jit_pass_inline_fork_wait(traced.graph)
+        torch._C._jit_pass_dce(traced.graph)
+        self.assertGraphContainsExactly(traced.graph, kind='prim::fork', num_kind_nodes=0)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
+        self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
+
+    def test_trace_fork_wait_inline_onnx(self):
+        def fork_body(x):
+            return torch.neg(x), torch.neg(x)
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                fut = torch.jit._fork(fork_body, x)
+                val = torch.jit._wait(fut)
+                return val[1]
+
+        # smoke test for ONNX export
+        f = io.BytesIO()
+        torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

@@ -63,6 +63,9 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -735,12 +738,20 @@ def brute_pdist(inp, p=2):
     k = n * (n - 1) // 2
     if k == 0:
         # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
     square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
     unroll = square.view(square.shape[:-2] + (n * n,))
     inds = torch.ones(k, dtype=torch.int)
     inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
     return unroll[..., inds.cumsum(0)]
+
+
+def brute_cdist(x, y, p=2):
+    r1 = x.shape[-2]
+    r2 = y.shape[-2]
+    if r1 == 0 or r2 == 0:
+        return torch.empty(r1, r2, device=x.device)
+    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -810,6 +821,7 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
+    'test_conv_double_backward',
     'test_conv_double_backward_groups',
     'test_Conv3d_dilated',
     'test_Conv3d_stride_padding',

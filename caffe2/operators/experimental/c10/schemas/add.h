@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 #include "caffe2/core/context_base.h"
 
@@ -11,9 +11,9 @@ struct Add final {
   static constexpr const char* name = "add";
 
   using Signature = void(
-      const C10Tensor& input1,
-      const C10Tensor& input2,
-      const C10Tensor& output,
+      const at::Tensor& input1,
+      const at::Tensor& input2,
+      const at::Tensor& output,
       bool legacy_broadcast,
       int axis);
 

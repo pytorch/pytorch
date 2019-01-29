@@ -123,7 +123,7 @@ void testMPSCNN() {
               for (auto i = 0; i < N; ++i) {
                 const auto& t1 = ws.GetBlob(cpu(i))->Get<TensorCPU>();
                 const auto& t2 = ws.GetBlob(y_cpu(i))->Get<TensorCPU>();
-                CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                 for (auto i = 0; i < t1.size(); ++i) {
                   // FP16 <-> FP32 round trip.
                   CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
@@ -269,7 +269,7 @@ void testMPSCNN() {
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -385,7 +385,7 @@ void testMPSCNN() {
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -462,7 +462,7 @@ void testMPSCNN() {
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -555,7 +555,7 @@ void testMPSCNN() {
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -643,7 +643,7 @@ void testMPSCNN() {
                   std::vector<int64_t>{int64_t(batchSize), int64_t(COut)});
               // Note dims do not match, as Metal leaves a 1x1 spatial
               // dimension.
-              CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+              CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
 
               for (auto i = 0; i < t1.size(); ++i) {
                 // FP16 <-> FP32 round trip, accumulation, etc.
@@ -758,7 +758,7 @@ void testMPSCNN() {
                           const auto& t1 =
                               ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                           for (auto i = 0; i < t1.size(); ++i) {
                             // FP16 <-> FP32 round trip, accumulation, etc.
                             const float t1_i = t1.data<float>()[i];
@@ -844,7 +844,7 @@ void testMPSCNN() {
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -927,7 +927,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -986,7 +986,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
@@ -1045,7 +1045,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
@@ -1161,7 +1161,7 @@ void testMPSCNN() {
                       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                       for (auto i = 0; i < t1.size(); ++i) {
                         // FP16 <-> FP32 round trip, accumulation, etc.
                         const float t1_i = t1.data<float>()[i];
@@ -1259,7 +1259,7 @@ void testMPSCNN() {
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -1373,7 +1373,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1476,7 +1476,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1584,7 +1584,7 @@ void testMPSCNN() {
               const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
               const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-              CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+              CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
               for (auto i = 0; i < t1.size(); ++i) {
                 // FP16 <-> FP32 round trip, accumulation, etc.
                 const float t1_i = t1.data<float>()[i];
@@ -1708,7 +1708,7 @@ void testMPSCNN() {
                 const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                 const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                 for (auto i = 0; i < t1.size(); ++i) {
                   // FP16 <-> FP32 round trip, accumulation, etc.
                   const float t1_i = t1.data<float>()[i];
@@ -1779,7 +1779,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1844,7 +1844,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1909,7 +1909,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1998,7 +1998,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -2052,7 +2052,7 @@ void testMPSCNN() {
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -2117,8 +2117,8 @@ void testMPSCNN() {
     ws.RunNetOnce(netdef);
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-    LOG(INFO) << t1.dims();
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+    LOG(INFO) << t1.sizes();
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -2231,8 +2231,8 @@ void testMPSCNN() {
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-            LOG(INFO) << t1.dims();
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+            LOG(INFO) << t1.sizes();
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -2343,8 +2343,8 @@ void testMPSCNN() {
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-        LOG(INFO) << t1.dims();
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+        LOG(INFO) << t1.sizes();
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -2422,8 +2422,8 @@ void testMPSCNN() {
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-            LOG(INFO) << t1.dims();
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+            LOG(INFO) << t1.sizes();
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -2628,8 +2628,8 @@ void testMPSCNN() {
       ws.RunNetOnce(netdef);
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-      LOG(INFO) << t1.dims();
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+      LOG(INFO) << t1.sizes();
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -2769,8 +2769,8 @@ void testMPSCNN() {
                                 ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                             const auto& t1 =
                                 ws.GetBlob("Y_ref")->Get<TensorCPU>();
-                            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-                            LOG(INFO) << t1.dims();
+                            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+                            LOG(INFO) << t1.sizes();
                             for (auto i = 0; i < t1.size(); ++i) {
                               // FP16 <-> FP32 round trip, accumulation, etc.
                               const float t1_i = t1.data<float>()[i];
@@ -2869,8 +2869,8 @@ void testMPSCNN() {
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-          LOG(INFO) << t1.dims();
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+          LOG(INFO) << t1.sizes();
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -2938,7 +2938,7 @@ void testMPSCNN() {
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -3024,8 +3024,8 @@ void testMPSCNN() {
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-          LOG(INFO) << t1.dims();
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+          LOG(INFO) << t1.sizes();
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -3365,7 +3365,7 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     {
       const auto& mt = mws.GetBlob(name)->Get<TensorCPU>();
       const auto& ct = cws.GetBlob(name)->Get<TensorCPU>();
-      CHECK_EQ(mt.dims(), ct.dims());
+      CHECK_EQ(mt.sizes(), ct.sizes());
       for (auto j = 0; j < mt.size(); ++j) {
         if (mt.IsType<float>()) {
           if (j < 10) {
@@ -3422,13 +3422,13 @@ void verifyRewrite(
   for (auto i = 0; i < predictNet.external_output_size(); i++) {
     auto blobName = predictNet.external_output(i);
     LOG(INFO) << "Checking output blob:" << blobName;
-    const auto& mt = mws.GetBlob(blobName)->Get<TensorCPU>();
-    const auto& ct = cws.GetBlob(blobName)->Get<TensorCPU>();
+    const auto& mt = mws.GetBlob(blobName)->Get<Tensor>();
+    const auto& ct = cws.GetBlob(blobName)->Get<Tensor>();
     if (mt.size() == 0 || ct.size() == 0) {
       LOG(INFO) << "One of the operator failed.";
       return;
     }
-    // CHECK_EQ(mt.dims(), ct.dims());
+    // CHECK_EQ(mt.sizes(), ct.sizes());
     for (auto j = 0; j < fmin(mt.size(), ct.size()); ++j) {
       if (mt.IsType<float>()) {
         if (j < 10) {

@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_
 
+#include <c10/util/Optional.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/conversions.h"
@@ -104,15 +105,22 @@ class FullyConnectedOp final : public Operator<Context> {
         &context_,
         math_type);
     // Add bias term
-    if (bias_multiplier_.numel() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(M);
+    if (!bias_multiplier_.has_value()) {
+      bias_multiplier_ = caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
       math::Set<T_B, Context>(
           M,
           convert::To<float, T_B>(1),
-          bias_multiplier_.template mutable_data<T_B>(),
+          bias_multiplier_->template mutable_data<T_B>(),
+          &context_);
+    } else if (bias_multiplier_->numel() != M) {
+      bias_multiplier_->Resize(M);
+      math::Set<T_B, Context>(
+          M,
+          convert::To<float, T_B>(1),
+          bias_multiplier_->template mutable_data<T_B>(),
           &context_);
     }
+
     math::Gemm<T_B, Context, Engine>(
         CblasNoTrans,
         CblasNoTrans,
@@ -120,7 +128,7 @@ class FullyConnectedOp final : public Operator<Context> {
         N,
         1,
         1,
-        bias_multiplier_.template data<T_B>(),
+        bias_multiplier_->template data<T_B>(),
         b.template data<T_B>(),
         1,
         Y->template mutable_data<T_Y>(),
@@ -144,7 +152,7 @@ class FullyConnectedOp final : public Operator<Context> {
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
   vector<int64_t> Y_shape_cache_;
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  c10::optional<Tensor> bias_multiplier_;
 
   bool float16_compute_;
 };
@@ -250,14 +258,19 @@ class FullyConnectedGradientOp : public Operator<Context> {
         dW->template mutable_data<T_DW>(),
         &context_,
         math_type);
-    if (bias_multiplier_.numel() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it
-      // with one.
-      bias_multiplier_.Resize(M);
+    if (!bias_multiplier_.has_value()) {
+      bias_multiplier_ = caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
       math::Set<T_B, Context>(
           M,
           convert::To<float, T_B>(1),
-          bias_multiplier_.template mutable_data<T_B>(),
+          bias_multiplier_->template mutable_data<T_B>(),
+          &context_);
+    } else if (bias_multiplier_->numel() != M) {
+      bias_multiplier_->Resize(M);
+      math::Set<T_B, Context>(
+          M,
+          convert::To<float, T_B>(1),
+          bias_multiplier_->template mutable_data<T_B>(),
           &context_);
     }
     // Compute dB
@@ -267,7 +280,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
         N,
         1,
         dY.template data<T_DY>(),
-        bias_multiplier_.template data<T_B>(),
+        bias_multiplier_->template data<T_B>(),
         0,
         db->template mutable_data<T_DB>(),
         &context_);
@@ -307,7 +320,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
  protected:
   size_t axis_{1};
   size_t axis_w_{1};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  c10::optional<Tensor> bias_multiplier_;
   bool float16_compute_;
 };
 
