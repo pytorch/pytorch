@@ -36,4 +36,4 @@ private:
   C10_EXPORT const c10::OperatorHandle& Name() {                                \
     static ::c10::detail::OpSchemaRegistrar registrar(Schema);                  \
     return registrar.opHandle();                                                \
-  }                                                                             \
+  }
