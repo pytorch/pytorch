@@ -123,12 +123,12 @@ def sum(input, dim=None, dtype=None):
         tensor([-2.6596, -1.1450])
     """
     if dtype is None:
-        if dim:
+        if dim is not None:
             return torch._sparse_sum(input, dim)
         else:
             return torch._sparse_sum(input)
     else:
-        if dim:
+        if dim is not None:
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
