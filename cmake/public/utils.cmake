@@ -202,7 +202,7 @@ function(torch_compile_options libname)
     -Wno-unused-parameter
     -Wno-unknown-warning-option
     -Wno-unknown-pragmas)
-  if ($ENV{WERROR})
+  if (WERROR)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
 endfunction()
