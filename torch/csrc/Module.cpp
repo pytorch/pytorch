@@ -1,3 +1,4 @@
+
 #include <torch/csrc/python_headers.h>
 #include <sys/types.h>
 
@@ -147,16 +148,19 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
 
 static PyObject * THPModule_getNumThreads(PyObject *module)
 {
-  return PyLong_FromLong(THGetNumThreads());
+  HANDLE_TH_ERRORS
+  return PyLong_FromLong(at::get_num_threads());
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-  THSetNumThreads((int)THPUtils_unpackLong(arg));
   at::set_num_threads((int)THPUtils_unpackLong(arg));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
@@ -533,7 +537,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
-  THInferNumThreads();
+  (void) at::globalContext();  // Initialization
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
@@ -634,7 +638,7 @@ PyObject* initModule() {
 
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
-  at::init();
+  (void) at::globalContext();
 
   py::reinterpret_borrow<py::module>(module).def("_demangle", &c10::demangle);
 

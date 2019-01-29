@@ -224,56 +224,12 @@ double THExpm1(const double x)
   return expm1(x);
 }
 
-void THSetNumThreads(int num_threads)
-{
-#ifdef _OPENMP
-  omp_set_num_threads(num_threads);
-#endif
-#ifdef TH_BLAS_MKL
-  mkl_set_num_threads(num_threads);
-
-  // because PyTorch uses OpenMP outside of MKL invocations
-  // as well, we want this flag to be false, so that
-  // threads aren't destroyed and recreated across every
-  // MKL / non-MKL boundary of OpenMP usage
-  // See https://github.com/pytorch/pytorch/issues/13757
-  mkl_set_dynamic(false);
-#endif
-#if !defined(_OPENMP) && !defined(TH_BLAS_MKL)
-  if (num_threads != 1)
-    THError("PyTorch is compiled with neither OpenMP nor MKL. Setting the "
-            "number of threads used to a value other than 1 is not allowed.");
-#endif
-}
-
-int THGetNumThreads(void)
-{
-#if defined(_OPENMP)
-  return omp_get_max_threads();
-#elif defined(TH_BLAS_MKL)
-  return mkl_get_max_threads();
-#else
-  return 1;
-#endif
-}
-
 int THGetNumCores(void)
 {
 #ifdef _OPENMP
   return omp_get_num_procs();
 #else
   return 1;
-#endif
-}
-
-TH_API void THInferNumThreads(void)
-{
-#if defined(_OPENMP) && defined(TH_BLAS_MKL)
-  // If we are using MKL an OpenMP make sure the number of threads match.
-  // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
-  // size of the OpenMP thread pool, resulting in worse performance (and memory
-  // leaks in GCC 5.4)
-  omp_set_num_threads(mkl_get_max_threads());
 #endif
 }
 

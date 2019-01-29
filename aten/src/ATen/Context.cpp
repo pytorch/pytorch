@@ -10,6 +10,7 @@
 #include <string>
 #include <stdexcept>
 
+#include <ATen/CPUGeneral.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/RegisterCPU.h>
 #include <ATen/Tensor.h>
@@ -46,6 +47,7 @@ Context::Context()
 // destructor of an object with static lifetime.
 Context & globalContext() {
   static Context globalContext_;
+  at::init_num_threads_for_this_thread();
   return globalContext_;
 }
 

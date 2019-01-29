@@ -206,7 +206,6 @@ Engine::~Engine() = default;
 // TODO: Engine is not written in a way that it can deal with anything that's
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
-  THInferNumThreads();
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually

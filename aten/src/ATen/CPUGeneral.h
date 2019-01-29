@@ -7,6 +7,7 @@
 #include <ATen/core/ATenGeneral.h>
 
 namespace at {
+CAFFE2_API void init_num_threads_for_this_thread();
 CAFFE2_API void set_num_threads(int);
 CAFFE2_API int get_num_threads();
 }

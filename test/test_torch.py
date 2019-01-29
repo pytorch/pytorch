@@ -15,19 +15,21 @@ import pickle
 import gzip
 import types
 import re
+import threading
+import time
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
-from torch._six import inf, nan, string_classes, istuple
+from torch._six import inf, nan, string_classes, istuple, queue
 from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
-    TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
+    TEST_LIBROSA, TEST_PSUTIL, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, JOIN_TIMEOUT
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -42,6 +44,9 @@ if TEST_SCIPY:
 
 if TEST_LIBROSA:
     import librosa
+
+if TEST_PSUTIL:
+    import psutil
 
 SIZE = 100
 
@@ -94,6 +99,189 @@ class BytesIOContext(io.BytesIO):
 
     def __exit__(self, *args):
         pass
+
+
+def _run_with_num_threads(parent_setup_event, child_setup_event, stop_event,
+                          num_threads, fn, *args):
+    torch.set_num_threads(num_threads)
+    child_setup_event.set()
+    parent_setup_event.wait()
+    while not stop_event.is_set():
+        fn(*args)
+
+# gets the (approximate) max num threads used in `duration` seconds
+def _psutil_get_max_num_threads(psutil_p, duration=3):
+    t0 = time.time()
+    num_threads = psutil_p.num_threads()
+    while time.time() - t0 < duration:
+        time.sleep(0.2)
+        num_threads = max(num_threads, psutil_p.num_threads())
+    return num_threads
+
+# send a signal over `heartbeat_q` after each test
+def _test_num_threads_global_setting(heartbeat_q):
+    this_p = psutil.Process()
+
+    heartbeat_q.put(1)
+
+    # main thread + mp.Queue putting thread
+    BASE_NUM_THREAD = 2
+
+    assert this_p.num_threads() == BASE_NUM_THREAD
+
+    stop_event = threading.Event()
+    q = queue.Queue()
+
+    def get_num_threads(q):
+        q.put(torch.get_num_threads())
+
+    num_threads = torch.get_num_threads()
+
+    # initial value in new thread should be correct
+    t = threading.Thread(target=get_num_threads, args=(q,))
+    t.start()
+    t.join()
+    assert q.get() == num_threads
+
+    heartbeat_q.put(1)
+
+    # setting in main thread should affect child thread
+    num_threads += 1
+    torch.set_num_threads(num_threads)
+    t = threading.Thread(target=get_num_threads, args=(q,))
+    t.start()
+    t.join()
+    assert q.get() == num_threads
+
+    heartbeat_q.put(1)
+
+    # setting in main thread should affect child thread even after child starts
+    def get_num_threads_after(parent_setup_event, child_setup_event, q):
+        child_setup_event.set()
+        parent_setup_event.wait()
+        q.put(torch.get_num_threads())
+
+    parent_setup_event = threading.Event()
+    child_setup_event = threading.Event()
+    t = threading.Thread(target=get_num_threads_after, args=(parent_setup_event, child_setup_event, q))
+    t.start()
+
+    child_setup_event.wait()
+    num_threads = 2
+    torch.set_num_threads(num_threads)
+    parent_setup_event.set()
+    t.join()
+    assert q.get() == num_threads
+
+    heartbeat_q.put(1)
+
+    # Next we will change the setting and test that it is actually reflected in
+    # a separate running thread.
+    # We will use values: num_threads -> num_threads + 2 -> num_threads + 4
+
+    x = torch.empty(num_threads + 4, 64, 50, 50)
+    running_mean = torch.empty(64)
+    running_var = torch.empty(64)
+
+    def run_load(done_event):
+        while not done_event.is_set():
+            torch.nn.functional.batch_norm(x, running_mean, running_var)
+
+    done_event = threading.Event()
+
+    t = threading.Thread(target=run_load, args=(done_event,))
+    t.start()
+
+    ret = _psutil_get_max_num_threads(this_p)
+    assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads+BASE_NUM_THREAD)
+    heartbeat_q.put(1)
+
+    # set in main thread
+    num_threads += 2
+    torch.set_num_threads(num_threads)
+    ret = _psutil_get_max_num_threads(this_p)
+    assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads+BASE_NUM_THREAD)
+    # assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
+    heartbeat_q.put(1)
+
+    # set in another thread
+    def set_num_threads(val):
+        torch.set_num_threads(val)
+
+    num_threads += 2
+    _t = threading.Thread(target=set_num_threads, args=(num_threads,))
+    _t.start()
+    _t.join()
+    assert torch.get_num_thread() == num_threads
+    assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
+    heartbeat_q.put(1)
+
+    done_event.set()
+    t.join()
+
+    assert this_p.num_threads() == BASE_NUM_THREAD
+
+
+class TestCPUNumThreads(TestCase):
+    @unittest.skipIf(not TEST_PSUTIL, "psutil not found")
+    @unittest.skipIf(not torch.backends.openmp.is_available(),
+                     "This test relies on OpenMP multithreading of CPU batch_norm operator.")
+    def test_num_threads(self):
+        test_settings = (1, 3, 5)
+
+        x = torch.empty(max(test_settings) * 2, 3, 50, 50)
+        g = torch.empty(max(test_settings) * 2, 50, 50, 2)
+
+        for num_threads in test_settings:
+            parent_setup_event = mp.Event()
+            child_setup_event = mp.Event()
+            stop_event = mp.Event()
+
+            # use CPU 2d grid_sampler, which we know is parallelized.
+            p = mp.Process(target=_run_with_num_threads,
+                           args=(parent_setup_event, child_setup_event,
+                                 stop_event, num_threads,
+                                 torch.nn.functional.grid_sample,
+                                 x[:(num_threads * 2)], g[:(num_threads * 2)]))
+
+            try:
+                p.start()
+                psutil_p = psutil.Process(p.pid)
+                child_setup_event.wait(JOIN_TIMEOUT)
+                self.assertTrue(child_setup_event.is_set(), "Child process set up timed out")
+                parent_setup_event.set()
+
+                num_threads_used = _psutil_get_max_num_threads(psutil_p)
+                self.assertEqual(num_threads_used, num_threads,
+                                 "Expect to use {} threads, but only detected {}".format(num_threads, num_threads_used))
+
+                stop_event.set()
+                p.join(timeout=JOIN_TIMEOUT)
+            finally:
+                if p.is_alive():
+                    p.terminate()
+
+    @unittest.skipIf(not TEST_PSUTIL, "psutil not found")
+    @unittest.skipIf(not torch.backends.openmp.is_available(),
+                     "This test relies on OpenMP multithreading of CPU batch_norm operator.")
+    def test_global_setting(self):
+        heartbeat_q = mp.Queue()
+        p = mp.Process(target=_test_num_threads_global_setting, args=(heartbeat_q,))
+        try:
+            p.start()
+            while True:
+                try:
+                    heartbeat_q.get(timeout=JOIN_TIMEOUT)
+                    print('got')
+                except queue.Empty:
+                    p.join(timeout=0)
+                    if p.is_alive():
+                        self.fail("test_global_setting: process failed to run subtest within given time")
+                    self.assertEqual(p.exitcode, 0, "test_global_setting: some test failed")
+                    break
+        finally:
+            if p.is_alive():
+                p.terminate()
 
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to

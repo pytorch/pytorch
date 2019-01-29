@@ -66,6 +66,9 @@ IS_PPC = platform.machine() == "ppc64le"
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
 
+# Join timeout for multiprocessing and multithreading tests
+JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
+
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -95,6 +98,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
+TEST_PSUTIL = _check_module_exists('psutil')
 
 # On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
 # see librosa/librosa#729.

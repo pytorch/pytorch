@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/CPUGeneral.h>
 #include <ATen/Type.h>
 #include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
+#include <ATen/CPUGeneral.h>
 #include <ATen/LegacyTHDispatch.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/ATenGeneral.h>
@@ -156,16 +156,6 @@ private:
 };
 
 CAFFE2_API Context& globalContext();
-
-static inline void init() {
-  globalContext();
-  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-}
 
 static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
   return globalContext().getNonVariableType(p, s);

@@ -16,15 +16,13 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
-                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests)
+from common_utils import (TestCase, run_tests, TEST_NUMPY, TEST_PSUTIL,
+                          IS_WINDOWS, IS_PPC, IS_PYTORCH_CI, MP_JOIN_TIMEOUT
+                          NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests)
 
-try:
+if TEST_PSUTIL:
     import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
+else:
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
     if IS_PYTORCH_CI:
@@ -47,9 +45,6 @@ if not NO_MULTIPROCESSING_SPAWN:
     # Get a multiprocessing context because some test / third party library will
     # set start_method when imported, and setting again triggers RuntimeError.
     mp = mp.get_context(method='spawn')
-
-
-JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -693,7 +688,7 @@ class TestDataLoader(TestCase):
                 self.assertFalse(pin_memory_thread.is_alive())
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skipIf(not TEST_PSUTIL, "psutil not found")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
