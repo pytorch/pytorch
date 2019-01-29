@@ -165,23 +165,20 @@ TypePtr attemptToRecoverType(const IValue& input_ivalue) {
 }
 
 // Checks if input_ivalue is a subvalue of type.
-// Only examines the first element of generic containers
 bool isSubvalueOf(const IValue& input_ivalue, TypePtr type) {
   auto ivalue = input_ivalue;
-  while (ivalue.isGenericList()) {
+  if (ivalue.isGenericList()) {
     auto list_type = type->cast<ListType>();
     if (!list_type) {
       return false;
     }
     auto& ivalue_list = ivalue.toGenericListRef();
-    if (ivalue_list.size() == 0) {
-      return true;
-    }
-    type = list_type->getElementType();
-    ivalue = ivalue_list[0];
+    auto element_type = list_type->getElementType();
+    return std::all_of(ivalue_list.begin(), ivalue_list.end(), [&](const IValue& list_elem) {
+      return isSubvalueOf(list_elem, element_type);
+    });
   }
-  const TypePtr base_type = incompleteInferTypeFrom(ivalue);
-  return base_type->isSubtypeOf(type);
+  return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
 

@@ -66,4 +66,26 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
                   "position 0, but instead got value of type t[][][]") == 0);
 
   };
+
+  std::vector<torch::jit::IValue> gen_list;
+  std::vector<int64_t> int_list = {1, 2, 3};
+
+  gen_list.emplace_back(list);
+  gen_list.emplace_back(int_list);
+
+  try {
+    module->run_method("nested_loop", gen_list, b);
+    AT_ASSERT(false);
+  } catch (const c10::Error& error) {
+    //TODO: currently does not unify types across encounted generic lists,
+    //so the error message is not helpful here.
+    AT_ASSERT(
+        std::string(error.what_without_backtrace())
+            .find("Expected value of type Tensor[][] for argument 'a' in "
+                  "position 0, but instead got value of type Tensor[][]") == 0);
+
+  };
+
+
+
 }
