@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
@@ -117,7 +117,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      JIT_ASSERT(kind == 0);
+      AT_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -489,7 +489,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    JIT_ASSERT(file);
+    AT_ASSERT(file);
     if (!shared.match(
             *file,
             pos,

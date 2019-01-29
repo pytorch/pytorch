@@ -31,7 +31,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     const auto value = pr.first;
     const auto& aliasInfo = pr.second;
     // We don't support composite types yet
-    JIT_ASSERT(aliasInfo.containedTypes().size() == 0);
+    AT_ASSERT(aliasInfo.containedTypes().size() == 0);
     for (const auto aliasSet : aliasInfo.sets()) {
       aliasToValue_[aliasSet].insert(value);
     }
@@ -67,7 +67,7 @@ bool AliasDb::writesTo(Node* n, const Value* v) const {
   }
 
   const auto& aliasInfo = valueToAlias_.at(v);
-  JIT_ASSERT(aliasInfo.sets().size() > 0);
+  AT_ASSERT(aliasInfo.sets().size() > 0);
   // We only need to check one alias set, since if this value belongs to
   // multiple alias sets they are all written to
   const auto& aliasSet = *aliasInfo.sets().begin();
@@ -288,7 +288,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       }
       addAlias(input, tupleTypeAliases.at(tupleType));
     } else {
-      JIT_ASSERT(!shouldAnnotate(input));
+      AT_ASSERT(!shouldAnnotate(input));
     }
   }
 
@@ -388,10 +388,10 @@ void AliasDb::analyze(Node* node) {
     }
 
     // We don't support composite types for alias analysis yet.
-    JIT_ASSERT(formal->containedTypes().size() == 0);
+    AT_ASSERT(formal->containedTypes().size() == 0);
     // TODO neither unions nor wildcards make sense on an input. We should
     // disallow them in function schema
-    JIT_ASSERT(!formal->isWildcard())
+    AT_ASSERT(!formal->isWildcard())
     const auto& formalAlias = formal->set();
 
     // skip if we've already bound this alias
@@ -428,19 +428,36 @@ void AliasDb::analyze(Node* node) {
     }
 
     // We don't support composite types for alias analysis yet.
-    JIT_ASSERT(formal->containedTypes().size() == 0);
+    AT_ASSERT(formal->containedTypes().size() == 0);
 
-    const auto& formalAlias = formal->set();
-    auto outputAlias = formalToActual.at(formalAlias);
+    for (const auto& formalAlias : formal->sets()) {
+      // If we encounter an alias annotation that wasn't in the inputs:
+      if (!formalToActual.count(formalAlias)) {
+        // If this alias is not seen elsewhere and is the only annotation on
+        // the output, it's equivalent to being fresh:
+        //   e.g. foo(Tensor(a) self) -> Tensor(b)
+        if (formal->sets().size() == 1) {
+          giveFreshAlias(actual);
+        }
+        // Or it is the form of a|fresh, which we can ignore, taking the
+        // conservative assumption that the output must alias `a`, e.g
+        //   aten::cuda(Tensor(a) self) -> Tensor(a|fresh)
 
-    // Record writes
-    for (const auto& alias : outputAlias.sets()) {
-      if (formal->isWrite()) {
-        aliasToWrites_[alias].insert(node);
+        // Don't assign an alias set in that case.
+        continue;
       }
-    }
 
-    addAlias(actual, outputAlias);
+      auto outputAlias = formalToActual.at(formalAlias);
+
+      // Record writes
+      for (const auto& alias : outputAlias.sets()) {
+        if (formal->isWrite()) {
+          aliasToWrites_[alias].insert(node);
+        }
+      }
+
+      addAlias(actual, outputAlias);
+    }
   }
   // Keep the wildcard index up to date.
   if (hasWildcardImpl(node)) {
@@ -472,8 +489,8 @@ void AliasDb::analyzeLoop(Node* node) {
   const auto loopCarriedInputs = node->inputs().slice(2); // skip max, cond
   const auto blockInputs = bodyBlock->inputs().slice(1); // skip trip
   const auto blockOutputs = bodyBlock->outputs().slice(1); // skip trip
-  JIT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
-  JIT_ASSERT(blockOutputs.size() == node->outputs().size());
+  AT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
+  AT_ASSERT(blockOutputs.size() == node->outputs().size());
 
   // Run alias analysis on the loop body, iterating until the block output
   // alias info converges.
@@ -496,7 +513,7 @@ void AliasDb::analyzeLoop(Node* node) {
 
       // Check whether or not this would change anything
       if (valueToAlias_.count(input) != 0) {
-        JIT_ASSERT(valueToAlias_.count(output) != 0)
+        AT_ASSERT(valueToAlias_.count(output) != 0)
         if (!valueToAlias_[output].isSubsetOf(valueToAlias_[input])) {
           notConverged = true;
         }
@@ -519,7 +536,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
   // TODO(suo): the subgraph outputs and node outputs are NOT NECESSARILY the
   // same length. Autodifferentiation maybe capture additional outputs in the
   // subgraph block.
-  JIT_ASSERT(subgraphBlock->outputs().size() >= node->outputs().size());
+  AT_ASSERT(subgraphBlock->outputs().size() >= node->outputs().size());
   for (size_t i = 0; i < node->outputs().size(); i++) {
     addAlias(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
@@ -605,14 +622,14 @@ void AliasDb::addAlias(const Value* value, Symbol alias) {
 // Union the alias info of `value` with `from`
 void AliasDb::addAlias(const Value* value, const Value* from) {
   if (!shouldAnnotate(value)) {
-    JIT_ASSERT(!shouldAnnotate(from));
+    AT_ASSERT(!shouldAnnotate(from));
     return;
   }
   addAlias(value, valueToAlias_.at(from));
 }
 
 void AliasDb::mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from) {
-  JIT_ASSERT(to.size() == from.size());
+  AT_ASSERT(to.size() == from.size());
   for (size_t i = 0; i < to.size(); i++) {
     addAlias(to[i], from[i]);
   }
@@ -792,7 +809,7 @@ class AliasDb::WorkingSet {
   // outside), then return nullptr. Since we can only reorder nodes within a
   // block, `target` would be irrelevant.
   static Node* findSameBlock(Node* target, Node* n) {
-    JIT_ASSERT(target->owningGraph() == n->owningGraph());
+    AT_ASSERT(target->owningGraph() == n->owningGraph());
     if (target->owningBlock() == n->owningBlock()) {
       return target;
     } else {
@@ -833,7 +850,7 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  JIT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
   if (toMove == movePoint) {
     return true;
   }
@@ -897,7 +914,7 @@ bool AliasDb::tryMove(
   }
 
   // 3. Execute the move
-  JIT_ASSERT(curNode == movePoint);
+  AT_ASSERT(curNode == movePoint);
   if (splitToMoveAndDeps) {
     // Move `toMove`
     move(toMove, movePoint, moveSide);
@@ -977,7 +994,7 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
     }
     lhs = subgraphToOwner_.at(lhs->owningGraph());
   }
-  JIT_ASSERT(false);
+  AT_ASSERT(false);
 }
 } // namespace jit
 } // namespace torch
