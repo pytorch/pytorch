@@ -516,13 +516,13 @@ template <typename T_X, typename T_W, typename T_B, typename T_Y>
 bool CudnnConvOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto* Y = Output(0);
 
   // Figure out the output shape
   CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
   const int M = filter.dim32(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, M);
+  auto output_sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, M);
+  auto* Y = Output(0, output_sizes, at::dtype<T_Y>());
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
   int group_offset_X = 0, group_offset_Y = 0;
 
