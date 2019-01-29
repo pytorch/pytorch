@@ -18,7 +18,7 @@ struct ExpandDims final {
       const at::Tensor& output,
       ArrayRef<int64_t> dims);
 
-  static constexpr size_t num_output_parameters() {return 1;}
+  static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 3> parameter_names() {
     return {"input", "output", "dims"};

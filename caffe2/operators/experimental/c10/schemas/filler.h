@@ -36,7 +36,7 @@ struct GivenTensorFill final {
        "values"};
    }
 
-   static constexpr size_t num_output_parameters() {return 1;}
+   static constexpr size_t num_outputs() {return 1;}
 };
 
 struct ConstantFill final {
@@ -51,7 +51,7 @@ struct ConstantFill final {
       int64_t dtype,
       Scalar value);
 
-  static constexpr size_t num_output_parameters() {return 1;}
+  static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 7> parameter_names() {
     return
@@ -82,7 +82,7 @@ struct UniformFill final {
       double min,
       double max);
 
-  static constexpr size_t num_output_parameters() {return 1;}
+  static constexpr size_t num_outputs() {return 1;}
 
   static constexpr c10::guts::array<const char*, 7> parameter_names() {
     return

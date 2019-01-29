@@ -56,21 +56,21 @@ class C10OperatorWrapper final : public Operator<Context> {
             c10::guts::make_index_sequence<num_parameters()>())) {}
 
   static constexpr size_t num_inputs() {
-    return Schema::signature::num_args - num_output_parameters() - num_parameters();
+    return Schema::signature::num_args - num_outputs() - num_parameters();
   }
 
   static constexpr size_t num_parameters() {
     return std::tuple_size<ParameterDefTuple>::value;
   }
 
-  static constexpr size_t num_output_parameters() {
-    return Schema::signature::num_output_parameters;
+  static constexpr size_t num_outputs() {
+    return Schema::signature::num_outputs;
   }
 
   bool RunOnDevice() override {
     RunOnDevice_(
         c10::guts::make_index_sequence<num_inputs()>(),
-        c10::guts::make_index_sequence<num_output_parameters()>(),
+        c10::guts::make_index_sequence<num_outputs()>(),
         c10::guts::make_index_sequence<num_parameters()>());
     return true;
   }

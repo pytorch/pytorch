@@ -15,7 +15,7 @@ struct SchemaDef final {
   static constexpr guts::array<const char*, 6> parameter_names() {
     return {"1", "2", "3", "4", "5", "6"};
   }
-  static constexpr size_t num_output_parameters() {return 0;}
+  static constexpr size_t num_outputs() {return 0;}
 };
 static_assert(6 == OpSchema<SchemaDef>::signature::num_args, "");
 static_assert(std::is_same<bool, typename OpSchema<SchemaDef>::signature::return_type>::value, "");
