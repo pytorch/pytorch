@@ -56,19 +56,6 @@ def default_collate(batch):
             numel = sum([x.numel() for x in batch])
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage)
-        # TODO: remove once CPU half tensors support stack
-        if elem.dtype == torch.float16:
-            out_shape = torch.Size([len(batch)] + list(elem.size()))
-            if out is None:
-                out = elem.new_empty(out_shape)
-            else:
-                strides = [1]
-                for s in out_shape[1::-1]:
-                    strides.insert(0, strides[0] * s)
-                out = out.set_(out.storage, out_shape, strides)
-            for src, dst in zip(batch, out):
-                dst.copy_(src)
-            return out
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
