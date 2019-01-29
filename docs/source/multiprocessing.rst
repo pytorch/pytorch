@@ -27,7 +27,13 @@ a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
 Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
-Let's see a simple example explaining how this works:
+Unlike CPU tensors, the sending process is required to keep the original tensor
+as long as the receiving process retains a copy of the tensor.
+This shouldn't be a problem for sharing model parameters (which stay live
+for the entire execution of the model), but passing other
+kinds of data should be done with care.
+
+Here is an example program which handles these requirements correctly:
 
 ::
     import torch
@@ -58,30 +64,20 @@ Let's see a simple example explaining how this works:
 
         p.join()
 
-CUDA API requires that the allocation exported to other processes remains
-valid as long as it's used by them. In the example above, calling `e.wait()`
+In the example above, calling `e.wait()`
 on sender side ensures tensor `s_sample` doesn't get deleted while
-receiver is working on it.
+receiver is working on it.  The receiver signals when it is done
+with the tensor using `e.set()`, being careful to `del` its reference
+to the received tensor first.  It is INSUFFICIENT to promise never to call
+`r_sample` again; while `r_sample` is live, it may be confused with
+any subsequent tensors allocated by the source process at the same address.
 
-This shouldn't be a problem for sharing model parameters, but passing other
-kinds of data should be done with care. Note that this restriction doesn't
-apply to shared CPU memory.
-
-Once sender calls `e.wait()`, receiver can do whatever it wants to `r_sample`.
-`r_sample` points to exactly the same CUDA storage as `s_sample` using CUDA
-IPC sharing. All operations to `r_sample` should be done before calling
-`del r_sample;e.set()`, which indicates receiver will NEVER touch this memory
-any more.
-
-Note that once receiver is done working on `r_sample`, calling `del r_sample`
-is REQUIRED. Keeping `r_sample` alive while sender could reallocate a new
-tensor `s_sample_new` on where `r_sample` points to is dangerous. When sharing
-`s_sample_new`, receiver can find this memory in its cache, and it has no way
-to discover this storage is a completely new one. And this could potentially
-result in unexpected behavior.
-
-If receiver wants to save the data of `r_sample` for future use, it has to
+If a receiver wants to save the data of `r_sample` for future use while
+letting the source process deallocate the original, it must
 `clone()` it.
+
+This behavior is very confusing, and we are tracking a fix for it
+at https://github.com/pytorch/pytorch/issues/16141
 
 Sharing strategies
 ------------------
