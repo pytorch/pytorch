@@ -280,7 +280,7 @@ RegisterOperators reg({
         }),
     // reference function parse_to_conversion in python_arg_parsing.h
     Operator(
-        "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool non_blocking;
@@ -298,7 +298,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool non_blocking;
@@ -315,7 +315,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor self;
@@ -389,7 +389,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::cpu(Tensor(a) self) -> Tensor(a)",
+        "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -399,7 +399,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::cuda(Tensor(a) self) -> Tensor(a)",
+        "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
