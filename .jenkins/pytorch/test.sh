@@ -165,7 +165,7 @@ test_custom_script_ops() {
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
-    cp -r "$CUSTOM_OP_BUILD" build
+    cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
     python model.py --export-script-module=model.pt
