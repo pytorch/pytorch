@@ -30,7 +30,6 @@ struct AddAxisParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::Concat,
-    void,
     C10Concat_DontUseThisOpYet,
     ParameterHelper<AxisParameter>,
     ParameterHelper<AddAxisParameter>)

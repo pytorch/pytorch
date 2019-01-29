@@ -43,8 +43,6 @@ RegisterOperators reg({
         Tensor c10_output_mean(at::empty({0}, input.device()));
         Tensor c10_output_stdev(at::empty({0}, input.device()));
 
-        c10::intrusive_ptr<caffe2::Blob> cache = c10::make_intrusive<caffe2::Blob>();
-        cache->GetMutable<c10::core::opschema::LayerNorm::Cache>(); // initialize cache
         // TODO remove std::array for args here, instead pass through inputs directly as ArrayRef
         std::array<c10::IValue, 7> args{
           IValue(torch::autograd::Variable(std::move(input)).data()),
@@ -52,8 +50,7 @@ RegisterOperators reg({
           IValue(c10_output_mean),
           IValue(c10_output_stdev),
           axis,
-          epsilon,
-          IValue(cache)
+          epsilon
         };
         c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(args).call(args);
         push(stack,
