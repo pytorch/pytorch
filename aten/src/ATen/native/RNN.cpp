@@ -614,6 +614,11 @@ std::tuple<Tensor, Tensor> NAME(                                               \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
+  if (at::mkldnn_is_acceptable(_input)                                         \
+      && (!train || (train && _input.size(2) == hx.size(2) && !bidirectional))) { \
+    return at::NAME##_mkldnn_stub(_input, hx, _params, has_biases,             \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+  }                                                                            \
   check_device(_input, _params, hx);					\
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
@@ -664,6 +669,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
+  }
+  if (at::mkldnn_is_acceptable(_input)
+      && (!train || (train && _input.size(2) == hx[0].size(2) && !bidirectional))) {
+    // Disable MKLDNN RNN for training when input_size != hidden_size and bidirectional
+    // since workspace offset is miss calculated on such cases
+    // This issue has been fixed on https://github.com/intel/mkl-dnn since commit d5c4eb5e
+    // TODO: remove these limitations once mkl-dnn is upgraded
+    return at::lstm_mkldnn_stub(_input, hx, _params, has_biases, num_layers,
+        dropout_p, train, bidirectional, batch_first);
   }
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
