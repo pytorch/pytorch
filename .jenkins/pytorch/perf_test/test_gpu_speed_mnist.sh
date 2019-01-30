@@ -12,7 +12,7 @@ test_gpu_speed_mnist () {
 
   cd examples/mnist
 
-  pip install -q -r requirements.txt
+  pip install -r requirements.txt
 
   # Download data
   python main.py --epochs 0
