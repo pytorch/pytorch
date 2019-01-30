@@ -10978,13 +10978,12 @@ class TestFuser(JitTestCase):
             rbx = torch.min(b1x2, b2x2)
             rby = torch.min(b1y2, b2y2)
 
-            TO_REMOVE = 1
-            w = (rbx - ltx + TO_REMOVE).clamp(min=0, max=float('inf'))  # [N,M]
-            h = (rby - lty + TO_REMOVE).clamp(min=0, max=float('inf'))  # [N,M]
+            w = (rbx - ltx).clamp(min=0, max=float('inf'))  # [N,M]
+            h = (rby - lty).clamp(min=0, max=float('inf'))  # [N,M]
             inter = w * h  # [N,M]
 
-            area1 = (b1x2 - b1x1 + TO_REMOVE) * (b1y2 - b1y2 + TO_REMOVE)  # [N,1]
-            area2 = (b2x2 - b2x1 + TO_REMOVE) * (b2y2 - b2y2 + TO_REMOVE)  # [1,M]
+            area1 = (b1x2 - b1x1) * (b1y2 - b1y2)  # [N,1]
+            area2 = (b2x2 - b2x1) * (b2y2 - b2y2)  # [1,M]
             iou = inter / (area1 + area2 - inter)
             return iou
 

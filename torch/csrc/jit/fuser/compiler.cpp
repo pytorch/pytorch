@@ -188,7 +188,8 @@ void processGradSumToSize(KernelSpec& spec) {
     if (node->kind() != aten::_grad_sum_to_size) {
       continue;
     }
-    bool success = trackSingleGradSumToSizeToOutputs(node->output(), &outputGradSumToSizes);
+    bool success = trackSingleGradSumToSizeToOutputs(
+        node->output(), &outputGradSumToSizes);
     AT_ASSERT(success); // check that we didn't hit anything unknown
 
     // remove the GradSumToSize node, a new node outside the fusion graph

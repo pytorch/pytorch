@@ -12,7 +12,7 @@ TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
-    c10::optional<std::vector<int64_t>*> outputGradSumToSizes);
+    std::vector<int64_t>* outputGradSumToSizes);
 
 } // namespace jit
 } // namespace torch

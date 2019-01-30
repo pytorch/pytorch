@@ -14,8 +14,8 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
-#include <unordered_map>
 #include <queue>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -197,10 +197,11 @@ struct GraphFuser {
     if (node->owningBlock() != block_)
       return false;
     if (node->kind() == aten::_grad_sum_to_size) {
-      // only fuse _grad_sum_to_size if
-      // - we will fuse its input next
+      // We only fuse _grad_sum_to_size if
+      // - we will fuse its input next (checked here)
       // - we can commute the _grad_sum_to_size with everything
-      //   along the computation graph until we reach the outputs
+      //   along the computation graph until we reach the outputs,
+      //   but this is checked later
       return isFusable(node->inputs()[0]->node());
     }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
@@ -473,18 +474,19 @@ struct GraphFuser {
       return at::nullopt;
     }
     if (producer->node()->kind() == aten::_grad_sum_to_size &&
-	consumer->kind() == prim::FusionGroup) {
+        consumer->kind() == prim::FusionGroup) {
       // check that we will be able to move the _grad_sum_to_size to be fused
       // to the end of the fusion group in the fusion compiler
       // the difficulty here is that the producer is not part of the fusion
       // group yet
-      for (auto &u : producer->uses()) {
-	if (u.user == consumer) {
-	  auto subgraph = &getSubgraph(consumer);
-	  if (! trackSingleGradSumToSizeToOutputs(subgraph->inputs().at(u.offset), c10::nullopt)) {
-	    return at::nullopt;
-	  }
-	}
+      for (auto& u : producer->uses()) {
+        if (u.user == consumer) {
+          auto subgraph = &getSubgraph(consumer);
+          if (!trackSingleGradSumToSizeToOutputs(
+                  subgraph->inputs().at(u.offset), nullptr)) {
+            return at::nullopt;
+          }
+        }
       }
     }
 
@@ -1252,13 +1254,16 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 // This takes a _grad_sum_to_size output and tracks it to the return
 // statements that depend on it, checking that it only hits nodes
 // that commute with _grad_sum_to_size on its path.
-// If a vector pointer outputGradSumToSizes is passed, the sizes
+// If a non-nullptr vector pointer outputGradSumToSizes is passed, the sizes
 // will be recorded as target sizes for the outputs as applicable.
 // In the graph_fuser pass we only need to check that we can go to the
 // outputs while in the fuser's compiler we want to record the sizes.
+// Note: This will only record a new sum_to_size if there is not one
+// already. As we want the last grad_sum_to_size, you need to call
+// it in reverse order when recording and removing outputs.
 bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
-    c10::optional<std::vector<int64_t>*> outputGradSumToSizes) {
+    std::vector<int64_t>* outputGradSumToSizes) {
   static OperatorSet commutes_with_SumToSize{{
       "aten::mul(Tensor self, Tensor other) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
@@ -1301,16 +1306,17 @@ bool trackSingleGradSumToSizeToOutputs(
       // _grad_sumtosizes "in parallel" (from auto-diff added AutogradAdd as the
       // backward of using an input in multiple places) they are the same. This
       // is because AutogradAdd does not broadcast.
-      if (outputGradSumToSizes && (**outputGradSumToSizes)[offset] == -1) {
+      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset] == -1) {
         // note: we make the assumption that the sizes are inputs to the
         // fusion group (rather than something calculated).
-        (**outputGradSumToSizes)[offset] = gradSumToSizeOutput->node()->inputs()[1]->offset();
+        (*outputGradSumToSizes)[offset] =
+            gradSumToSizeOutput->node()->inputs()[1]->offset();
       }
     } else if (user->kind() == aten::_grad_sum_to_size) {
       // do nothing
       // this case only happens in the graph_fuser step because in the
-      // compile stap because we iterate backwards and delete
-      // all _grad_sum__to_size nodes we see
+      // compile step because we iterate backwards and delete
+      // all _grad_sum_to_size nodes we see
     } else {
       // we find something we do not support. Note that this notably includes
       // prim::FusedConcat, which we do not know how to deal with in conjunction
