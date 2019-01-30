@@ -8,6 +8,7 @@ from ._torch_docs import parse_kwargs
 def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
+
 new_common_args = parse_kwargs("""
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
@@ -2770,6 +2771,18 @@ Example::
     >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
     >>> z.size()
     torch.Size([2, 8])
+
+    >>> a=torch.randn((1,2,3,4))
+    >>> a.shape
+    torch.Size([1, 2, 3, 4])
+    >>> b = a.transpose(1,2)  # Swaps 2nd and 3rd dimension
+    >>> b.shape
+    torch.Size([1, 3, 2, 4])
+    >>> c = a.view((1, 3, 2, 4))  # Does not change tensor layout in memory
+    >>> c.shape
+    torch.Size([1, 3, 2, 4])
+    >>> bool((b == c).all())
+    False
 
 """)
 
