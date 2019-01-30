@@ -85,7 +85,7 @@ else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
 endif()
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
-message(STATUS "The BLAS backend of choice:" ${BLAS})
+message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
@@ -121,7 +121,7 @@ elseif(BLAS STREQUAL "vecLib")
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
 else()
-  message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
+  message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
 
 
@@ -130,22 +130,18 @@ if (NOT BUILD_ATEN_MOBILE)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+    message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if (NOT BLAS_FOUND)
       set(USE_BLAS 0)
+      set(BLAS "" CACHE STRING "Selected BLAS library")
+    else()
+      set(BLAS BLAS_INFO CACHE STRING "Selected BLAS library")
     endif()
   endif()
 
   if (MKL_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
-    if(NOT MKL_INCLUDE_DIR)
-      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-        You can get them by `conda install mkl-include` if using conda (if \
-        it is missing, run `conda upgrade -n root conda` first), and \
-        `pip install mkl-devel` if using pip. If build fails with header files \
-        available in the system, please make sure that CMake will search the \
-        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
-	endif()
     if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
       set(AT_MKL_MT 1)
@@ -1102,21 +1098,44 @@ if (NOT BUILD_ATEN_MOBILE)
 
   # OpenMP support?
   SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+
+  IF (CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+    SET(CMAKE_C_COMPILER_IS_APPLE_CLANG true)
+  ELSE()
+    SET(CMAKE_C_COMPILER_IS_APPLE_CLANG false)
+  ENDIF()
+  IF (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    SET(CMAKE_CXX_COMPILER_IS_APPLE_CLANG true)
+  ELSE()
+    SET(CMAKE_CXX_COMPILER_IS_APPLE_CLANG false)
+  ENDIF()
+
+  # macOS + GCC
   IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
     EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
     STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
     IF (DARWIN_VERSION GREATER 9)
       SET(APPLE_OPENMP_SUCKS 1)
     ENDIF (DARWIN_VERSION GREATER 9)
     EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
       OUTPUT_VARIABLE GCC_VERSION)
     IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
-      MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
+        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
       add_compile_options(-Wno-unknown-pragmas)
       SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
     ENDIF()
+  ENDIF()
+
+  # Apple Clang supports OpenMP, but disables it in the driver. Use the frontend
+  # flag to enable it.
+  # https://iscinumpy.gitlab.io/post/omp-on-high-sierra/
+  IF (CMAKE_C_COMPILER_IS_APPLE_CLANG)
+    SET(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp")
+  ENDIF()
+  IF (CMAKE_CXX_COMPILER_IS_APPLE_CLANG)
+    SET(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
   ENDIF()
 
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
@@ -1132,6 +1151,26 @@ if (NOT BUILD_ATEN_MOBILE)
     MESSAGE(STATUS "Compiling with OpenMP support")
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+  ELSE()
+    # LLVM 3.7 supports OpenMP 3.1, and continues to add more features to
+    # support newer OpenMP standards in new versions.
+    # http://releases.llvm.org/3.7.0/tools/clang/docs/ReleaseNotes.html#openmp-support
+    #
+    # Apple Clang 7.0 is the first version based on LLVM 3.7 or later.
+    # https://en.wikipedia.org/wiki/Xcode#Latest_versions
+    IF ((CMAKE_C_COMPILER_IS_APPLE_CLANG   AND (NOT CMAKE_C_COMPILER_VERSION   VERSION_LESS 7.0)) OR
+        (CMAKE_CXX_COMPILER_IS_APPLE_CLANG AND (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0)))
+      MESSAGE(WARNING "Disabling OpenMP. Build uses Apple's customized LLVM "
+        "with version >= 7.0. This compiler supports OpenMP but does not "
+        "come with libomp, and no compatible libomp is found in the system. To "
+        "enable OpenMp, install libomp (e.g., via `brew`) and specify proper "
+        "include and linker paths, e.g., \n"
+        "  env MACOSX_DEPLOYMENT_TARGET=10.9 \\\n"
+        "    CC=clang CXX=clang++ \\\n"
+        "    LDFLAGS=\"-L$(brew --prefix libomp)/lib -Wl,-rpath,$(brew --prefix libomp)/lib\" \\\n"
+        "    CPPFLAGS=\"-I$(brew --prefix libomp)/include\" \\\n"
+        "    python3 setup.py build\n")
+    ENDIF()
   ENDIF()
 
 
@@ -1286,7 +1325,6 @@ if (NOT BUILD_ATEN_MOBILE)
     FIND_PACKAGE(Threads)
     IF(THREADS_FOUND)
       ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
-      TARGET_LINK_LIBRARIES(TH ${CMAKE_THREAD_LIBS_INIT})
       MESSAGE(STATUS "Atomics: using pthread")
     ENDIF()
   ENDIF()
