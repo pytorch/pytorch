@@ -19,7 +19,7 @@ run_all_jobs: &run_all_jobs
       only:
         - master
 
-run_high_signal_jobs_only: &run_on_all_branches
+run_high_signal_jobs_only: &run_high_signal_jobs_only
   filters:
     branches:
       ignore:
