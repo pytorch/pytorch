@@ -324,10 +324,10 @@ struct ContainerTensor : public at::TensorImpl {
             /* is_variable */ false) {}
 
   ~ContainerTensor() override = default;
-  at::IntListRef sizes() const override {
+  at::IntArrayRef sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  at::IntListRef strides() const override {
+  at::IntArrayRef strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
   int64_t dim() const override {

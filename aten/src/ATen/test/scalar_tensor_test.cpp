@@ -26,7 +26,7 @@ void require_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
   ASSERT_TRUE(lhs.sizes().equals(rhs.sizes()));
 }
 
-bool should_expand(const IntListRef &from_size, const IntListRef &to_size) {
+bool should_expand(const IntArrayRef &from_size, const IntArrayRef &to_size) {
   if (from_size.size() > to_size.size()) {
     return false;
   }

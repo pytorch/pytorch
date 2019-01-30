@@ -438,7 +438,7 @@ RegisterOperators reg({
             size.reserve(8);
             for (size_t i = 0; i < num_inputs; ++i) {
               size = at::infer_size(
-                  size, peek(stack, i, num_inputs).toIntListRef()->elements());
+                  size, peek(stack, i, num_inputs).toIntList()->elements());
             }
             drop(stack, num_inputs);
             push(stack, std::move(size));
@@ -451,7 +451,7 @@ RegisterOperators reg({
           int64_t raw_dim = node->i(attr::dim);
           int64_t chunks = node->i(attr::chunks);
           return [raw_dim, chunks](Stack& stack) {
-            Shared<IntListRef> sizes_l;
+            Shared<IntArrayRef> sizes_l;
             pop(stack, sizes_l);
             const auto& shape = sizes_l->elements();
             std::vector<int64_t> regular_shape = shape;
@@ -525,7 +525,7 @@ RegisterOperators reg({
             pop(stack, input, shape);
             shape = shape.contiguous();
             AT_ASSERT(shape.ndimension() == 1);
-            at::IntListRef shape_list(shape.data<int64_t>(), shape.size(0));
+            at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
             push(stack, input.reshape(shape_list));
             return 0;
           };
@@ -535,7 +535,7 @@ RegisterOperators reg({
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
-            at::IntListRef sizes = t.sizes();
+            at::IntArrayRef sizes = t.sizes();
             auto sizes_tensor = torch::empty(
                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
@@ -585,7 +585,7 @@ RegisterOperators reg({
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;
-            Shared<IntListRef> desired_sizes;
+            Shared<IntArrayRef> desired_sizes;
             pop(stack, self, desired_sizes);
             push(stack, at::sum_to(std::move(self), desired_sizes->elements()));
             return 0;
@@ -701,7 +701,7 @@ RegisterOperators reg({
           if (lt->getElementType() == IntType::get()) {
             return [=](Stack& stack) {
               auto ilist = pop(stack);
-              const auto& list = ilist.toIntListRef()->elements();
+              const auto& list = ilist.toIntList()->elements();
               AT_CHECK(
                   list.size() == num_outputs,
                   "Expected ",
@@ -922,7 +922,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 }
 
 // Equivalent to list.at(idx)
-template <typename TList> // something like Shared<IntListRef>
+template <typename TList> // something like Shared<IntArrayRef>
 typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
   const int64_t list_size = list->elements().size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
@@ -1210,7 +1210,7 @@ RegisterOperators reg2({
             " el) -> " decl_type "[](a!)",                               \
             listSetItem<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_IMMUTABLE_LIST_OPS("int", IntListRef),
+      CREATE_IMMUTABLE_LIST_OPS("int", IntArrayRef),
       CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
       CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
       CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
@@ -1227,13 +1227,13 @@ RegisterOperators reg2({
             "[]",                                                                     \
             listSlice<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_LIST_OPS("int", IntListRef),
+      CREATE_LIST_OPS("int", IntArrayRef),
       CREATE_LIST_OPS("float", DoubleList),
       CREATE_LIST_OPS("Tensor", TensorList),
       CREATE_LIST_OPS("t", GenericList),
   #undef CREATE_LIST_OPS
 
-      Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntListRef>>),
+      Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntArrayRef>>),
       Operator(
           "aten::eq(float[] a, float[] b) -> bool",
           listEq<Shared<DoubleList>>),
@@ -1243,7 +1243,7 @@ RegisterOperators reg2({
       Operator(
           "aten::eq(bool[] a, bool[] b) -> bool",
           listEq<Shared<BoolList>>),
-      Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntListRef>>),
+      Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntArrayRef>>),
       Operator(
           "aten::ne(float[] a, float[] b) -> bool",
           listNe<Shared<DoubleList>>),
@@ -1408,7 +1408,7 @@ RegisterOperators reg2({
             for (int i = 0; i < t.size(0); i++) {
               elems.push_back(*t[i].data<int32_t>());
             }
-            push(stack, jit::IntListRef::create(elems));
+            push(stack, jit::IntArrayRef::create(elems));
             return 0;
           };
         }),
@@ -1468,7 +1468,7 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntListRefRef();
+      return size.toIntListRef();
     }
   }
   std::vector<double> scale_repeated;
@@ -1591,8 +1591,8 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   IValue scale_factor_double;
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
-  } else if (int_ivalue.isIntListRef()) {
-    auto int_list = int_ivalue.toIntListRefRef();
+  } else if (int_ivalue.isIntList()) {
+    auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
     scale_factor_double = double_vec;
   } else if (int_ivalue.isNone()) {

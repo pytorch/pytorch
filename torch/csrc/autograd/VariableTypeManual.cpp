@@ -290,7 +290,7 @@ Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool 
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntListRef size) const {
+Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");

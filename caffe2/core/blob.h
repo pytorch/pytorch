@@ -30,7 +30,7 @@ inline Tensor* BlobSetTensor(Blob* blob, Tensor&& tensor) {
 
 inline Tensor GetSizedTensorWithOptions(
     Tensor&& previous_tensor,
-    at::IntListRef dims,
+    at::IntArrayRef dims,
     at::TensorOptions options) {
   Tensor tensor = std::move(previous_tensor);
   if (tensor.GetDevice() == options.device() ||
@@ -54,7 +54,7 @@ inline Tensor GetSizedTensorWithOptions(
 // need to keep both functions that returns Tensor* and the one
 // returns Tensor for clangr codemod
 inline Tensor*
-BlobGetMutableTensor(Blob* blob, at::IntListRef dims, at::TensorOptions options) {
+BlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
@@ -83,7 +83,7 @@ BlobGetMutableTensor(Blob* blob, at::IntListRef dims, at::TensorOptions options)
 }
 
 inline Tensor
-XBlobGetMutableTensor(Blob* blob, at::IntListRef dims, at::TensorOptions options) {
+XBlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
   return BlobGetMutableTensor(blob, dims, options)->UnsafeSharedInstance();
 }
 

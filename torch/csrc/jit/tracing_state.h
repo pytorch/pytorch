@@ -65,10 +65,10 @@ struct TORCH_API TracingState
 
 // This is meant to be used as a thread local place, where we can store extra
 // info that gets lost when we call into ATen from Python bindings. One example
-// for when this happens is when we get an IntListRef argument with e.g. sizes for
+// for when this happens is when we get an IntArrayRef argument with e.g. sizes for
 // view. When tracing, those might be tensors, which let us encode extra data
 // dependencies, but once they get to the ATen call where we actually have the
-// tracing logic, they get converted into a raw IntListRef, and we loose all
+// tracing logic, they get converted into a raw IntArrayRef, and we loose all
 // information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntListRefTrace : std::vector<Value*> {

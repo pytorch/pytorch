@@ -277,11 +277,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'bool': 'toBool',
         'double': 'toDouble',
         'std::string': 'string',
-        'IntListRef': 'intlist',
+        'IntArrayRef': 'intlist',
     }
 
     unpack_with_default_methods = {
-        'IntListRef': 'setDefaultIntlist',
+        'IntArrayRef': 'setDefaultIntlist',
         'Scalar': 'scalarWithDefault',
         'int64_t': 'toInt64WithDefault',
         'bool': 'setDefaultBool',
@@ -328,8 +328,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
-            if typename.startswith('IntListRef['):
-                typename = 'IntListRef'
+            if typename.startswith('IntArrayRef['):
+                typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 

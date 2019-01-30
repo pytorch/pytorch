@@ -163,10 +163,10 @@ class CAFFE2_API Tensor {
 
   const char * toString() const;
 
-  IntListRef sizes() const {
+  IntArrayRef sizes() const {
     return impl_->sizes();
   }
-  IntListRef strides() const {
+  IntArrayRef strides() const {
     return impl_->strides();
   }
   int64_t ndimension() const {

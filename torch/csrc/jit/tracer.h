@@ -33,7 +33,7 @@ using ::c10::ivalue::Tuple;
 using ::c10::ivalue::BoolList;
 using ::c10::ivalue::DoubleList;
 using ::c10::ivalue::GenericList;
-using ::c10::ivalue::IntListRef;
+using ::c10::ivalue::IntList;
 using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;
@@ -86,7 +86,7 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
-TORCH_API void addInputs(Node* n, const char* name, at::IntListRef value);
+TORCH_API void addInputs(Node* n, const char* name, at::IntArrayRef value);
 TORCH_API void addInputs(Node* n, const char* name, at::TensorList value);
 TORCH_API void addInputs(
     Node* n,

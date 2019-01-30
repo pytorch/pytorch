@@ -396,8 +396,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   ~Impl() override;
 
   int64_t numel() const override;
-  at::IntListRef sizes() const override;
-  at::IntListRef strides() const override;
+  at::IntArrayRef sizes() const override;
+  at::IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;

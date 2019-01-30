@@ -30,7 +30,7 @@
         - THStorage* source
         - long storage_offset
         - IntListRefSize size
-        - arg: IntListRef stride
+        - arg: IntArrayRef stride
           default: {}
 ]]
 [[

@@ -56,11 +56,11 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
   strides_.push_back(1);
 }
 
-IntListRef TensorImpl::sizes() const {
+IntArrayRef TensorImpl::sizes() const {
   return sizes_;
 }
 
-IntListRef TensorImpl::strides() const {
+IntArrayRef TensorImpl::strides() const {
   return strides_;
 }
 

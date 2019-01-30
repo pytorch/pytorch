@@ -266,7 +266,7 @@ bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
-using IntListRef = ArrayRef<int64_t>;
+using IntArrayRef = ArrayRef<int64_t>;
 
 
 // This alias is deprecated, because the name does not make the ownership

@@ -391,7 +391,7 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, options.device());
 }
 
-void addInputs(Node* n, const char* name, at::IntListRef value) {
+void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntListRef(name)
       ? ArgumentStash::popIntListRef(name)
@@ -407,7 +407,7 @@ void addInputs(Node* n, const char* name, at::IntListRef value) {
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
       throw std::runtime_error(
-          "Type mismatch in setposattr for IntListRef. Check that your program "
+          "Type mismatch in setposattr for IntArrayRef. Check that your program "
           "is valid without tracing, and please file a bug report if it is.");
     }
   }

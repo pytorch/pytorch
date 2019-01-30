@@ -2,7 +2,7 @@
 
 namespace at {
 
-std::vector<int64_t> infer_size(IntListRef a, IntListRef b) {
+std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   auto dimsA = a.size();
   auto dimsB = b.size();
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
@@ -29,9 +29,9 @@ std::vector<int64_t> infer_size(IntListRef a, IntListRef b) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
-    IntListRef tensor_sizes,
-    IntListRef tensor_strides,
-    IntListRef sizes) {
+    IntArrayRef tensor_sizes,
+    IntArrayRef tensor_strides,
+    IntArrayRef sizes) {
   int64_t ndim = sizes.size();
   int64_t tensor_dim = tensor_sizes.size();
 

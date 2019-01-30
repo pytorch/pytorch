@@ -34,7 +34,7 @@ struct CuFFTParams
 // would not be a POD anymore.
 static inline void setCuFFTParams(CuFFTParams* params,
     const Tensor& input, int64_t signal_ndim, bool complex_input,
-    bool complex_output, IntListRef checked_signal_sizes, bool onesided) {
+    bool complex_output, IntArrayRef checked_signal_sizes, bool onesided) {
 
   memset(params, 0, sizeof(CuFFTParams));
   params->scalar_type_ = input.type().scalarType();
@@ -86,8 +86,8 @@ public:
   CuFFTConfig& operator=(CuFFTConfig const&) = delete;
 
   explicit CuFFTConfig(Tensor& input, int64_t signal_ndim, bool complex_input,
-    bool complex_output, IntListRef checked_signal_sizes, bool onesided,
-    IntListRef output_sizes) {
+    bool complex_output, IntArrayRef checked_signal_sizes, bool onesided,
+    IntArrayRef output_sizes) {
 
     // signal sizes
 #ifdef __HIP_PLATFORM_HCC__

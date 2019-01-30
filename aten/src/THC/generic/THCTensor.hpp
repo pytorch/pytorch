@@ -9,13 +9,13 @@
 // new functions in here, they should probably be un-genericized.
 
 THC_API void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
-                                    at::IntListRef size_, at::IntListRef stride_);
-THC_API THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntListRef size);
+                                    at::IntArrayRef size_, at::IntArrayRef stride_);
+THC_API THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size);
 /* strides.data() might be nullptr */
 THC_API THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
-                                              at::IntListRef sizes, at::IntListRef strides);
+                                              at::IntArrayRef sizes, at::IntArrayRef strides);
 
-THC_API void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntListRef size, at::IntListRef stride);
-THC_API THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntListRef size, at::IntListRef stride);
+THC_API void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+THC_API THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride);
 
 #endif

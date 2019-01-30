@@ -32,8 +32,8 @@ IValue deepCopy(const IValue& self) {
   }
 
   // Regular lists can copy assign
-  if (self.isIntListRef()) {
-    return IValue(self.toIntListRefRef());
+  if (self.isIntList()) {
+    return IValue(self.toIntListRef());
   } else if (self.isDoubleList()) {
     return IValue(self.toDoubleListRef());
   } else if (self.isBoolList()) {
@@ -62,8 +62,8 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
     return lhs.toDouble() == rhs.toDouble();
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
-  } else if (lhs.isIntListRef() && rhs.isIntListRef()) {
-    return lhs.toIntListRef()->elements() == rhs.toIntListRef()->elements();
+  } else if (lhs.isIntList() && rhs.isIntList()) {
+    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }

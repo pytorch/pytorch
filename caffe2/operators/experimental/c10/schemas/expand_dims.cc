@@ -4,15 +4,15 @@
 
 using caffe2::CPUContext;
 using c10::intrusive_ptr;
-using c10::ivalue::IntListRef;
+using c10::ivalue::IntList;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::ExpandDims);
 
 namespace {
 struct DimsParameter final {
-  using type = intrusive_ptr<IntListRef>;
-  static intrusive_ptr<IntListRef> parse(const caffe2::ArgumentHelper& helper) {
-    return IntListRef::create(helper.GetRepeatedArgument<int64_t>("dims"));
+  using type = intrusive_ptr<IntArrayRef>;
+  static intrusive_ptr<IntArrayRef> parse(const caffe2::ArgumentHelper& helper) {
+    return IntArrayRef::create(helper.GetRepeatedArgument<int64_t>("dims"));
   }
 };
 } // namespace
