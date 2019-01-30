@@ -180,8 +180,8 @@ Value* getNestedOutputTrace(
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
     auto tuple_node = state->graph->createTuple(
-        fmap(elems, [&state](const IValue& iv) {
-          return getNestedOutputTrace(state, iv);
+        fmap(elems, [&state](const IValue& ival) {
+          return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
     return tuple_node->output();

@@ -67,7 +67,7 @@ void EliminateCommonSubexpression(
 } // namespace
 
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   EliminateCommonSubexpression(
       graph->block(), aliasDb, [](Node*) { return nullptr; });
 }
