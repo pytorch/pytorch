@@ -198,6 +198,8 @@ macos_brew_update: &macos_brew_update
     brew install moreutils --without-parallel
     brew link parallel --overwrite
     brew install expect
+    # install libomp
+    brew install libomp
 
 
 ##############################################################################
