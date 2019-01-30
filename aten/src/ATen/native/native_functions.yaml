@@ -1111,7 +1111,7 @@
 
 - func: index_put_(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   matches_jit_signature: True
-  variants: method
+  variants: function, method
 
 - func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: function, method
