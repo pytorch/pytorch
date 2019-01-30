@@ -209,7 +209,7 @@ def run_cmake(version,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    pprint(os.environ.items())
+    pprint(my_env)
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
