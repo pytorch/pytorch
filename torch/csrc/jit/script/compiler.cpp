@@ -1909,7 +1909,17 @@ struct to_ir {
           type,
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
-      if (!expr->type()->isSubtypeOf(type)) {
+
+      // This is to ensure even if user forgets to call annotate None with the
+      // Optional wrapper type, we still generate the correct value with the
+      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
+      // with annotate(Optional[Tensor], None). It also maintains the backward
+      // compatibility of exported model on Optional undefined tensor/None
+      auto opt_type = expr->type()->cast<OptionalType>();
+      bool forget_opt_annotate =
+          opt_type && *opt_type->getElementType() == *type;
+
+      if (!forget_opt_annotate && !expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str();

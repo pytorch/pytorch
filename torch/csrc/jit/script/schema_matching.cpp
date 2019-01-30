@@ -87,6 +87,10 @@ Value* tryConvertToType(
       value =
           graph.insertNode(graph.createNone(optional_type->getElementType()))
               ->output();
+    } else {
+      // When try to convert None to non-optional concrete type, create a None
+      // node with the return value type of Optional[concrete_type]
+      value = graph.insertNode(graph.createNone(concrete_type))->output();
     }
   }
 
@@ -209,8 +213,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (allow_conversions &&
-          arg.type()->kind() ==
-              TypeKind::ListType && // the formal must be a list
+          arg.type()->kind() == TypeKind::ListType && // formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],
                       // otherwise a single int is a valid input
           (schema_i + 1 == schema.arguments().size() ||

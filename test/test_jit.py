@@ -2929,6 +2929,16 @@ class TestScript(JitTestCase):
             return torch.jit.annotate(float, a)
         self.checkScript(baz, (torch.rand(()),))
 
+        # test annotate none types
+        def annotate_none():
+            return torch.jit.annotate(Optional[torch.Tensor], None)
+
+        def annotate_none_no_optional():
+            return torch.jit.annotate(torch.Tensor, None)
+
+        self.checkScript(annotate_none, ())
+        self.checkScript(annotate_none_no_optional, ())
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
