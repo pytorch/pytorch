@@ -25,7 +25,7 @@ run_high_signal_jobs_only: &run_high_signal_jobs_only
       ignore:
         - none
 
-PR_CI_COVERAGE_SETTING:
+PR_CI_COVERAGE_SETTING: &PR_CI_COVERAGE_SETTING
   # Change to `run_all_jobs` if you want to test the full CI matrix.
   # Change back to `run_high_signal_jobs_only` when you are ready to merge the PR.
   <<: *run_high_signal_jobs_only
