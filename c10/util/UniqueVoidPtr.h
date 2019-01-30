@@ -67,12 +67,6 @@ class UniqueVoidPtr {
     return std::move(ctx_);
   }
 
-  C10_NODISCARD bool compare_exchange_deleter(DeleterFnPtr expected_deleter, DeleterFnPtr new_deleter) {
-    if (get_deleter() != expected_deleter) return false;
-    ctx_ = std::unique_ptr<void, DeleterFnPtr>(ctx_.release(), new_deleter);
-    return true;
-  }
-
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     if (get_deleter() != expected_deleter)
