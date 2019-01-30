@@ -972,10 +972,11 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          if grep -Fxq "<<: *run_all_jobs" .circleci/config.yml
-          then
-            exit 1
-          fi
+          while read line; do
+            if [[ "$line" == *"<<: *run_all_jobs"* ]] && [[ "$line" != *"IGNORE_MATCH"* ]]; then  # IGNORE_MATCH
+              echo $line
+            fi
+          done < .circleci/config.yml
 
   pytorch_linux_trusty_py2_7_9_build:
     environment:
