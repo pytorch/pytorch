@@ -11,6 +11,10 @@ namespace math = caffe2::math;
 namespace caffe2 {
 namespace {
 
+struct State final : public c10::KernelState {
+  std::shared_ptr<at::Tensor> scratch;
+};
+
 template <class T, class Context>
 void batch_matmul_op_cpu_impl(
     const at::Tensor& A_,
@@ -19,11 +23,10 @@ void batch_matmul_op_cpu_impl(
     int trans_a,
     int trans_b,
     int broadcast,
-    intrusive_ptr<Blob> state_) {
+    State* state) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
   Tensor Y{C10Tensor(Y_)};
-  caffe2::ops::BatchMatmul::State* state = state_->GetMutable<caffe2::ops::BatchMatmul::State>();
   CPUContext context;
   using Engine = caffe2::DefaultEngine;
 
@@ -270,6 +273,7 @@ void batch_matmul_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchMatmul)
+    .withState<caffe2::State>()
     .kernel<&caffe2::batch_matmul_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(c10::DispatchKey<2>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,

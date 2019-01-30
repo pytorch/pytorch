@@ -130,7 +130,11 @@ void ReinitializeTensor(
     at::TensorOptions options) {
   CAFFE_ENFORCE(options.device_opt() != c10::nullopt);
   if (*tensor) {
-    if (tensor->GetDevice() == options.device()) {
+    // Note: we don't compare device_id here because of the purpose of
+    // ReinitializeTensor: https://github.com/pytorch/pytorch/pull/13147
+    // In the original code, we don't have device_id defined, therefore, we should not
+    // include device_id in the comparison
+    if (tensor->GetDeviceType() == options.device().type()) {
       if (tensor->sizes() != dims) {
         // Resize when the dims doesn't match
         tensor->Resize(dims);

@@ -11,6 +11,12 @@ using caffe2::Tensor;
 
 namespace caffe2 {
 namespace {
+
+struct State final : public c10::KernelState {
+  vector<int64_t> Y_shape_cache_;
+  at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
+};
+
 template <class DataType, class Context>
 void fc_op_cpu_impl(
     const at::Tensor& X_,
@@ -19,12 +25,11 @@ void fc_op_cpu_impl(
     const at::Tensor& Y_,
     int axis,
     int axis_w,
-    intrusive_ptr<Blob> state_) {
+    State* state) {
   Tensor X{C10Tensor(X_)};
   Tensor W{C10Tensor(W_)};
   Tensor b{C10Tensor(b_)};
   Tensor Y{C10Tensor(Y_)};
-  caffe2::ops::FullyConnected::State* state = state_->GetMutable<caffe2::ops::FullyConnected::State>();
   CPUContext context;
 
   constexpr bool TransposeWeight = true;
@@ -124,6 +129,7 @@ void fc_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
+    .withState<caffe2::State>()
     .kernel<&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
     .dispatchKey(c10::DispatchKey<3>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,

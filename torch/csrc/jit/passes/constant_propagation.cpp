@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -116,7 +116,7 @@ void inlineIfBody(Block* body) {
 
 void inlineIf(Node* n, const AliasDb& aliasDb) {
   auto input_bool = constant_as<bool>(n->input());
-  JIT_ASSERT(input_bool);
+  AT_ASSERT(input_bool);
   size_t block_index = *input_bool ? 0 : 1;
   ConstantPropagation(n->blocks().at(block_index), aliasDb);
   inlineIfBody(n->blocks().at(block_index));
@@ -124,7 +124,7 @@ void inlineIf(Node* n, const AliasDb& aliasDb) {
 
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
-  JIT_ASSERTM(n->kind() == prim::If, "Only supported for If nodes");
+  AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
   auto initial_outputs = true_block->outputs().size();

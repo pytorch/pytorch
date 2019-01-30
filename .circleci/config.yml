@@ -20,6 +20,110 @@ install_official_git_client: &install_official_git_client
     sudo apt-get -qq update
     sudo apt-get -qq install openssh-client git
 
+install_doc_push_script: &install_doc_push_script
+  name: Install the doc push script
+  no_output_timeout: "2m"
+  command: |
+    cat >/home/circleci/project/doc_push_script.sh <<EOL
+    # =================== The following code **should** be executed inside Docker container ===================
+
+    # This is where the local pytorch install in the docker image is located
+    pt_checkout="/var/lib/jenkins/workspace"
+
+    # Since we're cat-ing this file, we need to escape all $'s
+    echo "doc_push_script.sh: Invoked with \$*"
+
+    git clone https://yf225:${GITHUB_PYTORCHBOT_TOKEN}@github.com/pytorch/pytorch.github.io -b site
+    pushd pytorch.github.io
+
+    set -ex
+
+    # Argument 1: Where to copy the built documentation to
+    # (pytorch.github.io/$install_path)
+    install_path="\$1"
+    if [ -z "\$install_path" ]; then
+    echo "error: doc_push_script.sh: install_path (arg1) not specified"
+      exit 1
+    fi
+
+    # Argument 2: What version of the docs we are building.
+    version="\$2"
+    if [ -z "\$version" ]; then
+    echo "error: doc_push_script.sh: version (arg2) not specified"
+      exit 1
+    fi
+
+    is_master_doc=false
+    if [ "\$version" == "master" ]; then
+      is_master_doc=true
+    fi
+
+    # Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
+    dry_run=false
+    if [ "\$3" != "" ]; then
+      dry_run=true
+    fi
+
+    echo "install_path: \$install_path  version: \$version  dry_run: \$dry_run"
+
+    export LC_ALL=C
+    export PATH=/opt/conda/bin:$PATH
+
+    rm -rf pytorch || true
+
+    # Get all the documentation sources, put them in one place
+    pushd "\$pt_checkout"
+    git clone https://github.com/pytorch/vision
+    pushd vision
+    conda install -q pillow
+    time python setup.py install
+    popd
+    pushd docs
+    rm -rf source/torchvision
+    cp -a ../vision/docs/source source/torchvision
+
+    # Build the docs
+    pip -q install -r requirements.txt || true
+    if [ "\$is_master_doc" = true ]; then
+      make html
+    else
+      make html-stable
+    fi
+
+    # Move them into the docs repo
+    popd
+    popd
+    git rm -rf "\$install_path" || true
+    mv "\$pt_checkout/docs/build/html" "\$install_path"
+
+    # Add the version handler by search and replace.
+    # XXX: Consider moving this to the docs Makefile or site build
+    if [ "\$is_master_doc" = true ]; then
+      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
+    else
+      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\$version \&#x25BC</a>@g"
+    fi
+
+    git add "\$install_path" || true
+    git status
+    git config user.email "soumith+bot@pytorch.org"
+    git config user.name "pytorchbot"
+    # If there aren't changes, don't make a commit; push is no-op
+    git commit -m "auto-generating sphinx docs" || true
+    git status
+
+    if [ "\$dry_run" = false ]; then
+      echo "Pushing to pytorch.github.io:site"
+      git push origin site
+    else
+      echo "Skipping push due to dry_run"
+    fi
+
+    popd
+    # =================== The above code **should** be executed inside Docker container ===================
+    EOL
+    chmod +x /home/circleci/project/doc_push_script.sh
+
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment
   no_output_timeout: "1h"
@@ -44,12 +148,10 @@ setup_ci_environment: &setup_ci_environment
 
     sudo pip -q install awscli==1.16.35
 
-    if [[ "${JOB_BASE_NAME}" == *-test* || "${JOB_BASE_NAME}" == smoke* || "${JOB_BASE_NAME}" == binary* ]]; then
-      if [ -n "${CUDA_VERSION}" ]; then
-        wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
-        sudo /bin/bash ./NVIDIA-Linux-x86_64-410.79.run -s --no-drm
-        nvidia-smi
-      fi
+    if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+      wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
+      sudo /bin/bash ./NVIDIA-Linux-x86_64-410.79.run -s --no-drm
+      nvidia-smi
     fi
 
     if [[ "${JOB_BASE_NAME}" == *-build ]]; then
@@ -57,7 +159,7 @@ setup_ci_environment: &setup_ci_environment
       echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
       echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
       echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
-      if [ -n "${CUDA_VERSION}" ]; then
+      if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
         echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
       fi
       export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
@@ -65,9 +167,15 @@ setup_ci_environment: &setup_ci_environment
       export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
       echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
-      # This IAM user allows write access to S3 bucket for sccache
-      echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
-      echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+      if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+        # This IAM user allows write access to S3 bucket for sccache & bazels3cache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+      else
+        # This IAM user allows write access to S3 bucket for sccache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+      fi
     fi
 
     # This IAM user only allows read-write access to ECR
@@ -144,7 +252,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-        if [ -n "${CUDA_VERSION}" ]; then
+        if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -266,7 +374,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-        if [ -n "${CUDA_VERSION}" ]; then
+        if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -415,7 +523,7 @@ binary_run_in_docker: &binary_run_in_docker
     chmod +x /home/circleci/project/ci_test_script.sh
 
     # Run the docker and copy pkgs/env/script into it
-    if [ -n "${CUDA_VERSION}" ]; then
+    if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
       export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
     else
       export id=$(docker run -t -d "${DOCKER_IMAGE}")
@@ -632,7 +740,7 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
             set +x
             echo 'If there is no more output then logging into Anaconda failed'
             timeout 30 \
-                anaconda login \
+                yes | anaconda login \
                     --username '"$CONDA_USERNAME"' \
                     --password '"$CONDA_PASSWORD"' \
                     >/dev/null 2>&1
@@ -800,7 +908,7 @@ binary_mac_upload: &binary_mac_upload
           set +x
           echo 'If there is no more output then logging into Anaconda failed'
           /usr/local/bin/gtimeout 30 \
-              anaconda login \
+              yes | anaconda login \
                   --username '"$CONDA_USERNAME"' \
                   --password '"$CONDA_PASSWORD"' \
                   >/dev/null 2>&1
@@ -890,6 +998,19 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
+  pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+    environment:
+      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
+    environment:
+      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
   pytorch_linux_trusty_py3_6_gcc7_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-build
@@ -936,7 +1057,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
       BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     <<: *pytorch_linux_build_defaults
 
@@ -945,7 +1065,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -954,7 +1074,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       MULTI_GPU: "1"
     resource_class: gpu.large
     <<: *pytorch_linux_test_defaults
@@ -964,7 +1084,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -973,7 +1093,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -982,7 +1102,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
       PYTHON_VERSION: "2.7"
-      CUDA_VERSION: "9"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
@@ -990,7 +1109,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
       PYTHON_VERSION: "2.7"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -999,7 +1118,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "9"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
@@ -1007,7 +1125,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -1016,7 +1134,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "9.2"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
@@ -1024,7 +1141,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "9.2"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -1033,7 +1150,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "10"
     <<: *pytorch_linux_build_defaults
 
   pytorch_short_perf_test_gpu:
@@ -1041,7 +1157,7 @@ jobs:
       JOB_BASE_NAME: pytorch-short-perf-test-gpu
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     machine:
       image: default
@@ -1078,70 +1194,25 @@ jobs:
     - run:
         <<: *setup_ci_environment
     - run:
-        name: Doc Push
+        <<: *install_doc_push_script
+    - run:
+        name: Doc Build and Push
         no_output_timeout: "1h"
         command: |
           set -e
-          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
-            echo "Skipping doc push..."
-            exit 0
-          fi
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          cat >/home/circleci/project/doc_push_script.sh <<EOL
-          # =================== The following code will be executed inside Docker container ===================
-          git clone https://yf225:${GITHUB_PYTORCHBOT_TOKEN}@github.com/pytorch/pytorch.github.io -b site
-          pushd pytorch.github.io
-
-          set -ex
-
-          export LC_ALL=C
-          export PATH=/opt/conda/bin:$PATH
-
-          rm -rf pytorch || true
-
-          # Get all the documentation sources, put them in one place
-          # TODO: These clones can race
-          git clone https://github.com/pytorch/pytorch
-          pushd pytorch
-          git clone https://github.com/pytorch/vision
-          pushd vision
-          conda install -q pillow
-          time python setup.py install
-          popd
-          pushd docs
-          rm -rf source/torchvision
-          cp -r ../vision/docs/source source/torchvision
-
-          # Build the docs
-          pip -q install -r requirements.txt || true
-          make html
-
-          # Move them into the docs repo
-          popd
-          popd
-          git rm -rf docs/master || true
-          mv pytorch/docs/build/html docs/master
-          find docs/master -name "*.html" -print0 | xargs -0 sed -i -E 's/master[[:blank:]]\\([[:digit:]]\\.[[:digit:]]\\.[[:xdigit:]]+\\+[[:xdigit:]]+[[:blank:]]\\)/<a href="http:\\/\\/pytorch.org\\/docs\\/versions.html">& \\&#x25BC<\\/a>/g'
-          git add docs/master || true
-          git status
-          git config user.email "soumith+bot@pytorch.org"
-          git config user.name "pytorchbot"
-          # If there aren't changes, don't make a commit; push is no-op
-          git commit -m "auto-generating sphinx docs" || true
-          git status
-          git push origin site
-
-          popd
-          # =================== The above code will be executed inside Docker container ===================
-          EOL
-          chmod +x /home/circleci/project/doc_push_script.sh
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
-          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+            # Do a dry_run of the docs build. This will build the docs but not push them.
+            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          else
+            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   pytorch_macos_10_13_py3_build:
@@ -1171,12 +1242,13 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
 
-            git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
             mkdir -p /Users/distiller/pytorch-ci-env/workspace
-            cp -r /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
+
+            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
+            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
       - persist_to_workspace:
           root: /Users/distiller/pytorch-ci-env
           paths:
@@ -1205,7 +1277,8 @@ jobs:
             set -e
             export IN_CIRCLECI=1
 
-            cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
+            cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -1260,7 +1333,6 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9"
       BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
@@ -1268,7 +1340,7 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
@@ -1277,7 +1349,6 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9"
       BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
@@ -1285,7 +1356,7 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
@@ -1294,7 +1365,6 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9.1"
       BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
@@ -1302,7 +1372,7 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "9.1"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
@@ -1356,7 +1426,6 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "8"
       BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
@@ -1364,7 +1433,7 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
@@ -1420,7 +1489,7 @@ jobs:
     environment:
       JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-centos7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:238"
-      CUDA_VERSION: "9.0"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-centos7"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
@@ -1450,7 +1519,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1460,7 +1528,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1470,7 +1537,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1480,7 +1546,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1490,7 +1555,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1500,7 +1564,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1510,7 +1573,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1520,7 +1582,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1530,7 +1591,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1540,7 +1600,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1550,7 +1609,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1560,7 +1618,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1570,7 +1627,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1580,7 +1636,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1590,7 +1645,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1600,7 +1654,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1610,7 +1663,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1620,7 +1672,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1630,7 +1681,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1640,7 +1690,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1650,7 +1699,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1660,7 +1708,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1670,7 +1717,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1680,7 +1726,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1690,7 +1735,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1700,7 +1744,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1710,7 +1753,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1720,7 +1762,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1730,7 +1771,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1740,7 +1780,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1750,7 +1789,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1760,7 +1798,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1770,7 +1807,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1780,7 +1816,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1790,7 +1825,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1800,7 +1834,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1810,7 +1843,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_libtorch_2.7m_cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1820,7 +1852,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_libtorch_2.7m_cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
@@ -1830,7 +1861,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_libtorch_2.7m_cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
@@ -1840,7 +1870,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_libtorch_2.7m_cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1850,7 +1879,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_2.7_cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.5_cpu_build:
@@ -1858,7 +1886,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.5_cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.6_cpu_build:
@@ -1866,7 +1893,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.6_cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.7_cpu_build:
@@ -1874,7 +1900,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.7_cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_2.7_cpu_build:
@@ -1882,7 +1907,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_2.7_cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.5_cpu_build:
@@ -1890,7 +1914,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.5_cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.6_cpu_build:
@@ -1898,7 +1921,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.6_cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.7_cpu_build:
@@ -1906,7 +1928,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.7_cpu"
     <<: *binary_mac_build
 
   binary_macos_libtorch_2.7_cpu_build:
@@ -1914,7 +1935,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_libtorch_2.7_cpu"
     <<: *binary_mac_build
 
   # Binary build tests
@@ -1926,7 +1946,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1935,7 +1954,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1944,7 +1962,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1953,7 +1970,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1962,7 +1978,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1972,8 +1987,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1983,8 +1997,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -1994,8 +2007,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -2005,8 +2017,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -2016,8 +2027,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
 
@@ -2027,8 +2037,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     <<: *binary_linux_test_and_upload
 
@@ -2038,8 +2047,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     <<: *binary_linux_test_and_upload
 
@@ -2049,8 +2057,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     <<: *binary_linux_test_and_upload
 
@@ -2060,8 +2067,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     <<: *binary_linux_test_and_upload
 
@@ -2071,8 +2077,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     <<: *binary_linux_test_and_upload
 
@@ -2082,8 +2087,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7m_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test_and_upload
 
@@ -2093,8 +2097,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test_and_upload
 
@@ -2104,8 +2107,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test_and_upload
 
@@ -2115,8 +2117,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.6m_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test_and_upload
 
@@ -2126,8 +2127,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.7m_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test_and_upload
 
@@ -2136,7 +2136,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2145,7 +2144,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2154,7 +2152,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2163,7 +2160,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2173,8 +2169,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2184,8 +2179,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2195,8 +2189,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2206,8 +2199,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2217,8 +2209,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2228,8 +2219,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2239,8 +2229,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2250,8 +2239,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2261,8 +2249,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_2.7_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2272,8 +2259,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.5_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2283,8 +2269,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2294,8 +2279,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
 
@@ -2304,7 +2288,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_2.7_cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.5_cpu_upload:
@@ -2312,7 +2295,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.5_cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.6_cpu_upload:
@@ -2320,7 +2302,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.6_cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.7_cpu_upload:
@@ -2328,7 +2309,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_wheel_3.7_cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_2.7_cpu_upload:
@@ -2336,7 +2316,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_2.7_cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.5_cpu_upload:
@@ -2344,7 +2323,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.5_cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.6_cpu_upload:
@@ -2352,7 +2330,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.6_cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.7_cpu_upload:
@@ -2360,7 +2337,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_conda_3.7_cpu"
     <<: *binary_mac_upload
 
   binary_macos_libtorch_2.7_cpu_upload:
@@ -2368,7 +2344,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_macos_libtorch_2.7_cpu"
     <<: *binary_mac_upload
 
 
@@ -2381,7 +2356,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_manywheel_2.7mu_cpu"
       DO_NOT_UPLOAD: "DO_NOT_DELETE_THIS"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
@@ -2392,8 +2366,7 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "binary_linux_manywheel_3.5m_cu80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DO_NOT_UPLOAD: "DO_NOT_DELETE_THIS"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test_and_upload
@@ -2404,7 +2377,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "binary_linux_conda_3.6_cpu"
       DO_NOT_UPLOAD: "DO_NOT_DELETE_THIS"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
@@ -2415,8 +2387,7 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "binary_linux_conda_3.7_cu100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
       DO_NOT_UPLOAD: "DO_NOT_DELETE_THIS"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test_and_upload
@@ -2430,7 +2401,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2439,7 +2409,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2448,7 +2417,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2457,7 +2425,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2466,7 +2433,6 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2475,9 +2441,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2486,9 +2451,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2497,9 +2461,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2508,9 +2471,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2519,9 +2481,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2530,9 +2491,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2541,9 +2501,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2552,9 +2511,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2563,9 +2521,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2574,9 +2531,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2585,9 +2541,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2596,9 +2551,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "2.7mu"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2607,9 +2561,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.5m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2618,9 +2571,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.6m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2629,9 +2581,8 @@ jobs:
       PACKAGE_TYPE: "manywheel"
       DESIRED_PYTHON: "3.7m"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2640,7 +2591,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_conda_2.7_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_build
 
@@ -2649,7 +2599,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_conda_3.5_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_build
 
@@ -2658,7 +2607,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_conda_3.6_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_build
 
@@ -2667,7 +2615,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_linux_conda_3.7_cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_build
 
@@ -2676,9 +2623,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2687,9 +2633,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2698,9 +2643,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2709,9 +2653,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu80"
-      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2720,9 +2663,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2731,9 +2673,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2742,9 +2683,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2753,9 +2693,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu90"
-      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2764,9 +2703,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2775,9 +2713,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2786,9 +2723,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2797,9 +2733,8 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cu100"
-      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2809,7 +2744,6 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
       LIBTORCH_VARIANT: "shared-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2819,7 +2753,6 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
       LIBTORCH_VARIANT: "shared-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2829,7 +2762,6 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
       LIBTORCH_VARIANT: "static-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2839,7 +2771,6 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
       LIBTORCH_VARIANT: "static-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_build
 
@@ -2849,9 +2780,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
       LIBTORCH_VARIANT: "shared-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2861,9 +2791,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
       LIBTORCH_VARIANT: "shared-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2873,9 +2802,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
       LIBTORCH_VARIANT: "static-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2885,9 +2813,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu80"
       LIBTORCH_VARIANT: "static-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      CUDA_VERSION: "8"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2897,9 +2824,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
       LIBTORCH_VARIANT: "shared-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2909,9 +2835,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
       LIBTORCH_VARIANT: "shared-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2921,9 +2846,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
       LIBTORCH_VARIANT: "static-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2933,9 +2857,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu90"
       LIBTORCH_VARIANT: "static-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      CUDA_VERSION: "9"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2945,9 +2868,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
       LIBTORCH_VARIANT: "shared-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2957,9 +2879,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
       LIBTORCH_VARIANT: "shared-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2969,9 +2890,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
       LIBTORCH_VARIANT: "static-with-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2981,9 +2901,8 @@ jobs:
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cu100"
       LIBTORCH_VARIANT: "static-without-deps"
-      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      CUDA_VERSION: "10"
+      USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_build
 
@@ -2992,7 +2911,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_wheel_2.7_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_wheel_3.5_cpu:
@@ -3000,7 +2918,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_wheel_3.5_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_wheel_3.6_cpu:
@@ -3008,7 +2925,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_wheel_3.6_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_wheel_3.7_cpu:
@@ -3016,7 +2932,6 @@ jobs:
       PACKAGE_TYPE: "wheel"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_wheel_3.7_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_conda_2.7_cpu:
@@ -3024,7 +2939,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "2.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_conda_2.7_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_conda_3.5_cpu:
@@ -3032,7 +2946,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.5"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_conda_3.5_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_conda_3.6_cpu:
@@ -3040,7 +2953,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.6"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_conda_3.6_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_conda_3.7_cpu:
@@ -3048,7 +2960,6 @@ jobs:
       PACKAGE_TYPE: "conda"
       DESIRED_PYTHON: "3.7"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_conda_3.7_cpu"
     <<: *smoke_mac_build
 
   smoke_macos_libtorch_2.7m_cpu:
@@ -3056,7 +2967,6 @@ jobs:
       PACKAGE_TYPE: "libtorch"
       DESIRED_PYTHON: "2.7m"
       DESIRED_CUDA: "cpu"
-      JOB_BASE_NAME: "smoke_macos_libtorch_2.7m_cpu"
     <<: *smoke_mac_build
 
 
@@ -3096,6 +3006,18 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc7_build
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+          filters:
+            branches:
+              only:
+                - master
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
+          filters:
+            branches:
+              only:
+                - master
+          requires:
+            - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_pynightly_build
       - pytorch_linux_trusty_pynightly_test:
           requires:
