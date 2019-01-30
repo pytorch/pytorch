@@ -137,8 +137,8 @@ class MIOPENConvTransposeGradientOp final : public MIOPENConvTransposeOpBase {
   int returnedAlgoCount_;
   bool bestDataAlgoFound_;
   bool bestWeightAlgoFound_;
-  miopenConvBwdWeightsAlgorithm_t bwdWeiAlgo_;
   miopenConvFwdAlgorithm_t fwdAlgo_;
+  miopenConvBwdWeightsAlgorithm_t bwdWeiAlgo_;
   size_t fwdWsSize_;
   size_t bwdWeightWsSize_;
   char* fwdWs_;
