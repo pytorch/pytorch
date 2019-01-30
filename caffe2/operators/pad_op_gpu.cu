@@ -251,13 +251,12 @@ __global__ void PadImageGradientEdgeNHWC(
 template <>
 bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
+  auto* Y = Output(0);
   const int num = X.dim32(0);
   const int channels = X.dim32(1);
   const int height = X.dim32(2);
   const int width = X.dim32(3);
-  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, channels);
-  auto* Y = Output(0, sizes, at::dtype<float>());
-
+  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, channels);
   const int output_size = Y->size();
   const int padded_height = Y->dim32(2);
   const int padded_width = Y->dim32(3);
@@ -328,13 +327,12 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template<>
 bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
+  auto* Y = Output(0);
   const int num = X.dim32(0);
   const int height = X.dim32(1);
   const int width = X.dim32(2);
   const int channels = X.dim32(3);
-  auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, channels);
-  auto* Y = Output(0, sizes, at::dtype<float>());
-
+  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, channels);
   const int output_size = Y->size();
   const int padded_height = Y->dim32(1);
   const int padded_width = Y->dim32(2);
@@ -405,7 +403,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(0);
-
+  
   auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1),
       dY.dim32(2) - pad_t() - pad_b(),
@@ -485,7 +483,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& dY = Input(0);
-
+  
   auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1) - pad_t() - pad_b(),
       dY.dim32(2) - pad_l() - pad_r(),
