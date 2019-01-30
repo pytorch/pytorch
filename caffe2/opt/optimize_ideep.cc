@@ -538,6 +538,48 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
   }
 }
 
+void fuseOrderSwitchAtTop(repr::NNModule *nn) {
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  if (allNodes.size() < 2)
+    return;
+
+  int i = 0;
+  for (; i < allNodes.size(); i++) {
+    if (repr::nn::is<repr::NeuralNetOperator>(allNodes[i]))
+      break;
+  }
+
+  auto osNode = allNodes[i];
+  if (osNode == nullptr || !isOpType(osNode, "NCHW2NHWC")) {
+    return;
+  }
+
+  auto osOutput = repr::nn::getOutputs(osNode).front();
+  auto osConsumers = repr::nn::getConsumers(osOutput);
+  if (osConsumers.size() != 1) {
+    return;
+  }
+
+  auto quantizeNode = osConsumers.back();
+  if (quantizeNode == nullptr || !isOpType(quantizeNode, "Int8Quantize")) {
+    return;
+  }
+
+  auto osInput = repr::nn::getInputs(osNode).front();
+  auto quantizeInput = repr::nn::getInputs(quantizeNode).front();
+  nn->dataFlow.replaceNode(quantizeInput, osInput);
+
+  auto quantize = repr::nn::get<repr::NeuralNetOperator>(quantizeNode);
+  auto *quantizeOp = getMutableOpDef(*quantize);
+  auto *arg = quantizeOp->add_arg();
+  arg->set_name("output_order");
+  arg->set_i(iformat::nhwc);
+
+  nn->dataFlow.deleteNode(osNode);
+  nn->dataFlow.deleteNode(osOutput);
+  nn->dataFlow.deleteNode(quantizeInput);
+}
+
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -558,6 +600,8 @@ void OptimizeForIdeep(
   enforceFusionInplaceForIdeep(nn, ws);
 
   setPoolingInferenceMode(nn);
+
+  fuseOrderSwitchAtTop(nn);
 }
 
 #endif // CAFFE2_USE_MKLDNN
