@@ -30,6 +30,7 @@ Dispatcher::Dispatcher()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
+Dispatcher::~Dispatcher() {}
 
 C10_EXPORT Dispatcher& Dispatcher::singleton() {
   static Dispatcher _singleton;
