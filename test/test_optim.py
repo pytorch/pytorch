@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm, load_tests
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -381,7 +381,6 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
-    @skipIfRocm
     def test_adamax(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
@@ -418,7 +417,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
-    @skipIfRocm
     def test_rprop(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
