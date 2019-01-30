@@ -16,11 +16,12 @@ fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja six
-pip install hypothesis librosa>=0.6.2 psutil
+pip install -q hypothesis "librosa>=0.6.2" psutil
 if [ -z "${IN_CIRCLECI}" ]; then
   rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
+git submodule sync --recursive
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
@@ -52,31 +53,38 @@ fi
 test_python_all() {
   echo "Ninja version: $(ninja --version)"
   python test/run_test.py --verbose
+  assert_git_not_dirty
 }
 
-test_cpp_api() {
+test_libtorch() {
   # C++ API
 
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  # But still clean it before we perform our own build.
-  #
-  CPP_BUILD="$PWD/../cpp-build"
-  rm -rf $CPP_BUILD
-  mkdir -p $CPP_BUILD/caffe2
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+    # NB: Install outside of source directory (at the same level as the root
+    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+    # But still clean it before we perform our own build.
 
-  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-  pushd $CPP_BUILD/caffe2
-  VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
-  popd
+    echo "Testing libtorch"
 
-  python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    CPP_BUILD="$PWD/../cpp-build"
+    rm -rf $CPP_BUILD
+    mkdir -p $CPP_BUILD/caffe2
 
-  # Unfortunately it seems like the test can't load from miniconda3
-  # without these paths being set
-  export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-  export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-  "$CPP_BUILD"/caffe2/bin/test_api
+    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+    pushd $CPP_BUILD/caffe2
+    VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    popd
+
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+
+    # Unfortunately it seems like the test can't load from miniconda3
+    # without these paths being set
+    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
+    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
+    TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+
+    assert_git_not_dirty
+  fi
 }
 
 test_custom_script_ops() {
@@ -96,18 +104,19 @@ test_custom_script_ops() {
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt
   popd
+  assert_git_not_dirty
 }
 
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
   test_python_all
-  test_cpp_api
+  test_libtorch
   test_custom_script_ops
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
     test_python_all
   elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-    test_cpp_api
+    test_libtorch
     test_custom_script_ops
   fi
 fi
