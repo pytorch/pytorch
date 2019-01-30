@@ -29,35 +29,25 @@ RegisterOperators reg({
   Operator(
     "caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon) -> (Tensor, Tensor, Tensor)",
     [](Stack& stack) {
-        ArrayRef<IValue> inputs = last(stack, 3);
-        Tensor input = std::move(inputs[0]).toTensor();
-        const IValue& axis = inputs[1];
-        const IValue& epsilon = inputs[2];
-        drop(stack, 3);
-
-        if (input.requires_grad()) {
+        Tensor tensor_input = std::move(stack[stack.size()-3]).toTensor();
+        if (tensor_input.requires_grad()) {
           throw std::runtime_error("Autograd not yet supported for c10 ops.");
         }
+        auto device = tensor_input.device();
+        torch::jit::peek(stack, 0, 3) = torch::autograd::Variable(std::move(tensor_input)).data();
 
-        Tensor c10_output(at::empty({0}, input.device()));
-        Tensor c10_output_mean(at::empty({0}, input.device()));
-        Tensor c10_output_stdev(at::empty({0}, input.device()));
+        // push output fields as outputs to stack
+        push(stack, at::empty({0}, device), at::empty({0}, device), at::empty({0}, device));
 
-        // TODO remove std::array for args here, instead pass through inputs directly as ArrayRef
-        std::array<c10::IValue, 7> args{
-          IValue(torch::autograd::Variable(std::move(input)).data()),
-          IValue(c10_output),
-          IValue(c10_output_mean),
-          IValue(c10_output_stdev),
-          axis,
-          epsilon
-        };
-        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(args).call(args);
-        push(stack,
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
-        );
+        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(&stack).call(&stack);
+
+        // move outputs down the stack to where the inputs were before
+        for (int i = 0; i < 3; ++i) {
+          torch::jit::peek(stack, i, 6) = torch::autograd::make_variable(std::move(torch::jit::peek(stack, i, 3)).toTensor(), false);
+        }
+
+        drop(stack, 3); // drop inputs
+
         return 0;
       })
   });

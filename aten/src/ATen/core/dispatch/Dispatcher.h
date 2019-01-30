@@ -28,12 +28,12 @@ public:
   /**
    * Call the operator kernel with the given arguments.
    */
-  IValue call(ArrayRef<IValue> args) {
+  void call(Stack* stack) {
     if (state_.get() == nullptr) {
       AT_ASSERT(state_creator_ != nullptr);
       state_ = (*state_creator_)();
     }
-    return (*kernel_)(args, state_.get());
+    return (*kernel_)(stack, state_.get());
   }
 
 private:
@@ -76,9 +76,9 @@ public:
   /**
    * Perform a dynamic dispatch and get the kernel for an operator
    */
-  static OpKernel lookup(ArrayRef<IValue> args) {
+  static OpKernel lookup(const Stack* stack) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    const DispatchTableEntry& kernel = dispatch_table_for_this_op.lookup(args);
+    const DispatchTableEntry& kernel = dispatch_table_for_this_op.lookup(stack);
     return OpKernel(kernel.kernel_func, kernel.state_creator_func);
   }
 
