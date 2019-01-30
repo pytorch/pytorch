@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
 
@@ -15,7 +16,7 @@ using namespace ::c10::prim;
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(std::move(graph))) {}
+      : aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
   DeadCodeEliminator() = default;
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
@@ -268,7 +269,7 @@ class DeadCodeEliminator {
     }
   }
 
-  c10::optional<AliasDb> aliasDb_;
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
   std::unordered_set<const Value*> liveValues_;
