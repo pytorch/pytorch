@@ -167,7 +167,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 
 struct GraphFuser {
   Block* block_;
-  c10::optional<AliasDb> aliasDb_;
+  std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
@@ -1002,7 +1002,7 @@ struct GraphFuser {
   }
 
   void refreshAliasDb() {
-    aliasDb_ = AliasAnalysis(graph_);
+    aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
   bool canFuseWithConcat(Value* producer, Node* before_check) {

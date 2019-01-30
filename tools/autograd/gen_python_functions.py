@@ -346,7 +346,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             type_args = type_actual_args
 
         if type_args and len(outputs) > 1:
-                raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
+            raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']

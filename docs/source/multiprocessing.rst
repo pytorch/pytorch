@@ -27,15 +27,57 @@ a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
 Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
-.. warning::
+Unlike CPU tensors, the sending process is required to keep the original tensor
+as long as the receiving process retains a copy of the tensor.
+This shouldn't be a problem for sharing model parameters (which stay live
+for the entire execution of the model), but passing other
+kinds of data should be done with care.
 
-    CUDA API requires that the allocation exported to other processes remains
-    valid as long as it's used by them. You should be careful and ensure that
-    CUDA tensors you shared don't go out of scope as long as it's necessary.
-    This shouldn't be a problem for sharing model parameters, but passing other
-    kinds of data should be done with care. Note that this restriction doesn't
-    apply to shared CPU memory.
+Here is an example program which handles these requirements correctly:
 
+::
+    import torch
+    import torch.multiprocessing as mp
+
+    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+    def sender(q, e):
+        for i in range(10):
+            s_sample = [torch.zeros(1), torch.ones(1)]
+            q.put(s_sample)
+            e.wait()
+            del s_sample
+            e.clear()
+
+    if __name__ == "__main__":
+        ctx = mp.get_context("spawn")
+        q = ctx.Queue()
+        e = ctx.Event()
+        p = ctx.Process(target=sender, args=(q, e))
+        p.start()
+
+        for i in range(10):
+            print('=== ITER {} ===".format(i))
+            r_sample = q.get()
+            del r_sample
+            e.set()
+
+        p.join()
+
+In the example above, calling `e.wait()`
+on sender side ensures tensor `s_sample` doesn't get deleted while
+receiver is working on it.  The receiver signals when it is done
+with the tensor using `e.set()`, being careful to `del` its reference
+to the received tensor first.  It is INSUFFICIENT to promise never to call
+`r_sample` again; while `r_sample` is live, it may be confused with
+any subsequent tensors allocated by the source process at the same address.
+
+If a receiver wants to save the data of `r_sample` for future use while
+letting the source process deallocate the original, it must
+`clone()` it.
+
+This behavior is very confusing, and we are tracking a fix for it
+at https://github.com/pytorch/pytorch/issues/16141
 
 Sharing strategies
 ------------------
