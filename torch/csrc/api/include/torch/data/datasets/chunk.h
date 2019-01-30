@@ -1,7 +1,15 @@
 #pragma once
 
 #include <torch/data/datasets/stateful.h>
+#include <algorithm>
+#include <condition_variable>
+#include <cstddef>
+#include <exception>
+#include <mutex>
+#include <numeric>
 #include <random>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace data {
@@ -243,15 +251,18 @@ class BatchDataBuffer {
 };
 
 /// Select chunks for loading and define a sampling behavior.
-/// In a distributed setting, it selects a subset of the chunks depending on the
-/// provided num_replicas and rank parameters.
-/// The `next()` method of this class needs to be thread-safe as it will be
-/// called from different threads during chunk loading.
+/// In a distributed setting, this selects a subset of the chunks depending on
+/// the provided num_replicas and rank parameters. The `next()` method of this
+/// class needs to be thread-safe as it will be called from different threads
+/// during chunk loading.
 class ChunkSelector {
  public:
   virtual ~ChunkSelector() = default;
   ChunkSelector(size_t chunk_count, size_t num_replicas = 1, size_t rank = 0)
-      : chunk_count_(chunk_count), num_replicas_(num_replicas), rank_(rank) {
+      : chunk_count_(chunk_count),
+        num_replicas_(num_replicas),
+        rank_(rank),
+        epoch_(0) {
     local_chunk_count_ = (size_t)std::ceil(chunk_count_ * 1.0 / num_replicas_);
   }
 
@@ -276,7 +287,7 @@ class ChunkSelector {
   }
 
  protected:
-  size_t epoch_{0};
+  size_t epoch_;
   size_t chunk_count_;
   size_t num_replicas_;
   size_t rank_;
@@ -294,14 +305,14 @@ class RandomChunkSelector : public ChunkSelector {
     size_t index_count =
         num_replicas_ == 1 ? chunk_count_ : local_chunk_count_ * num_replicas_;
     all_indices_.resize(index_count);
+    std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
     if (num_replicas_ > 1)
-      for (size_t i = 0; i < index_count; ++i) {
+    {
+      for (size_t i = chunk_count; i < index_count; ++i) {
         all_indices_[i] =
             i % chunk_count_; // we are adding some more chunks to make all
                               // replicas to have the same number of chunks.
-      }
-    else {
-      std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
+      }    
     }
   }
 
