@@ -22,6 +22,7 @@
 aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
+build/
 caffe2/cpp_test/
 dist/
 docs/src/**/*
@@ -61,22 +62,16 @@ torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
 torch/lib/*.so*
-torch/lib/protobuf*.pc
 torch/lib/build
-torch/lib/caffe2/
 torch/lib/cmake
 torch/lib/include
 torch/lib/pkgconfig
 torch/lib/protoc
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
-torch/lib/site-packages/
 torch/lib/python*
 torch/share/
 torch/version.py
-# Root level file used in CI to specify certain env configs.
-# E.g., see .circleci/config.yaml
-env
 
 # IPython notebook checkpoints
 .ipynb_checkpoints

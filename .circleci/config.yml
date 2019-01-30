@@ -80,7 +80,7 @@ install_doc_push_script: &install_doc_push_script
     popd
     pushd docs
     rm -rf source/torchvision
-    cp -a ../vision/docs/source source/torchvision
+    cp -r ../vision/docs/source source/torchvision
 
     # Build the docs
     pip -q install -r requirements.txt || true
@@ -1242,13 +1242,12 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
 
+            git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
             mkdir -p /Users/distiller/pytorch-ci-env/workspace
-
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
+            cp -r /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
       - persist_to_workspace:
           root: /Users/distiller/pytorch-ci-env
           paths:
@@ -1277,8 +1276,7 @@ jobs:
             set -e
             export IN_CIRCLECI=1
 
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+            cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
