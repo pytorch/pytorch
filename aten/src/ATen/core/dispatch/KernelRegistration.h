@@ -34,9 +34,9 @@ public:
    * @param kernel The concrete function implementation to register
    * @param dispatch_key  The dispatch key to register the function to
    */
-  KernelRegistrar(KernelFunction* kernel, typename Schema::dispatch::dispatch_key_type dispatch_key)
+  KernelRegistrar(typename Schema::dispatch::dispatch_key_type dispatch_key, KernelFunction* kernel, KernelStateCreatorFunction* state_creator)
   : dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
-    Dispatcher<OpSchemaDef>::registerKernel(kernel, dispatch_key_);
+    Dispatcher<OpSchemaDef>::registerKernel(dispatch_key_, kernel, state_creator);
   }
 
   KernelRegistrar(KernelRegistrar&& rhs)
@@ -80,25 +80,38 @@ private:
  * @tparam OpSchemaDef The operator schema this is building a KernelRegistration for
  * @tparam FieldsPresentFlags Remembers which fields are already set in the builder
  */
-template<class OpSchemaDef, uint64_t FieldsPresentFlags>
+template<class OpSchemaDef, class StateTypeOrVoid, uint64_t FieldsPresentFlags>
 class KernelRegistrationBuilder final {
 private:
   using Schema = OpSchema<OpSchemaDef>;
 
-  static constexpr uint64_t KERNEL_PRESENT = 0x01 << 0;
-  static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 1;
+  static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 0;
+  static constexpr uint64_t KERNEL_PRESENT = 0x01 << 1;
+  static constexpr uint64_t STATE_PRESENT = 0x01 << 2;
 
-  c10::optional<KernelFunction*> kernel_;
+  static std::unique_ptr<c10::KernelState> defaultStateCreator() {
+    return nullptr;
+  }
+
+  template<class State>
+  static std::unique_ptr<c10::KernelState> stateCreator() {
+    static_assert(std::is_default_constructible<State>::value, "State class must be default constructible");
+    return guts::make_unique<State>();
+  }
+
   c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
+  KernelFunction* kernel_;
+  KernelStateCreatorFunction* state_creator_;
 
  public:
   constexpr KernelRegistrationBuilder()
-      : KernelRegistrationBuilder(c10::nullopt, c10::nullopt) {}
+      : KernelRegistrationBuilder(c10::nullopt, nullptr, &defaultStateCreator) {}
 
   constexpr KernelRegistrationBuilder(
-      c10::optional<KernelFunction*> kernel,
-      c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key)
-      : kernel_(std::move(kernel)), dispatch_key_(std::move(dispatch_key)) {}
+      c10::optional<typename Schema::dispatch::dispatch_key_type> dispatch_key,
+      KernelFunction* kernel,
+      KernelStateCreatorFunction* state_creator)
+      : dispatch_key_(std::move(dispatch_key)), kernel_(kernel), state_creator_(state_creator)  {}
 
   /**
    * Implicit coercion to KernelRegistrar<OpSchemaDef> that finalizes the builder and
@@ -108,7 +121,17 @@ private:
   operator KernelRegistrar<OpSchemaDef>() && {
     static_assert(FieldsPresentFlags & KERNEL_PRESENT, "Forgot to call .kernel() in kernel registration");
     static_assert(FieldsPresentFlags & DISPATCH_KEY_PRESENT, "Forgot to call .dispatchKey() in kernel registration");
-    return KernelRegistrar<OpSchemaDef>(std::move(*kernel_), std::move(*dispatch_key_));
+    return KernelRegistrar<OpSchemaDef>(std::move(*dispatch_key_), kernel_, state_creator_);
+  }
+
+  /**
+   * Specify the dispatch key for this dispatch registration
+   * @param dispatch_key dispatch key to register the function to
+   * @return "this" for method chaining
+   */
+  constexpr KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
+    static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
+    return KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(dispatch_key), kernel_, state_creator_);
   }
 
   /**
@@ -117,9 +140,10 @@ private:
    * @return "this" for method chaining
    */
   template<KernelFunction* kernel_func>
-  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+  constexpr KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
     static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT>(kernel_func, std::move(dispatch_key_));
+    // TODO Better error message when kernel function mismatches, one common mismatch is missing state parameter or state parameter present while not expected.
+    return KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT>(std::move(dispatch_key_), kernel_func, state_creator_);
   }
 
   /**
@@ -127,9 +151,9 @@ private:
    * @param kernel concrete function implementation to be registered
    * @return "this" for method chaining
    */
-  template<typename Schema::signature::func_type* kernel_func>
-  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
-    return std::move(*this).template kernel<&Schema::signature::template wrap_kernel<kernel_func>>();
+  template<typename Schema::signature::template func_type_with_state<StateTypeOrVoid>* kernel_func>
+  constexpr KernelRegistrationBuilder<OpSchemaDef, StateTypeOrVoid, FieldsPresentFlags | KERNEL_PRESENT> kernel() && {
+    return std::move(*this).template kernel<&Schema::signature::template wrap_kernel<StateTypeOrVoid, kernel_func>>();
   }
 
   /**
@@ -137,9 +161,14 @@ private:
    * @param dispatch_key dispatch key to register the function to
    * @return "this" for method chaining
    */
-  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
-    static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(kernel_), std::move(dispatch_key));
+  template<class State>
+  constexpr KernelRegistrationBuilder<OpSchemaDef, State, FieldsPresentFlags | STATE_PRESENT> withState() && {
+    static_assert(!(FieldsPresentFlags & STATE_PRESENT), "Tried to define state twice in same op registration");
+    static_assert(std::is_base_of<c10::KernelState, State>::value, "State must inherit from c10::KernelState");
+
+    static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Cannot set the state after the kernel function is already set. Please call .withState() first and .kernel() later in the chain.");
+
+    return KernelRegistrationBuilder<OpSchemaDef, State, FieldsPresentFlags | STATE_PRESENT>(std::move(dispatch_key_), kernel_, &stateCreator<State>);
   }
 };
 
@@ -148,4 +177,4 @@ private:
 // TODO Can the builder logic be moved to compile time?
 // NB: Semicolon after applying this macro is MANDATORY
 #define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \
-  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, 0>()
+  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, void, 0>()
