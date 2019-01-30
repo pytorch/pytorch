@@ -6,7 +6,7 @@
 
 using namespace at;
 
-int test_int;
+static int test_int;
 
 Tensor empty_override(IntList size, const TensorOptions & options) {
   test_int = 1;
