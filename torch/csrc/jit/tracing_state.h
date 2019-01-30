@@ -5,7 +5,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/variadic.h>

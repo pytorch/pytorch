@@ -3,7 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/custom_operator.h>
 
 using at::Tensor;
