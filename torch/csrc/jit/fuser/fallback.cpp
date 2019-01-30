@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/utils/functional.h> //fmap
 
 #include <stdexcept>
