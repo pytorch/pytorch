@@ -2300,9 +2300,9 @@ struct to_ir {
       const SourceRange& loc,
       Value* input,
       at::ArrayRef<Value*> indices) {
-    // NB: the index of aten::index can either be a type of TensorList or
-    // List[Optional[Tensor]], this is to support the case like t[:, :, 1]
-    // where : here indicates a None/undefined tensor(optional tensor)
+    // NB: the index of aten::index should be a type of List[Optional[Tensor]],
+    // this is to support the case like t[:, :, 1] where : here indicates a
+    // None/undefined tensor(optional tensor)
     auto* index =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
@@ -2325,7 +2325,7 @@ struct to_ir {
     size_t dim = 0;
 
     auto handle_tensor = [&](Value* tensor) {
-      // NB: tensor_indices can have NULL holes because of how at::index works.
+      // NB: tensor_indices can have None holes because of how at::index works.
       tensor_indices.resize(dim + 1);
       tensor_indices[dim] = tensor;
       dim++;
@@ -2337,7 +2337,7 @@ struct to_ir {
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr);
+      auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
@@ -2351,8 +2351,8 @@ struct to_ir {
           << index->type()->str()
           << ". Only ints, slices, and tensors are supported.";
     }
-    // at::index takes in a TensorList where some tensors can be undefined.
-    // Convert NULL tensorIndices to undefined tensors to pass to at::index.
+    // at::index takes in a List[Optional[Tensor]] where some dims can be None.
+    // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
         index =
