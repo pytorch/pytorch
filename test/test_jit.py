@@ -8316,10 +8316,17 @@ a")
         with self.assertRaisesRegex(RuntimeError, error):
             p1((1, 2))
 
-        # test that JIT successfully reject a namedtuple with different field names
+        # test that JIT successfully reject namedtuple with different field names
         T3 = namedtuple('T3', ['c', 'd'])
         with self.assertRaisesRegex(RuntimeError, error):
             p1(T3(c=1, d=2))
+
+        error = re.escape("expected a value of type (int a) for argument 'x' but found (int)")
+        with self.assertRaisesRegex(RuntimeError, error):
+            @torch.jit.script
+            def g3(x):
+                # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('c', int)]))]))
+                return g1(x.b)
 
     def test_tuple_slicing(self):
         def tuple_slice(a):
