@@ -205,6 +205,7 @@ template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
 bool MIOPENConvOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
+  auto* Y = Output(0);
 
   // Figure out the output shape
   CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
@@ -213,8 +214,7 @@ bool MIOPENConvOp::DoRunWithType() {
       "Conv op with MIOpen engine is supported only for 2D convolutions");
 
   const int M = Weight.dim32(0);
-  auto sizes = ConvPoolOpBase<HIPContext>::GetOutputSize(X, M);
-  auto* Y = Output(0, sizes, at::dtype<T_Y>());
+  ConvPoolOpBase<HIPContext>::SetOutputSize(X, Y, M);
 
   int N = X.dim32(0);
   int C = X.dim32(1);
