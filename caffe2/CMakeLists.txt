@@ -240,7 +240,7 @@ endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Window]
+  # Note [Supporting both static and dynamic libraries on Windows]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   # A Windows library may be distributed as either a static or dynamic
   # library.  The chosen distribution mechanism affects how you setup
