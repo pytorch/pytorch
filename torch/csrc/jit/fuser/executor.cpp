@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
 #include <torch/csrc/jit/fuser/tensor_info.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/utils/functional.h>
 
 #include <algorithm>

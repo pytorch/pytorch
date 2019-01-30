@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/caffe2_operator.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
