@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -208,7 +208,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    if (aliasDb_.hasWritersBefore(node)) {
+    if (aliasDb_.hasWriters(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;

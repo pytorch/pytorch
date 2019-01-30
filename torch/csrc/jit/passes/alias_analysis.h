@@ -30,9 +30,6 @@ class AliasDb {
   TORCH_API explicit AliasDb(std::shared_ptr<Graph> graph);
   TORCH_API ~AliasDb();
 
-  // Does `n` write to any alias sets?
-  bool hasWrites(Node* n) const;
-
   // There are limitations to what effects the alias analysis can track. Two
   // kinds of nodes may have untracked effects:
   // 1. Nodes that write to a value that may alias the graph inputs (since
@@ -44,16 +41,21 @@ class AliasDb {
   bool hasUntrackedEffects(Node* n) const;
 
   // Get all the values that `n` writes to.
-  std::unordered_set<const Value*> getWrites(Node* n) const;
+  // NOTE: this only returns values directly written to, not aliases thereof
+  //
+  // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
+  std::unordered_set<const Value*> getWrites(
+      Node* n,
+      bool recurseBlocks = false) const;
 
-  // Get all values that may alias to `v`.
-  std::unordered_set<const Value*> getAliases(const Value* v) const;
+  // Do any values in group `a` potentially share a memory location with any
+  // value in group `b`?
+  bool mayAlias(
+      const std::unordered_set<const Value*>& a,
+      const std::unordered_set<const Value*>& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   bool hasWriters(const Node* n) const;
-
-  // Same as hasWriters() but ignores writes after `n`.
-  bool hasWritersBefore(const Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -81,13 +83,27 @@ class AliasDb {
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
+  void getWritesImpl(
+      Node* n,
+      std::unordered_set<const Value*>& ret,
+      bool recurseBlocks = false) const;
+
+  // Get all the values that `n` reads from.
+  // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
+  std::unordered_set<const Value*> getReads(Node* n, bool recurseBlocks = false)
+      const;
+
+  void getReadsImpl(
+      Node* n,
+      std::unordered_set<const Value*>& ret,
+      bool recurseBlocks = false) const;
+  // Does `n` write to any alias sets?
+  bool hasWrites(Node* n) const;
+
   // Does `n` use or write to any wildcard aliases?
   bool hasWildcard(const Node* n) const;
   // Returns nullopt if there are no wildcard nodes
   c10::optional<const Node*> getLastWildcard() const;
-
-  // Get all nodes that write to any alias set inputed/outputed by `n`
-  std::unordered_set<Node*> getWriters(const Node* n) const;
 
   // Does `n` write to a value that may alias one of the graph inputs?
   bool writesToInputAlias(Node* n) const;
