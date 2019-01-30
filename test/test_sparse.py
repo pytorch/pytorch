@@ -80,7 +80,6 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
-    @skipIfRocm  # ROCm stack doesn't like the x + x call
     def test_print(self):
         shape_sparse_dim_nnz = [
             ((), 0, 2),
@@ -250,7 +249,6 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 5, 0)
         test_tensor(x, res)
 
-    @skipIfRocm  # see https://github.com/pytorch/pytorch/pull/12171#issuecomment-431069849
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
         max_nnz = 1
@@ -716,7 +714,6 @@ class TestSparse(TestCase):
                                     "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
-    @skipIfRocm
     def test_unsqueeze(self):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
@@ -804,7 +801,6 @@ class TestSparse(TestCase):
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
 
-    @skipIfRocm
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz):
             D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
@@ -820,7 +816,6 @@ class TestSparse(TestCase):
 
         test_shape(7, 8, 9, 20)
 
-    @skipIfRocm
     def test_sparse_mm(self):
         def test_shape(d1, d2, d3, nnz):
             D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
@@ -1076,7 +1071,6 @@ class TestSparse(TestCase):
             # coalesced.
             self.assertEqual(z._values(), y._values())
 
-    @skipIfRocm
     def test_basic_ops(self):
         self._test_basic_ops_shape(9, 12, [5, 6])
         self._test_basic_ops_shape(9, 12, [10, 10, 10])
@@ -1159,7 +1153,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 0]))
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
 
@@ -1206,7 +1199,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2, 0]))
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()
 
@@ -1315,7 +1307,6 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
             y.backward(x)
 
-    @skipIfRocm
     def test_log1p(self):
         input = torch.sparse_coo_tensor(
             torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),
