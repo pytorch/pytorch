@@ -63,20 +63,6 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-function assert_git_not_dirty() {
-    # TODO: we should add an option to `build_amd.py` that reverts the repo to
-    #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-        git_status=$(git status --porcelain)
-        if [[ $git_status ]]; then
-            echo "Build left local git repository checkout dirty"
-            echo "git status --porcelain:"
-            echo "${git_status}"
-            exit 1
-        fi
-    fi
-}
-
 if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
@@ -129,8 +115,7 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0

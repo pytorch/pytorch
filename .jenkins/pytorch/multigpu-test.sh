@@ -26,4 +26,3 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 time python test/run_test.py --verbose -i distributed
-assert_git_not_dirty

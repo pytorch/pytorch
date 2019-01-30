@@ -17,7 +17,6 @@ source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
-git submodule sync --recursive
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
@@ -65,8 +64,6 @@ export MAX_JOBS=2
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 python setup.py install
-
-assert_git_not_dirty
 
 # Upload torch binaries when the build job is finished
 if [ -z "${IN_CIRCLECI}" ]; then
