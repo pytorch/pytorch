@@ -2,6 +2,7 @@
 #include <torch/csrc/autograd/function.h>
 
 #include <sstream>
+#include <fstream>
 
 namespace torch { namespace autograd { namespace profiler {
 
