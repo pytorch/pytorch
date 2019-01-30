@@ -1006,7 +1006,7 @@ def exp(g, self):
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
-    if not train: # in eval mode, dropout is non-op
+    if not train:  # in eval mode, dropout is non-op
         return input
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
