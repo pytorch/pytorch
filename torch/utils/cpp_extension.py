@@ -508,7 +508,7 @@ def include_paths(cuda=False):
     '''
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
-    lib_include = os.path.join(torch_path, 'lib', 'include')
+    lib_include = os.path.join(torch_path, 'include')
     paths = [
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
