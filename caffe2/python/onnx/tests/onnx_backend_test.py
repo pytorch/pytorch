@@ -54,6 +54,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_where.*'  # Needs implementation
                      '|test_shrink.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
+                     '|test_tfidfvectorizer.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

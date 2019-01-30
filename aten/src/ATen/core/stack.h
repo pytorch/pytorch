@@ -1,7 +1,8 @@
 #pragma once
-#include <ATen/ATen.h>
 
 #include <ATen/core/ivalue.h>
+
+// TODO move this to c10 namespace
 
 namespace torch {
 namespace jit {

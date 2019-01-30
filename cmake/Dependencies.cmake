@@ -1,3 +1,20 @@
+# RPATH stuff
+# see https://cmake.org/Wiki/CMake_RPATH_handling
+if (APPLE)
+  set(CMAKE_MACOSX_RPATH ON)
+  set(_rpath_portable_origin "@loader_path")
+else()
+  set(_rpath_portable_origin $ORIGIN)
+endif(APPLE)
+# Use separate rpaths during build and install phases
+set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+# Don't use the install-rpath during the build phase
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
+# Automatically add all linked folders that are NOT in the build directory to
+# the rpath (per library?)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
  # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
@@ -1013,23 +1030,6 @@ endif()
 if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  # RPATH stuff
-  # see https://cmake.org/Wiki/CMake_RPATH_handling
-  if (APPLE)
-    set(CMAKE_MACOSX_RPATH ON)
-    set(_rpath_portable_origin "@loader_path")
-  else()
-    set(_rpath_portable_origin $ORIGIN)
-  endif(APPLE)
-  # Use separate rpaths during build and install phases
-  set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-  # Don't use the install-rpath during the build phase
-  set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-  set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
-  # Automatically add all linked folders that are NOT in the build directory to
-  # the rpath (per library?)
-  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config

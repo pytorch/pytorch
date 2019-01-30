@@ -1,16 +1,4 @@
-#include <torch/csrc/jit/ir.h>
-
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/operator.h>
-
-#include <algorithm>
-#include <iostream>
-#include <set>
-#include <sstream>
-#include <stack>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
+#include <torch/csrc/jit/scope.h>
 
 namespace torch {
 namespace jit {

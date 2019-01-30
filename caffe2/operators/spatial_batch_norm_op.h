@@ -392,7 +392,8 @@ class SpatialBNGradientOp : public Operator<Context> {
           dbias_data,
           alpha_data,
           beta_data,
-          gamma_data);
+          gamma_data,
+          dX_data);
     }
     ComputeXGradient<T>(
         N, C, HxW, dY_data, X_data, alpha_data, beta_data, gamma_data, dX_data);
@@ -431,7 +432,8 @@ class SpatialBNGradientOp : public Operator<Context> {
       T* dbias,
       T* alpha,
       T* beta,
-      T* gamma);
+      T* gamma,
+      T* scratch);
 
   template <typename T>
   void ComputeXGradient(
@@ -452,6 +454,7 @@ class SpatialBNGradientOp : public Operator<Context> {
   Tensor alpha_;
   Tensor beta_;
   Tensor gamma_;
+  Tensor ones_;
 
   INPUT_TAGS(
       INPUT,

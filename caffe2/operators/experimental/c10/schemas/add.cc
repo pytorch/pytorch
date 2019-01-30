@@ -31,7 +31,6 @@ struct AxisParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::Add,
-    void,
     C10Add_DontUseThisOpYet,
     ParameterHelper<LegacyBroadcastParameter>,
     ParameterHelper<AxisParameter>)
