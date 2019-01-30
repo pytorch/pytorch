@@ -201,7 +201,7 @@ TYPE_FORMAL_GENERIC = {
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
-    'IntListRefSize': 'IntArrayRef',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -217,7 +217,7 @@ DYNAMIC_TYPE = {
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
-    'IntListRefSize': 'IntArrayRef',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -1391,7 +1391,7 @@ def create_derived(backend_type_env, declarations):
         output_count = 0
 
         # scalar_check is the heuristic conditions when a result may be a scalar_check
-        # if there is a IntListRefSize argument, then its dimensions are used to determine scalar.
+        # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
         scalar_check_is_from_option = False
@@ -1407,7 +1407,7 @@ def create_derived(backend_type_env, declarations):
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'IntListRefSize' and not scalar_check_is_from_option:
+            if arg['type'] == 'IntArrayRefSize' and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':
