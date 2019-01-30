@@ -35,11 +35,13 @@ test/data/gpu_tensors.pt
 test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
 test/data/linear.pt
+test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
+torch/__init__.pyi
 torch/csrc/autograd/generated/*
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated

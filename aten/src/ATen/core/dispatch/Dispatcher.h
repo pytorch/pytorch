@@ -97,6 +97,8 @@ class RegistrationListenerList;
  */
 class CAFFE2_API Dispatcher final {
 public:
+  ~Dispatcher();
+
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
