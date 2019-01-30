@@ -55,7 +55,7 @@ public:
     }
 
     template <typename F>
-    auto read(F&& readFunc) const {
+    auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
         if(_inDestruction.load()) {
             throw std::logic_error("Issued LeftRight::read() after the destructor started running");
         }
@@ -66,7 +66,7 @@ public:
 
     // Throwing from write would result in invalid state
     template <typename F>
-    auto write(F&& writeFunc) {
+    auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
         if(_inDestruction.load()) {
             throw std::logic_error("Issued LeftRight::read() after the destructor started running");
         }
