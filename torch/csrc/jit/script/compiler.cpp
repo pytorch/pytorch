@@ -1582,10 +1582,10 @@ struct to_ir {
             /*required=*/true);
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
-        // into `index` and `index_put_` ops
+        // into `index` and `index_put_` ops with tensordices of Tensor?[]
         const auto indices = graph
                                  ->insertNode(graph->createList(
-                                     DynamicType::get(), tensorIndices))
+                                     OptionalType::ofTensor(), tensorIndices))
                                  ->output();
         const auto indexed =
             graph->insert(aten::index, {slicedArg, indices}, {}, stmt.range());
@@ -1671,10 +1671,10 @@ struct to_ir {
         graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
-        // Dispatch to `aten::index_put_`.
+        // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
         const auto indices = graph
                                  ->insertNode(graph->createList(
-                                     DynamicType::get(), tensorIndices))
+                                     OptionalType::ofTensor(), tensorIndices))
                                  ->output();
 
         graph->insert(
