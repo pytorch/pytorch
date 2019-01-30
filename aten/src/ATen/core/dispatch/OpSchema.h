@@ -7,6 +7,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/core/DeviceType.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/stack.h>
 
 namespace c10 {
 
@@ -22,11 +23,13 @@ public:
   virtual ~KernelState() = default;
 };
 
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 /**
  * This is the basic ABI for any kernel call. Each kernel is registered as a
  * pointer to a global C function of this type.
  */
-using KernelFunction = IValue(ArrayRef<IValue>, KernelState* state);
+using KernelFunction = void(Stack*, KernelState* state);
 
 namespace details {
 
@@ -143,55 +146,65 @@ struct ivalue_to_arg_type<ArrayRef<T>> {
   }
 };
 
-template<class ReturnType, class ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel {};
-template<class ReturnType, class... ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, StateType, FuncType, kernel> {
-  using parameter_types = guts::typelist::typelist<ParamTypes...>;
+template<class FuncType, class... ExtraArgs, size_t... ivalue_arg_indices>
+typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(FuncType* func, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>, ExtraArgs&&... extra_args) {
+  using IValueArgTypes = typename guts::function_traits<FuncType>::parameter_types;
+  return (*func)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])..., std::forward<ExtraArgs>(extra_args)...);
+}
 
-  template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
-    if (args.size() != sizeof...(ParamTypes)) {
-      throw std::runtime_error("Wrong number of arguments for operator call");
-    }
-    return return_type_to_ivalue(
-      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])..., static_cast<StateType*>(state))
-    );
+template<class FuncType, class... ExtraArgs>
+typename guts::function_traits<FuncType>::return_type call_with_ivalue_args(FuncType* func, ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args) {
+  constexpr size_t num_ivalue_args = guts::function_traits<FuncType>::number_of_parameters - sizeof...(ExtraArgs);
+  return call_with_ivalue_args_<FuncType>(func, ivalue_args, guts::make_index_sequence<num_ivalue_args>(), std::forward<ExtraArgs>(extra_args)...);
+}
+
+template<class OutputType>
+struct write_outputs final {
+  static void call(OutputType&& output, ArrayRef<IValue> outputs) {
+    write_outputs<std::tuple<OutputType>>(std::tuple<OutputType>(std::move(output)), outputs);
   }
 };
-template<class ReturnType, class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, void, FuncType, kernel> {
-  using parameter_types = guts::typelist::typelist<ParamTypes...>;
-
-  template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
-    if (args.size() != sizeof...(ParamTypes)) {
-      throw std::runtime_error("Wrong number of arguments for operator call");
+template<class... OutputTypes>
+struct write_outputs<std::tuple<OutputTypes...>> final {
+  static void call(std::tuple<OutputTypes...>&& output, ArrayRef<IValue> outputs) {
+    AT_ASSERT(outputs.size() == sizeof...(OutputTypes)); // Mismatch in number of returns between kernel function and operator schema.
+    for (size_t i = 0; i < sizeof...(OutputTypes); ++i) {
+      outputs[i] = return_type_to_ivalue(std::move(output));
     }
-    return return_type_to_ivalue(
-      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...)
-    );
   }
 };
-template<class... ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, StateType, FuncType, kernel> {
-  using parameter_types = guts::typelist::typelist<ParamTypes...>;
 
-  template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
-    if (args.size() != sizeof...(ParamTypes)) {
-      throw std::runtime_error("Wrong number of arguments for operator call");
-    }
-    (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])..., static_cast<StateType*>(state));
-    return IValue();
+
+// SFINAE over (1) does the operator kernel have state and (2) does it return a value or void
+template<class StateTypeOrVoid, class FuncType, class Enable = void> struct call_kernel_with_ivalue_args {};
+// SFINAE version for kernels with output and with state
+template<class StateTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, StateTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* state) {
+    auto output = call_with_ivalue_args(func, ivalue_args, static_cast<StateTypeOrVoid*>(state));
+    write_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), outputs);
   }
 };
-template<class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, void, FuncType, kernel> {
-  using parameter_types = guts::typelist::typelist<ParamTypes...>;
-
-  template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
-    if (args.size() != sizeof...(ParamTypes)) {
-      throw std::runtime_error("Wrong number of arguments for operator call");
-    }
-    (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
-    return IValue();
+// SFINAE version for kernels with output and without state
+template<class StateTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, StateTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* /*state*/) {
+    auto output = call_with_ivalue_args(func, ivalue_args);
+    write_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), outputs);
+  }
+};
+// SFINAE version for kernels without output and with state
+template<class StateTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<!std::is_same<void, StateTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* state) {
+    call_with_ivalue_args(func, ivalue_args, static_cast<StateTypeOrVoid*>(state));
+  }
+};
+// SFINAE version for kernels without output and without state
+template<class StateTypeOrVoid, class FuncType>
+struct call_kernel_with_ivalue_args<StateTypeOrVoid, FuncType, guts::enable_if_t<std::is_same<void, StateTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
+  static typename guts::function_traits<FuncType>::return_type call(FuncType* func, ArrayRef<IValue> ivalue_args, ArrayRef<IValue> outputs, c10::KernelState* /*state*/) {
+    call_with_ivalue_args(func, ivalue_args);
   }
 };
 
@@ -242,9 +255,14 @@ public:
   template<class StateTypeOrVoid> using func_type_with_state = typename add_ptr_parameter_if_not_void<func_type, StateTypeOrVoid>::type;
 
   template<class StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>* kernel>
-  static IValue wrap_kernel(ArrayRef<IValue> args, KernelState* state) {
-    constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
-    return details::_wrapKernel<return_type, parameter_types, StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>, kernel>::call(args, state, guts::make_index_sequence<num_parameters>());
+  static void wrap_kernel(Stack* stack, KernelState* state) {
+    constexpr size_t num_inputs = guts::typelist::size<parameter_types>::value;
+    constexpr size_t num_outputs = 1; // TODO allow multiple outputs if it's a tuple
+
+    ArrayRef<IValue> inputs = torch::jit::peekSlice(*stack, 0, num_inputs + num_outputs, num_inputs);
+    ArrayRef<IValue> outputs = torch::jit::peekSlice(*stack, 0, num_outputs, num_outputs);
+
+    call_kernel_with_ivalue_args<StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>>::call(kernel, inputs, outputs, state);
   }
 
 private:
@@ -293,7 +311,7 @@ class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_
 public:
   using dispatch_key_type = DispatchKey<OpSchemaDef::num_dispatch_args()>;
 
-  static inline dispatch_key_type dispatch_key(ArrayRef<IValue> args) {
+  static inline dispatch_key_type dispatch_key(const Stack* stack) {
     /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;
@@ -302,7 +320,7 @@ public:
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");*/
     return dispatch_key_type {
-      details::getDispatchTypeIds_<OpSchemaDef>(args)
+      details::getDispatchTypeIds_<OpSchemaDef>(torch::jit::last(*stack, signature::num_args))
     };
   }
 };
@@ -325,13 +343,13 @@ private:
   static_assert(guts::is_hashable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have an overload for std::hash. Please define it.");
 
   static_assert(std::is_same<
-    guts::typelist::typelist<c10::ArrayRef<c10::IValue>>,
+    guts::typelist::typelist<const Stack*>,
     typename dispatch_key_traits::parameter_types
-    >::value, "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type ArrayRef<IValue>.");
+    >::value, "Operator schema defines custom dispatch_key() derivation function, but it has the wrong signature. Expected to take one argument, which is of type const Stack*.");
 
 public:
 
-  static inline dispatch_key_type dispatch_key(ArrayRef<IValue> args) {
+  static inline dispatch_key_type dispatch_key(const Stack* stack) {
     /* TODO Should we make this a runtime assert now?
     using guts::typelist::map_t;
     using guts::typelist::typelist;
@@ -340,7 +358,7 @@ public:
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
     */
-    return OpSchemaDef::dispatch_key(args);
+    return OpSchemaDef::dispatch_key(stack);
   }
 };
 
