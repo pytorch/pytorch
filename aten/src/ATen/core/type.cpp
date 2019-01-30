@@ -165,8 +165,7 @@ TypePtr attemptToRecoverType(const IValue& input_ivalue) {
 }
 
 // Checks if input_ivalue is a subvalue of type.
-bool isSubvalueOf(const IValue& input_ivalue, TypePtr type) {
-  auto ivalue = input_ivalue;
+bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   if (ivalue.isGenericList()) {
     auto list_type = type->cast<ListType>();
     if (!list_type) {
