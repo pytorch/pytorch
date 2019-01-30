@@ -13,7 +13,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
-    from torch_test_cpp_extension.msnpu import init_msnpu_extension, get_test_int
+    import torch_test_cpp_extension.msnpu as msnpu_extension
 except ImportError:
     warnings.warn(
         "test_cpp_extensions.py cannot be invoked directly. Run "
@@ -626,7 +626,7 @@ class TestCppExtension(common.TestCase):
 class TestMSNPUTensor(common.TestCase):
     @classmethod
     def setUpClass(cls):
-        init_msnpu_extension()
+        msnpu_extension.init_msnpu_extension()
 
     def test_unregistered(self):
         a = torch.empty(5, 5, device='cpu')
@@ -639,33 +639,33 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(a.sum(), 0)
 
         b = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(get_test_int(), 0)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
 
     def test_add(self):
         a = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(get_test_int(), 0)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
 
         b = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(get_test_int(), 0)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
 
         c = torch.add(a, b)
-        self.assertEqual(get_test_int(), 1)
+        self.assertEqual(msnpu_extension.get_test_int(), 1)
 
     def test_backwards(self):
         a = torch.zeros(5, 5, device='msnpu', requires_grad=True)
-        self.assertEqual(get_test_int(), 0)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
 
         b = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(get_test_int(), 0)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
 
         c = torch.kl_div(a, b)
-        self.assertEqual(get_test_int(), 3)
+        self.assertEqual(msnpu_extension.get_test_int(), 3)
 
         d = c.sum()
-        self.assertEqual(get_test_int(), 2)
+        self.assertEqual(msnpu_extension.get_test_int(), 2)
 
         c.backward()
-        self.assertEqual(get_test_int(), 4)
+        self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 
 if __name__ == "__main__":
