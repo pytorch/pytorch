@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/data/datasets/stateful.h>
+#include <random>
 
 namespace torch {
 namespace data {
@@ -240,6 +241,130 @@ class BatchDataBuffer {
   // the program to hang. This boolean is used to break this waiting condition.
   std::atomic<bool> stop_;
 };
+
+/// Select chunks for loading and define a sampling behavior.
+/// In a distributed setting, it selects a subset of the chunks depending on the
+/// provided num_replicas and rank parameters.
+/// The `next()` method of this class needs to be thread-safe as it will be
+/// called from different threads during chunk loading.
+class ChunkSelector {
+ public:
+  virtual ~ChunkSelector() = default;
+  ChunkSelector(size_t chunk_count, size_t num_replicas = 1, size_t rank = 0)
+      : chunk_count_(chunk_count), num_replicas_(num_replicas), rank_(rank) {
+    local_chunk_count_ = (size_t)std::ceil(chunk_count_ * 1.0 / num_replicas_);
+  }
+
+  /// Get the next chunk index for loading.
+  /// Note: this method needs to be thread-safe.
+  virtual optional<size_t> next() = 0;
+
+  /// Reset the chunk selector for a new enumeration.
+  virtual void reset() = 0;
+
+  /// Set the epoch for the current enumeration. This can be used to alter the
+  /// chunk selection and shuffling behavior.
+  void set_epoch(size_t epoch) {
+    epoch_ = epoch;
+  }
+
+  /// Return the number of chunks to be loaded. In the case of distributed
+  /// training, this is different to chunk_count as each loader needs to load
+  /// only a subset of chunks.
+  size_t local_chunk_count() {
+    return local_chunk_count_;
+  }
+
+ protected:
+  size_t epoch_{0};
+  size_t chunk_count_;
+  size_t num_replicas_;
+  size_t rank_;
+  size_t local_chunk_count_;
+};
+
+/// Select chunks randomly. The chunk order shuffled at each `reset()` call.
+class RandomChunkSelector : public ChunkSelector {
+ public:
+  RandomChunkSelector(
+      size_t chunk_count,
+      size_t num_replicas = 1,
+      size_t rank = 0)
+      : ChunkSelector(chunk_count, num_replicas, rank) {
+    size_t index_count =
+        num_replicas_ == 1 ? chunk_count_ : local_chunk_count_ * num_replicas_;
+    all_indices_.resize(index_count);
+    if (num_replicas_ > 1)
+      for (size_t i = 0; i < index_count; ++i) {
+        all_indices_[i] =
+            i % chunk_count_; // we are adding some more chunks to make all
+                              // replicas to have the same number of chunks.
+      }
+    else {
+      std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
+    }
+  }
+
+  optional<size_t> next() { 
+    AT_CHECK(
+        !chunk_indices_.empty(),
+        "reset() needs to be called before calling next().");
+    size_t idx = current_index_.fetch_add(1, std::memory_order_relaxed);
+    if (idx < chunk_indices_.size()) {
+      return chunk_indices_[idx];
+    } else {
+      return nullopt;
+    }
+  }
+
+  void reset() override {
+    std::minstd_rand rand(epoch_);
+    std::shuffle(all_indices_.begin(), all_indices_.end(), rand);
+    chunk_indices_.clear();
+    chunk_indices_.reserve(local_chunk_count_);
+    auto begin_index_iter = all_indices_.begin() + rank_ * local_chunk_count_;
+    auto end_index_iter = begin_index_iter + local_chunk_count_;
+    std::copy(begin_index_iter, end_index_iter, back_inserter(chunk_indices_));
+    current_index_ = 0;
+  }
+
+ private:
+  std::vector<size_t> all_indices_;
+  std::vector<size_t> chunk_indices_;
+  std::atomic<size_t> current_index_{0};
+};
+
+/// Select chunks sequentially. 
+class SequentialChunkSelector : public ChunkSelector {
+ public:
+  SequentialChunkSelector(
+      size_t chunk_count,
+      size_t num_replicas = 1,
+      size_t rank = 0)
+      : ChunkSelector(chunk_count, num_replicas, rank) {
+    begin_index_ = rank_ * local_chunk_count_;
+    end_index_ = begin_index_ + local_chunk_count_;
+    chunk_index_ = begin_index_;
+  }
+
+  optional<size_t> next() {
+    size_t idx = chunk_index_.fetch_add(1, std::memory_order_relaxed);
+    if (idx < end_index_) {
+      return idx % chunk_count_;
+    } else {
+      return nullopt;/// Select chunks randomly. The chunk order shuffled at each `reset()` call
+    }
+  }
+
+  void reset() override {
+    chunk_index_ = begin_index_;
+  }
+
+  private:
+  size_t begin_index_;
+  size_t end_index_;
+  std::atomic<size_t> chunk_index_;
+};
 } // namespace detail
 
 /// Options to configure a `ChunkDataset`.
@@ -273,7 +398,7 @@ struct ChunkDatasetOptions {
   /// The size of each batch.
   TORCH_ARG(size_t, batch_size);
 
-  // the capacity of the queue for batch caching.
+  // The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
 };
 
@@ -287,31 +412,28 @@ struct ChunkDatasetOptions {
 /// inspired by this paper http://martin.zinkevich.org/publications/nips2010.pdf
 template <
     typename ChunkReader,
-    typename ChunkSampler = samplers::RandomSampler,
     typename ExampleSampler = samplers::RandomSampler>
 class ChunkDataset final
     : public StatefulDataset<
-          ChunkDataset<ChunkReader, ChunkSampler, ExampleSampler>,
+          ChunkDataset<ChunkReader, ExampleSampler>,
           typename ChunkReader::BatchType,
           size_t> {
  public:
   using BatchType = torch::optional<typename ChunkReader::BatchType>;
   using UnwrappedBatchType = typename ChunkReader::BatchType;
   using BatchRequestType = size_t;
-  using ChunkSamplerType = ChunkSampler;
   using ExampleSamplerType = ExampleSampler;
 
   ChunkDataset(
       ChunkReader chunk_reader,
-      ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
+      std::shared_ptr<detail::ChunkSelector> chunk_selector,
       ChunkDatasetOptions options)
       : chunk_reader_(std::move(chunk_reader)),
-        chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
+        chunk_selector_(std::move(chunk_selector)),
         options_(std::move(options)),
-        quit_worker_(false) {
-  }
+        quit_worker_(false) {}
 
   virtual ~ChunkDataset() {
     free_workers();
@@ -341,11 +463,15 @@ class ChunkDataset final
     // free workers from previous reset if there is any.
     free_workers();
     preload_threads_.clear();
-
+        
     chunk_reader_.reset();
 
-    size_t chunks_to_load = chunk_reader_.chunk_count();
-    chunk_sampler_.reset(chunks_to_load);
+    // reset the chunk selector.
+    chunk_selector_->reset();
+
+    // In distributed training, local chunk count could be different to total
+    // chunks availble. Chunk selector holds the truth.
+    size_t chunks_to_load = chunk_selector_->local_chunk_count();
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
@@ -376,8 +502,8 @@ class ChunkDataset final
     while (!quit_worker_.load()) {
       try {
         size_t chunk_id = 0;
-        if (auto chunk_sampler_result = chunk_sampler_.next(1)) {
-          chunk_id = chunk_sampler_result.value()[0];
+        if (auto chunk_sampler_result = chunk_selector_->next()) {
+          chunk_id = chunk_sampler_result.value();
         } else {
           break;
         }
@@ -415,14 +541,15 @@ class ChunkDataset final
   // batches and caches them in batch_buffer_.
   ChunkReader chunk_reader_;
 
-  // chunk sampler to shuffle different chunks
-  samplers::LockedSampler<ChunkSamplerType> chunk_sampler_;
-
   // example sampler to shuffle examples in a specific chunk
   ExampleSamplerType example_sampler_;
 
+  // Selects chunks and their order for this reader.
+  std::shared_ptr<detail::ChunkSelector> chunk_selector_;
+
   // batch data buffer which holds chunk data from preloading thread.
-  std::shared_ptr<detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>
+  std::shared_ptr<
+      detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>
       batch_buffer_;
 
   // worker thread pool
