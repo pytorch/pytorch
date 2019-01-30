@@ -64,9 +64,7 @@ export MAX_JOBS=2
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
-env LDFLAGS="-L$(brew --prefix libomp)/lib -Wl,-rpath,$(brew --prefix libomp)/lib" \
-    CFLAGS="-I$(brew --prefix libomp)/include" \
-    python setup.py install
+python setup.py install
 
 assert_git_not_dirty
 

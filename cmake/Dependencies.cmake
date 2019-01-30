@@ -1099,17 +1099,6 @@ if (NOT BUILD_ATEN_MOBILE)
   # OpenMP support?
   SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
 
-  IF (CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
-    SET(CMAKE_C_COMPILER_IS_APPLE_CLANG true)
-  ELSE()
-    SET(CMAKE_C_COMPILER_IS_APPLE_CLANG false)
-  ENDIF()
-  IF (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    SET(CMAKE_CXX_COMPILER_IS_APPLE_CLANG true)
-  ELSE()
-    SET(CMAKE_CXX_COMPILER_IS_APPLE_CLANG false)
-  ENDIF()
-
   # macOS + GCC
   IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
     EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
@@ -1128,16 +1117,6 @@ if (NOT BUILD_ATEN_MOBILE)
     ENDIF()
   ENDIF()
 
-  # Apple Clang supports OpenMP, but disables it in the driver. Use the frontend
-  # flag to enable it.
-  # https://iscinumpy.gitlab.io/post/omp-on-high-sierra/
-  IF (CMAKE_C_COMPILER_IS_APPLE_CLANG)
-    SET(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp")
-  ENDIF()
-  IF (CMAKE_CXX_COMPILER_IS_APPLE_CLANG)
-    SET(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
-  ENDIF()
-
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
     FIND_PACKAGE(OpenMP)
     SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
@@ -1151,26 +1130,6 @@ if (NOT BUILD_ATEN_MOBILE)
     MESSAGE(STATUS "Compiling with OpenMP support")
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  ELSE()
-    # LLVM 3.7 supports OpenMP 3.1, and continues to add more features to
-    # support newer OpenMP standards in new versions.
-    # http://releases.llvm.org/3.7.0/tools/clang/docs/ReleaseNotes.html#openmp-support
-    #
-    # Apple Clang 7.0 is the first version based on LLVM 3.7 or later.
-    # https://en.wikipedia.org/wiki/Xcode#Latest_versions
-    IF ((CMAKE_C_COMPILER_IS_APPLE_CLANG   AND (NOT CMAKE_C_COMPILER_VERSION   VERSION_LESS 7.0)) OR
-        (CMAKE_CXX_COMPILER_IS_APPLE_CLANG AND (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0)))
-      MESSAGE(WARNING "Disabling OpenMP. Build uses Apple's customized LLVM "
-        "with version >= 7.0. This compiler supports OpenMP but does not "
-        "come with libomp, and no compatible libomp is found in the system. To "
-        "enable OpenMp, install libomp (e.g., via `brew`) and specify proper "
-        "include and linker paths, e.g., \n"
-        "  env MACOSX_DEPLOYMENT_TARGET=10.9 \\\n"
-        "    CC=clang CXX=clang++ \\\n"
-        "    LDFLAGS=\"-L$(brew --prefix libomp)/lib -Wl,-rpath,$(brew --prefix libomp)/lib\" \\\n"
-        "    CPPFLAGS=\"-I$(brew --prefix libomp)/include\" \\\n"
-        "    python3 setup.py build\n")
-    ENDIF()
   ENDIF()
 
 
