@@ -249,6 +249,7 @@ class BatchDataBuffer {
   // the program to hang. This boolean is used to break this waiting condition.
   std::atomic<bool> stop_;
 };
+} // namespace detail
 
 /// Select chunks for loading and define a sampling behavior.
 /// In a distributed setting, this selects a subset of the chunks depending on
@@ -263,7 +264,8 @@ class ChunkSelector {
         num_replicas_(num_replicas),
         rank_(rank),
         epoch_(0) {
-    local_chunk_count_ = (size_t)std::ceil(chunk_count_ * 1.0 / num_replicas_);
+    local_chunk_count_ =
+        static_cast<size_t>(std::ceil(chunk_count_ * 1.0 / num_replicas_));
   }
 
   /// Get the next chunk index for loading.
@@ -286,11 +288,11 @@ class ChunkSelector {
     return local_chunk_count_;
   }
 
- protected:
-  size_t epoch_;
+ protected:  
   size_t chunk_count_;
   size_t num_replicas_;
   size_t rank_;
+  size_t epoch_;
   size_t local_chunk_count_;
 };
 
@@ -316,7 +318,7 @@ class RandomChunkSelector : public ChunkSelector {
     }
   }
 
-  optional<size_t> next() { 
+  optional<size_t> next() override {
     AT_CHECK(
         !chunk_indices_.empty(),
         "reset() needs to be called before calling next().");
@@ -358,12 +360,13 @@ class SequentialChunkSelector : public ChunkSelector {
     chunk_index_ = begin_index_;
   }
 
-  optional<size_t> next() {
+  optional<size_t> next() override {
     size_t idx = chunk_index_.fetch_add(1, std::memory_order_relaxed);
     if (idx < end_index_) {
       return idx % chunk_count_;
     } else {
-      return nullopt;/// Select chunks randomly. The chunk order shuffled at each `reset()` call
+      return nullopt; /// Select chunks randomly. The chunk order shuffled at
+                      /// each `reset()` call
     }
   }
 
@@ -371,12 +374,11 @@ class SequentialChunkSelector : public ChunkSelector {
     chunk_index_ = begin_index_;
   }
 
-  private:
+ private:
   size_t begin_index_;
   size_t end_index_;
   std::atomic<size_t> chunk_index_;
 };
-} // namespace detail
 
 /// Options to configure a `ChunkDataset`.
 struct ChunkDatasetOptions {
@@ -438,7 +440,7 @@ class ChunkDataset final
   ChunkDataset(
       ChunkReader chunk_reader,
       ExampleSampler example_sampler,
-      std::shared_ptr<detail::ChunkSelector> chunk_selector,
+      std::shared_ptr<ChunkSelector> chunk_selector,
       ChunkDatasetOptions options)
       : chunk_reader_(std::move(chunk_reader)),
         example_sampler_(std::move(example_sampler)),
@@ -556,7 +558,7 @@ class ChunkDataset final
   ExampleSamplerType example_sampler_;
 
   // Selects chunks and their order for this reader.
-  std::shared_ptr<detail::ChunkSelector> chunk_selector_;
+  std::shared_ptr<ChunkSelector> chunk_selector_;
 
   // batch data buffer which holds chunk data from preloading thread.
   std::shared_ptr<
