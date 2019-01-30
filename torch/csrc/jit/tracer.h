@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Backtrace.h>
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -9,7 +10,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/jit/tracing_state.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
