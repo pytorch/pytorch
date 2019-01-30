@@ -580,6 +580,48 @@ void fuseOrderSwitchAtTop(repr::NNModule *nn) {
   nn->dataFlow.deleteNode(quantizeInput);
 }
 
+void fuseDequantize(repr::NNModule *nn) {
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  for (int i = allNodes.size() - 1; i > 0; i--) {
+    auto dequantizeNode = allNodes[i];
+    if (dequantizeNode == nullptr
+      || !repr::nn::is<repr::NeuralNetOperator>(dequantizeNode)) {
+      continue;
+    }
+
+    auto dequantize = repr::nn::get<repr::NeuralNetOperator>(dequantizeNode);
+    if (!isOnIdeepDevice(*dequantize)) {
+      LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    if (!isOpType(dequantizeNode, "Int8Dequantize")) {
+      continue;
+    }
+
+    auto dequantizeInput = repr::nn::getInputs(dequantizeNode).back();
+    if (dequantizeInput->getInEdges().size() <= 0) {
+      continue;
+    }
+
+    auto consumers = repr::nn::getConsumers(dequantizeInput);
+    if (consumers.size() != 1) {
+      continue;
+    }
+
+    auto preNode = repr::nn::getProducer(dequantizeInput);
+    auto pre = repr::nn::get<repr::NeuralNetOperator>(preNode);
+    removeArg(*pre, "Y_scale");
+    removeArg(*pre, "Y_zero_point");
+
+    auto dequantizeOutput = repr::nn::getOutputs(dequantizeNode).front();
+    nn->dataFlow.replaceNode(dequantizeOutput, dequantizeInput);
+
+    nn->dataFlow.deleteNode(dequantizeNode);
+    nn->dataFlow.deleteNode(dequantizeOutput);
+  }
+}
+
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -602,6 +644,8 @@ void OptimizeForIdeep(
   setPoolingInferenceMode(nn);
 
   fuseOrderSwitchAtTop(nn);
+
+  fuseDequantize(nn);
 }
 
 #endif // CAFFE2_USE_MKLDNN
