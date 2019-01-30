@@ -75,6 +75,7 @@ enum class TypeID {
   SparseCUDALong,
   SparseCUDAShort,
   MSNPU,
+  XLA,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,

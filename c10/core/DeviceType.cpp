@@ -25,6 +25,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "fpga" : "FPGA";
     case DeviceType::MSNPU:
       return lower_case ? "msnpu" : "MSNPU";
+    case DeviceType::TPU:
+      return lower_case ? "tpu" : "TPU";
     default:
       AT_ERROR(
           "Unknown device: ",
@@ -56,6 +58,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::HIP:
     case DeviceType::FPGA:
     case DeviceType::MSNPU:
+    case DeviceType::TPU:
       return true;
     default:
       return false;
