@@ -221,7 +221,7 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx is -1:
+        if self.idx == -1:
             return
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:

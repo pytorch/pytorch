@@ -1801,7 +1801,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
         reduction_enum = _Reduction.get_enum(reduction)
-        if reduction is not 'none':
+        if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(
                 input, target, weight, reduction_enum, ignore_index)
         else:
@@ -1856,9 +1856,9 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction is 'none':
+    if reduction == 'none':
         ret = loss
-    if reduction is 'mean':
+    if reduction == 'mean':
         ret = torch.mean(loss)
     else:
         ret = torch.sum(loss)
