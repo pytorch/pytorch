@@ -724,7 +724,7 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
 
         # Install the package
         if [[ "$PACKAGE_TYPE" == conda ]]; then
-          conda install -y "$pkg" --offline --no-update-dependencies
+          conda install -y "$pkg" --offline
         else
           pip install "$pkg"
         fi
@@ -862,7 +862,7 @@ binary_mac_build: &binary_mac_build
 
         # Install the package
         if [[ "$PACKAGE_TYPE" == conda ]]; then
-          conda install -y "$pkg" --offline --no-update-dependencies
+          conda install -y "$pkg" --offline
         else
           pip install "$pkg" --no-index --no-dependencies -v
         fi
