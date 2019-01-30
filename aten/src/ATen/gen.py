@@ -405,6 +405,8 @@ def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
     fm.write(env['Dispatcher'] + ".cpp", LEGACY_TH_DISPATCHER_DERIVED_CPP, env)
     fm.write(env['Dispatcher'] + ".h", LEGACY_TH_DISPATCHER_DERIVED_H, env)
 
+    return env
+
 
 def iterate_types():
     for backend in backends:

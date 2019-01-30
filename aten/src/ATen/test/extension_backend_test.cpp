@@ -36,6 +36,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
+  ASSERT_EQ(a.dtype(), caffe2::TypeMeta::Make<float>());
   ASSERT_EQ(test_int, 1);
 
   EXPECT_ANY_THROW(empty_like(a, at::kMSNPU));

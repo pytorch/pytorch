@@ -333,7 +333,7 @@ struct C10_API TensorOptions {
       case kSparse:
         return toSparse(backend);
       default:
-        AT_ERROR("Unknown layout: ", layout());
+        return backend;
     }
   }
 
