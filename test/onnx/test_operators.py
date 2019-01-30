@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
 import torch
 import torch.onnx
 from torch.autograd import Variable, Function
-from torch.nn import Module
+from torch.nn import Module, functional
 import torch.nn as nn
 
 import itertools
@@ -62,6 +62,7 @@ class TestOperators(TestCase):
             m = f
         else:
             m = FuncModule(f, params)
+        m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
         subname = kwargs.pop('subname', None)
         self.assertExpected(onnx_model_pbtxt, subname)
@@ -513,6 +514,11 @@ class TestOperators(TestCase):
     def test_erf(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: x.erf(), x)
+
+    def test_dropout(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
