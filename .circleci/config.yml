@@ -16,14 +16,14 @@
 run_all_jobs: &run_all_jobs
   filters:
     branches:
-      only:
-        - master
+      ignore:
+        - none
 
 run_high_signal_jobs_only: &run_high_signal_jobs_only
   filters:
     branches:
-      ignore:
-        - none
+      only:
+        - master
 
 PR_CI_COVERAGE_SETTING: &PR_CI_COVERAGE_SETTING
   # Change to `run_all_jobs` if you want to test the full CI matrix.
