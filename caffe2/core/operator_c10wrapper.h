@@ -103,11 +103,14 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    call_({
+    Stack stack;
+    torch::jit::push(stack,
       IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
       IValue(std::get<ParameterIndex>(parameters_))...,
-    });
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...
+    );
+    call_(&stack);
+    // TODO Do we have to Write outputs from stack back into the workspace?
   }
 
   template <
@@ -122,20 +125,22 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<InputIndex...>,
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
-    // TODO Make outputs be returned, not passed in
-    call_(ArrayRef<IValue>{
+    Stack stack;
+    torch::jit::push(stack,
       IValue(ivalue::TensorList::create(array_inputs_())),
-      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
       IValue(std::get<ParameterIndex>(parameters_))...,
-    });
+      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...
+    );
+    call_(&stack);
+    // TODO Do we have to Write outputs from stack back into the workspace?
   }
 
-  void call_(ArrayRef<IValue> args) {
+  void call_(Stack* stack) {
     if (!kernel_.has_value()) {
       // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
-      kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(args);
+      kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(stack);
     }
-    kernel_->call(args);
+    kernel_->call(stack);
   }
 
   std::vector<at::Tensor> array_inputs_() {
