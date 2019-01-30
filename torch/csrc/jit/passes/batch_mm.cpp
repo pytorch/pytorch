@@ -435,7 +435,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     // TODO(suo): make BatchMM mutability-safe
     return;
   }
-  auto alias_db = AliasAnalysis(graph);
+  AliasDb alias_db(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);
   EliminateDeadCode(graph);

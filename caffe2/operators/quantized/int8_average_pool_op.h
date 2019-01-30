@@ -44,8 +44,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
 
     CHECK_EQ(X.t.dim(), 4);
     const int channels = X.t.dim32(3);
-    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X.t, channels);
-    ReinitializeTensor(&(Y->t), sizes, at::dtype<uint8_t>().device(CPU));
+    ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), channels);
 
     initQNNPACK();
 
