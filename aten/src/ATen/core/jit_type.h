@@ -532,9 +532,7 @@ struct DictType : public Type {
   }
 
   std::string str() const override {
-    std::stringstream ss;
-    ss << getKeyType()->str() << "[" << getValueType()->str() << "]";
-    return ss.str();
+    return python_str();
   }
 
   std::string python_str() const override {
