@@ -4752,7 +4752,7 @@ class TestNN(NNTestCase):
             where input, hidden are inputs to a model'''
             input = torch.randn(input_shape)
             hidden = torch.randn(hidden_shape)
-            if mode is not 'LSTM':
+            if mode != 'LSTM':
                 return [(input, hidden)]
             if hidden_shape == correct_hidden_shape:
                 return [(input, (hidden, hidden))]
@@ -4815,13 +4815,13 @@ class TestNN(NNTestCase):
             # input and hiddens are not at the same device
             with self.assertRaisesRegex(RuntimeError,
                                         r"Input and hidden tensors are not at the same device"):
-                if mode is 'LSTM':
+                if mode == 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
                     model(input, (hidden.to('cuda:0')))
 
             # hidden tensors are not at the same CUDA device
-            if mode is 'LSTM':
+            if mode == 'LSTM':
                 with self.assertRaisesRegex(RuntimeError,
                                             "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
@@ -4833,7 +4833,7 @@ class TestNN(NNTestCase):
             input = torch.randn(10, 32, 30)
             hidden = torch.zeros(2, 32, 20)
 
-            if mode is 'LSTM':
+            if mode == 'LSTM':
                 hidden = (hidden, hidden)
             output1, hidden1 = rnn(input, hidden)
             output2, hidden2 = rnn(input)
@@ -6457,17 +6457,17 @@ class TestNN(NNTestCase):
 
     def test_interpolate(self):
         def _test_interpolate_helper(in_t, scale_factor, layer):
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                dim = len(in_t.shape) - 2
-                out_shape = [1, 1] + [out_size] * dim
-                out_t = m(in_t)
-                self.assertEqual(torch.ones(out_shape), out_t)
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            dim = len(in_t.shape) - 2
+            out_shape = [1, 1] + [out_size] * dim
+            out_t = m(in_t)
+            self.assertEqual(torch.ones(out_shape), out_t)
 
-                self.assertEqual(
-                    F.interpolate(in_t, (out_size,) * dim, **kwargs),
-                    F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+            self.assertEqual(
+                F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
 
         def _make_input(dim):
             size = [1, 1]
