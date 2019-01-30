@@ -1,5 +1,5 @@
 #include "caffe2/operators/experimental/c10/schemas/cast.h"
-#include <c10/core/dispatch/OpSchemaRegistration.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/cast.h"
 
@@ -21,7 +21,6 @@ struct ToParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     ops::Cast,
-    void,
     C10Cast_DontUseThisOpYet,
     ToParameter)
 }

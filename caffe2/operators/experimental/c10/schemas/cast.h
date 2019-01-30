@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Array.h>
 #include "caffe2/core/context_base.h"
 
@@ -11,9 +11,9 @@ struct Cast final {
   static constexpr const char* name = "cast";
 
   using Signature = void(
-      const C10Tensor& input1,
-      const C10Tensor& output,
-      TensorProto_DataType to);
+      const at::Tensor& input1,
+      const at::Tensor& output,
+      int64_t to_dtype);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 

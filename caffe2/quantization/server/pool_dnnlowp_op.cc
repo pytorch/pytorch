@@ -100,8 +100,8 @@ class AveragePoolDnnLowPOp final
     GetOutputQuantizationParams_();
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, X.dim32(1));
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -238,9 +238,9 @@ class AveragePoolDnnLowPOp final
     GetOutputQuantizationParams_();
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, channels);
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -397,8 +397,8 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, X.dim32(1));
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -543,9 +543,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
-    auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, channels);
+    auto* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
 
     T* Ydata = GetQuantizedOutputData_();
 

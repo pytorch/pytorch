@@ -35,12 +35,12 @@ class LambdaRankNdcgOp final : public Operator<Context> {
       Tensor** dy);
   bool use_ndcg_as_loss_;
   bool use_exp_gain_;
-  Tensor gain_{Context::GetDeviceType()};
-  Tensor discount_{Context::GetDeviceType()};
-  Tensor rank_idx_{Context::GetDeviceType()};
-  Tensor ideal_idx_{Context::GetDeviceType()};
-  Tensor lambda_{Context::GetDeviceType()};
-  Tensor inv_log_i_{Context::GetDeviceType()};
+  Tensor gain_;
+  Tensor discount_;
+  Tensor rank_idx_;
+  Tensor ideal_idx_;
+  Tensor lambda_;
+  Tensor inv_log_i_;
 };
 
 template <typename T, class Context>

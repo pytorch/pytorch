@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
@@ -82,7 +82,7 @@ class SubgraphSlicer {
   //
   // Returns true if an inlining has occured, false otherwise.
   bool inlineIfTooSmall(Node* n) {
-    JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
+    AT_ASSERT(n->kind() == prim::DifferentiableGraph);
     auto subgraph = SubgraphUtils::getSubgraph(n);
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
@@ -148,7 +148,7 @@ class SubgraphSlicer {
       Node* consumer,
       Node* producer,
       AliasDb& aliasDb) {
-    JIT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
+    AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb.moveBeforeTopologicallyValid(producer, consumer);
 

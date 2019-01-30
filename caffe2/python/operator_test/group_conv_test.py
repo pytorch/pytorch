@@ -43,6 +43,9 @@ class TestGroupConvolution(hu.HypothesisTestCase):
         else:
             # TODO: Group conv in NHWC not implemented for GPU yet.
             assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+        # Group conv not implemented with EIGEN engine.
+        assume(group == 1 or engine != "EIGEN")
+
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 

@@ -36,29 +36,32 @@ class MomentsOp final : public Operator<Context> {
           "Axes ids must be smaller than the dimensions of input.");
     }
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int64_t> Y_dims;
-    Y_dims.reserve(ndim);
+    std::vector<int> Y_dims = X_dims;
+    for (const int axis : axes_) {
+      Y_dims[axis] = 1;
+    }
+    std::vector<std::int64_t> output_dims;
+    output_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
       if (cur_axis < axes_.size() && i == axes_[cur_axis]) {
         if (keep_dims_) {
-          Y_dims.push_back(1);
+          output_dims.push_back(1);
         }
         ++cur_axis;
       } else {
-        Y_dims.push_back(X_dims[i]);
+        output_dims.push_back(X_dims[i]);
       }
     }
-    auto* mean = Output(0, Y_dims, at::dtype<T>());
-    auto* variance = Output(1, Y_dims, at::dtype<T>());
+    auto* mean = Output(0, output_dims, at::dtype<T>());
+    auto* var = Output(1, output_dims, at::dtype<T>());
     math::Moments<float, Context>(
         X_dims.size(),
         X_dims.data(),
-        axes_.size(),
-        axes_.data(),
+        Y_dims.data(),
         X.template data<T>(),
         mean->template mutable_data<T>(),
-        variance->template mutable_data<T>(),
+        var->template mutable_data<T>(),
         &context_);
     return true;
   }

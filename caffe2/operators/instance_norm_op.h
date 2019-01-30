@@ -81,8 +81,8 @@ class InstanceNormGradientOp : public Operator<Context> {
 
   // temp results that could get passed through to this gradient, but if not,
   // are stored here
-  Tensor mean_{Context::GetDeviceType()};
-  Tensor inv_stdev_{Context::GetDeviceType()};
+  Tensor mean_;
+  Tensor inv_stdev_;
 
   INPUT_TAGS(INPUT, SCALE, BIAS, OUTPUT_GRAD, MEAN, INV_STDEV);
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <cstdlib>
 
