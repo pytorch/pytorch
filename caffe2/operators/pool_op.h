@@ -36,10 +36,10 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(0);
+    auto* Y = Output(0);
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
-    auto* Y = Output(0, sizes, at::dtype<T>());
+    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (global_pooling_) {
@@ -65,11 +65,11 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Input(0);
+    auto* Y = Output(0);
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
-    auto* Y = Output(0, sizes, at::dtype<T>());
+    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (global_pooling_) {
