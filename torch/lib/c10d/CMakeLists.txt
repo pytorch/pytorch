@@ -135,10 +135,7 @@ endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
 
-install(TARGETS c10d
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib)
+install(TARGETS c10d DESTINATION lib)
 
 option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
