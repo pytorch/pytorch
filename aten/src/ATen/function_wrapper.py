@@ -547,16 +547,13 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
 ])
 
 
-def device_guard(option, formals, is_factory_method, dispatch_options):
+def device_guard(option, formals, is_factory_method, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
     if option.get('device_guard', True):
         if dispatch_options:
             return 'const DeviceGuard device_guard({}.device());'.format(dispatch_options['name'])
-        if not is_factory_method:
-            tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
-            if tensor_arguments:
-                tensor_argument = tensor_arguments[0]['name']
-                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
+        if not is_factory_method and dispatch_tensor:
+            return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
 
 
@@ -839,7 +836,7 @@ def create_generic(top_env, declarations):
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         if option['mode'] == 'TH':
             option['device_guard'] = False
-        option['device_guard_declaration'] = device_guard(option, formals, False, False)
+        option['device_guard_declaration'] = device_guard(option, formals, False, False, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 
@@ -1084,7 +1081,8 @@ def create_generic(top_env, declarations):
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
-        option['device_guard_declaration'] = device_guard(option, formals, is_factory_method, dispatch_options)
+        option['device_guard_declaration'] = device_guard(option, formals, is_factory_method,
+                                                          dispatch_options, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 
