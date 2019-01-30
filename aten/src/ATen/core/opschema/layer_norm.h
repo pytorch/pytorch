@@ -15,20 +15,20 @@ namespace opschema {
 struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
-  using Signature = void(
+  using Signature = std::tuple<at::Tensor, int, float, at::Tensor, at::Tensor, at::Tensor> (
       const at::Tensor& input,
+      int axis,
+      float epsilon,
       const at::Tensor& output,
       const at::Tensor& output_mean,
-      const at::Tensor& output_stddev,
-      int axis,
-      float epsilon);
+      const at::Tensor& output_stdev);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 
   static constexpr size_t num_outputs() {return 3;}
 
   static constexpr c10::guts::array<const char*, 6> parameter_names = {
-      {"input", "output", "output_mean", "output_stddev", "axis", "epsilon"}};
+      {"input", "axis", "epsilon", "output", "output_mean", "output_stdev"}};
 };
 
 } // namespace opschema

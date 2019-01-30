@@ -27,17 +27,17 @@
 
 #endif // defined(USE_GTEST)
 
+#include "ATen/core/interned_strings.h"
+#include "c10/util/Exception.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "c10/util/Exception.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
-#include "ATen/core/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -56,12 +56,13 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
+#include "torch/csrc/utils/memory.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
-#include "torch/csrc/jit/graph_executor.h"
 #include "ATen/core/ivalue.h"
+#include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 
@@ -278,8 +279,8 @@ void testAttributes() {
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Node *n = g.create(Symbol::fromQualString("foo::bar"));
-  Node &attr = *n;
+  Node* n = g.create(Symbol::fromQualString("foo::bar"));
+  Node& attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -291,8 +292,8 @@ void testAttributes() {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Node *n2 = g.create(Symbol::fromQualString("foo::baz"));
-  Node &attr2 = *n2;
+  Node* n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node& attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
   attr2.f_(one, 5);
@@ -1783,7 +1784,7 @@ void testDynamicDAG() {
 struct TopoMoveTestFixture {
   TopoMoveTestFixture() {
     createGraph();
-    aliasDb = AliasAnalysis(graph);
+    aliasDb = torch::make_unique<AliasDb>(graph);
   }
 
   // Nodes are named after their output.
@@ -1912,7 +1913,7 @@ struct TopoMoveTestFixture {
   }
 
   std::shared_ptr<Graph> graph;
-  c10::optional<AliasDb> aliasDb;
+  std::unique_ptr<AliasDb> aliasDb;
   std::unordered_map<std::string, Node*> nodes;
 };
 
@@ -2037,7 +2038,7 @@ void testAliasAnalysis() {
 
     graph->lint();
 
-    auto aliasDb = AliasAnalysis(graph);
+    AliasDb aliasDb(graph);
     // Can't move past a mutation of a used value
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
     AT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
@@ -2059,10 +2060,10 @@ void testAliasAnalysis() {
     auto usesB = graph->insert(aten::add, {b, fresh});
     auto aliasesB = graph->insert(aten::select, {a, constant, constant});
     auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
-    auto c = graph->insert(aten::add, {fresh, aliasesB});
+    graph->insert(aten::add, {fresh, aliasesB});
     graph->lint();
 
-    auto aliasDb = AliasAnalysis(graph);
+    AliasDb aliasDb(graph);
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         aliasesB->node(), mutatesAliasOfB->node()));
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(

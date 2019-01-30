@@ -2,8 +2,11 @@
 #include <caffe2/ideep/utils/ideep_operator.h>
 
 #include <caffe2/operators/accuracy_op.h>
+#include <caffe2/operators/affine_channel_op.h>
+#include <caffe2/operators/batch_matmul_op.h>
 #include <caffe2/operators/bbox_transform_op.h>
 #include <caffe2/operators/box_with_nms_limit_op.h>
+#include <caffe2/operators/clip_op.h>
 #include <caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h>
 #include <caffe2/operators/conv_transpose_op.h>
 #include <caffe2/operators/cross_entropy_op.h>
@@ -12,30 +15,32 @@
 #include <caffe2/operators/distance_op.h>
 #include <caffe2/operators/dropout_op.h>
 #include <caffe2/operators/elementwise_add_op.h>
+#include <caffe2/operators/elementwise_div_op.h>
 #include <caffe2/operators/elementwise_mul_op.h>
 #include <caffe2/operators/elementwise_ops.h>
+#include <caffe2/operators/expand_op.h>
 #include <caffe2/operators/filler_op.h>
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/generate_proposals_op.h>
 #include <caffe2/operators/given_tensor_fill_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
+#include <caffe2/operators/order_switch_ops.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
+#include <caffe2/operators/reduce_ops.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/roi_align_rotated_op.h>
 #include <caffe2/operators/scale_op.h>
 #include <caffe2/operators/softmax_op.h>
-#include <caffe2/operators/tanh_op.h>
-#include <caffe2/operators/transpose_op.h>
-#include <caffe2/operators/affine_channel_op.h>
-#include <caffe2/operators/stop_gradient.h>
-#include <caffe2/operators/order_switch_ops.h>
 #include <caffe2/operators/softmax_with_loss_op.h>
+#include <caffe2/operators/stop_gradient.h>
+#include <caffe2/operators/tanh_op.h>
+#include <caffe2/operators/tensor_protos_db_input.h>
+#include <caffe2/operators/transpose_op.h>
+#include <caffe2/queue/queue_ops.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
-#include <caffe2/queue/queue_ops.h>
-#include <caffe2/operators/tensor_protos_db_input.h>
 
 #ifdef CAFFE2_USE_GLOO
 #include <caffe2/contrib/gloo/common_world_ops.h>
@@ -193,6 +198,34 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     NCHW2NHWC,
     IDEEPFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    Expand,
+    IDEEPFallbackOp<ExpandOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    ReduceL2,
+    IDEEPFallbackOp<
+        ReduceOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    ReduceSum,
+    IDEEPFallbackOp<ReduceOp<
+        TensorTypes<std::int32_t, std::int64_t, float, double>,
+        CPUContext,
+        SumReducer<CPUContext>>>);
+
+REGISTER_IDEEP_OPERATOR(
+    BatchMatMul,
+    IDEEPFallbackOp<BatchMatMulOp<CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    Div,
+    IDEEPFallbackOp<
+        BinaryElementwiseOp<NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
+
+REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 
 #ifdef CAFFE2_USE_GLOO
 namespace gloo {

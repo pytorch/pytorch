@@ -8,32 +8,32 @@ using std::vector;
 TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<int> obj;
 
-  obj.write([] (auto& obj) {obj = 5;});
-  int read = obj.read([] (auto& obj) {return obj;});
+  obj.write([] (int& obj) {obj = 5;});
+  int read = obj.read([] (int& obj) {return obj;});
   EXPECT_EQ(5, read);
 
   // check changes are also present in background copy
-  obj.write([] (auto&) {}); // this switches to the background copy
-  read = obj.read([] (auto& obj) {return obj;});
+  obj.write([] (int&) {}); // this switches to the background copy
+  read = obj.read([] (int& obj) {return obj;});
   EXPECT_EQ(5, read);
 }
 
 TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
     LeftRight<vector<int>> obj;
 
-    obj.write([] (auto& obj) {obj.push_back(5);});
-    vector<int> read = obj.read([] (auto& obj) {return obj;});
+    obj.write([] (vector<int>& obj) {obj.push_back(5);});
+    vector<int> read = obj.read([] (vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 
-    obj.write([] (auto& obj) {obj.push_back(6);});
-    read = obj.read([] (auto& obj) {return obj;});
+    obj.write([] (vector<int>& obj) {obj.push_back(6);});
+    read = obj.read([] (vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5, 6}), read);
 }
 
 TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
     LeftRight<vector<int>> obj;
 
-    auto a = obj.write([] (auto& obj) -> int {return 5;});
+    auto a = obj.write([] (vector<int>& obj) -> int {return 5;});
     static_assert(std::is_same<int, decltype(a)>::value, "");
     EXPECT_EQ(5, a);
 }
@@ -43,14 +43,14 @@ TEST(LeftRightTest, readsCanBeConcurrent) {
     std::atomic<int> num_running_readers{0};
 
     std::thread reader1([&] () {
-       obj.read([&] (auto&) {
+       obj.read([&] (int&) {
            ++num_running_readers;
            while(num_running_readers.load() < 2) {}
        });
     });
 
     std::thread reader2([&] () {
-        obj.read([&] (auto&) {
+        obj.read([&] (int&) {
             ++num_running_readers;
             while(num_running_readers.load() < 2) {}
         });
@@ -68,7 +68,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
     std::atomic<bool> writer_running{false};
 
     std::thread reader([&] () {
-        obj.read([&] (auto&) {
+        obj.read([&] (int&) {
             reader_running = true;
             while(!writer_running.load()) {}
         });
@@ -78,7 +78,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
         // run read first, write second
         while (!reader_running.load()) {}
 
-        obj.write([&] (auto&) {
+        obj.write([&] (int&) {
             writer_running = true;
         });
     });
@@ -95,7 +95,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
     std::atomic<bool> reader_running{false};
 
     std::thread writer([&] () {
-        obj.read([&] (auto&) {
+        obj.read([&] (int&) {
             writer_running = true;
             while(!reader_running.load()) {}
         });
@@ -105,7 +105,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
         // run write first, read second
         while (!writer_running.load()) {}
 
-        obj.read([&] (auto&) {
+        obj.read([&] (int&) {
             reader_running = true;
         });
     });
@@ -122,7 +122,7 @@ TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
     std::atomic<bool> first_writer_finished{false};
 
     std::thread writer1([&] () {
-        obj.write([&] (auto&) {
+        obj.write([&] (int&) {
             first_writer_started = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             first_writer_finished = true;
@@ -133,7 +133,7 @@ TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
         // make sure the other writer runs first
         while (!first_writer_started.load()) {}
 
-        obj.write([&] (auto&) {
+        obj.write([&] (int&) {
             // expect the other writer finished before this one starts
             EXPECT_TRUE(first_writer_finished.load());
         });
@@ -151,7 +151,7 @@ TEST(LeftRightTest, whenReadThrowsException_thenThrowsThrough) {
     LeftRight<int> obj;
 
     EXPECT_THROW(
-        obj.read([](auto&) {throw MyException();}),
+        obj.read([](int&) {throw MyException();}),
         MyException
     );
 }
@@ -160,7 +160,7 @@ TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
     LeftRight<int> obj;
 
     EXPECT_THROW(
-        obj.write([](auto&) {throw MyException();}),
+        obj.write([](int&) {throw MyException();}),
         MyException
     );
 }
@@ -168,10 +168,10 @@ TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
 TEST(LeftRightTest, givenInt_whenWriteThrowsException_thenResetsToOldState) {
     LeftRight<int> obj;
 
-    obj.write([](auto& obj) {obj = 5;});
+    obj.write([](int& obj) {obj = 5;});
 
     EXPECT_THROW(
-        obj.write([](auto& obj) {
+        obj.write([](int& obj) {
             obj = 6;
             throw MyException();
         }),
@@ -179,22 +179,22 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsException_thenResetsToOldState) {
     );
 
     // check reading it returns old value
-    int read = obj.read([] (auto& obj) {return obj;});
+    int read = obj.read([] (int& obj) {return obj;});
     EXPECT_EQ(5, read);
 
     // check changes are also present in background copy
-    obj.write([] (auto&) {}); // this switches to the background copy
-    read = obj.read([] (auto& obj) {return obj;});
+    obj.write([] (int&) {}); // this switches to the background copy
+    read = obj.read([] (int& obj) {return obj;});
     EXPECT_EQ(5, read);
 }
 
 TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
     LeftRight<vector<int>> obj;
 
-    obj.write([](auto& obj) {obj.push_back(5);});
+    obj.write([](vector<int>& obj) {obj.push_back(5);});
 
     EXPECT_THROW(
-            obj.write([](auto& obj) {
+            obj.write([](vector<int>& obj) {
                 obj.push_back(6);
                 throw MyException();
             }),
@@ -202,11 +202,11 @@ TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
     );
 
     // check reading it returns old value
-    vector<int> read = obj.read([] (auto& obj) {return obj;});
+    vector<int> read = obj.read([] (vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 
     // check changes are also present in background copy
-    obj.write([] (auto&) {}); // this switches to the background copy
-    read = obj.read([] (auto& obj) {return obj;});
+    obj.write([] (vector<int>&) {}); // this switches to the background copy
+    read = obj.read([] (vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 }

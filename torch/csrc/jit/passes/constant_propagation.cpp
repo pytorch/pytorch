@@ -213,7 +213,7 @@ void ConstantPropagation(Block* block, const AliasDb& aliasDb) {
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   ConstantPropagation(graph->block(), aliasDb);
   EliminateDeadCode(graph);
 }

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/pybind.h>
@@ -177,6 +178,12 @@ void initPythonIRBindings(PyObject* module_) {
             std::stringstream ss;
             ss << g;
             return ss.str();
+          })
+      .def(
+          "dump_alias_db",
+          [](std::shared_ptr<Graph> g) {
+            AliasDb db(g);
+            db.dump();
           })
       .def(
           "propagate_shapes",
