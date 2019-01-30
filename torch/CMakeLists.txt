@@ -27,22 +27,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-# RPATH stuff
-# see https://cmake.org/Wiki/CMake_RPATH_handling
-if (APPLE)
-  set(CMAKE_MACOSX_RPATH ON)
-  set(_rpath_portable_origin "@loader_path")
-else()
-  set(_rpath_portable_origin $ORIGIN)
-endif(APPLE)
-# Use separate rpaths during build and install phases
-set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-# Don't use the install-rpath during the build phase
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-# Automatically add all linked folders that are NOT in the build directory to
-# the rpath (per library?)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # Get the correct Python executable
 if (DEFINED ENV{PYTORCH_PYTHON})
@@ -435,10 +420,7 @@ install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
 install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
-install(TARGETS torch
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+install(TARGETS torch DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 if (MSVC AND NOT TORCH_STATIC)
   install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
@@ -745,8 +727,5 @@ if (BUILD_PYTHON)
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
 
-  install(TARGETS torch_python
-    RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-    LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-    ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()

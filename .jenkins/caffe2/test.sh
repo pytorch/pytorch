@@ -19,7 +19,7 @@ else
   # directory in cwd
   python_installation="$(dirname $(dirname $(cd /usr && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
   caffe2_pypath="$python_installation/caffe2"
-  cpp_test_dir="$python_installation/caffe2/cpp_test"
+  cpp_test_dir="$python_installation/torch/test"
   ld_library_path="$python_installation/torch/lib"
 fi
 

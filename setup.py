@@ -207,7 +207,6 @@ else:
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
-tmp_install_path = lib_path + "/tmp_install"
 caffe2_build_dir = os.path.join(cwd, "build")
 # lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
@@ -293,9 +292,8 @@ def build_deps():
         if not same:
             shutil.copyfile(orig_file, sym_file)
 
-    dir_util.copy_tree('torch/lib/tmp_install/share', 'torch/share')
     dir_util.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
+                       'torch/include/pybind11')
 
 ################################################################################
 # Building dependent libraries
@@ -396,7 +394,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join(tmp_install_path, rel_site_packages, filename)
+            src = os.path.join("torch", rel_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
@@ -731,6 +729,8 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
+                'bin/*',
+                'test/*',
                 '__init__.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
@@ -739,61 +739,63 @@ if __name__ == '__main__':
                 'lib/*.pdb',
                 'lib/torch_shm_manager',
                 'lib/*.h',
-                'lib/include/ATen/*.h',
-                'lib/include/ATen/cpu/*.h',
-                'lib/include/ATen/core/*.h',
-                'lib/include/ATen/cuda/*.cuh',
-                'lib/include/ATen/cuda/*.h',
-                'lib/include/ATen/cuda/detail/*.cuh',
-                'lib/include/ATen/cuda/detail/*.h',
-                'lib/include/ATen/cudnn/*.h',
-                'lib/include/ATen/detail/*.h',
-                'lib/include/caffe2/utils/*.h',
-                'lib/include/c10/*.h',
-                'lib/include/c10/macros/*.h',
-                'lib/include/c10/core/*.h',
-                'lib/include/ATen/core/dispatch/*.h',
-                'lib/include/c10/core/impl/*.h',
-                'lib/include/ATen/core/opschema/*.h',
-                'lib/include/c10/util/*.h',
-                'lib/include/c10/cuda/*.h',
-                'lib/include/c10/cuda/impl/*.h',
-                'lib/include/c10/hip/*.h',
-                'lib/include/c10/hip/impl/*.h',
-                'lib/include/caffe2/**/*.h',
-                'lib/include/torch/*.h',
-                'lib/include/torch/csrc/*.h',
-                'lib/include/torch/csrc/api/include/torch/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/dataloader/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/transforms/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
-                'lib/include/torch/csrc/api/include/torch/nn/*.h',
-                'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
-                'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',
-                'lib/include/torch/csrc/api/include/torch/optim/*.h',
-                'lib/include/torch/csrc/api/include/torch/serialize/*.h',
-                'lib/include/torch/csrc/autograd/*.h',
-                'lib/include/torch/csrc/autograd/generated/*.h',
-                'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/csrc/jit/*.h',
-                'lib/include/torch/csrc/jit/generated/*.h',
-                'lib/include/torch/csrc/jit/passes/*.h',
-                'lib/include/torch/csrc/jit/script/*.h',
-                'lib/include/torch/csrc/utils/*.h',
-                'lib/include/pybind11/*.h',
-                'lib/include/pybind11/detail/*.h',
-                'lib/include/TH/*.h*',
-                'lib/include/TH/generic/*.h*',
-                'lib/include/THC/*.cuh',
-                'lib/include/THC/*.h*',
-                'lib/include/THC/generic/*.h',
-                'lib/include/THCUNN/*.cuh',
-                'lib/include/THNN/*.h',
+                'include/ATen/*.h',
+                'include/ATen/cpu/*.h',
+                'include/ATen/core/*.h',
+                'include/ATen/cuda/*.cuh',
+                'include/ATen/cuda/*.h',
+                'include/ATen/cuda/detail/*.cuh',
+                'include/ATen/cuda/detail/*.h',
+                'include/ATen/cudnn/*.h',
+                'include/ATen/detail/*.h',
+                'include/caffe2/utils/*.h',
+                'include/c10/*.h',
+                'include/c10/macros/*.h',
+                'include/c10/core/*.h',
+                'include/ATen/core/dispatch/*.h',
+                'include/c10/core/impl/*.h',
+                'include/ATen/core/opschema/*.h',
+                'include/c10/util/*.h',
+                'include/c10/cuda/*.h',
+                'include/c10/cuda/impl/*.h',
+                'include/c10/hip/*.h',
+                'include/c10/hip/impl/*.h',
+                'include/caffe2/**/*.h',
+                'include/torch/*.h',
+                'include/torch/csrc/*.h',
+                'include/torch/csrc/api/include/torch/*.h',
+                'include/torch/csrc/api/include/torch/data/*.h',
+                'include/torch/csrc/api/include/torch/data/dataloader/*.h',
+                'include/torch/csrc/api/include/torch/data/datasets/*.h',
+                'include/torch/csrc/api/include/torch/data/detail/*.h',
+                'include/torch/csrc/api/include/torch/data/samplers/*.h',
+                'include/torch/csrc/api/include/torch/data/transforms/*.h',
+                'include/torch/csrc/api/include/torch/detail/*.h',
+                'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+                'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+                'include/torch/csrc/api/include/torch/optim/*.h',
+                'include/torch/csrc/api/include/torch/serialize/*.h',
+                'include/torch/csrc/autograd/*.h',
+                'include/torch/csrc/autograd/generated/*.h',
+                'include/torch/csrc/cuda/*.h',
+                'include/torch/csrc/jit/*.h',
+                'include/torch/csrc/jit/generated/*.h',
+                'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/utils/*.h',
+                'include/pybind11/*.h',
+                'include/pybind11/detail/*.h',
+                'include/TH/*.h*',
+                'include/TH/generic/*.h*',
+                'include/THC/*.cuh',
+                'include/THC/*.h*',
+                'include/THC/generic/*.h',
+                'include/THCUNN/*.cuh',
+                'include/THCUNN/generic/*.h',
+                'include/THNN/*.h',
+                'include/THNN/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
@@ -804,7 +806,6 @@ if __name__ == '__main__':
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
-                'cpp_test/*',
                 'python/serialized_test/data/operator_test/*.zip',
             ]
         },

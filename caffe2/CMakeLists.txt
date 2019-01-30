@@ -530,11 +530,6 @@ if (BUILD_PYTHON)
   # For cmake installs, including c++ only installs, install libcaffe2 into
   # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
   # rpath
-  if(APPLE)
-    set(_rpath_portable_origin "@loader_path")
-  else()
-    set(_rpath_portable_origin $ORIGIN)
-  endif(APPLE)
   set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
   if(${BUILDING_WITH_TORCH_LIBS})
     # site-packages/caffe2/python/caffe2_pybind11_state
