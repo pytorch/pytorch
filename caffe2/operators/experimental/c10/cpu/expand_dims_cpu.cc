@@ -7,15 +7,20 @@ using caffe2::Tensor;
 
 namespace caffe2 {
 namespace {
+
+struct State final : public c10::KernelState {
+  std::vector<int64_t> dims;
+  bool initialized = false;
+};
+
 template <class DataType>
 void expand_dims_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     ArrayRef<int64_t> dims,
-    intrusive_ptr<Blob> state_) {
+    State* state) {
   Tensor input{C10Tensor(input_)};
   Tensor output{C10Tensor(output_)};
-  caffe2::ops::ExpandDims::State* state = state_->GetMutable<caffe2::ops::ExpandDims::State>();
 
   if (!state->initialized) {
     state->dims = dims.vec();
@@ -54,6 +59,7 @@ void expand_dims_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::ExpandDims)
+    .withState<caffe2::State>()
     .kernel<&caffe2::expand_dims_op_cpu_impl<float>>()
     .dispatchKey({DeviceTypeId::CPU,
                   LayoutId(0),

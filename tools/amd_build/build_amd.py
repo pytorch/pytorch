@@ -63,7 +63,7 @@ ignores = [
     "torch/csrc/autograd/engine.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
-    "torch/lib/include/*",
+    "torch/include/*",
 ]
 
 json_settings = os.path.join(amd_build_dir, "disabled_features.json")

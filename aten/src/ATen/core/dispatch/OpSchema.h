@@ -10,7 +10,23 @@
 
 namespace c10 {
 
-using KernelFunction = IValue(ArrayRef<IValue>);
+/**
+ * A kernel can keep around a cache to have better performance when it's
+ * called multiple times. This is used by a lot of caffe2 kernels.
+ * This cache owned by the call site and passed in to the kernel as a function
+ * argument. It must inherit from KernelState so the call site knows how to
+ * store and destruct it.
+ */
+class CAFFE2_API KernelState {
+public:
+  virtual ~KernelState() = default;
+};
+
+/**
+ * This is the basic ABI for any kernel call. Each kernel is registered as a
+ * pointer to a global C function of this type.
+ */
+using KernelFunction = IValue(ArrayRef<IValue>, KernelState* state);
 
 namespace details {
 
@@ -127,12 +143,25 @@ struct ivalue_to_arg_type<ArrayRef<T>> {
   }
 };
 
-template<class ReturnType, class ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel {};
-template<class ReturnType, class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, FuncType, kernel> {
+template<class ReturnType, class ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel {};
+template<class ReturnType, class... ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, StateType, FuncType, kernel> {
   using parameter_types = guts::typelist::typelist<ParamTypes...>;
 
   template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
+  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
+    if (args.size() != sizeof...(ParamTypes)) {
+      throw std::runtime_error("Wrong number of arguments for operator call");
+    }
+    return return_type_to_ivalue(
+      (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])..., static_cast<StateType*>(state))
+    );
+  }
+};
+template<class ReturnType, class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<ReturnType, guts::typelist::typelist<ParamTypes...>, void, FuncType, kernel> {
+  using parameter_types = guts::typelist::typelist<ParamTypes...>;
+
+  template<size_t... indices>
+  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
     if (args.size() != sizeof...(ParamTypes)) {
       throw std::runtime_error("Wrong number of arguments for operator call");
     }
@@ -141,17 +170,38 @@ template<class ReturnType, class... ParamTypes, class FuncType, FuncType* kernel
     );
   }
 };
-template<class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, FuncType, kernel> {
+template<class... ParamTypes, class StateType, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, StateType, FuncType, kernel> {
   using parameter_types = guts::typelist::typelist<ParamTypes...>;
 
   template<size_t... indices>
-  static IValue call(ArrayRef<IValue> args, guts::index_sequence<indices...>) {
+  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
+    if (args.size() != sizeof...(ParamTypes)) {
+      throw std::runtime_error("Wrong number of arguments for operator call");
+    }
+    (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])..., static_cast<StateType*>(state));
+    return IValue();
+  }
+};
+template<class... ParamTypes, class FuncType, FuncType* kernel> struct _wrapKernel<void, guts::typelist::typelist<ParamTypes...>, void, FuncType, kernel> {
+  using parameter_types = guts::typelist::typelist<ParamTypes...>;
+
+  template<size_t... indices>
+  static IValue call(ArrayRef<IValue> args, c10::KernelState* state, guts::index_sequence<indices...>) {
     if (args.size() != sizeof...(ParamTypes)) {
       throw std::runtime_error("Wrong number of arguments for operator call");
     }
     (*kernel)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<indices, parameter_types>>>>::call(args[indices])...);
     return IValue();
   }
+};
+
+template<class FuncType, class AddedParameter, class Enable = void> struct add_ptr_parameter_if_not_void final {};
+template<class Return, class... Parameters, class AddedParameter>
+struct add_ptr_parameter_if_not_void<Return(Parameters...), AddedParameter, guts::enable_if_t<!std::is_same<void, AddedParameter>::value>> final {
+  using type = Return(Parameters..., AddedParameter*);
+};
+template<class FuncType> struct add_ptr_parameter_if_not_void<FuncType, void, void> final {
+  using type = FuncType;
 };
 
 /**
@@ -189,10 +239,12 @@ public:
 
   static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
 
-  template<func_type* kernel>
-  static IValue wrap_kernel(ArrayRef<IValue> args) {
+  template<class StateTypeOrVoid> using func_type_with_state = typename add_ptr_parameter_if_not_void<func_type, StateTypeOrVoid>::type;
+
+  template<class StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>* kernel>
+  static IValue wrap_kernel(ArrayRef<IValue> args, KernelState* state) {
     constexpr size_t num_parameters = guts::typelist::size<parameter_types>::value;
-    return details::_wrapKernel<return_type, parameter_types, func_type, kernel>::call(args, guts::make_index_sequence<num_parameters>());
+    return details::_wrapKernel<return_type, parameter_types, StateTypeOrVoid, func_type_with_state<StateTypeOrVoid>, kernel>::call(args, state, guts::make_index_sequence<num_parameters>());
   }
 
 private:

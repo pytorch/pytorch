@@ -339,16 +339,12 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
                          "an output_size or an output_ratio")
     if output_size is None:
         _output_ratio = _pair(torch.jit._unwrap_optional(output_ratio))
-        _output_size = [int(input.size(2) * _output_ratio[0]),
-                        int(input.size(3) * _output_ratio[1])]
-    else:
-        _output_size = torch.jit._unwrap_optional(output_size)
+        output_size = [int(input.size(2) * _output_ratio[0]),
+                       int(input.size(3) * _output_ratio[1])]
 
     if _random_samples is None:
         _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
-    else:
-        _random_samples = torch.jit._unwrap_optional(_random_samples)
-    return torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
+    return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
 @weak_script
@@ -408,17 +404,13 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
                          "an output_size or an output_ratio")
     if output_size is None:
         _output_ratio = _triple(torch.jit._unwrap_optional(output_ratio))
-        _output_size = [int(input.size(2) * _output_ratio[0]),
-                        int(input.size(3) * _output_ratio[1]),
-                        int(input.size(4) * _output_ratio[2])]
-    else:
-        _output_size = torch.jit._unwrap_optional(output_size)
+        output_size = [int(input.size(2) * _output_ratio[0]),
+                       int(input.size(3) * _output_ratio[1]),
+                       int(input.size(4) * _output_ratio[2])]
 
     if _random_samples is None:
         _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
-    else:
-        _random_samples = torch.jit._unwrap_optional(_random_samples)
-    return torch._C._nn.fractional_max_pool3d(input, kernel_size, _output_size, _random_samples)
+    return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
 @weak_script
@@ -448,11 +440,9 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool1d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
+        stride = torch.jit.annotate(List[int], [])
     return torch.max_pool1d_with_indices(
-        input, kernel_size, _stride, padding, dilation, ceil_mode)
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -480,10 +470,8 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
     See :class:`~torch.nn.MaxPool2d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
-    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, _stride, padding, dilation, ceil_mode)
+        stride = torch.jit.annotate(List[int], [])
+    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -511,11 +499,9 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool3d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
+        stride = torch.jit.annotate(List[int], [])
     return torch._C._nn.max_pool3d_with_indices(
-        input, kernel_size, _stride, padding, dilation, ceil_mode)
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -544,7 +530,6 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     if output_size is None:
         ret = default_size
     else:
-        output_size = torch.jit._unwrap_optional(output_size)
         if len(output_size) == len(kernel_size) + 2:
             output_size = output_size[2:]
         if len(output_size) != len(kernel_size):
@@ -574,7 +559,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _single(kernel_size)
     if stride is not None:
-        _stride = _single(torch.jit._unwrap_optional(stride))
+        _stride = _single(stride)
     else:
         _stride = kernel_size
     padding = _single(padding)
@@ -593,7 +578,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _pair(kernel_size)
     if stride is not None:
-        _stride = _pair(torch.jit._unwrap_optional(stride))
+        _stride = _pair(stride)
     else:
         _stride = kernel_size
     padding = _pair(padding)
@@ -612,7 +597,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _triple(kernel_size)
     if stride is not None:
-        _stride = _triple(torch.jit._unwrap_optional(stride))
+        _stride = _triple(stride)
     else:
         _stride = kernel_size
     padding = _triple(padding)
@@ -633,7 +618,6 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     """
     kw, kh = utils._pair(kernel_size)
     if stride is not None:
-        stride = torch.jit._unwrap_optional(stride)
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
@@ -651,7 +635,6 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     See :class:`~torch.nn.LPPool1d` for details.
     """
     if stride is not None:
-        stride = torch.jit._unwrap_optional(stride)
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
@@ -1211,12 +1194,9 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = (-input).softmax(dim)
     else:
-        dtype = torch.jit._unwrap_optional(dtype)
         ret = (-input).softmax(dim, dtype=dtype)
     return ret
 
@@ -1251,12 +1231,9 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = input.softmax(dim)
     else:
-        dtype = torch.jit._unwrap_optional(dtype)
         ret = input.softmax(dim, dtype=dtype)
     return ret
 
@@ -1341,13 +1318,10 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = input.log_softmax(dim)
     else:
-        _dtype = torch.jit._unwrap_optional(dtype)
-        ret = input.log_softmax(dim, dtype=_dtype)
+        ret = input.log_softmax(dim, dtype=dtype)
     return ret
 
 
@@ -1401,11 +1375,11 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
+        ret = torch.addmm(bias, input, weight.t())
     else:
         output = input.matmul(weight.t())
         if bias is not None:
-            output += torch.jit._unwrap_optional(bias)
+            output += bias
         ret = output
     return ret
 
@@ -1484,7 +1458,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
                  [ 0.6262,  0.2438,  0.7471]]])
     """
     if padding_idx is not None:
-        padding_idx = torch.jit._unwrap_optional(padding_idx)
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
         elif padding_idx < 0:
@@ -1493,7 +1466,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
     else:
         padding_idx = -1
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
@@ -1627,7 +1599,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
         # XXX: equivalent to
         # with torch.no_grad():
         #   torch.nembedding_renorm_
@@ -2071,7 +2042,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
                          "!= input nelement ({})".format(target.numel(), input.numel()))
 
     if weight is not None:
-        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
@@ -2284,7 +2254,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
     if weight is not None:
-        loss = loss * torch.jit._unwrap_optional(weight)
+        loss = loss * weight
 
     loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
 
@@ -2331,7 +2301,6 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
     if weight is not None:
-        weight = torch.jit._unwrap_optional(weight)
         if weight.dim() != 1:
             raise ValueError('weight must be one-dimensional')
 
@@ -2928,7 +2897,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
         ret = input / denom
     else:
         denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
-        ret = torch.div(input, denom, out=torch.jit._unwrap_optional(out))
+        ret = torch.div(input, denom, out=out)
     return ret
 
 
