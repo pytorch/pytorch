@@ -135,10 +135,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
-      .def(py::init<const std::string&, int>());
+      .def(py::init<const std::string&, int, std::chrono::milliseconds>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, int, bool>());
+      .def(py::init<
+           const std::string&,
+           int,
+           int,
+           bool,
+           std::chrono::milliseconds>());
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, ::c10d::Store&>());
