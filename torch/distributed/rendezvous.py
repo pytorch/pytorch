@@ -4,6 +4,8 @@ except ImportError:
     from urlparse import urlparse
 
 import os
+from datetime import timedelta
+
 from . import FileStore, TCPStore
 
 
