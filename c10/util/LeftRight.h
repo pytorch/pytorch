@@ -77,7 +77,7 @@ public:
 
 private:
     template <class F>
-    auto _write(const F& writeFunc) {
+    auto _write(const F& writeFunc) -> typename std::result_of<F(T&)>::type {
         /*
          * Assume, A is in background and B in foreground. In simplified terms, we want to do the following:
          * 1. Write to A (old background)
@@ -133,11 +133,11 @@ private:
         _waitForBackgroundCounterToBeZero(localCounterIndex);
 
         // 6. Write to B
-        _callWriteFuncOnBackgroundInstance(writeFunc, localDataIndex);
+        return _callWriteFuncOnBackgroundInstance(writeFunc, localDataIndex);
     }
 
     template<class F>
-    auto _callWriteFuncOnBackgroundInstance(const F& writeFunc, uint8_t localDataIndex) {
+    auto _callWriteFuncOnBackgroundInstance(const F& writeFunc, uint8_t localDataIndex) -> typename std::result_of<F(T&)>::type {
         try {
             return writeFunc(_data[localDataIndex ^ 1]);
         } catch (...) {

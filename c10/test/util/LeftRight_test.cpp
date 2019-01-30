@@ -30,6 +30,14 @@ TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
     EXPECT_EQ((vector<int>{5, 6}), read);
 }
 
+TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
+    LeftRight<vector<int>> obj;
+
+    auto a = obj.write([] (auto& obj) -> int {return 5;});
+    static_assert(std::is_same<int, decltype(a)>::value, "");
+    EXPECT_EQ(5, a);
+}
+
 TEST(LeftRightTest, readsCanBeConcurrent) {
     LeftRight<int> obj;
     std::atomic<int> num_running_readers{0};
