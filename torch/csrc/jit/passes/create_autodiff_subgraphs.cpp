@@ -40,7 +40,7 @@ class SubgraphSlicer {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      auto aliasDb = AliasAnalysis(graph_);
+      AliasDb aliasDb(graph_);
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
         std::tie(it, changed) = scanNode(*it, aliasDb);
