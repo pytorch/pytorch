@@ -21,11 +21,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/verify_api_visibility.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tbb_init_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp)
-if (NOT USE_ROCM)
-  list(APPEND ATen_CPU_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp)
-endif()
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
