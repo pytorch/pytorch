@@ -917,6 +917,7 @@ private:
   : Type(TypeKind::DeviceObjType) {}
 };
 
+
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema

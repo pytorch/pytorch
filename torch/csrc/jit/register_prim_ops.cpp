@@ -1097,6 +1097,14 @@ Operation listNe<Shared<TensorList>>(const Node* node) {
   };
 }
 
+Operation listList(const Node* node) {
+  return [=](Stack& stack) {
+    // Intentional no-op, needed to match Python semantics for list(iterable),
+    // but in JIT these will already be lists
+    return 0;
+  };
+}
+
 template <class TList, class TElement>
 Operation listAdd(const Node* node) {
   return [=](Stack& stack) {
@@ -1194,8 +1202,7 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
 
 Operation dictLen(const Node* node) {
   return [=](Stack& stack) {
-    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
-    pop(stack, dict);
+    auto dict = pop(stack).toGenericDictRef();
     push(stack, int64_t(dict.size()));
     return 0;
   };
@@ -1203,8 +1210,7 @@ Operation dictLen(const Node* node) {
 
 Operation dictKeys(const Node* node) {
   return [=](Stack& stack) {
-    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
-    pop(stack, dict);
+    auto dict = pop(stack).toGenericDictRef();
     std::vector<IValue> keys;
     keys.reserve(dict.size());
     for (auto item : dict) {
@@ -1217,8 +1223,7 @@ Operation dictKeys(const Node* node) {
 
 Operation dictValues(const Node* node) {
   return [=](Stack& stack) {
-    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
-    pop(stack, dict);
+    auto dict = pop(stack).toGenericDictRef();
     std::vector<IValue> values;
     values.reserve(dict.size());
     for (auto item : dict) {
@@ -1297,7 +1302,8 @@ RegisterOperators reg2({
             "aten::slice(" decl_type                                                  \
             "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
             "[]",                                                                     \
-            listSlice<Shared<c_type>, c_type::ElemType>)
+            listSlice<Shared<c_type>, c_type::ElemType>),                             \
+        Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
 
       CREATE_LIST_OPS("int", IntList),
       CREATE_LIST_OPS("float", DoubleList),
