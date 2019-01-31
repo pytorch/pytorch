@@ -1232,7 +1232,9 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 else:
-    ScriptModule = torch.nn.Module
+    class ScriptModule(torch.nn.Module):
+        def __init__(self, optimize=True):
+            super(ScriptModule, self).__init__()
 
 
 def _get_weak_stubs(cls):
