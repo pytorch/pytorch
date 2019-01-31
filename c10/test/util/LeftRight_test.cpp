@@ -165,7 +165,7 @@ TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
     );
 }
 
-TEST(LeftRightTest, givenInt_whenWriteThrowsException_thenResetsToOldState) {
+TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnFirstCall_thenResetsToOldState) {
     LeftRight<int> obj;
 
     obj.write([](int& obj) {obj = 5;});
@@ -186,6 +186,37 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsException_thenResetsToOldState) {
     obj.write([] (int&) {}); // this switches to the background copy
     read = obj.read([] (const int& obj) {return obj;});
     EXPECT_EQ(5, read);
+}
+
+// note: each write is executed twice, on the foreground and background copy.
+// We need to test a thrown exception in either call is handled correctly.
+TEST(LeftRightTest, givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewState) {
+    LeftRight<int> obj;
+
+    obj.write([](int& obj) {obj = 5;});
+    bool write_called = false;
+
+    EXPECT_THROW(
+        obj.write([&](int& obj) {
+            obj = 6;
+            if (write_called) {
+                // this is the second time the write callback is executed
+                throw MyException();
+            } else {
+                write_called = true;
+            }
+        }),
+	MyException
+    );
+
+    // check reading it returns new value
+    int read = obj.read([] (const int& obj) {return obj;});
+    EXPECT_EQ(6, read);
+
+    // check changes are also present in background copy
+    obj.write([] (int&) {}); // this switches to the background copy
+    read = obj.read([] (const int& obj) {return obj;});
+    EXPECT_EQ(6, read);
 }
 
 TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {

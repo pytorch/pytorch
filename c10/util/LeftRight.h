@@ -64,7 +64,8 @@ public:
         return readFunc(_data[_foregroundDataIndex.load()]);
     }
 
-    // Throwing from write would result in invalid state
+    // Throwing an exception in writeFunc is ok but causes the state to be either the old or the new state,
+    // depending on if the first or the second call to writeFunc threw.
     template <typename F>
     auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
         if(_inDestruction.load()) {
