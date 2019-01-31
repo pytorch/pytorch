@@ -207,7 +207,7 @@ class ConvPoolOpBase : public Operator<Context> {
     return size;
   }
 
-  // Gets the output size. The output channel is manually provided since
+  // Sets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
@@ -215,7 +215,8 @@ class ConvPoolOpBase : public Operator<Context> {
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
-  std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
+  // TODO: passing sizes directly rather than Tensor
+  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
     CAFFE_ENFORCE(input.numel() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
@@ -240,7 +241,7 @@ class ConvPoolOpBase : public Operator<Context> {
       output_dims.insert(output_dims.begin(), N);
       output_dims.push_back(output_channel);
     }
-    return std::vector<int64_t>(output_dims.cbegin(), output_dims.cend());
+    output->Resize(output_dims);
   }
 
   // Helper function that is also called from OperatorSchema. Modified

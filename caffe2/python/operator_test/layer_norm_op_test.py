@@ -117,6 +117,34 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
+    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    def test_layer_norm_op_c10(self, X, gc, dc):
+        X = X[0]
+        if len(X.shape) == 1:
+            X = np.expand_dims(X, axis=0)
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+        op = core.CreateOperator(
+            "C10LayerNorm_DontUseThisOpYet",
+            ["input"],
+            ["output", "mean", "stdev"],
+            axis=axis,
+            epsilon=epsilon,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=partial(_layer_norm_ref, axis, epsilon)
+        )
+        self.assertDeviceChecks(
+            device_options=dc,
+            op=op,
+            inputs=[X],
+            outputs_to_check=[0, 1, 2],
+        )
+
     @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_op_pytorch(self, X, gc, dc):
         X = X[0]
