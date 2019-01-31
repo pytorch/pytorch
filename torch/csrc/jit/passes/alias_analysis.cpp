@@ -10,6 +10,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
+      type->kind() == TypeKind::DictType ||
       type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
@@ -186,6 +187,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // 1. Partition inputs by their type
   std::map<TypeKind, std::vector<Value*>> listTypes;
   std::unordered_map<TupleTypePtr, std::vector<Value*>> tupleTypes;
+  std::unordered_map<DictTypePtr, std::vector<Value*>> dictTypes;
   std::vector<Value*> tensors;
 
   for (auto input : graph->inputs()) {
@@ -208,6 +210,9 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     } else if (inputType->kind() == TypeKind::TupleType) {
       auto tupleType = inputType->cast<TupleType>();
       tupleTypes[tupleType].push_back(input);
+    } else if (inputType->kind() == TypeKind::DictType) {
+      auto dictType = inputType->cast<DictType>();
+      dictTypes[dictType].push_back(input);
     } else {
       AT_ASSERT(!shouldAnnotate(input));
     }
@@ -258,6 +263,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::Constant:
+    case prim::DictConstruct:
     case prim::ListConstruct:
     case prim::TupleConstruct:
     case prim::Undefined:
@@ -271,6 +277,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
+    case prim::DictIndex:
     case prim::TupleSlice:
     case prim::ListUnpack:
     case prim::PythonOp:

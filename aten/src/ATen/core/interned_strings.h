@@ -52,6 +52,8 @@ namespace c10 {
   _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
+  _(prim, DictConstruct)           \
+  _(prim, DictIndex)               \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \

@@ -444,7 +444,7 @@ struct PythonPrintPass {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Pretty printer expected 2 lists of same size");
+      AT_ERROR("Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
@@ -462,6 +462,25 @@ struct PythonPrintPass {
     for (auto* value : list) {
       stmt << delimiter;
       stmt << useOf(value);
+      delimiter = ", ";
+    }
+    stmt << end;
+  }
+
+  void printDict(
+      std::ostream& stmt,
+      at::ArrayRef<Value*> key_value_pairs,
+      const char* begin = "{",
+      const char* end = "}") {
+    stmt << begin;
+    auto delimiter = "";
+    for (size_t i = 0; i < key_value_pairs.size(); i += 2) {
+      stmt << delimiter;
+      auto key = key_value_pairs[i];
+      auto value = key_value_pairs[i + 1];
+
+      stmt << useOf(key) << ": " << useOf(value);
+
       delimiter = ", ";
     }
     stmt << end;
@@ -776,6 +795,20 @@ struct PythonPrintPass {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
+      case prim::DictConstruct: {
+        auto dict_type = node->output()->type()->expect<DictType>();
+        if (node->inputs().size() == 0 &&
+            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            !dict_type->getValueType()->isSubtypeOf(DynamicType::get())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+        } else {
+          printDict(stmt, node->inputs());
+        }
+      } break;
+      case prim::DictIndex: {
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
+      } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
         auto name = genMethodName("__forked_function");
@@ -1044,12 +1077,14 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::Constant,
       prim::fork,
       prim::ListConstruct,
+      prim::DictConstruct,
       prim::ListUnpack,
       prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
+      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
