@@ -510,17 +510,12 @@ void enforceFusionInplaceForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
 }
 
 void setPoolingInferenceMode(repr::NNModule *nn) {
-  for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef maxPoolNode;
-    repr::MaxPool *maxPool;
-    std::tie(maxPool, maxPoolNode) = node_pair;
-
-    if (!isOnIdeepDevice(*maxPool)) {
+  auto setTrainingMode = [](repr::NeuralNetOperator &pool) {
+    if (!isOnIdeepDevice(pool)) {
       LOG(WARNING) << "Not a IDEEP operator";
-      continue;
+      return;
     }
-
-    auto *op = getMutableOpDef(*maxPool);
+    auto *op = getMutableOpDef(pool);
     bool found_training_mode = false;
     for (auto &arg : *op->mutable_arg()) {
       if (arg.name() == "training_mode") {
@@ -529,11 +524,27 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
         break;
       }
     }
-
     if (!found_training_mode) {
       auto *arg = op->add_arg();
       arg->set_name("training_mode");
       arg->set_i(0);
+    }
+  };
+
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  for (int i = 0; i < allNodes.size(); ++i) {
+    auto poolNode = allNodes[i];
+    if (poolNode == nullptr
+      || !repr::nn::is<repr::NeuralNetOperator>(poolNode)) {
+      continue;
+    }
+
+    if (isOpType(poolNode, "MaxPool")
+        || isOpType(poolNode, "AveragePool")
+        || isOpType(poolNode, "Int8MaxPool")
+        || isOpType(poolNode, "Int8AveragePool")) {
+      auto pool = repr::nn::get<repr::NeuralNetOperator>(poolNode);
+      setTrainingMode(*pool);
     }
   }
 }
