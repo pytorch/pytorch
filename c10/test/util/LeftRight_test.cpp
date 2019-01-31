@@ -9,12 +9,12 @@ TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<int> obj;
 
   obj.write([] (int& obj) {obj = 5;});
-  int read = obj.read([] (int& obj) {return obj;});
+  int read = obj.read([] (const int& obj) {return obj;});
   EXPECT_EQ(5, read);
 
   // check changes are also present in background copy
   obj.write([] (int&) {}); // this switches to the background copy
-  read = obj.read([] (int& obj) {return obj;});
+  read = obj.read([] (const int& obj) {return obj;});
   EXPECT_EQ(5, read);
 }
 
@@ -22,11 +22,11 @@ TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
     LeftRight<vector<int>> obj;
 
     obj.write([] (vector<int>& obj) {obj.push_back(5);});
-    vector<int> read = obj.read([] (vector<int>& obj) {return obj;});
+    vector<int> read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 
     obj.write([] (vector<int>& obj) {obj.push_back(6);});
-    read = obj.read([] (vector<int>& obj) {return obj;});
+    read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5, 6}), read);
 }
 
@@ -43,14 +43,14 @@ TEST(LeftRightTest, readsCanBeConcurrent) {
     std::atomic<int> num_running_readers{0};
 
     std::thread reader1([&] () {
-       obj.read([&] (int&) {
+       obj.read([&] (const int&) {
            ++num_running_readers;
            while(num_running_readers.load() < 2) {}
        });
     });
 
     std::thread reader2([&] () {
-        obj.read([&] (int&) {
+        obj.read([&] (const int&) {
             ++num_running_readers;
             while(num_running_readers.load() < 2) {}
         });
@@ -68,7 +68,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
     std::atomic<bool> writer_running{false};
 
     std::thread reader([&] () {
-        obj.read([&] (int&) {
+        obj.read([&] (const int&) {
             reader_running = true;
             while(!writer_running.load()) {}
         });
@@ -95,7 +95,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
     std::atomic<bool> reader_running{false};
 
     std::thread writer([&] () {
-        obj.read([&] (int&) {
+        obj.read([&] (const int&) {
             writer_running = true;
             while(!reader_running.load()) {}
         });
@@ -105,7 +105,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
         // run write first, read second
         while (!writer_running.load()) {}
 
-        obj.read([&] (int&) {
+        obj.read([&] (const int&) {
             reader_running = true;
         });
     });
@@ -151,7 +151,7 @@ TEST(LeftRightTest, whenReadThrowsException_thenThrowsThrough) {
     LeftRight<int> obj;
 
     EXPECT_THROW(
-        obj.read([](int&) {throw MyException();}),
+        obj.read([](const int&) {throw MyException();}),
         MyException
     );
 }
@@ -179,12 +179,12 @@ TEST(LeftRightTest, givenInt_whenWriteThrowsException_thenResetsToOldState) {
     );
 
     // check reading it returns old value
-    int read = obj.read([] (int& obj) {return obj;});
+    int read = obj.read([] (const int& obj) {return obj;});
     EXPECT_EQ(5, read);
 
     // check changes are also present in background copy
     obj.write([] (int&) {}); // this switches to the background copy
-    read = obj.read([] (int& obj) {return obj;});
+    read = obj.read([] (const int& obj) {return obj;});
     EXPECT_EQ(5, read);
 }
 
@@ -202,11 +202,11 @@ TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
     );
 
     // check reading it returns old value
-    vector<int> read = obj.read([] (vector<int>& obj) {return obj;});
+    vector<int> read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 
     // check changes are also present in background copy
     obj.write([] (vector<int>&) {}); // this switches to the background copy
-    read = obj.read([] (vector<int>& obj) {return obj;});
+    read = obj.read([] (const vector<int>& obj) {return obj;});
     EXPECT_EQ((vector<int>{5}), read);
 }
