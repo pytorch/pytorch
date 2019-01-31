@@ -231,17 +231,12 @@ TORCH_API thread_event_lists disableProfiler();
 //   }
 // Then open filename.trace in chrome://tracing
 struct TORCH_API RecordProfile {
-  RecordProfile(std::ostream& out)
-  : out_(out) {
-    init();
-  }
+  RecordProfile(std::ostream& out);
   RecordProfile(const std::string& filename);
 
   ~RecordProfile();
 private:
-  void init() {
-    enableProfiler(ProfilerState::CPU);
-  }
+  void init();
   std::unique_ptr<std::ofstream> file_;
   std::ostream& out_;
   void processEvents(const std::vector<Event*>& events);

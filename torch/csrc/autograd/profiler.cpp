@@ -205,9 +205,19 @@ static jit::CodeTemplate event_template(R"(
   "args": {}
 })");
 
+
+RecordProfile::RecordProfile(std::ostream& out)
+: out_(out) {
+  init();
+}
+
 RecordProfile::RecordProfile(const std::string& filename)
 : file_(new std::ofstream(filename)), out_(*file_) {
   init();
+}
+
+void RecordProfile::init() {
+  enableProfiler(ProfilerState::CPU);
 }
 
 RecordProfile::~RecordProfile() {
