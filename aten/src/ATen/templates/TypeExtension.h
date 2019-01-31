@@ -26,10 +26,7 @@ struct CAFFE2_API ${Type}Dispatch {
     fn_table[schema] = reinterpret_cast<void *>(fn);
   }
 
-  static std::unordered_map<std::string, void *>& get_fn_table() {
-    static std::unordered_map<std::string, void *> fn_table;
-    return fn_table;
-  }
+  static std::unordered_map<std::string, void *>& get_fn_table();
 };
 
 struct CAFFE2_API ${Type} : public TypeDefault {
