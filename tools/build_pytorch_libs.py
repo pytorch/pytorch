@@ -87,6 +87,16 @@ elif REL_WITH_DEB_INFO:
     build_type = "RelWithDebInfo"
 
 
+def overlay_windows_vcvars(env):
+    from distutils._msvccompiler import _get_vc_env
+    vc_env = _get_vc_env('x64')
+    for k, v in env.items():
+        lk = k.lower()
+        if lk not in vc_env:
+            vc_env[lk] = v
+    return vc_env
+
+
 def mkdir_p(dir):
     try:
         os.makedirs(dir)
@@ -94,11 +104,29 @@ def mkdir_p(dir):
         pass
 
 
+def create_build_env():
+    # XXX - our cmake file sometimes looks at the system environment
+    # and not cmake flags!
+    # you should NEVER add something to this list. It is bad practice to
+    # have cmake read the environment
+    my_env = os.environ.copy()
+    if USE_CUDNN:
+        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
+        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
+    if USE_CUDA:
+        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
+
+    if IS_WINDOWS:
+        my_env = overlay_windows_vcvars(my_env)
+    return my_env
+
+
 def run_cmake(version,
               cmake_python_library,
               build_python,
               build_test,
-              build_dir):
+              build_dir,
+              my_env):
     cmake_args = [
         get_cmake_command(),
         base_dir
@@ -119,17 +147,6 @@ def run_cmake(version,
     ldflags = os.getenv('LDFLAGS') or ""
     if IS_WINDOWS:
         cflags += " /EHa"
-
-    # XXX - our cmake file sometimes looks at the system environment
-    # and not cmake flags!
-    # you should NEVER add something to this list. It is bad practice to
-    # have cmake read the environment
-    my_env = os.environ.copy()
-    if USE_CUDNN:
-        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
-        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
-    if USE_CUDA:
-        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     mkdir_p(install_dir)
     mkdir_p(build_dir)
@@ -194,7 +211,7 @@ def run_cmake(version,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    pprint(os.environ.items())
+    pprint(my_env)
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
@@ -203,6 +220,7 @@ def build_caffe2(version,
                  build_python,
                  rerun_cmake,
                  build_dir):
+    my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
@@ -212,22 +230,23 @@ def build_caffe2(version,
                   cmake_python_library,
                   build_python,
                   build_test,
-                  build_dir)
+                  build_dir,
+                  my_env)
     if IS_WINDOWS:
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
-                       cwd=build_dir)
+                       cwd=build_dir, env=my_env)
         else:
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
-                       cwd=build_dir)
+                       cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            check_call(['ninja', 'install'], cwd=build_dir)
+            check_call(['ninja', 'install'], cwd=build_dir, env=my_env)
         else:
             max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir)
+            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
