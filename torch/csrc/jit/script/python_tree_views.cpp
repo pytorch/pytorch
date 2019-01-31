@@ -218,7 +218,6 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Select, Expr>(m, "Select")
       .def(py::init([](const Expr& expr, const Ident& field) {
-        const auto& r = expr.range();
         return Select::create(expr.range(), expr, field);
       }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")

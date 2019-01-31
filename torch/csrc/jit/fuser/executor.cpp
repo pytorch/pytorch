@@ -308,7 +308,6 @@ bool runFusion(const int64_t key, Stack& stack) {
   // Determines device to dispatch to. If there's a device mismatch in the
   // inputs, we use the fallback (which should give a nice error message).
   at::Device device = inputs.at(0).device();
-  at::ScalarType dtype = inputs[0].type().scalarType();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
     if (t.device() != device) {
       return false;
