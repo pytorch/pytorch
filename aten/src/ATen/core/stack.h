@@ -67,7 +67,7 @@ static inline void pop(Stack& stack, Types&... args) {
 }
 template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
-  std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
+  (void)std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
 }
 
 // The packer here is carefully written not to make any unnecessary
