@@ -2,6 +2,11 @@
 
 namespace at {
 
+std::unordered_map<std::string, void *>& ${Type}Dispatch::get_fn_table() {
+  static std::unordered_map<std::string, void *> fn_table;
+  return fn_table;
+}
+
 ${Type}::${Type}()
   : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 

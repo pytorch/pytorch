@@ -17,9 +17,7 @@ VALGRIND=${VALGRIND:=ON}
 ./scalar_tensor_test
 ./tensor_interop_test
 ./undefined_tensor_test
-if [[ -x ./extension_backend_test ]]; then
-  ./extension_backend_test
-fi
+./extension_backend_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
@@ -41,9 +39,7 @@ fi
 if [ "$VALGRIND" == "ON" ]
 then
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
-  if [[ -x ./extension_backend_test ]]; then
-    valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
-  fi
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
 fi
 
 popd
