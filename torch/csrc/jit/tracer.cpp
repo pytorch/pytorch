@@ -179,8 +179,8 @@ Value* getNestedOutputTrace(
     return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
-    auto tuple_node = state->graph->createTuple(
-        fmap(elems, [&state](const IValue& ival) {
+    auto tuple_node =
+        state->graph->createTuple(fmap(elems, [&state](const IValue& ival) {
           return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
@@ -376,20 +376,21 @@ void addInputs(
   }
 }
 
-void addInputs(Node* n, const char* name, at::TensorList value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    at::TensorList value,
+    bool allow_undefined) {
   Graph* g = n->owningGraph();
-  TypePtr typ = DynamicType::get();
-  // NB: for TensorList, we create the node depending on the values inside,
-  // if any of the value in tensor list is undefined, create the type of
-  // List[Optional[Tensor]] instead of List[Tensor]
-  for (const at::Tensor& v : value) {
-    if (!v.defined()) {
-      typ = OptionalType::ofTensor();
-      break;
-    }
+  Node* list_node = nullptr;
+  if (allow_undefined) {
+    // if allow undefined, we create a list of optional tensors
+    list_node = g->insertNode(
+        g->createList(OptionalType::ofTensor(), fmap(value, getValueTrace)));
+  } else {
+    list_node = g->insertNode(
+        g->createList(DynamicType::get(), fmap(value, getValueTrace)));
   }
-  Node* list_node =
-      g->insertNode(g->createList(typ, fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
 
@@ -484,9 +485,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   return size_var;
 }
 
-void ensureUniqueIfOutOfPlaced(
-    const char* name,
-    const at::Tensor& tensor) {
+void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
   auto& state = getTracingState();
   if (state && state->force_outplace == false) {
     // If we're not converting in-place ops to out-of-place, this check is
