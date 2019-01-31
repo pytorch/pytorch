@@ -20,6 +20,7 @@ template <typename T, class Context>
 bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
+  auto* Y = Output(0);
   const int image_ndim = X.dim() - 2;
   CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
@@ -40,8 +41,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       0,
       "The number of output channels is not divisible by group.");
 
-  auto output_sizes = ConvPoolOpBase<Context>::GetOutputSize(X, shape.M);
-  auto* Y = Output(0, output_sizes, at::dtype<T>());
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
@@ -109,6 +109,7 @@ template <typename T, class Context>
 bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
+  auto* Y = Output(0);
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
@@ -123,8 +124,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 1), kernel_h());
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 2), kernel_w());
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 3), shape.C);
-  auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, shape.M);
-  auto* Y = Output(0, sizes, at::dtype<T>());
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
 
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);

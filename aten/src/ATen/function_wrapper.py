@@ -63,7 +63,7 @@ PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
-AT_DEPRECATED(virtual ${return_type} \
+C10_DEPRECATED(virtual ${return_type} \
 ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0);
 """)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
@@ -132,7 +132,7 @@ static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
-AT_DEPRECATED(static inline ${return_type} ${api_name}(${formals_with_defaults}));
+C10_DEPRECATED(static inline ${return_type} ${api_name}(${formals_with_defaults}));
 """)
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
@@ -547,15 +547,13 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
 ])
 
 
-def device_guard(option, formals, dispatch_options):
+def device_guard(option, formals, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
     if option.get('device_guard', True):
         if dispatch_options:
             return 'const DeviceGuard device_guard({}.device());'.format(dispatch_options['name'])
-        tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
-        if tensor_arguments:
-            tensor_argument = tensor_arguments[0]['name']
-            return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
+        if dispatch_tensor:
+            return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
 
 
@@ -838,7 +836,7 @@ def create_generic(top_env, declarations):
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         if option['mode'] == 'TH':
             option['device_guard'] = False
-        option['device_guard_declaration'] = device_guard(option, formals, False)
+        option['device_guard_declaration'] = device_guard(option, formals, False, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 
@@ -1078,7 +1076,7 @@ def create_generic(top_env, declarations):
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
-        option['device_guard_declaration'] = device_guard(option, formals, dispatch_options)
+        option['device_guard_declaration'] = device_guard(option, formals, dispatch_options, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/tests.h>
+#include <test/cpp/jit/test_alias_analysis.h>
+#include <test/cpp/jit/test_misc.h>
 
 using namespace torch;
 using namespace torch::jit;

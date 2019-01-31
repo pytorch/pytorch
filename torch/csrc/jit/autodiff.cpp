@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/autodiff.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <c10/util/Exception.h>
 

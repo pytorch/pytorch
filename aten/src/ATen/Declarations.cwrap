@@ -959,7 +959,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -988,7 +987,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -2777,7 +2775,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   return: self
   arguments:
@@ -2811,7 +2808,6 @@
 [[
   name: _th_geometric_
   backends:
-    - CPU
     - CUDA
   cname: geometric
   variants: function
