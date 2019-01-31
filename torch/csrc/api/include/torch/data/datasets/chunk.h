@@ -256,16 +256,27 @@ class BatchDataBuffer {
 /// the provided num_replicas and rank parameters. The `next()` method of this
 /// class needs to be thread-safe as it will be called from different threads
 /// during chunk loading.
+/// When deciding the total number of chunks, the Selector performs a rounding
+/// operation based on the `allow_duplicates` parameter.
 class ChunkSelector {
  public:
   virtual ~ChunkSelector() = default;
-  ChunkSelector(size_t chunk_count, size_t num_replicas = 1, size_t rank = 0)
+  ChunkSelector(
+      size_t chunk_count,
+      size_t num_replicas = 1,
+      size_t rank = 0,
+      bool allow_duplicates = true)
       : chunk_count_(chunk_count),
         num_replicas_(num_replicas),
         rank_(rank),
         epoch_(0) {
-    local_chunk_count_ =
-        static_cast<size_t>(std::ceil(chunk_count_ * 1.0 / num_replicas_));
+    if (allow_duplicates) {
+      local_chunk_count_ =
+          static_cast<size_t>(std::ceil(chunk_count_ * 1.0 / num_replicas_));
+    } else {
+      local_chunk_count_ =
+          static_cast<size_t>(std::floor(chunk_count_ * 1.0 / num_replicas_));
+    }
   }
 
   /// Get the next chunk index for loading.
@@ -302,29 +313,32 @@ class RandomChunkSelector : public ChunkSelector {
   RandomChunkSelector(
       size_t chunk_count,
       size_t num_replicas = 1,
-      size_t rank = 0)
-      : ChunkSelector(chunk_count, num_replicas, rank) {
+      size_t rank = 0,
+      bool allow_duplicates = true)
+      : ChunkSelector(chunk_count, num_replicas, rank, allow_duplicates) {
     size_t index_count =
         num_replicas_ == 1 ? chunk_count_ : local_chunk_count_ * num_replicas_;
     all_indices_.resize(index_count);
     std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
-    if (num_replicas_ > 1)
-    {
+    if (num_replicas_ > 1 && index_count > chunk_count) {
       for (size_t i = chunk_count; i < index_count; ++i) {
         all_indices_[i] =
-            i % chunk_count_; // we are adding some more chunks to make all
+            i % chunk_count_; // we added duplicate chunks to make all
                               // replicas to have the same number of chunks.
-      }    
+      }
     }
+
+    begin_index_ = rank_ * local_chunk_count_;
+    end_index_ = begin_index_ + local_chunk_count_;
+    chunk_index_ = begin_index_;
+    // shuffle first time.
+    reset();
   }
 
   optional<size_t> next() override {
-    AT_CHECK(
-        !chunk_indices_.empty(),
-        "reset() needs to be called before calling next().");
-    size_t idx = current_index_.fetch_add(1, std::memory_order_relaxed);
-    if (idx < chunk_indices_.size()) {
-      return chunk_indices_[idx];
+    size_t idx = chunk_index_.fetch_add(1, std::memory_order_relaxed);
+    if (idx < end_index_) {
+      return all_indices_[idx];
     } else {
       return nullopt;
     }
@@ -333,28 +347,25 @@ class RandomChunkSelector : public ChunkSelector {
   void reset() override {
     std::minstd_rand rand(epoch_);
     std::shuffle(all_indices_.begin(), all_indices_.end(), rand);
-    chunk_indices_.clear();
-    chunk_indices_.reserve(local_chunk_count_);
-    auto begin_index_iter = all_indices_.begin() + rank_ * local_chunk_count_;
-    auto end_index_iter = begin_index_iter + local_chunk_count_;
-    std::copy(begin_index_iter, end_index_iter, back_inserter(chunk_indices_));
-    current_index_ = 0;
+    chunk_index_ = begin_index_;
   }
 
  private:
+  size_t begin_index_;
+  size_t end_index_;
+  std::atomic<size_t> chunk_index_;
   std::vector<size_t> all_indices_;
-  std::vector<size_t> chunk_indices_;
-  std::atomic<size_t> current_index_{0};
 };
 
-/// Select chunks sequentially. 
+/// Select chunks sequentially.
 class SequentialChunkSelector : public ChunkSelector {
  public:
   SequentialChunkSelector(
       size_t chunk_count,
       size_t num_replicas = 1,
-      size_t rank = 0)
-      : ChunkSelector(chunk_count, num_replicas, rank) {
+      size_t rank = 0,
+      bool allow_duplicates = true)
+      : ChunkSelector(chunk_count, num_replicas, rank, allow_duplicates) {
     begin_index_ = rank_ * local_chunk_count_;
     end_index_ = begin_index_ + local_chunk_count_;
     chunk_index_ = begin_index_;
@@ -365,8 +376,7 @@ class SequentialChunkSelector : public ChunkSelector {
     if (idx < end_index_) {
       return idx % chunk_count_;
     } else {
-      return nullopt; /// Select chunks randomly. The chunk order shuffled at
-                      /// each `reset()` call
+      return nullopt;
     }
   }
 
@@ -476,7 +486,7 @@ class ChunkDataset final
     // free workers from previous reset if there is any.
     free_workers();
     preload_threads_.clear();
-        
+
     chunk_reader_.reset();
 
     // reset the chunk selector.
@@ -499,8 +509,7 @@ class ChunkDataset final
     quit_worker_ = false;
 
     for (size_t i = 0; i < options_.preloader_count_; ++i) {
-      preload_threads_.emplace_back(
-          [this, i]() { this->preloader(i); });
+      preload_threads_.emplace_back([this, i]() { this->preloader(i); });
     }
   }
 
@@ -525,8 +534,7 @@ class ChunkDataset final
           // if the chunk is empty, skip the current chunk data and move on to
           // the next.
           batch_buffer_->skip_chunk();
-        }
-        else {
+        } else {
           batch_buffer_->add_chunk_data(std::move(data));
         }
       } catch (...) {

@@ -838,14 +838,7 @@ TEST(DataTest, RandomChunkSelectorSingleReplicaSingleThread) {
   datasets::RandomChunkSelector cs(chunk_count);
   ASSERT_EQ(cs.local_chunk_count(), chunk_count);
 
-  ASSERT_THROWS_WITH(
-      cs.next(),
-      "reset() needs to be"
-      " called before calling next().");
-
-  cs.reset();
   std::vector<size_t> res;
-
   torch::optional<size_t> idx;
   while ((idx = cs.next()).has_value()) {
     res.push_back(*idx);
@@ -862,37 +855,47 @@ TEST(DataTest, RandomChunkSelectorSingleReplicaSingleThread) {
 TEST(DataTest, RandomChunkSelectorMultiReplicaSingleThread) {
   size_t chunk_count = 10;
   size_t num_replicas = 3;
-  size_t local_chunk_count =
-      (size_t)std::ceil(chunk_count * 1.0 / num_replicas);
-  std::vector<std::unique_ptr<datasets::RandomChunkSelector>> selectors;
 
-  for (size_t i = 0; i < num_replicas; ++i) {
-    selectors.emplace_back(torch::make_unique<datasets::RandomChunkSelector>(
-        chunk_count, num_replicas, i));
-  }
-  // local_chunk_count does not depend on the rank. So only checking one.
-  ASSERT_EQ((*selectors[0]).local_chunk_count(), local_chunk_count);
+  auto test_function = [&](bool allow_duplicates,
+                           size_t local_chunk_count,
+                           std::vector<size_t>& output) {
+    std::vector<std::unique_ptr<datasets::RandomChunkSelector>> selectors;
 
-  std::vector<size_t> res;
-  for (size_t i = 0; i < num_replicas; ++i) {
-    (*selectors[i]).reset();
-    torch::optional<size_t> idx;
-    while ((idx = (*selectors[i]).next()).has_value()) {
-      res.push_back(*idx);
+    for (size_t i = 0; i < num_replicas; ++i) {
+      selectors.emplace_back(torch::make_unique<datasets::RandomChunkSelector>(
+          chunk_count, num_replicas, i, allow_duplicates));
     }
-    ASSERT_EQ(res.size(), local_chunk_count * (i + 1));
-  }
+    // local_chunk_count does not depend on the rank. So only checking one.
+    ASSERT_EQ((*selectors[0]).local_chunk_count(), local_chunk_count);
 
-  std::vector<size_t> output{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  std::sort(res.begin(), res.end());
-  ASSERT_EQ(res, output);
+    std::vector<size_t> res;
+    for (size_t i = 0; i < num_replicas; ++i) {
+      (*selectors[i]).reset();
+      torch::optional<size_t> idx;
+      while ((idx = (*selectors[i]).next()).has_value()) {
+        res.push_back(*idx);
+      }
+      ASSERT_EQ(res.size(), local_chunk_count * (i + 1));
+    }
+    std::sort(res.begin(), res.end());
+    ASSERT_EQ(res, output);
+  };
+
+  size_t local_chunk_count =
+      static_cast<size_t>(std::ceil(chunk_count * 1.0 / num_replicas));
+  std::vector<size_t> output1{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  test_function(true, local_chunk_count, output1);
+
+  local_chunk_count =
+      static_cast<size_t>(std::floor(chunk_count * 1.0 / num_replicas));
+  std::vector<size_t> output2{0, 1, 2, 3, 4, 5, 6, 7, 8};
+  test_function(false, local_chunk_count, output2);
 }
 
 TEST(DataTest, RandomChunkSelectorMultiReplicaMultiThread) {
   size_t chunk_count = 10;
 
   datasets::RandomChunkSelector cs(chunk_count);
-  cs.reset();
   std::vector<size_t> res;
   std::shared_ptr<std::mutex> guard_ptr = std::make_shared<std::mutex>();
 
@@ -921,9 +924,7 @@ TEST(DataTest, SequentialChunkSelectorSingleReplicaSingleThread) {
   datasets::SequentialChunkSelector cs(chunk_count);
   ASSERT_EQ(cs.local_chunk_count(), chunk_count);
 
-  cs.reset();
   std::vector<size_t> res;
-
   torch::optional<size_t> idx;
   while ((idx = cs.next()).has_value()) {
     res.push_back(*idx);
@@ -940,38 +941,48 @@ TEST(DataTest, SequentialChunkSelectorSingleReplicaSingleThread) {
 TEST(DataTest, SequentialChunkSelectorMultiReplicaSingleThread) {
   size_t chunk_count = 10;
   size_t num_replicas = 3;
-  size_t local_chunk_count =
-      (size_t)std::ceil(chunk_count * 1.0 / num_replicas);
-  std::vector<std::unique_ptr<datasets::SequentialChunkSelector>> selectors;
 
-  for (size_t i = 0; i < num_replicas; ++i) {
-    selectors.emplace_back(
-        torch::make_unique<datasets::SequentialChunkSelector>(
-            chunk_count, num_replicas, i));
-  }
-  // local_chunk_count does not depend on the rank. So only checking one.
-  ASSERT_EQ((*selectors[0]).local_chunk_count(), local_chunk_count);
+  auto test_function = [&](bool allow_duplicates,
+                           size_t local_chunk_count,
+                           std::vector<size_t>& output) {
+    std::vector<std::unique_ptr<datasets::SequentialChunkSelector>> selectors;
 
-  std::vector<size_t> res;
-  for (size_t i = 0; i < num_replicas; ++i) {
-    (*selectors[i]).reset();
-    torch::optional<size_t> idx;
-    while ((idx = (*selectors[i]).next()).has_value()) {
-      res.push_back(*idx);
+    for (size_t i = 0; i < num_replicas; ++i) {
+      selectors.emplace_back(
+          torch::make_unique<datasets::SequentialChunkSelector>(
+              chunk_count, num_replicas, i, allow_duplicates));
     }
-    ASSERT_EQ(res.size(), local_chunk_count * (i + 1));
-  }
+    // local_chunk_count does not depend on the rank. So only checking one.
+    ASSERT_EQ((*selectors[0]).local_chunk_count(), local_chunk_count);
 
-  std::vector<size_t> output{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  std::sort(res.begin(), res.end());
-  ASSERT_EQ(res, output);
+    std::vector<size_t> res;
+    for (size_t i = 0; i < num_replicas; ++i) {
+      (*selectors[i]).reset();
+      torch::optional<size_t> idx;
+      while ((idx = (*selectors[i]).next()).has_value()) {
+        res.push_back(*idx);
+      }
+      ASSERT_EQ(res.size(), local_chunk_count * (i + 1));
+    }
+    std::sort(res.begin(), res.end());
+    ASSERT_EQ(res, output);
+  };
+
+  size_t local_chunk_count =
+      static_cast<size_t>(std::ceil(chunk_count * 1.0 / num_replicas));
+  std::vector<size_t> output1{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  test_function(true, local_chunk_count, output1);
+
+  local_chunk_count =
+      static_cast<size_t>(std::floor(chunk_count * 1.0 / num_replicas));
+  std::vector<size_t> output2{0, 1, 2, 3, 4, 5, 6, 7, 8};
+  test_function(false, local_chunk_count, output2);
 }
 
 TEST(DataTest, SequentialChunkSelectorMultiReplicaMultiThread) {
   size_t chunk_count = 10;
 
   datasets::SequentialChunkSelector cs(chunk_count);
-  cs.reset();
   std::vector<size_t> res;
   std::shared_ptr<std::mutex> guard_ptr = std::make_shared<std::mutex>();
 
