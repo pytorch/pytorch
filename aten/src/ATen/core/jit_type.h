@@ -937,6 +937,8 @@ template<class T> inline TypePtr getTypePtr() {
 }
 
 CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
+CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
+CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
