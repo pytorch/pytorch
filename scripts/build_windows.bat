@@ -80,6 +80,7 @@ cmake .. ^
   -DUSE_OPENCV=OFF ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
+  -DPYTHON_EXECUTABLE=python^
   || goto :label_error
 
 :: Actually run the build
