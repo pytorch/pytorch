@@ -31,7 +31,7 @@ def which(thefile):
         fname = os.path.join(dir, thefile)
         fnames = [fname]
         if IS_WINDOWS:
-            exts = os.environ.get('PATHEXT', '').split(os.sep)
+            exts = os.environ.get('PATHEXT', '').split(os.pathsep)
             fnames += [fname + ext for ext in exts]
         for name in fnames:
             if (os.path.exists(name) and os.access(name, os.F_OK | os.X_OK)
