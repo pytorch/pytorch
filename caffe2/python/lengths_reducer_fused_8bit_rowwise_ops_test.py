@@ -24,19 +24,23 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
 
         input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
         if empty_indices:
-            indices = np.empty(0, dtype=np.int32)
+            lengths = np.zeros(batchsize, dtype=np.int32)
+            num_indices = 0
         else:
-            indices = np.random.randint(
-                low=0,
-                high=len(input_data),
-                size=[np.random.randint(len(input_data))],
-                dtype=np.int32,
+            num_indices = np.random.randint(len(input_data))
+            num_lengths = np.clip(1, num_indices // 2, 10)
+            lengths = (
+                np.ones([num_indices // num_lengths], dtype=np.int32) * num_lengths
             )
-        weights = np.random.uniform(size=[len(indices)]).astype(np.float32)
-        lengths_split = np.clip(1, len(indices) // 2, 10)
-        lengths = (
-            np.ones([len(indices) // lengths_split], dtype=np.int32) * lengths_split
+            # readjust num_indices when num_lengths doesn't divide num_indices
+            num_indices = num_indices // num_lengths * num_lengths
+        indices = np.random.randint(
+            low=0,
+            high=len(input_data),
+            size=[num_indices],
+            dtype=np.int32,
         )
+        weights = np.random.uniform(size=[len(indices)]).astype(np.float32)
 
         quantized_data = net.FloatToFused8BitRowwiseQuantized(
             "input_data", "quantized_data"
@@ -87,19 +91,22 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
 
         input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
         if empty_indices:
-            indices = np.empty(0, dtype=np.int32)
             lengths = np.zeros(batchsize, dtype=np.int32)
+            num_indices = 0
         else:
-            indices = np.random.randint(
-                low=0,
-                high=len(input_data),
-                size=[np.random.randint(len(input_data))],
-                dtype=np.int32,
-            )
-            lengths_split = np.clip(1, len(indices) // 2, 10)
+            num_indices = np.random.randint(len(input_data))
+            num_lengths = np.clip(1, num_indices // 2, 10)
             lengths = (
-                np.ones([len(indices) // lengths_split], dtype=np.int32) * lengths_split
+                np.ones([num_indices // num_lengths], dtype=np.int32) * num_lengths
             )
+            # readjust num_indices when num_lengths doesn't divide num_indices
+            num_indices = num_indices // num_lengths * num_lengths
+        indices = np.random.randint(
+            low=0,
+            high=len(input_data),
+            size=[num_indices],
+            dtype=np.int32,
+        )
         print(indices, lengths)
 
         quantized_data = net.FloatToFused8BitRowwiseQuantized(
