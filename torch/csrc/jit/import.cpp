@@ -1,12 +1,12 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/utils/functional.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -26,9 +26,9 @@
 namespace torch {
 namespace jit {
 
-using caffe2::serialize::ReadAdapterInterface;
-using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::FileAdapter;
+using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 
@@ -74,7 +74,8 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
     : reader_(is) {}
 
-ScriptModuleDeserializer::ScriptModuleDeserializer(std::unique_ptr<ReadAdapterInterface> rai)
+ScriptModuleDeserializer::ScriptModuleDeserializer(
+    std::unique_ptr<ReadAdapterInterface> rai)
     : reader_(std::move(rai)) {}
 
 void ScriptModuleDeserializer::deserialize(
@@ -156,8 +157,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
           storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
     } else if (device.type() == at::DeviceType::CUDA) {
       at::Tensor cpu_tensor =
-          at::empty({0}, at::CPU(type).options())
-              .set_(cpu_storage);
+          at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
       at::Storage cuda_storage =
           cpu_tensor.to(device, cpu_tensor.scalar_type()).storage();
       storage_it =
@@ -250,7 +250,7 @@ std::shared_ptr<script::Module> load(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai =
-    caffe2::make_unique<IStreamAdapter>(&in);
+      caffe2::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device);
   return module;
 }

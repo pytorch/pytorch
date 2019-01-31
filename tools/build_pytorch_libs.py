@@ -104,10 +104,9 @@ def mkdir_p(dir):
 def create_build_env():
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
-    # you should NEVER add something to this list. It is bad practice to
+    # You should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    my_env['PYTORCH_PYTHON'] = escape_path(sys.executable)
     if USE_CUDNN:
         my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
         my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
