@@ -130,10 +130,6 @@ void testCodeTemplate() {
   }
 }
 
-Value* appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(kind, inputs))->output();
-}
-
 void testFusion() {
   auto testSimple = [&] {
     Graph graph;
@@ -836,12 +832,6 @@ void testADFormulas() {
     assertAllClose(tensors_out, expected_tensors_out);
     assertAllClose(tensor_grads_out, expected_tensor_grads_out);
   }
-}
-
-std::string toString(std::shared_ptr<Graph>& graph) {
-  std::ostringstream s;
-  s << *graph;
-  return s.str();
 }
 
 void testDifferentiate(std::ostream& out = std::cout) {
