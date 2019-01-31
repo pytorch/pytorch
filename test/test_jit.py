@@ -10808,7 +10808,7 @@ class TestFuser(JitTestCase):
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'prim::SumToSize'})
+            self.assertAllFused(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -10963,6 +10963,67 @@ class TestFuser(JitTestCase):
 
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fuser_deduplication(self):
+        # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
+        # see the discussion in PR #14957.
+        def f(x, y):
+            return torch.sigmoid(x + y)
+
+        b = torch.randn(5, 5, requires_grad=True)
+        a = torch.randn(5, 5, requires_grad=True)
+        s = self.checkScript(f, (a, b))
+        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+
+        c = s(a, b)
+        ga, gb = torch.autograd.grad(c.sum(), [a, b])
+        graph = backward_graph(s)
+        self.assertAllFused(graph)
+        # check that a, b share storage, i.e. were generated as a single output in the fuser
+        self.assertEqual(ga.data_ptr(), gb.data_ptr())
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fuser_iou(self):
+        # This checks if most of Intersection over Union is fused.
+        # In particular, the backward contains many _grad_sum_to_size.
+        def iou(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2):
+            ltx = torch.max(b1x1, b2x1)  # [N,M]
+            lty = torch.max(b1y1, b2y1)
+            rbx = torch.min(b1x2, b2x2)
+            rby = torch.min(b1y2, b2y2)
+
+            w = (rbx - ltx).clamp(min=0, max=float('inf'))  # [N,M]
+            h = (rby - lty).clamp(min=0, max=float('inf'))  # [N,M]
+            inter = w * h  # [N,M]
+
+            area1 = (b1x2 - b1x1) * (b1y2 - b1y2)  # [N,1]
+            area2 = (b2x2 - b2x1) * (b2y2 - b2y2)  # [1,M]
+            iou = inter / (area1 + area2 - inter)
+            return iou
+
+        box1 = torch.randn(5, 4, requires_grad=True)
+        box2 = torch.randn(5, 4, requires_grad=True)
+        # unsqueezing can currently not be fused
+        b1x1 = box1[:, 0].unsqueeze(1)  # [N,1]
+        b1y1 = box1[:, 1].unsqueeze(1)
+        b1x2 = box1[:, 2].unsqueeze(1)
+        b1y2 = box1[:, 3].unsqueeze(1)
+        b2x1 = box2[:, 0].unsqueeze(0)  # [1,N]
+        b2y1 = box2[:, 1].unsqueeze(0)
+        b2x2 = box2[:, 2].unsqueeze(0)
+        b2y2 = box2[:, 3].unsqueeze(0)
+
+        s = self.checkScript(iou, (b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2))
+        self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
+                            except_for={'aten::size', 'prim::BroadcastSizes'})
+
+        c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
+        torch.autograd.grad(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
+        graph = backward_graph(s)
+        self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
