@@ -31,7 +31,7 @@ def which(thefile):
         fname = os.path.join(dir, thefile)
         fnames = [fname]
         if IS_WINDOWS:
-            exts = os.environ.get('PATHEXT', '').split(os.sep)
+            exts = os.environ.get('PATHEXT', '').split(os.pathsep)
             fnames += [fname + ext for ext in exts]
         for name in fnames:
             if (os.path.exists(name) and os.access(name, os.F_OK | os.X_OK)
@@ -69,10 +69,13 @@ def cmake_defines(lst, **kwargs):
 
 
 # Ninja
-try:
-    import ninja
+# The ninja package is different in Anaconda Cloud and PYPI. The one in Anaconda Cloud
+# doesn't have the python code (ninja_syntax.py) in it, while the one in PYPI does.
+# Since we don't use the python part here, it is also acceptable if we use the executable
+# directly if it is in `PATH`.
+if which('ninja'):
     USE_NINJA = True
-except ImportError:
+else:
     USE_NINJA = False
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
