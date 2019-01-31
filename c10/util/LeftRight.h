@@ -37,7 +37,7 @@ public:
     , _foregroundDataIndex{0}
     , _counters{{{0}, {0}}}
     , _data{{{}, {}}}
-    , _inDestruction(false) {}
+    , _inDestruction{false} {}
 
     ~LeftRight() {
         // from now on, no new readers/writers will be accepted (see asserts in read()/write())
