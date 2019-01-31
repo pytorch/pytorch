@@ -2,12 +2,11 @@
 #include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/jit/interned_strings.h"
-
-#include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
 
 #include <algorithm>
 #include <array>
@@ -42,6 +41,9 @@ using at::Tensor;
 using at::TensorOptions;
 using at::DeviceGuard;
 
+using ::c10::fmap;
+using ::c10::filter;
+
 namespace {
 
 inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
@@ -54,7 +56,7 @@ inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
   std::array<bool, N> res;
-  JIT_ASSERT(vec.size() == N);
+  AT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
@@ -62,7 +62,7 @@ struct generic_graph_node_list_iterator {
     return cur;
   }
   generic_graph_node_list_iterator& operator++() {
-    JIT_ASSERT(cur);
+    AT_ASSERT(cur);
     cur = cur->next_in_graph[d];
     return *this;
   }
@@ -72,7 +72,7 @@ struct generic_graph_node_list_iterator {
     return old;
   }
   generic_graph_node_list_iterator& operator--() {
-    JIT_ASSERT(cur);
+    AT_ASSERT(cur);
     cur = cur->next_in_graph[reverseDir()];
     return *this;
   }

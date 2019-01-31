@@ -9,6 +9,5 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::StopGradient);
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::StopGradient,
-    void,
     C10StopGradient_DontUseThisOpYet)
 }

@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
@@ -117,7 +117,7 @@ struct QualifiedName : c10::intrusive_ptr_target {
       }
       out << name_;
     } else {
-      JIT_ASSERT(prefix_);
+      AT_ASSERT(prefix_);
       out << "getattr(";
       prefix_->emit(out);
       out << ", ";
@@ -281,7 +281,7 @@ struct PythonPrintPass {
   // block_point's output.
   Node* scanValue(Node* block_point, Value* v) {
     Node* n = v->node();
-    JIT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
+    AT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
 
     if (n == block_point &&
         canInline(v)) { // the node must be at the expected point of the typical
@@ -336,7 +336,7 @@ struct PythonPrintPass {
         return i;
       }
     }
-    JIT_ASSERT(t.is_variable());
+    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -825,7 +825,7 @@ struct PythonPrintPass {
             }
           } else {
             // vararg functions like format can have extra arguments
-            JIT_ASSERT(schema.is_vararg());
+            AT_ASSERT(schema.is_vararg());
           }
           stmt << v;
         }
@@ -913,7 +913,7 @@ struct PythonPrintPass {
     }
 
     // have we use all the provided defaults?
-    JIT_ASSERT(defaults_offset == defaults.end());
+    AT_ASSERT(defaults_offset == defaults.end());
 
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {
@@ -1060,8 +1060,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // to be correctly printed for export (a process that happens before
   // optimization passes run)
   const static std::unordered_set<Symbol> unneeded = {
-      onnx::Reshape, // only used in onnx
-      onnx::Shape, // only used in onnx
+      c10::onnx::Reshape, // only used in onnx
+      c10::onnx::Shape, // only used in onnx
       prim::AnyDefined, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it

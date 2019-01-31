@@ -97,6 +97,8 @@ class TestConvolution(serial.SerializedTestCase):
         assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
         if group != 1 and order == "NHWC":
             dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+        # Group conv not implemented with EIGEN engine.
+        assume(group == 1 or engine != "EIGEN")
 
         input_channels *= group
         output_channels *= group
@@ -884,12 +886,12 @@ class TestConvolution(serial.SerializedTestCase):
 
     @serial.given(
         op_type=st.sampled_from(["Conv", "Conv2D"]),
-        N=st.integers(1, 4),
-        G=st.integers(1, 4),
-        DX=st.integers(1, 4),
-        DY=st.integers(1, 4),
-        H=st.integers(1, 4),
-        W=st.integers(1, 4),
+        N=st.integers(1, 3),
+        G=st.integers(1, 3),
+        DX=st.integers(1, 3),
+        DY=st.integers(1, 3),
+        H=st.integers(1, 3),
+        W=st.integers(1, 3),
         use_bias=st.booleans(),
         order=st.sampled_from(["NCHW", "NHWC"]),
         force_algo_fwd=_cudnn_convolution_algo_count("fwd"),

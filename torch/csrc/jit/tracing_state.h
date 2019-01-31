@@ -1,13 +1,13 @@
 #pragma once
 
+#include <ATen/core/functional.h>
+#include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Backtrace.h>
@@ -45,8 +45,17 @@ struct TORCH_API TracingState
     }
   };
 
-  std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
-      value_map;
+  struct TracingEnvironmentFrame {
+    std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
+        value_map;
+    // TODO weak refcount
+    std::unordered_map<c10::intrusive_ptr<c10::ivalue::Future>, Value*>
+        future_map;
+  };
+
+  using TracingEnvironmentStack = std::vector<TracingEnvironmentFrame>;
+
+  TracingEnvironmentStack env_stack;
   std::shared_ptr<Graph> graph;
   bool warn = true;
   bool force_outplace = false;
@@ -93,7 +102,7 @@ struct ArgumentStash {
       const std::string& arg_name,
       size_t idx,
       const Variable& var,
-      const TypePtr& type = nullptr);
+      const c10::TypePtr& type = nullptr);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;
@@ -148,6 +157,16 @@ struct TORCH_API NoWarn {
   }
   std::shared_ptr<TracingState> state;
   bool prev;
+};
+
+struct WithNestedTracingFrame {
+  WithNestedTracingFrame() {
+    getTracingState()->env_stack.emplace_back();
+  }
+
+  ~WithNestedTracingFrame() {
+    getTracingState()->env_stack.pop_back();
+  }
 };
 
 } // namespace tracer
