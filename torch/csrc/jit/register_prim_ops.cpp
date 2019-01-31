@@ -790,6 +790,40 @@ RegisterOperators reg({
           }
         }),
     Operator(
+      prim::DictConstruct,
+      [](const Node* node) -> Operation {
+        const auto num_inputs = node->inputs().size();
+        if (num_inputs % 2 != 0) {
+          throw std::runtime_error("DictConstruct must have an even number of inputs");
+        }
+        return [=](Stack& stack) {
+          c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+          for (size_t i = 0; i < num_inputs; i += 2) {
+            auto val = pop(stack);
+            auto key = pop(stack);
+            vals[key] = val;
+          }
+          push(stack, std::move(vals));
+          return 0;
+        };
+      }
+    ),
+    Operator(
+        prim::DictIndex,
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            auto index = pop(stack);
+            auto dict = pop(stack).toGenericDict();
+            const auto& elems = dict->elements();
+            auto value = elems.find(index);
+            if (value == elems.end()) {
+              AT_ERROR("KeyError: '", index, "'");
+            }
+            push(stack, value->second);
+            return 0;
+          };
+        }),
+    Operator(
         "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
