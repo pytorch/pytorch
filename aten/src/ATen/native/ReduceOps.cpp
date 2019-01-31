@@ -275,7 +275,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
 
   // === Start workaround impl ===
   int64_t dim_prod = 1;
-  if (dim.size() == 0) {
+  if (dim.size() == 0 || self.ndimension() == 0) {
     dim_prod = self.numel();
   } else {
     for (auto d : dim) {
