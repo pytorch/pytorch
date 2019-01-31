@@ -58,11 +58,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
-    const std::vector<c10::IValue>& inputs,
-    const std::vector<c10::IValue*>& outputs)
+    std::vector<c10::IValue> inputs,
+    std::vector<c10::IValue*> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
-      ivalue_inputs_(inputs),
-      ivalue_outputs_(outputs) {
+      ivalue_inputs_(std::move(inputs)),
+      ivalue_outputs_(std::move(outputs)) {
   input_tensors_.resize(ivalue_inputs_.size());
   output_tensors_.resize(ivalue_outputs_.size());
 }
@@ -325,8 +325,8 @@ unique_ptr<OperatorBase> CreateOperator(
 
 void RunOperator(
     c10::Symbol name,
-    std::vector<c10::IValue>& inputs,
-    std::vector<c10::IValue*>& outputs) {
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs) {
   auto fn_wrap =
       caffe2::FunctionSchemaRegistry()->Create(name.toUnqualString());
   CAFFE_ENFORCE(
@@ -376,8 +376,8 @@ C10_DEFINE_REGISTRY(
     FunctionSchemaOperatorRegistry,
     OperatorBase,
     const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
+    std::vector<c10::IValue>,
+    std::vector<c10::IValue*>);
 
 C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
