@@ -87,8 +87,6 @@ elif REL_WITH_DEB_INFO:
 def overlay_windows_vcvars(env):
     from distutils._msvccompiler import _get_vc_env
     vc_env = _get_vc_env('x64')
-    print("VC ENV IS:")
-    pprint(vc_env)
     for k, v in env.items():
         lk = k.lower()
         if lk not in vc_env:

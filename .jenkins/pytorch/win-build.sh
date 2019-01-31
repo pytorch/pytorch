@@ -118,8 +118,6 @@ sccache --zero-stats
 set CC=sccache cl
 set CXX=sccache cl
 
-set DISTUTILS_USE_SDK=1
-
 set CMAKE_GENERATOR=Ninja
 
 if not "%USE_CUDA%"=="1" (
