@@ -1155,6 +1155,9 @@ struct FunctionSchemaStorageBase {
 
 C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
+// Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
+// as they wrap it all in a Meyer's singleton accessible from Torch.
+
 #define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
   struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
@@ -1164,6 +1167,21 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
+
+#define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  void CAFFE2_MEYERS_OP_REGISTRATION_##name() {                      \
+    REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl);  \
+  }                                                                  \
+  static CAFFE2_STRUCT_OP_REGISTRATION_##name                        \
+      CAFFE2_STRUCT_OP_REGISTRATION_DEFN_##name;
+
+#define DECLARE_FUNCTION_SCHEMA_OPERATOR(name)             \
+  CAFFE2_API void CAFFE2_MEYERS_OP_REGISTRATION_##name();  \
+  struct CAFFE2_API CAFFE2_STRUCT_OP_REGISTRATION_##name { \
+    CAFFE2_STRUCT_OP_REGISTRATION_##name() {               \
+      CAFFE2_MEYERS_OP_REGISTRATION_##name();              \
+    }                                                      \
+  };
 
 #define GET_FUNCTION_SCHEMA(name) \
   FunctionSchemaRegistry()->Create(name)->getSchema()
