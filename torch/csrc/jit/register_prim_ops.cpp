@@ -13,6 +13,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/thread_pool.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/SmallVector.h>
 
@@ -1191,6 +1192,43 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
+Operation dictLen(const Node* node) {
+  return [=](Stack& stack) {
+    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
+    pop(stack, dict);
+    push(stack, int64_t(dict.size()));
+    return 0;
+  };
+}
+
+Operation dictKeys(const Node* node) {
+  return [=](Stack& stack) {
+    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
+    pop(stack, dict);
+    std::vector<IValue> keys;
+    keys.reserve(dict.size());
+    for (auto item : dict) {
+      keys.push_back(item.first);
+    }
+    push(stack, IValue(keys));
+    return 0;
+  };
+}
+
+Operation dictValues(const Node* node) {
+  return [=](Stack& stack) {
+    c10::ivalue::DictUnorderedMap<IValue, IValue> dict;
+    pop(stack, dict);
+    std::vector<IValue> values;
+    values.reserve(dict.size());
+    for (auto item : dict) {
+      values.push_back(item.second);
+    }
+    push(stack, IValue(values));
+    return 0;
+  };
+}
+
 
 RegisterOperators reg2({
 
@@ -1461,6 +1499,17 @@ RegisterOperators reg2({
             return 0;
           };
         }),
+    #define CREATE_DICT_OPS(key_type)                                     \
+      Operator("aten::len(Dict[" key_type ", t] self) -> int", dictLen),  \
+      Operator(                                                           \
+          "aten::keys(Dict[" key_type ", t] self) -> " key_type "[]",     \
+          dictKeys),                                                      \
+      Operator("aten::values(Dict[" key_type ", t] self) -> t[]", dictValues)
+
+    CREATE_DICT_OPS("str"),
+    CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("float"),
+    #undef CREATE_DICT_OPS
 });
 
 // reference: _output_size in torch/nn/functional.py

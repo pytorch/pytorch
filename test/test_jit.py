@@ -9675,6 +9675,42 @@ a")
             return a == b
         self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
 
+    def test_dict_view(self):
+        @torch.jit.script
+        def fn(x, y):
+            l = {"a": x}
+            x_view = l["a"]
+            a = x + x
+            x_view.add_(y)
+            b = x + x
+            return a == b
+        print(fn.graph)
+        # self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
+
+    def test_dict_ops(self):
+        d = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+
+        @torch.jit.script
+        def fn(x):
+            # type: (Dict[str, Tensor]) -> List[str]
+            return x.keys()
+
+        print(fn(d))
+
+        @torch.jit.script
+        def fn(x):
+            # type: (Dict[str, Tensor]) -> List[Tensor]
+            return x.values()
+
+        print(fn(d))
+
+        @torch.jit.script
+        def fn(x):
+            # type: (Dict[str, Tensor]) -> int
+            return len(x)
+
+        print(fn(d))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
