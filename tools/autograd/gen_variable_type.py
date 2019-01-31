@@ -450,6 +450,15 @@ def emit_body(declaration):
             if has_tensorlist_arg:
                 return None
 
+            # Empirical evaluation of the cases where we insert those guards in
+            # backward show that they are somewhat useless. E.g. there's no need
+            # to guard on some values captured from forward, because they had to
+            # require_grad if the backward function even gets executed. I don't
+            # have any good ideas for detecting those cases, so I simply disabled the
+            # checks.
+            if 'backward' in func['name']:
+                return None
+
             # If there's a single derivative we could compute, we already have
             # a requires_grad check that is sufficient
             if len(func['args_with_gradients']) <= 1:
