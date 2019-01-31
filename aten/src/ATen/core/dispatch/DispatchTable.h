@@ -1,16 +1,18 @@
 #pragma once
 
-#include <ATen/core/dispatch/OpSchema.h>
+#include <ATen/core/function_schema.h>
 #include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/dispatch/KernelFunction.h>
 
 #include <array>
 #include <atomic>
 #include <iostream>
 #include <mutex>
 #include <type_traits>
+#include <sstream>
 #include <unordered_map>
 
 namespace c10 {
@@ -21,8 +23,7 @@ namespace c10 {
  * so we can create a new cache instance when a kernel is looked up
  * from the dispatch table.
  */
-using KernelStateCreatorFunction = std::unique_ptr<c10::KernelState> ();
-
+using KernelCacheCreatorFunction = std::unique_ptr<c10::KernelCache> ();
 /**
  * The dispatch table stores a pointer to a kernel function and a pointer
  * to a function initializing a cache for the kernel. If the kernel wants
@@ -33,49 +34,75 @@ using KernelStateCreatorFunction = std::unique_ptr<c10::KernelState> ();
  */
 struct DispatchTableEntry final {
   KernelFunction* kernel_func;
-  KernelStateCreatorFunction* state_creator_func;
+  KernelCacheCreatorFunction* cache_creator_func;
 };
 
 namespace details {
 /// Kernel implementations in a thread-safe hash table.
-template <class Key>
 class ThreadsafeOperatorTable_ final {
  public:
-  template <class Key_>
-  void emplace(Key_&& key, const DispatchTableEntry& value) {
-    bool res = map_.write([&](ska::flat_hash_map<Key, DispatchTableEntry>& map) -> bool {
-      auto result = map.emplace(std::forward<Key>(key), value);
+  void emplace(TensorTypeId key, const DispatchTableEntry& value, const std::string& operator_name) {
+    bool res = map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
+      auto result = map.emplace(key, value);
       return result.second;
     });
     if (!res) {
-      AT_ERROR("Tried to register conflicting kernels to the dispatcher: ", key);
+      AT_ERROR("Tried to register multiple kernels with same dispatch key '",
+      dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
     }
   }
 
-  void erase(const Key& key) {
-    auto num_removed =
-        map_.write([&](ska::flat_hash_map<Key, DispatchTableEntry>& map) -> size_t {
-          return map.erase(key);
-        });
-    assert(num_removed <= 1); // This is not a multi-map
-    if (num_removed == 0) {
-      AT_ERROR("Tried to deregister a kernel that isn't registered.");
-    }
-  }
+  void erase(TensorTypeId key, const std::string& operator_name) {
+    map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
+      auto num_removed = map.erase(key);
 
-  const DispatchTableEntry* lookup(const Key& key) const {
-    return map_.read([&](const ska::flat_hash_map<Key, DispatchTableEntry>& map) -> const DispatchTableEntry* {
-      auto found = map.find(key);
-      if (found != map.end()) {
-        return &found->second;
-      } else {
-        return nullptr;
+      assert(num_removed <= 1); // This is not a multi-map
+      if (num_removed == 0) {
+        AT_ERROR("Tried to deregister a kernel with dispatch key '",
+                 dispatch_key_to_string(key), "' for operator '", operator_name,
+                 "' but that kernel isn't registered. Registered dispatch keys are: ",
+                 list_all_dispatch_keys(map));
       }
     });
   }
 
+  const DispatchTableEntry* lookup(TensorTypeId key, const string& operator_name) const {
+    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> const DispatchTableEntry* {
+      auto found = map.find(key);
+      if (found != map.end()) {
+        return &found->second;
+      } else {
+        AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name,
+                 "'. Tried to look up kernel for dispatch key '", dispatch_key_to_string(key),
+                 "'. Registered dispatch keys are: ", list_all_dispatch_keys(map));
+      }
+    });
+  }
+
+  bool isEmpty() const {
+    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
+      return map.size() == 0;
+    });
+  }
+
  private:
-  LeftRight<ska::flat_hash_map<Key, DispatchTableEntry>> map_;
+   static std::string list_all_dispatch_keys(const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
+     if (map.size() == 0) {
+       return "";
+     }
+     std::ostringstream str;
+     str << dispatch_key_to_string(map.begin()->first);
+     for (auto iter = ++map.begin(); iter != map.end(); ++iter) {
+       str << ", " << dispatch_key_to_string(iter->first);
+     }
+     return str.str();
+   }
+
+   static std::string dispatch_key_to_string(TensorTypeId id) {
+     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + guts::to_string(id) + "]";
+   }
+
+   LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
 };
 } // namespace details
 
@@ -87,17 +114,13 @@ class ThreadsafeOperatorTable_ final {
  * consider the operator add(Tensor, Tensor), the dispatch table for this
  * operator may contain implementations for various dynamic tensor types, such
  * as (CPUFloatTensor, CPUFloatTensor), (CUDAFloatTensor, CUDAFloatTensor), etc.
- *
- * @tparam OpSchemaDef The operator signature this dispatch table encodes.
  */
-// TODO: Support dispatch for meta-operators (which apply to all dynamic types)
-template <class OpSchemaDef>
 class DispatchTable final {
- private:
-  using Schema = OpSchema<OpSchemaDef>;
-
  public:
-  DispatchTable() : kernels_() {}
+  DispatchTable(FunctionSchema schema)
+  : schema_(std::move(schema))
+  , kernels_()
+  , index_of_first_tensor_arg_(get_index_of_first_tensor_arg_(schema)) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -105,9 +128,9 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected
    */
   void registerKernel(
-      typename Schema::dispatch::dispatch_key_type dispatch_key,
+      TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    kernels_.emplace(std::move(dispatch_key), kernel);
+    kernels_.emplace(dispatch_key, kernel, schema_.name());
   }
 
   /**
@@ -118,9 +141,8 @@ class DispatchTable final {
   // TODO: This isn't going to work so well when we get more complicated
   // override patterns! In this case, an operator will show up in multiple
   // slots, and erasing them one-by-one is probably not such a good idea.
-  void deregisterKernel(
-      const typename Schema::dispatch::dispatch_key_type& dispatch_key) {
-    kernels_.erase(dispatch_key);
+  void deregisterKernel(TensorTypeId dispatch_key) {
+    kernels_.erase(dispatch_key, schema_.name());
   }
 
   /**
@@ -131,30 +153,40 @@ class DispatchTable final {
    * @return Kernel function pointing to the right kernel for the given arguments
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
-     auto dispatch_key = Schema::dispatch::dispatch_key(stack);
-     const DispatchTableEntry* found = kernels_.lookup(dispatch_key);
-     if (found == nullptr) {
-       // TODO Better error message - include op name and dispatch key (i.e.
-       // argument types)
-       AT_ERROR("Didn't find kernel to dispatch to for operator '", Schema::metadata::name(), "'");
-     }
-     return *found;
+     TensorTypeId dispatch_key = torch::jit::peek(
+       *stack,
+       index_of_first_tensor_arg_,
+       schema_.arguments().size()
+     ).toTensor().type_id();
+     return *kernels_.lookup(dispatch_key, schema_.name());
+   }
+
+   const FunctionSchema& schema() const {
+     return schema_;
+   }
+
+   bool isEmpty() const {
+     return kernels_.isEmpty();
    }
 
  private:
+  static size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
+    for (size_t i = 0; i < schema.arguments().size(); ++i) {
+      if (schema.arguments()[i].type()->isSubtypeOf(DynamicType::get())) {  // DynamicType means it's a tensor
+        return i;
+      }
+    }
+
+    AT_ERROR("Tried to create dispatch table for operator schema ", schema.name(), " that doesn't have tensor arguments.");
+  }
 
 
-  details::ThreadsafeOperatorTable_<
-      typename Schema::dispatch::dispatch_key_type>
-      kernels_;
+  FunctionSchema schema_;
+  details::ThreadsafeOperatorTable_ kernels_;
+
+  // this is caching the index so we don't have to parse the schema inputs
+  // again and again for each dispatcher lookup.
+  size_t index_of_first_tensor_arg_;
 };
 
 } // namespace c10
-
-/*
- * Use this to access the dispatch table singleton for a given op schema.
- * It has an implementation for each op schema def in a cpp file, because
- * we can't rely on the one-definition-rule.
- */
-template <class OpSchemaDef>
-C10_API c10::DispatchTable<OpSchemaDef>& c10_dispatch_table();
