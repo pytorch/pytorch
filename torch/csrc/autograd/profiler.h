@@ -235,10 +235,7 @@ struct TORCH_API RecordProfile {
   : out_(out) {
     init();
   }
-  RecordProfile(std::string filename)
-  : file_(new std::ofstream(filename)), out_(*file_) {
-    init();
-  }
+  RecordProfile(const std::string& filename);
 
   ~RecordProfile();
 private:

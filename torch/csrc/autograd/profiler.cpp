@@ -205,6 +205,11 @@ static jit::CodeTemplate event_template(R"(
   "args": {}
 })");
 
+RecordProfile::RecordProfile(const std::string& filename)
+: file_(new std::ofstream(filename)), out_(*file_) {
+  init();
+}
+
 RecordProfile::~RecordProfile() {
   thread_event_lists event_lists = disableProfiler();
   std::vector<Event*> events;
