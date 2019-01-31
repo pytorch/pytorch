@@ -7,11 +7,11 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -60,6 +60,8 @@ using ::c10::TypePtr;
 using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
+
+using ::c10::fmap;
 
 namespace prim {
 using namespace ::c10::prim;

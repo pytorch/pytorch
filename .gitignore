@@ -54,6 +54,8 @@ torch/csrc/nn/THNN_generic.cwrap
 torch/csrc/nn/THNN_generic.h
 torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THNN.cwrap
+torch/bin/
+torch/cmake/
 torch/lib/*.a*
 torch/lib/*.dll*
 torch/lib/*.exe*
@@ -72,7 +74,9 @@ torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/site-packages/
 torch/lib/python*
+torch/include/
 torch/share/
+torch/test/
 torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml

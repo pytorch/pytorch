@@ -3837,7 +3837,7 @@ a")
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
 
-    def test_mutable_list(self):
+    def test_mutable_list_append(self):
         def test_append():
             a = [0, 1]
             a.append(2)
@@ -3845,6 +3845,7 @@ a")
             return a == [0, 1, 2, 3]
         self.checkScript(test_append, ())
 
+    def test_mutable_list_append_2(self):
         def test_append_2():
             a = [0, 1]
             a.append(2)
@@ -3853,6 +3854,7 @@ a")
             return a == [1, 4]
         self.checkScript(test_append_2, ())
 
+    def test_mutable_list_append_if(self):
         def test_append_if():
             a = [1]
             if True:
@@ -3860,6 +3862,7 @@ a")
             return a == [1, 4]
         self.checkScript(test_append_if, ())
 
+    def test_mutable_list_append_if_else(self):
         def test_append_if_else():
             a = [1]
             if False:
@@ -3869,6 +3872,7 @@ a")
             return a == [1, 10]
         self.checkScript(test_append_if_else, ())
 
+    def test_mutable_list_append_loop(self):
         def test_append_loop():
             a = torch.jit.annotate(List[int], [])
             for i in range(5):
@@ -3877,6 +3881,7 @@ a")
             return a == [0, 1, 2, 3, 4]
         self.checkScript(test_append_loop, ())
 
+    def test_mutable_list_append_loop_if(self):
         def test_append_loop_if():
             a = torch.jit.annotate(List[int], [])
             for i in range(5):
@@ -3888,6 +3893,7 @@ a")
             return a == [0, 0, 0, 0, 4]
         self.checkScript(test_append_loop_if, ())
 
+    def test_mutable_list_nested_loop(self):
         def test_nested_loop():
             a = torch.jit.annotate(List[int], [])
             for i in range(2):
@@ -3895,7 +3901,7 @@ a")
                     a.append(i + j)
 
             return a == [0, 1, 1, 2]
-        self.checkScript(test_append_loop_if, ())
+        self.checkScript(test_nested_loop, ())
 
     def test_mutable_list_function_inline(self):
         @torch.jit.script
@@ -9494,6 +9500,17 @@ a")
             return b
 
         self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_wildcards(self):
+        def fn():
+            x = torch.ones(2, 3)
+            l = []
+            l.append(x)
+            x_view = l[0]
+            x.add_(torch.ones(2, 3))
+            return x_view
+
+        self.checkScript(fn, ())
 
     def test_cpp_function_tensor_str(self):
         x = torch.randn(2, 2)

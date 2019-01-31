@@ -5,10 +5,10 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/onnx/onnx.h>
 
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
