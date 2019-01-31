@@ -13,8 +13,8 @@ struct LpPoolFunctor {
 template <>
 bool PoolOp<float, CPUContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto sizes = ConvPoolOpBase::GetOutputSize(X, X.dim32(1));
-  auto* Y = Output(0, sizes, at::dtype<float>());
+  auto* Y = Output(0);
+  ConvPoolOpBase::SetOutputSize(X, Y, X.dim32(1));
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
@@ -59,11 +59,11 @@ bool PoolOp<float, CPUContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool PoolOp<float, CPUContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
+  auto* Y = Output(0);
   int height = X.dim32(1);
   int width = X.dim32(2);
   int channels = X.dim32(3);
-  auto sizes = ConvPoolOpBase::GetOutputSize(X, channels);
-  auto* Y = Output(0, sizes, at::dtype<float>());
+  ConvPoolOpBase::SetOutputSize(X, Y, channels);
 
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;

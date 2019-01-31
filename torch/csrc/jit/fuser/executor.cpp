@@ -2,14 +2,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/fuser/compiler.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
 #include <torch/csrc/jit/fuser/tensor_info.h>
-#include <ATen/core/stack.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only
