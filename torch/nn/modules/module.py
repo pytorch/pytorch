@@ -464,7 +464,6 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
-        input_vars = tuple(torch.autograd.function._iter_tensors(input))
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state:
             return self.forward(*input, **kwargs)
