@@ -29,14 +29,6 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-# Get the correct Python executable
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
-
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
@@ -74,7 +66,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
   COMMAND
-  ${PYCMD} tools/setup_helpers/generate_code.py
+  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -702,7 +694,7 @@ if (BUILD_PYTHON)
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
     COMMAND
-    ${PYCMD} -mtools.pyi.gen_pyi
+    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
