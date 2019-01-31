@@ -2,11 +2,10 @@
 #include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
-
-#include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 
 #include <algorithm>
@@ -41,6 +40,9 @@ using at::ScalarType;
 using at::Tensor;
 using at::TensorOptions;
 using at::DeviceGuard;
+
+using ::c10::fmap;
+using ::c10::filter;
 
 namespace {
 
