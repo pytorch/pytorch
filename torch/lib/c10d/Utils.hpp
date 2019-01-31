@@ -195,7 +195,7 @@ inline void assertTypeAndSizesMatch(
   assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
 }
 
-// Copied from torch/csrc/utils/functional.h.
+// Copied from ATen/core/functional.h.
 template <typename F, typename T>
 inline auto fmap(T& inputs, const F& fn)
     -> std::vector<decltype(fn(*inputs.begin()))> {

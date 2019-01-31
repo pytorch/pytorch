@@ -6,11 +6,13 @@
 #include <immintrin.h>
 #endif
 #include <c10/util/Half.h>
-#include <c10/util/Logging.h>
 
 namespace caffe2 {
 
 namespace internal {
+
+// The following functions inside internal namespace are inlined because they
+// are performance critical.
 
 template <typename T>
 static inline void adagrad_update_base_inlined(
@@ -31,6 +33,23 @@ static inline void adagrad_update_base_inlined(
   }
 }
 
+// version with prefetching
+// TODO(msmelyan)
+// Crux of the computation is computing a  / (sqrt(b) + epsilon),
+// where a and b are vectors and epislon is very small (eg., 10^-5) and does not
+// change. Today it's computed using two vector sqrt and vector divide simd
+// instructions. It is slow. We can take advantage of existing fast vector
+// VRSQRTPS instruction that computes approximate reciprocals of square roots
+// of the vector. It is 6x faster than vsrt and vdiv combinations. Since the
+// addition of epislon is just done to avoid division by zero, we approximate a
+// / (sqrt(b) + epsilon) by a / (sqrt(b + sqrt(epsilon)) If we do that, we can
+// use VRSQRTPS instead now. VRSQRTPS is not very accurate. Specifically, for
+// the test on random numbers between 0.1 and 1 the absolute error was about
+// 10^-3 compared to using slower but more accurate combination of vsqrt and
+// vdiv. Extend Marat's function with more NR iterations to get more accuracy
+// for training
+// TODO(msmelyan)
+// explore streaming stores, but need to have unique indices (deduplication)
 inline void adagrad_update_prefetch_inlined(
     int N,
     const float* w,
@@ -238,8 +257,12 @@ void adagrad_update(
     float decay,
     float lr);
 
+/**
+ * @return num_rows if succeeds otherwise return the row idx where we pass
+ *         the boundary of param_size
+ */
 template <typename SIndex>
-void sparse_adagrad(
+int sparse_adagrad(
     int num_rows, // number of rows reading
     int block_size, // number of parameters per rows
     std::uint64_t param_size, // total number of parameters
@@ -250,11 +273,10 @@ void sparse_adagrad(
     float* nw, // output parameters
     float* nh, // output momentums
     float epsilon,
-    float lr,
-    const std::string& param_name); // name of parameters (for error reporting)
+    float lr);
 
 #define SPARSE_ADAGRAD_SPECIALIZATION(SIndex, ISA)                       \
-  void sparse_adagrad_##SIndex##__##ISA(                                 \
+  int sparse_adagrad_##SIndex##__##ISA(                                  \
       int num_rows,                                                      \
       int block_size,                                                    \
       std::uint64_t param_size,                                          \
@@ -265,25 +287,15 @@ void sparse_adagrad(
       float* nw,                                                         \
       float* nh,                                                         \
       float epsilon,                                                     \
-      float lr,                                                          \
-      const std::string& param_name) {                                   \
+      float lr) {                                                        \
     for (int i = 0; i < num_rows; ++i) {                                 \
       auto idx = indices[i];                                             \
       auto offsetI = i * block_size;                                     \
       auto offsetIdx = idx * block_size;                                 \
                                                                          \
-      CAFFE_ENFORCE_GE(                                                  \
-          param_size,                                                    \
-          block_size + offsetIdx,                                        \
-          param_name,                                                    \
-          ", out of bound,  idx:",                                       \
-          idx,                                                           \
-          " for input i:",                                               \
-          i,                                                             \
-          " and block size:",                                            \
-          block_size,                                                    \
-          " max size:",                                                  \
-          param_size);                                                   \
+      if (block_size + offsetIdx > param_size) {                         \
+        return i;                                                        \
+      }                                                                  \
                                                                          \
       if (block_size == 1) {                                             \
         float gi = g[i];                                                 \
@@ -309,6 +321,7 @@ void sparse_adagrad(
             lr);                                                         \
       }                                                                  \
     }                                                                    \
+    return num_rows;                                                     \
   };
 
 } // namespace caffe2
