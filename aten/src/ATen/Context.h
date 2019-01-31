@@ -59,7 +59,7 @@ class CAFFE2_API Context {
 
   // PyTorch maintains a collection of default generators that get
   // inialized once. The purpose of these default generator is to
-  // maintain a running state of the PRNG. 
+  // maintain a running state of the pseudo random number generation. 
   // getDefaultGenerator gets the default generator for a particular
   // device
   Generator& getDefaultGenerator(Device device) {

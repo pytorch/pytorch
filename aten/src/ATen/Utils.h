@@ -132,10 +132,7 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
 * Utility function used in tensor implementations, which
 * supplies the default generator to tensors, if an input generator
 * is not supplied. The input Generator* is also dynamic casted to
-* the backend generator type (CPU/CUDAGenerator etc.), because
-* Generator is a base class and not an interface, and some methods
-* are specific to the individual backends (for instance: incrementPhiloxOffset
-* for CUDA and random()/random64 for CPU)
+* the backend generator type (CPU/CUDAGenerator etc.)
 */
 template <typename T>
 static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
@@ -146,6 +143,10 @@ static inline T * check_generator_with_default(Generator * expr, Generator * def
   AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 
+/*
+* Utility function used for dynamic casting a Generator* to
+* the backend generator type (CPU/CUDAGenerator etc.)
+*/
 template <typename T>
 static inline T * check_generator(Generator * expr) {
   if(auto result = dynamic_cast<T*>(expr))

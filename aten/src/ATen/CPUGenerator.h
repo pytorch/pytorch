@@ -26,6 +26,7 @@ struct CAFFE2_API CPUGenerator : public Generator {
   CPUGenerator(CPUGenerator&& other);
   CPUGenerator& operator=(CPUGenerator& other);
 
+  // CPUGenerator methods
   void setCurrentSeed(uint64_t seed) override;
   uint32_t random();
   uint64_t random64();

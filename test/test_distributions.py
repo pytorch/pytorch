@@ -1261,7 +1261,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_argmax_relaxed_categorical(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
 
         class ArgMax(object):
             def __init__(self, dist):
@@ -1865,7 +1865,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(2)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.]:
             self._check_sampler_sampler(Exponential(rate),
                                         scipy.stats.expon(scale=1. / rate),
@@ -1916,7 +1916,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_laplace_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(4)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Laplace(loc, scale),
                                         scipy.stats.laplace(loc=loc, scale=scale),
@@ -1967,7 +1967,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
@@ -2010,7 +2010,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(4)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
@@ -2039,7 +2039,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gumbel_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
+        set_rng_seed(4)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gumbel(loc, scale),
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
@@ -2070,7 +2070,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
+        set_rng_seed(5)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
             self._check_sampler_sampler(FisherSnedecor(df1, df2),
                                         scipy.stats.f(df1, df2),
@@ -2127,7 +2127,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
-        set_rng_seed(11)  # see Note [Randomized statistical tests]
+        set_rng_seed(17)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
                                         scipy.stats.t(df=df, loc=loc, scale=scale),

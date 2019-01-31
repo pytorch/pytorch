@@ -3482,7 +3482,7 @@ class _TestTorchMixin(object):
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.random.default_generator).dtype)
             self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
             out = torch.empty(size, dtype=torch.float32)
             self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
@@ -8592,6 +8592,34 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+    def test_generator_cpu(self):
+        # tests Generator API
+        # manual_seed, seed, initial_seed, get_state, set_state
+        g1 = torch.Generator()
+        g2 = torch.Generator()
+        g1.manual_seed(12345)
+        g2.manual_seed(12345)
+        self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1.seed()
+        g2.seed()
+        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1 = torch.Generator(default=True)
+        g2_state = g2.get_state()
+        g2_randn = torch.randn(1, generator=g2)
+        g1.set_state(g2_state)
+        g1_randn = torch.randn(1)
+        self.assertEqual(g1_randn, g2_randn)
+
+        default_state = torch.Generator(default=True).get_state()
+        q = torch.Tensor(100)
+        g1_normal = q.normal_()
+        g2 = torch.Generator()
+        g2.set_state(default_state)
+        g2_normal = q.normal_(generator=g2)
+        self.assertEqual(g1_normal, g2_normal)
 
     def test_parsing_int64(self):
         # accepts integer arguments

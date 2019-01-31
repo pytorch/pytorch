@@ -78,7 +78,7 @@ Generators
 :func:`Generator(device='cpu', default=False)`
 Creates and returns a generator object which manages the state of the algorithm that
 produces pseudo random numbers. Used as a keyword argument in many random tensors such
-as normal_, randn etc.
+as normal_, randn etc. Currently only works with cpu device.
  Keyword arguments:
     device (:class:`torch.device`, optional): the desired device for the Generator.
         Default: `torch.device('cpu')`.
@@ -88,9 +88,9 @@ as normal_, randn etc.
 Examples::
   >>> g_cpu = torch.Generator()
   >>> g_cpu_default = torch.Generator(default=True)
-  >>> g_cuda = torch.Generator(device='cuda')
-  >>> g_cuda_default = torch.Generator(device='cuda', default=True)
-  >>> g_cuda_default_1 = torch.Generator(device='cuda:1', default=True)
+  >>> g_cuda = torch.Generator(device='cuda') # not supported currently but will be soon
+  >>> g_cuda_default = torch.Generator(device='cuda', default=True) # not supported currently but will be soon
+  >>> g_cuda_default_1 = torch.Generator(device='cuda:1', default=True) # not supported currently but will be soon
 
 .. autofunction:: Generator.seed
 .. autofunction:: Generator.manual_seed

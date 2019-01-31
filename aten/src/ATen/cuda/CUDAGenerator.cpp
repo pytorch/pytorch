@@ -14,7 +14,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 namespace at {
 
 CUDAGenerator::CUDAGenerator(Context * context_)
-  : context(context_)
+  : Generator(Device(DeviceType::CUDA), default_rng_seed_val), context(context_)
 {
 }
 

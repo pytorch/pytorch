@@ -3,10 +3,29 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
+// Distributions kernel adapted from THRandom.cpp
+// The kernels try to follow std::random distributions signature
+// For instance: in ATen
+//      CPUGenerator* gen = new CPUGenerator();
+//      at::uniform_real_distribution<double> uniform(0, 1);
+//      auto sample = uniform(gen);
+//      
+//      vs std::random
+//
+//      std::mt19937 gen;
+//      std::uniform_real_distribution uniform(0, 1);
+//      auto sample = uniform(gen);
+//
+// Note: Why are operator() signatures different for CUDA and CPU?
+//       This is because, for CUDA, we will be using Philox4_32_10 engine
+//       inside a kernel and the number of random samples we would need is known
+//       before hand. For the CPU side, it's easier to let CPUGenerator encapsulate
+//       Philox4_32_10 and manage its state. Hence, for CUDA, operator() takes
+//       the Philox4_32_10 object directly and CPU take CPUGenerator object directly.
 namespace at {
 
 /*
-* Produces a uniform distribution in the range [0,1) of type T
+* Samples a uniform distribution in the range [0,1) of type T
 * Note: how to get a range of [0,1) from {0,1,..2^32-1}
 * https://lemire.me/blog/2017/02/28/how-many-floating-point-numbers-are-in-the-interval-01/
 */
@@ -65,6 +84,11 @@ struct uniform_real_distribution {
     T b; 
 };
 
+/*
+* Samples a normal distribution using the Box-Muller method
+* Takes mean and standard deviation as inputs
+* Outputs two samples at a time
+*/
 template <typename T>
 struct normal_distribution {
 
@@ -137,6 +161,9 @@ struct normal_distribution {
     T stdv;
 };
 
+/*
+* Samples a bernoulli distribution given a probability input
+*/
 template <typename T>
 struct bernoulli_distribution {
 
@@ -163,6 +190,9 @@ struct bernoulli_distribution {
     T p;
 };
 
+/*
+* Samples a geometric distribution given a probability input
+*/
 template <typename T>
 struct geometric_distribution {
 
@@ -189,6 +219,9 @@ struct geometric_distribution {
     T p;
 };
 
+/*
+* Samples an exponential distribution given a lambda input
+*/
 template <typename T>
 struct exponential_distribution {
 
@@ -210,6 +243,9 @@ struct exponential_distribution {
     T lambda;
 };
 
+/*
+* Samples a cauchy distribution given median and sigma as inputs
+*/
 template <typename T>
 struct cauchy_distribution {
 
@@ -233,6 +269,11 @@ struct cauchy_distribution {
     T sigma;
 };
 
+/*
+* Samples a lognormal distribution
+* Takes mean and standard deviation as inputs
+* Outputs two samples at a time
+*/
 template <typename T>
 struct lognormal_distribution {
 

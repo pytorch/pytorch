@@ -5,6 +5,9 @@ namespace at {
 
 namespace detail {
 
+/*
+* call once pattern to initialize default generator once
+*/
 CPUGenerator& getDefaultCPUGenerator() {
   std::call_once(cpu_device_flag, [&] {
     default_gen_cpu = c10::guts::make_unique<CPUGenerator>(default_rng_seed_val);
@@ -12,14 +15,18 @@ CPUGenerator& getDefaultCPUGenerator() {
   return *default_gen_cpu;
 }
 
+/*
+* Utility to create a CPUGenerator. Returns a unique_ptr
+*/
 std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
   return c10::guts::make_unique<CPUGenerator>(seed_val);
 }
 
 } //namespace detail
 
-// CPUGenerator class implementation
-
+/*
+* CPUGenerator class implementation
+*/
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : Generator(Device(DeviceType::CPU), seed_in), engine_(Philox4_32_10(seed_in)) {}
 
@@ -60,11 +67,17 @@ void CPUGenerator::setCurrentSeed(uint64_t seed) {
   engine_ = Philox4_32_10(seed);
 }
 
+/* 
+* Gets a random 32 bit unsigned integer from the engine
+*/
 uint32_t CPUGenerator::random() {
   std::lock_guard<std::mutex> lock(mutex);
   return engine_();
 }
 
+/* 
+* Gets a random 64 bit unsigned integer from the engine
+*/
 uint64_t CPUGenerator::random64() {
   std::lock_guard<std::mutex> lock(mutex);
   uint64_t hi = (static_cast<uint64_t>(engine_())) << 32;

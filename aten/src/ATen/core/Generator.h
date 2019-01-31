@@ -19,7 +19,7 @@
 * a random distribution. Such an engine almost always maintains a state and requires a
 * seed to start off the creation of random numbers. Often times, users have
 * encountered that it could be beneficial to be able to create, retain, and destroy 
-* generator states and also be able to have control over the seed value.
+* PRNG states and also be able to have control over the seed value.
 *
 * A Generator in ATen gives users the ability to read, write and modify a PRNG engine.
 * For instance, it does so by letting users seed a PRNG engine, fork the state of the
@@ -27,6 +27,7 @@
 *
 * By default, there is one generator per device, and a device's generator is 
 * lazily created. A user can use the torch.Generator() api to create their own generator.
+* Currently torch.Generator() can only create a CPUGenerator.
 */
 
 namespace at {
@@ -35,17 +36,17 @@ constexpr uint64_t default_rng_seed_val = 67280421310721;
 
 struct CAFFE2_API Generator {
   // Constructors
-  Generator() = default;
   Generator(Device device_in, uint64_t seed_in);
   Generator(const Generator& other);
   Generator(Generator&& other);
   virtual ~Generator() = default;
 
+  // Common methods for all generators
   virtual void setCurrentSeed(uint64_t seed);
   uint64_t getCurrentSeed();
   Device getDevice();
 
-  // stubbed
+  // stubbed. will be removed
   virtual Generator& manualSeedAll(uint64_t seed);
 
   protected:

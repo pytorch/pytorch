@@ -18,7 +18,6 @@
 #include <c10/util/Half.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-// Defining vector structs for CPU
 #define PHILOX_INLINE __forceinline__
 #else
 #define PHILOX_INLINE __inline__
@@ -149,12 +148,6 @@ public:
     ++counter[3];
   }
 
-private:
-  UINT4 counter;
-  UINT4 output;
-  UINT2 key;
-  unsigned int STATE;
-
   /*
   * Function that Skips one 128 bit number in a subsequence
   */
@@ -168,6 +161,12 @@ private:
     }
     ++counter[3];
   }
+
+private:
+  UINT4 counter;
+  UINT4 output;
+  UINT2 key;
+  unsigned int STATE;
 
   C10_HOST_DEVICE unsigned int mulhilo32(unsigned int a, unsigned int b,
                                     unsigned int *result_high) {
