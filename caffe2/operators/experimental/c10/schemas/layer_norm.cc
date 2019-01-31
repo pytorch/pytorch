@@ -27,7 +27,6 @@ struct EpsilonParameter final {
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     c10::core::opschema::LayerNorm,
-    c10::core::opschema::LayerNorm::Cache,
     C10LayerNorm_DontUseThisOpYet,
     ParameterHelper<AxisParameter>,
     ParameterHelper<EpsilonParameter>)

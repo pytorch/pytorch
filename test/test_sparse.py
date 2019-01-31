@@ -982,6 +982,14 @@ class TestSparse(TestCase):
         for i in range(1, 5):
             test_dims += itertools.combinations(range(len(with_size)), i)
 
+        # https://github.com/pytorch/pytorch/issues/16501
+        x = torch.tensor([[1., 0., 0., 1.],
+                          [0., 1., 0., 0.],
+                          [0., 1., 1., 0.],
+                          [0., 1., 0., 2.]]).to_sparse()
+        self.assertEqual(torch.sparse.sum(x, dim=0), torch.sparse.sum(x, dim=-2))
+        self.assertEqual(torch.sum(x.to_dense(), dim=0), torch.sparse.sum(x, dim=0).to_dense())
+
         # not support SparseTensor.sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
         self.assertRaises(RuntimeError, lambda: S.sum())

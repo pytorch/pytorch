@@ -186,16 +186,25 @@ to the end.)
 
 // Register layer norm with c10
 namespace {
+struct State final : public c10::KernelState {
+    at::optional<at::Tensor> scale = at::nullopt;
+    at::optional<at::Tensor> bias = at::nullopt;
+};
+
 template <class DataType>
-c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
+void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass in correct state type
+  c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, 3, 6);
+  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 0, 3, 3);
+
   caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
-  caffe2::Tensor Y{c10::C10Tensor(inputs[1].toTensor())};
-  caffe2::Tensor mean{c10::C10Tensor(inputs[2].toTensor())};
-  caffe2::Tensor sig{c10::C10Tensor(inputs[3].toTensor())};
-  int64_t axis = inputs[4].toInt();
-  float epsilon = inputs[5].toDouble();
+  int64_t axis = inputs[1].toInt();
+  float epsilon = inputs[2].toDouble();
+  caffe2::Tensor Y{c10::C10Tensor(outputs[0].toTensor())};
+  caffe2::Tensor mean{c10::C10Tensor(outputs[1].toTensor())};
+  caffe2::Tensor sig{c10::C10Tensor(outputs[2].toTensor())};
+
   caffe2::CPUContext context;
-  c10::core::opschema::LayerNorm::Cache* cache = inputs[6].toBlob()->GetMutable<c10::core::opschema::LayerNorm::Cache>();
+  State* cache = static_cast<State*>(state);
   if (!cache->scale.has_value()) {
     cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
   }
@@ -214,11 +223,17 @@ c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
   caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
     X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
   );
-  return c10::IValue();
+
+  torch::jit::peek(*stack, 0, 3) = at::Tensor(c10::C10Tensor(std::move(Y)));
+  torch::jit::peek(*stack, 1, 3) = at::Tensor(c10::C10Tensor(std::move(mean)));
+  torch::jit::peek(*stack, 2, 3) = at::Tensor(c10::C10Tensor(std::move(sig)));
+
+  return;
 }
 }
 namespace c10 {
 C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
+    .withState<State>()
     .kernel<&layer_norm_c10<float>>()
     .dispatchKey(c10::DispatchKey<1>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
