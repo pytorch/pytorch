@@ -113,6 +113,26 @@
     CPU: _acos__cpu
     CUDA: _acos__cuda
 
+- func: hypot(Tensor input, Tensor b) -> Tensor
+  variants: function
+  hidden: True
+  dispatch:
+    CPU: hypot
+
+- func: hypot(Tensor input, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  hidden: True
+  dispatch:
+    CPU: hypot_out
+
+- func: hypot(np.ndarray a, np.ndarray b) -> np.ndarray
+  variants: function
+  np_compat: True
+
+- func: hypot(np.ndarray a, np.ndarray b, *, np.ndarray out) -> np.ndarray
+  variants: function
+  np_compat: True
+
 - func: acos(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _acos_out_cpu
@@ -205,6 +225,15 @@
   dispatch:
     CPU: arange_cpu_out
     CUDA: arange_cuda_out
+
+- func: arange(Scalar start, Scalar stop, Scalar step=1) -> np.ndarray
+  variants: function
+  np_compat: True
+
+
+- func: arange(Scalar stop, Scalar step=1) -> np.ndarray
+  variants: function
+  np_compat: True
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
 # bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
@@ -587,6 +616,14 @@
 
 - func: cumsum(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
+- func: cumsum(np.ndarray a, int axis) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
+- func: cumsum(np.ndarray a, int axis, np.dtype dtype=None, np.ndarray out=None) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
 - func: cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
@@ -708,6 +745,12 @@
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
+
+- func: empty(int[1] shape, np.dtype dtype=float) -> np.ndarray
+  variants: function
+  additional_translations:
+    shape: size
+  np_compat: True
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
@@ -1381,6 +1424,12 @@
 
 - func: ones(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: ones(int[1] shape, np.dtype dtype=float) -> np.ndarray
+  variants: function
+  np_compat: True
+  additional_translations:
+    shape: size
+
 - func: ones_like(Tensor self) -> Tensor
 
 - func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
@@ -1533,6 +1582,10 @@
   requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_reshape
+
+- func: reshape(np.ndarray a, int[1] shape) -> np.ndarray
+  variants: function, method
+  np_compat: True
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -1805,6 +1858,30 @@
 
 - func: sum(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
+- func: sum(np.ndarray a) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
+- func: sum(np.ndarray a, *, np.dtype dtype) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
+- func: sum(np.ndarray a, int[1] axis, *, np.ndarray out=None, bool keepdims=False) -> np.ndarray
+  variants: function
+  np_compat: True
+
+- func: sum(np.ndarray a, int[1] axis, *, np.dtype dtype, np.ndarray out=None, bool keepdims=False) -> np.ndarray
+  variants: function
+  np_compat: True
+
+- func: sum(np.ndarray a, int[1] axis, *, bool keepdims=False) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
+- func: sum(np.ndarray a, int[1] axis, *, np.dtype dtype, bool keepdims=False) -> np.ndarray
+  variants: function, method
+  np_compat: True
+
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
   device_guard: False
@@ -2045,6 +2122,12 @@
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: zeros(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: zeros(int[1] shape, np.dtype dtype=float) -> np.ndarray
+  variants: function
+  np_compat: True
+  additional_translations:
+    shape: size
 
 - func: zeros_like(Tensor self) -> Tensor
 

@@ -601,6 +601,10 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
+    ('translations', Optional[Dict[str, str]]),
+    ('additional_translations', Optional[Dict[str, str]]),
+    ('np_compat', bool),
+    ('hidden', bool),
 ])
 
 
@@ -989,7 +993,11 @@ def create_generic(top_env, declarations):
             requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
-            deprecated=option.get('deprecated', False)
+            deprecated=option.get('deprecated', False),
+            translations=None,
+            additional_translations=None,
+            np_compat=option.get('np_compat', False),
+            hidden=option.get('hidden', False),
         ))
 
     def native_get_formals(option, include_constants=False):
@@ -1091,7 +1099,9 @@ def create_generic(top_env, declarations):
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
 
+        is_compat = option['np_compat']
         formals = native_get_formals(option)
+        option['is_compat'] = is_compat
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
@@ -1147,13 +1157,14 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if option['extended_method']:
-            top_env['pure_virtual_extended_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-        else:
-            top_env['pure_virtual_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-        top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+        if not is_compat:
+            if option['extended_method']:
+                top_env['pure_virtual_extended_type_method_declarations'].append(
+                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            else:
+                top_env['pure_virtual_type_method_declarations'].append(
+                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1165,32 +1176,33 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
-        if isinstance(type_method_dispatch, dict):
-            abstract = True
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        else:
-            body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
-                    env, type_definition_body=body))
+        if not is_compat:
+            if isinstance(type_method_dispatch, dict):
+                abstract = True
+                top_env['type_method_definitions'].append(
+                    TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
+            else:
+                body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
+                top_env['type_method_definitions'].append(
+                    TYPE_METHOD_DEFINITION_CONCRETE.substitute(
+                        env, type_definition_body=body))
 
-        # generate the at::native function declarations (i.e. what the user will implement)
-        if isinstance(type_method_dispatch, dict):
-            generated_native_functions = []  # type: List[str]
-            for key in sorted(type_method_dispatch.keys()):
-                value = type_method_dispatch[key]
-                if value not in generated_native_functions:
-                    option['native_type_method_dispatch'] = value
-                    top_env['native_function_declarations'].append(
-                        NATIVE_DECLARATION.substitute(env))
-                    generated_native_functions.append(value)
-        else:
-            top_env['native_function_declarations'].append(
-                NATIVE_DECLARATION.substitute(env))
+            # generate the at::native function declarations (i.e. what the user will implement)
+            if isinstance(type_method_dispatch, dict):
+                generated_native_functions = []  # type: List[str]
+                for key in sorted(type_method_dispatch.keys()):
+                    value = type_method_dispatch[key]
+                    if value not in generated_native_functions:
+                        option['native_type_method_dispatch'] = value
+                        top_env['native_function_declarations'].append(
+                            NATIVE_DECLARATION.substitute(env))
+                        generated_native_functions.append(value)
+            else:
+                top_env['native_function_declarations'].append(
+                    NATIVE_DECLARATION.substitute(env))
 
         method_of = ['Type']
-        if is_method:
+        if is_method and not is_compat:
             top_env['tensor_method_declarations'].append(
                 TENSOR_METHOD_DECLARATION.substitute(env))
             top_env['tensor_method_definitions'].append(
@@ -1206,10 +1218,16 @@ def create_generic(top_env, declarations):
                 # doesn't depend on a specific type, use undefined float
                 option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
-            top_env['function_declarations'].append(declaration.substitute(env))
-            top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
-            method_of.append('namespace')
+            if not is_compat:
+                top_env['function_declarations'].append(declaration.substitute(env))
+                top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
+                method_of.append('namespace')
 
+        if is_compat:
+            if 'function' in option['variants']:
+                method_of.append('np_namespace')
+            if 'method' in option['variants']:
+                method_of.append('np.ndarray')
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             matches_jit_signature=option["matches_jit_signature"],
@@ -1229,10 +1247,15 @@ def create_generic(top_env, declarations):
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
+            translations=option['translations'],
+            additional_translations=option['additional_translations'],
+            np_compat=option.get('np_compat', False),
+            hidden=option.get('hidden', False),
         ))
 
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
+
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
             option["matches_jit_signature"] = declaration["matches_jit_signature"]
@@ -1687,6 +1710,8 @@ def create_extension_backend(backend_type_env, declarations):
 
     for declaration in declarations:
         for option in declaration['options']:
+            if option.get('is_compat', False):
+                continue
             if not option.get('skip', False):
                 try:
                     option['formals_types'] = [f['type'] for f in option['formals_list']]

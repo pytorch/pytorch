@@ -45,9 +45,19 @@ def type_argument_translations(arg):
     # to support annotating complicated types with optional annotation
     nullable = (t != 'Generator?' and '?' in t)
 
+    if t.startswith('np.'):
+        pass
+#    if t == 'np.ndarray':
+#        t = 'Tensor'
+#    elif t == 'np.ndarray?':
+#        t = 'Tensor?'
+#    elif t == 'np.dtype':
+#        t = 'ScalarType'
+#    elif t == 'np.dtype?':
+#        t = 'ScalarType?'
     # This enables "Generator? x = None and translates to legacy
     # "Generator* x = nullptr". See [temp translations].
-    if t == 'Generator?' and default == 'None':
+    elif t == 'Generator?' and default == 'None':
         t = 'Generator*'
         default = 'nullptr'
     # Enables Generator? by translating to legacy Generator*.
@@ -385,6 +395,9 @@ def run(paths):
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
+                declaration['translations'] = func.get('translations', {})
+                declaration['additional_translations'] = func.get('additional_translations', {})
+                declaration['np_compat'] = func.get('np_compat', False)
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
@@ -392,6 +405,7 @@ def run(paths):
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
+                declaration['hidden'] = func.get('hidden', False)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')

@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <limits>
 
 
@@ -12,6 +13,13 @@
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
+
+template <typename scalar_t>
+void hypot_kernel_impl(TensorIterator& iter) {
+  gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    return device_sqrt(a*a + b*b);
+  });
+}
 
 template <typename scalar_t>
 void add_kernel_impl(TensorIterator& iter, Scalar alpha_scalar) {
@@ -79,9 +87,16 @@ static void mul_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void hypot_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hypot_cuda", [&]() {
+    hypot_kernel_impl<scalar_t>(iter);
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 
 }} // namespace at::native

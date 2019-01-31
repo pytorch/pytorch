@@ -43,15 +43,20 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
+${compat_template}
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     ${signatures}
-  }, /*traceable=*/${traceable});
+  }, /*traceable=*/${traceable},
+  {
+    ${compat_signatures}
+  }
+  );
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args${compat_arg});
   ${declare_namedtuple_return_types}
   ${dispatch}
   Py_RETURN_NONE;
@@ -101,7 +106,7 @@ PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
 ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 PY_VARIABLE_WRAP = CodeTemplate("""\
-return wrap(${namedtuple_return_type}${call_dispatch});""")
+return wrap(${namedtuple_return_type}${call_dispatch}${compat_arg});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
@@ -112,7 +117,7 @@ inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
 """)
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
+{"${name}", (PyCFunction)${pycname}${compat_template_arg}, ${flags}, NULL},""")
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
@@ -160,6 +165,7 @@ const auto options = TensorOptions()
     .pinned_memory(${pin_memory});
 """)
 
+DEFAULT_NP_TRANSLATIONS = {'a': 'input', 'keepdims': 'keepdim', 'axis': 'dim'}
 
 def should_generate_python_binding(declaration):
     name = declaration['name']
@@ -204,8 +210,10 @@ def gen_py_variable_methods(out, declarations, template_path):
     PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
 
     py_variable_methods = get_py_variable_methods(declarations)
+    np_compat_methods = get_np_compat_methods(declarations)
 
-    env = create_python_bindings(py_variable_methods, True)
+    env = create_python_bindings(py_variable_methods, True,
+            np_compat_functions=np_compat_methods)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
     write(out, 'python_variable_methods_dispatch.h', PY_VARIABLE_DISPATCH_H, env)
 
@@ -235,6 +243,21 @@ def gen_py_nn_functions(out, declarations, template_path):
     write(out, 'python_nn_functions_dispatch.h', PY_NN_DISPATCH_H, env)
 
 
+def get_np_compat_methods(declarations):
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                'np.ndarray' in declaration['method_of'])
+
+    return group_declarations_by_name(declarations, should_bind)
+
+
+def get_np_compat_functions(declarations):
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                'np_namespace' in declaration['method_of'])
+
+    return group_declarations_by_name(declarations, should_bind)
+
 def get_py_torch_functions(declarations):
     """
     Get declarations (grouped by name) which should be generated
@@ -254,8 +277,10 @@ def gen_py_torch_functions(out, declarations, template_path):
     PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
 
     py_torch_functions = get_py_torch_functions(declarations)
-
-    env = create_python_bindings(py_torch_functions, has_self=False)
+    np_compat_functions = get_np_compat_functions(declarations)
+    
+    env = create_python_bindings(py_torch_functions, has_self=False,
+            np_compat_functions=np_compat_functions)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
     write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
 
@@ -282,11 +307,14 @@ def get_type_default(declaration):
         return 'None'
 
 
-def create_python_bindings(python_functions, has_self, is_module=False):
+def create_python_bindings(python_functions, has_self,
+        name_prefix='THPVariable', is_module=False,
+        np_compat_functions={}):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
     py_method_dispatch = []
+    np_compat_method_defs = []
 
     unpack_methods = {
         'const Tensor &': 'tensor',
@@ -671,16 +699,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         declaration['namedtuple_return_type'] = '&type{}, '.format(next_index)
         return PY_RETURN_NAMEDTUPLE_DEF.substitute(declaration), next_index + 1
 
-    def process_function(name, declarations):
+    def process_function(name, declarations, compat_declarations):
         for declaration in declarations:
             declaration['python_binding_arguments'] = get_python_binding_arguments(declaration)
 
         env = {
             'name': name,
             'dispatch_name': 'dispatch_{}'.format(name),
-            'pycname': 'THPVariable_{}'.format(name),
+            'pycname': '{}_{}'.format(name_prefix, name),
             'signatures': [],
-            'max_args': max(len(o['arguments']) + len(o['python_binding_arguments']) for o in declarations),
+            'max_args': max([len(o['arguments']) +
+                len(o['python_binding_arguments']) for o in declarations] +
+                [-1]),
             'unpack_self': [],
             'dispatch': [],
             'declare_namedtuple_return_types': '',
@@ -697,6 +727,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         # emit dispatch
         grouped = group_declarations(declarations)
+        compat_grouped = group_declarations(compat_declarations)
+        has_compat = bool(compat_grouped)
+        if has_compat:
+            env['compat_template'] = 'template <bool compat>'
+            env['compat_arg'] = ', compat'
+            env['compat_template_arg'] = '<false>'
+        else:
+            env['compat_template'] = ''
+            env['compat_arg'] = ''
+            env['compat_template_arg'] = ''
         for i, dictionary in enumerate(grouped):
             signature = dictionary['signature']
             if has_self:
@@ -708,8 +748,27 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
+            if dictionary['base'].get('hidden', False):
+                signature += '|hidden'
             env['signatures'].append('"{}",'.format(signature))
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
+        env['compat_signatures']=[]
+        for i, dictionary in enumerate(compat_grouped):
+            signature = dictionary['signature']
+            if has_self:
+                signature = signature.replace('np.ndarray a, ', '')
+                signature = signature.replace('np.ndarray a', '')
+            compat_translations = dictionary['base'].get('translations', None).copy()
+            if not compat_translations:
+                compat_translations = DEFAULT_NP_TRANSLATIONS.copy()
+            additional_translations = dictionary['base'].get('additional_translations', {})
+            for np, t in additional_translations.items():
+                if t:
+                    compat_translations[np] = t
+                else:
+                    del compat_translations[np]
+            translations_cpp = ','.join(['{{"{}","{}"}}'.format(np, t) for np, t in compat_translations.items()])
+            env['compat_signatures'].append('{{"{}",{{{}}}}},'.format(signature, translations_cpp))
 
         env['dispatch'].append('}')
 
@@ -729,14 +788,19 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         py_methods.append(tmpl.substitute(env))
         py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
+        if has_compat:
+            env['compat_template_arg'] = '<true>'
+            env['flags']=env['flags'].replace(' | METH_STATIC', '')
+            np_compat_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
 
     for name in sorted(python_functions.keys()):
-        process_function(name, python_functions[name])
+        process_function(name, python_functions[name], np_compat_functions.get(name, []))
 
     return {
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
         'py_method_dispatch': py_method_dispatch,
+        'np_compat_method_defs': np_compat_method_defs,
     }
 
 
@@ -925,7 +989,7 @@ def get_python_signature(declaration, include_out):
             positional = False
         py_formal_args.append(get_py_formal_arg(arg))
 
-    if len(declaration['python_binding_arguments']) > 0:
+    if len(declaration.get('python_binding_arguments', '')) > 0:
         for arg in declaration['python_binding_arguments']:
             if arg.get('kwarg_only', False) and positional:
                 py_formal_args.append('*')

@@ -65,7 +65,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   return obj;
 }
 
-PyObject * THPVariable_Wrap(Variable var)
+PyObject * THPVariable_Wrap(Variable var, PyTypeObject *type)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -76,7 +76,7 @@ PyObject * THPVariable_Wrap(Variable var)
     return obj;
   }
 
-  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
+  return THPVariable_NewWithVar(type, std::move(var));
 }
 
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)

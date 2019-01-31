@@ -641,6 +641,11 @@ C = Extension("torch._C",
               )
 extensions.append(C)
 
+NP = Extension('torch._np_compat',
+        sources=['torch/csrc/np_stub.cpp'],
+        language='c++')
+extensions.append(NP)
+
 if not IS_WINDOWS:
     DL = Extension("torch._dl",
                    sources=["torch/csrc/dl.c"],

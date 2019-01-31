@@ -61,6 +61,16 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void hypot_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hypot_cpu", [&]() {
+    binary_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t { return std::sqrt(a*a + b*b); },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return (a*a + b*b).sqrt();
+      });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -68,5 +78,6 @@ REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 
 }} // namespace at::native

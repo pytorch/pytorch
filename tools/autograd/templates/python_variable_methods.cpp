@@ -14,6 +14,7 @@
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
 #endif
+#include "torch/csrc/np.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -309,20 +310,24 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+template <bool compat>
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "cuda(Device? device=None, bool non_blocking=False)",
     "cuda(Device? device=None, bool async=False)|deprecated"
+  }, false,{
+    {"cuda(Device? device=None, bool non_blocking=False)",{{}}},
+    {"cuda(Device? device=None, bool async=False)|deprecated",{{}}},
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args, compat);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
-  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false));
+  return wrap(dispatch_to(self_, device, r.toBool(1), false), compat);
   END_HANDLE_TH_ERRORS
 }
 
@@ -373,6 +378,23 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return THPUtils_packInt64(self_.element_size());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THNPArray__torch(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THNPArray*>(self)->cdata;
+  return wrap(make_variable_view(self_, self_.data()), false);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__np_compat(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+    // XXX fixme, what should we do here
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THNPArray_NewWithTensor((PyTypeObject *)THNPArrayClass, make_variable_view(self_, self_.data()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -688,7 +710,7 @@ PyMethodDef variable_methods[] = {
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
-  {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cuda", (PyCFunction)THPVariable_cuda<false>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
@@ -710,6 +732,7 @@ PyMethodDef variable_methods[] = {
   {"new_ones", (PyCFunction)THPVariable_new_ones, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", (PyCFunction)THPVariable_new_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_zeros", (PyCFunction)THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_np_compat", (PyCFunction)THPVariable__np_compat, METH_NOARGS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -725,5 +748,13 @@ PyMethodDef variable_methods[] = {
   ${py_method_defs}
   {NULL}
 };
+
+PyMethodDef np_compat_methods[] = {
+  {"_torch", (PyCFunction)THNPArray__torch, METH_NOARGS, NULL},
+  {"_cuda", (PyCFunction)THPVariable_cuda<true>, METH_VARARGS | METH_KEYWORDS, NULL},
+  ${np_compat_method_defs}
+  {NULL}
+};
+
 
 }} // namespace torch::autograd

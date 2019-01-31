@@ -97,16 +97,21 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
   return true;
 }
 
+template <bool compat>
 static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
     "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-  });
+  }, /*traceable=*/false, {
+    {"arange(Scalar start, Scalar stop, Scalar step=1) -> np.ndarray", {{"stop", "end"}}},
+    {"arange(Scalar stop, Scalar step=1, *, Scalar start=0) -> np.ndarray", {{"stop", "end"}}}
+  }
+  );
 
   ParsedArgs<9> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args, compat);
 
   if (r.idx == 0) {
     if (r.isNone(1)) {
@@ -119,12 +124,12 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .layout(r.layout(3).layout)
           .requires_grad(r.toBool(6))
           .pinned_memory(r.toBool(5));
-      return wrap(dispatch_arange(end, options));
+      return wrap(dispatch_arange(end, options), compat);
     } else {
       AT_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
-      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
+      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)), compat);
     }
   } else if (r.idx == 1) {
     if (r.isNone(3)) {
@@ -139,12 +144,12 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .layout(r.layout(5).layout)
           .requires_grad(r.toBool(8))
           .pinned_memory(r.toBool(7));
-      return wrap(dispatch_arange(start, end, step, options));
+      return wrap(dispatch_arange(start, end, step, options), compat);
     } else {
       AT_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
-      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
+      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)), compat);
     }
   }
   Py_RETURN_NONE;
@@ -399,7 +404,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
 ${py_methods}
 
 static PyMethodDef torch_functions[] = {
-  {"arange", (PyCFunction)THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"arange", (PyCFunction)THPVariable_arange<false>, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", (PyCFunction)THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
@@ -413,6 +418,14 @@ static PyMethodDef torch_functions[] = {
   {"tensor", (PyCFunction)THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
+  {NULL}
+};
+
+PyObject *_np_compat_init(PyObject *, PyObject *);
+PyMethodDef np_compat_functions[] = {
+  {"_np_compat_init", (PyCFunction)_np_compat_init, METH_NOARGS, NULL},
+  {"arange", (PyCFunction)THPVariable_arange<true>, METH_VARARGS | METH_KEYWORDS, NULL},
+  ${np_compat_method_defs}
   {NULL}
 };
 

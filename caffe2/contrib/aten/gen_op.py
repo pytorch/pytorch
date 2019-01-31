@@ -108,6 +108,8 @@ def expand(o):
 
 # filter the list of declarations removing things we cannot support
 def supports(o, factory_methods):
+    if o['np_compat']:
+        return False
     # Ignore all families (!) of functions that have TensorOptions (i.e. tensor factory methods).
     if o['name'] in factory_methods:
         if factory_methods[o['name']] == 0:

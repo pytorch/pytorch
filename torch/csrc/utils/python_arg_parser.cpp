@@ -1,7 +1,10 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/np.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -30,6 +33,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"np.ndarray", ParameterType::NP_NDARRAY},
+  {"np.dtype", ParameterType::NP_DTYPE},
 };
 
 // TODO: remove this. This is a temporary list of functions that allow Python
@@ -100,11 +105,81 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   python_name = PyUnicode_InternFromString(name.c_str());
 #endif
 }
+using torch::autograd::utils::wrap;
+
+static PyObject* getNPDtype(c10::ScalarType type) {
+  switch (type) {
+  case c10::ScalarType::Double:
+    return (PyObject*)&PyFloat_Type;
+  case c10::ScalarType::Long:
+    return (PyObject*)&NP_H_IntType;
+  default:
+    throw std::runtime_error("rich NP types not supported"); // XXX
+  }
+}
+
+py::object FunctionParameter::translate_default(PyObject* obj) {
+  if (obj) {
+    return py::reinterpret_borrow<py::object>(obj);
+  }
+  switch (type_) {
+  case ParameterType::BOOL:
+    return py::reinterpret_borrow<py::object>(default_bool ? Py_True : Py_False);
+    break;
+  case ParameterType::SCALAR: 
+    if (default_scalar.isFloatingPoint()) {
+      return py::reinterpret_steal<py::object>(PyFloat_FromDouble(default_scalar.toDouble()));
+    }
+    return py::reinterpret_steal<py::object>(PyLong_FromLong(default_scalar.toInt()));
+  case ParameterType::INT64:
+    return py::reinterpret_steal<py::object>(PyLong_FromLong(default_int));
+  case ParameterType::DOUBLE:
+    return py::reinterpret_steal<py::object>(PyFloat_FromDouble(default_double));
+  case ParameterType::NP_DTYPE:
+    return py::reinterpret_borrow<py::object>(getNPDtype(default_scalartype));
+  default: // FIXME
+    return py::reinterpret_borrow<py::object>(obj);
+  }
+}
+
+py::object FunctionParameter::translate(PyObject* obj) {
+  // we assume check already passed
+  py::object param { translate_default(obj) };
+  switch (type_) {
+    case ParameterType::TENSOR:
+    case ParameterType::GENERATOR:
+    case ParameterType::STORAGE:
+    case ParameterType::LAYOUT:
+      throw std::runtime_error("parameter type not supported in numpy compatibility mode");
+    case ParameterType::NP_NDARRAY: {
+      if (!param) {
+        return param; 
+      }
+      auto t = reinterpret_cast<THNPArray*>(param.ptr())->cdata;
+      return py::reinterpret_steal<py::object>(wrap(t));
+    }
+    case ParameterType::NP_DTYPE: {
+      auto to = reinterpret_cast<PyTypeObject*>(param.ptr());
+      PyObject *dtype;
+      if (to == &NP_H_IntType) {
+        dtype = (PyObject*)getDtype(at::ScalarType::Long);
+      } else if (to == &PyFloat_Type) {
+        dtype = (PyObject*)getDtype(at::ScalarType::Double);
+      } else {
+        throw std::runtime_error("Unrecognized Numpy dtype");
+      }
+      return py::reinterpret_borrow<py::object>(dtype);
+    }
+    default:
+      return param;
+  }  
+}
 
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
+    // XXX
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
+      return (THNPArray_Check(obj) || THPVariable_Check(obj)) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
     }
     case ParameterType::SCALAR:
       if (PyComplex_Check(obj)) {
@@ -148,6 +223,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
+    case ParameterType::NP_NDARRAY: return THNPArray_Check(obj);
+    case ParameterType::NP_DTYPE: return THNP_checkDtype(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -168,6 +245,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+    case ParameterType::NP_NDARRAY: return "torch.numpy.ndarray";
+    case ParameterType::NP_DTYPE: return "torch.numpy.dtype";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -246,6 +325,22 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else {
       throw std::runtime_error("invalid default value for ScalarType: " + str);
     }
+  } else if (type_ == ParameterType::NP_DTYPE) {
+    // XXX What to do for "None" ?
+    if (str == "float" || str == "np.float64") {
+      default_scalartype = at::ScalarType::Double;
+    } else if (str == "int" || str == "np.int64") {
+      default_scalartype = at::ScalarType::Long;
+    } else if (str == "np.float32") {
+      default_scalartype = at::ScalarType::Float;
+    } else if (str == "np.int32") {
+      default_scalartype = at::ScalarType::Int;
+      // XXX
+    } else if (str == "c10::nullopt") {
+      default_scalartype = at::ScalarType::Undefined;
+    } else {
+      throw std::runtime_error("invalid default value for np dtype: " + str);
+    }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
       default_layout = nullptr;
@@ -267,8 +362,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
-FunctionSignature::FunctionSignature(const std::string& fmt)
-  : min_args(0)
+FunctionSignature::FunctionSignature(const std::string& fmt, ParamMap compat_param_names)
+  : compat_param_names_(compat_param_names)
+  , min_args(0)
   , max_args(0)
   , max_pos_args(0)
   , hidden(false)
@@ -425,7 +521,44 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
-bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
+bool FunctionSignature::parse(const std::unordered_map<std::string, py::object>& kwargs,
+                              py::object dst[],
+                              bool raise_exception) {
+  int i = 0;
+  size_t remaining_kwargs = kwargs.size();
+  for (auto& param : params) {
+    PyObject* obj = nullptr;
+    auto find = kwargs.find(param.name);
+    if (find != kwargs.end()) {
+      obj = find->second.ptr();
+      --remaining_kwargs;
+    }
+    if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
+      
+      dst[i++] = py::object {};
+    } else if (!obj) {
+      if (raise_exception) {
+        missing_args(*this, i);
+      }
+      return false;
+    } else if (param.check(obj)) {
+      dst[i++] = py::reinterpret_borrow<py::object>(obj);
+    } else if (raise_exception) {
+      throw TypeError("fixme - couldn't check");
+    } else {
+      return false;
+    }
+  }
+  if (remaining_kwargs > 0) {
+    if (raise_exception) {
+      throw TypeError("fixme - remaining_kwargs > 0");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, py::object dst[],
                               bool raise_exception) {
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
@@ -465,7 +598,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     }
 
     if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
-      dst[i++] = nullptr;
+      dst[i++] = py::object {};
     } else if (!obj) {
       if (raise_exception) {
         // foo() missing 1 required positional argument: "b"
@@ -473,7 +606,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       }
       return false;
     } else if (param.check(obj)) {
-      dst[i++] = obj;
+      dst[i++] = py::reinterpret_borrow<py::object>(obj);
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
@@ -481,7 +614,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
-      dst[i++] = args;
+      dst[i++] = py::reinterpret_borrow<py::object>(args);
       arg_pos = nargs;
       continue;
     } else if (raise_exception) {
@@ -518,12 +651,18 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   return true;
 }
 
-PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
+PythonArgParser::PythonArgParser(
+  std::vector<std::string> fmts,
+  bool traceable,
+  std::vector<std::pair<std::string, ParamMap>> compat_fmts)
  : max_args(0)
  , traceable(traceable)
 {
   for (auto& fmt : fmts) {
     signatures_.emplace_back(fmt);
+  }
+  for (auto& fmt : compat_fmts) {
+    compat_signatures_.emplace_back(fmt.first, fmt.second);
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {
@@ -535,7 +674,49 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
   }
 }
 
-PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+template <typename Map, typename Key, typename Val>
+const Val& get_or_default(const Map& map, const Key& k, const Val& def) {
+  auto it = map.find(k);
+  if (it != map.end()) {
+    return it->second;
+  }
+  return def;
+}
+
+PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, py::object parsed_args[], bool compat) {
+  if (compat) {
+    // todo - sizes 1?
+    int i = 0;
+    std::vector<FunctionSignature*> matched_compats;
+    for (auto& signature : compat_signatures_) {
+      if (signature.parse(args, kwargs, parsed_args, false)) {
+        matched_compats.push_back(&signature);
+        std::unordered_map<std::string, py::object> translated_args;
+        int arg_index = 0;
+        for (auto& param: signature.params) {
+          const std::string& name = get_or_default(signature.compat_param_names_, param.name, param.name);
+          translated_args[name] = param.translate(parsed_args[arg_index++].ptr());
+        }
+        int j = 0;
+        for (auto& signature: signatures_) {
+          if (signature.parse(translated_args, parsed_args, false)) {
+            return PythonArgs(j, traceable, signature, parsed_args);
+          }
+          ++j;
+        }
+      }
+      ++i;
+    }
+    if (!matched_compats.empty()) {
+      std::stringstream ss;
+      ss << "Matched a NumPy signature but no underlying PyTorch signature -- this is probably a bug in PyTorch." << std::endl;
+      for (auto signature : matched_compats) {
+        ss << signature->toString() << std::endl << get_error(args, kwargs, parsed_args, false) << std::endl << std::endl;
+      }
+      throw TypeError("%s", ss.str().c_str());
+    }
+    print_error(args, kwargs, parsed_args, true);
+  }
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
@@ -549,15 +730,15 @@ PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject
     }
     i++;
   }
-
   print_error(args, kwargs, parsed_args);
 }
 
-void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+std::string PythonArgParser::get_error(PyObject* args, PyObject* kwargs, py::object parsed_args[], bool compat) {
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<int> plausible_idxs;
+  auto& sigs = (compat ? compat_signatures_ : signatures_);
   ssize_t i = 0;
-  for (auto& signature : signatures_) {
+  for (auto& signature : sigs) {
     if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.hidden) {
       plausible_idxs.push_back(i);
     }
@@ -565,20 +746,22 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   }
 
   if (plausible_idxs.size() == 1) {
-    auto& signature = signatures_[plausible_idxs[0]];
+    auto& signature = sigs[plausible_idxs[0]];
     signature.parse(args, kwargs, parsed_args, true);
   }
 
   std::vector<std::string> options;
-  for (auto& signature : signatures_) {
+  for (auto& signature : sigs) {
     if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }
 
-  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  throw TypeError("%s", msg.c_str());
+  return torch::format_invalid_args(args, kwargs, function_name + "()", options);
 }
 
+void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, py::object parsed_args[], bool compat) {
+  throw TypeError("%s", get_error(args, kwargs, parsed_args, compat).c_str());
+}
 
 } // namespace torch

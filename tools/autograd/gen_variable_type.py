@@ -444,7 +444,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # Factory methods usually do not appear in `VariableType` at all, since they
         # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
         # in which case they do!
-        if declaration['is_factory_method']:
+        if declaration['is_factory_method'] or declaration['np_compat']:
             continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
