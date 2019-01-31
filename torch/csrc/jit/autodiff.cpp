@@ -91,7 +91,7 @@ bool isDifferentiable(Node* n) {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
-      "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+      "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
       "aten::log_softmax(Tensor self, int dim) -> Tensor",
       "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
@@ -235,13 +235,13 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable sumToSizeOf(SymbolicVariable v, Symbol input_name) {
+  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name) {
     Value* size;
     {
       WithInsertPoint insert_guard{node};
       size = SymbolicVariable(node->namedInput(input_name)).size();
     }
-    return v.sumToSize(size);
+    return v.gradSumToSize(size);
   };
 
   std::vector<SymbolicVariable> buildSymbolicGradient(
@@ -266,8 +266,8 @@ class GradientHelper {
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {
-          sumToSizeOf(grads.at(0), attr::self),
-          sumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
+          gradSumToSizeOf(grads.at(0), attr::self),
+          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
           nullptr};
 
     } else if (
@@ -282,8 +282,8 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0), attr::self),
-              sumToSizeOf(
+      return {gradSumToSizeOf(grads.at(0), attr::self),
+              gradSumToSizeOf(
                   -grads.at(0) * node->namedInput(attr::alpha), attr::other),
               nullptr};
 
@@ -294,8 +294,8 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Tensor other) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0) * inputs.at(1), attr::self),
-              sumToSizeOf(grads.at(0) * inputs.at(0), attr::other)};
+      return {gradSumToSizeOf(grads.at(0) * inputs.at(1), attr::self),
+              gradSumToSizeOf(grads.at(0) * inputs.at(0), attr::other)};
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Scalar other) -> Tensor")) {
@@ -303,8 +303,8 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::div(Tensor self, Tensor other) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0) / inputs.at(1), attr::self),
-              sumToSizeOf(
+      return {gradSumToSizeOf(grads.at(0) / inputs.at(1), attr::self),
+              gradSumToSizeOf(
                   -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1)),
                   attr::other)};
 
@@ -315,20 +315,20 @@ class GradientHelper {
     } else if (node->matches(
                    "aten::max(Tensor self, Tensor other) -> Tensor")) {
       return {
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
               attr::self),
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0)),
               attr::other)};
 
     } else if (node->matches(
                    "aten::min(Tensor self, Tensor other) -> Tensor")) {
       return {
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
               attr::self),
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0)),
               attr::other)};
 
@@ -336,9 +336,9 @@ class GradientHelper {
         node->matches(
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
       return {nullptr,
-              sumToSizeOf(
+              gradSumToSizeOf(
                   grads.at(0) * inputs.at(0).type_as(grads.at(0)), attr::self),
-              sumToSizeOf(
+              gradSumToSizeOf(
                   grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0)),
                   attr::other)};
 
@@ -427,7 +427,7 @@ class GradientHelper {
 
     } else if (
         node->matches(
-            "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
       Value* self_size;
       {
         WithInsertPoint insert_guard{node};
@@ -523,7 +523,7 @@ class GradientHelper {
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
       return {
-          sumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
+          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
           grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
           inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
           nullptr,
@@ -1009,8 +1009,9 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
-  // TODO: we are sometimes emitting expressions like SumToSize(SumToSize(x,
-  // s1), s2), which are equivalent to SumToSize(x, s2), and could save us some
+  // TODO: we are sometimes emitting expressions like
+  // _grad_sum_to_size(_grad_sum_so_size(x, s1), s2), which are equivalent to
+  // _grad_sum_to_size(x, s2), and could save us some
   // captures, but I'm not 100% sure how to optimize this at this stage, since
   // we don't know which GradOf blocks will be stitched together to form the
   // derivative. I guess a smart analysis could implement this, but I didn't

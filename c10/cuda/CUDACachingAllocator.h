@@ -45,7 +45,7 @@ C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
 struct THCCachingAllocator;
 
-class Legacy {
+class C10_CUDA_API Legacy {
  public:
   Legacy();
   ~Legacy();
