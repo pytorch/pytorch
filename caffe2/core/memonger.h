@@ -14,6 +14,10 @@ CAFFE2_API NetDef optimize_inference_net(
     const NetDef& net,
     const std::set<string>& static_blobs);
 
+CAFFE2_API NetDef insert_free_op_after_last_use(
+    const NetDef& net,
+    const std::set<string>& static_blobs);
+
 CAFFE2_API NetDef compute_blob_recycling_for_dag(
     const NetDef& net,
     const std::vector<string>& heads,

@@ -5,6 +5,8 @@
 
 #include "caffe2/utils/proto_utils.h"
 
+C10_DEFINE_bool(caffe2_free_blobs, false, "Free blobs after the last use");
+
 namespace caffe2 {
 namespace memonger {
 
@@ -120,6 +122,84 @@ NetDef optimize_inference_net(
   }
 
   VLOG(1) << "optimized net using " << renaming.size() << " shared blobs";
+  return optim_net;
+}
+
+NetDef insert_free_op_after_last_use(
+    const NetDef& net,
+    const std::set<string>& static_blobs) {
+  if (!FLAGS_caffe2_free_blobs) {
+    return net;
+  }
+
+  if (net.type() != "" && net.type() != "simple") {
+    LOG(INFO) << "Cannot optimize memory for nets of type: " << net.type();
+    return net;
+  }
+
+  std::vector<OperatorDef> ops;
+  for (auto& op : net.op()) {
+    if (op.type() == "RecurrentNetwork") {
+      // NOTE: for subtleties of RNN op memonger, see memonger.py on how
+      // to deal with the forward/backward links etc.
+      LOG(INFO) << "Memonger does not support RecurrentNetwork yet";
+      return net;
+    }
+    if (op.type() == "Free") {
+      // rough safety check: network already has frees; abort
+      LOG(INFO) << "Network already has freeops";
+      return net;
+    }
+    ops.push_back(op);
+  }
+
+  // Step 1: count last operator for each blob
+  std::unordered_map<std::string, int> ranges;
+  for (size_t i = 0; i < ops.size(); i++) {
+    for (auto& inp : ops[i].input()) {
+      if (ranges.find(inp) != ranges.end()) {
+        ranges[inp] = i;
+      }
+    }
+    for (auto& outp : ops[i].output()) {
+      if (static_blobs.find(outp) != static_blobs.end()) {
+        continue;
+      }
+      if (ranges.find(outp) == ranges.end()) {
+        ranges[outp] = i;
+      }
+    }
+  }
+
+  // Step 2: pass over ops and recycle
+  std::unordered_map<int, std::vector<std::string>> blobs_to_free;
+  for (auto& blob : ranges) {
+    blobs_to_free[blob.second].emplace_back(blob.first);
+    /*
+    LOG(INFO) << "freeing blobs: " << blob.first
+              << ", position : " << blob.second << ", num ops: " << ops.size();
+              */
+  }
+
+  // Step 3: add freeops to net
+  NetDef optim_net = net;
+  optim_net.mutable_op()->Clear();
+  for (int j = 0; j < (int)ops.size(); ++j) {
+    auto op = ops[j];
+    auto* ao = optim_net.add_op();
+    ao->CopyFrom(op);
+
+    // free the other unused blobs
+    if (blobs_to_free.count(j) > 0 && blobs_to_free[j].size() > 0) {
+      for (auto& blob : blobs_to_free[j]) {
+        caffe2::OperatorDef* def = optim_net.add_op();
+        def->set_type("Free");
+        def->add_output(blob);
+        def->add_input(blob);
+      }
+    }
+  }
+
   return optim_net;
 }
 
