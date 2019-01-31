@@ -58,8 +58,10 @@ void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);
   size_table_[ptr] = nbytes;
   allocated_ += nbytes;
-  LOG(INFO) << "Caffe2 alloc " << nbytes << " bytes, total alloc " << allocated_
-            << " bytes.";
+  ++allocations_;
+  LOG_EVERY_N(INFO, 100000)
+      << "Caffe2 alloc " << nbytes << " bytes, total alloc " << allocated_
+      << " bytes, allocations: " << allocations_;
 }
 
 void MemoryAllocationReporter::Delete(void* ptr) {
@@ -67,8 +69,10 @@ void MemoryAllocationReporter::Delete(void* ptr) {
   auto it = size_table_.find(ptr);
   CHECK(it != size_table_.end());
   allocated_ -= it->second;
-  LOG(INFO) << "Caffe2 deleted " << it->second << " bytes, total alloc "
-            << allocated_ << " bytes.";
+  ++deallocations_;
+  LOG_EVERY_N(INFO, 100000)
+      << "Caffe2 deleted " << it->second << " bytes, total alloc " << allocated_
+      << " bytes, deallocations: " << deallocations_;
   size_table_.erase(it);
 }
 

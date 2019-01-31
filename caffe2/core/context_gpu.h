@@ -352,7 +352,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     void* data;
     at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());

@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_ALLOCATOR_H_
 #define CAFFE2_CORE_ALLOCATOR_H_
 
+#include <atomic>
 #include <cstring>
 #include <unordered_map>
 
@@ -42,6 +43,8 @@ class CAFFE2_API MemoryAllocationReporter {
   std::mutex mutex_;
   std::unordered_map<void*, size_t> size_table_;
   size_t allocated_;
+  size_t allocations_;
+  size_t deallocations_;
 };
 
 // Fill the data memory region of num bytes with a particular garbage pattern.
@@ -52,7 +55,7 @@ CAFFE2_API void memset_junk(void* data, size_t num);
 struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     void* data = nullptr;
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
@@ -104,6 +107,60 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
 
  protected:
   static MemoryAllocationReporter reporter_;
+};
+
+/*
+ * Allocates a larger chunk of memory at a time to be used piecemeal by future
+ * allocations. Tracks the accumulated memory requested by calls to allocate()
+ * then preallocates that amount in the stored buffer after a call to reset().
+ * This is useful when used in repeated inference runs of the same model.
+ * Meant to be used as a thread local allocator.
+ */
+class CAFFE2_API CPURegionAllocator final : public at::Allocator {
+ public:
+  ~CPURegionAllocator() override {}
+  /*
+   * Attempts to allocate memory from the preallocated buffer_, but otherwise
+   * allocates using DefaultCPUAllocator.
+   * Tracks the accumulated memory requested in next_chunk_size_
+   */
+  at::DataPtr allocate(size_t nbytes) override {
+    nbytes = (nbytes + gCaffe2Alignment - 1) & (~(gCaffe2Alignment - 1));
+
+    next_chunk_size_ += nbytes;
+
+    if (offset_ + nbytes > chunk_size_) {
+      return base_allocator_.allocate(nbytes);
+    }
+
+    void* src = static_cast<void*>(static_cast<char*>(buffer_.get()) + offset_);
+    at::DataPtr data_ptr = at::DataPtr(src, src, nullptr, buffer_.device());
+    offset_ += nbytes;
+    return data_ptr;
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &c10::detail::deleteNothing;
+  }
+
+  /*
+   * Flushes the buffer and allocates a new one according to a high watermark
+   * of the previously requested amounts of memory
+   */
+  void reset() override {
+    next_chunk_size_.store(std::max(next_chunk_size_, chunk_size_));
+    buffer_ = base_allocator_.allocate(next_chunk_size_);
+    chunk_size_.store(next_chunk_size_);
+    next_chunk_size_ = 0;
+    offset_ = 0;
+  }
+
+ private:
+  DefaultCPUAllocator base_allocator_;
+  at::DataPtr buffer_;
+  std::atomic<unsigned int> chunk_size_{0};
+  std::atomic<unsigned int> next_chunk_size_{0};
+  std::atomic<unsigned int> offset_{0};
 };
 
 // Get the CPU Alloctor.

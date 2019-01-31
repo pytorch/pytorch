@@ -522,7 +522,7 @@ static void CudaCachingDeleter(void* ptr) {
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publically exposed
 struct CudaCachingAllocator : public Allocator {
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;

@@ -1171,7 +1171,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         AT_ASSERT(storage_offset_ == 0); // because we just reallocated
         return storage_.data();
       }
-      const Allocator* allocator = storage_.allocator();
+      Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
       if (allocator == nullptr) {
         allocator = caffe2::GetAllocator(storage_.device_type());

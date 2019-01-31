@@ -400,7 +400,7 @@ void TrackMemoryAlloc(size_t nbytes) {
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     // Lock the mutex
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     // A one-time caffe2 cuda initializer.
