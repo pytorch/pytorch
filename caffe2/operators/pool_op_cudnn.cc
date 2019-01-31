@@ -107,6 +107,10 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
 
+    if (N == 0) {
+      return true;
+    }
+
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       if (order_ == StorageOrder::NCHW) {
@@ -248,6 +252,10 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
