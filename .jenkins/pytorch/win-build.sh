@@ -17,9 +17,12 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
-mkdir -p ci_scripts/
+export TMP_DIR="${PWD}/build/win_tmp"
+export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
-cat >ci_scripts/upload_image.py << EOL
+mkdir -p $TMP_DIR/ci_scripts/
+
+cat >$TMP_DIR/ci_scripts/upload_image.py << EOL
 
 import os
 import sys
@@ -36,44 +39,44 @@ response = object_acl.put(ACL='public-read')
 
 EOL
 
-cat >ci_scripts/build_pytorch.bat <<EOL
+cat >$TMP_DIR/ci_scripts/build_pytorch.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output mkl.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output %TMP_DIR_WIN%\\mkl.7z
   ) else (
-    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet
+    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z %TMP_DIR_WIN%\\mkl.7z --quiet
   )
-  7z x -aoa mkl.7z -omkl
+  7z x -aoa %TMP_DIR_WIN%\\mkl.7z -o%TMP_DIR_WIN%\\mkl
 )
-set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
-set LIB=%cd%\\mkl\\lib;%LIB
+set CMAKE_INCLUDE_PATH=%TMP_DIR_WIN%\\mkl\\include
+set LIB=%TMP_DIR_WIN%\\mkl\\lib;%LIB
 
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output magma_2.4.0_cuda90_release.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z magma_2.4.0_cuda90_release.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z --quiet
   )
-  7z x -aoa magma_2.4.0_cuda90_release.7z -omagma
+  7z x -aoa %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z -o%TMP_DIR_WIN%\\magma
 )
-set MAGMA_HOME=%cd%\\magma
+set MAGMA_HOME=%TMP_DIR_WIN%\\magma
 
 :: Install sccache
-mkdir %CD%\\tmp_bin
+mkdir %TMP_DIR_WIN%\\bin
 if "%REBUILD%"=="" (
   :check_sccache
-  %CD%\\tmp_bin\\sccache.exe --show-stats || (
+  %TMP_DIR_WIN%\\bin\\sccache.exe --show-stats || (
     taskkill /im sccache.exe /f /t || ver > nul
-    del %CD%\\tmp_bin\\sccache.exe
+    del %TMP_DIR_WIN%\\bin\\sccache.exe
     if "%BUILD_ENVIRONMENT%"=="" (
-      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\\tmp_bin\\sccache.exe
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %TMP_DIR_WIN%\\bin\\sccache.exe
     ) else (
-      aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+      aws s3 cp s3://ossci-windows/sccache.exe %TMP_DIR_WIN%\\bin\\sccache.exe
     )
     goto :check_sccache
   )
@@ -87,8 +90,8 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 if "%REBUILD%"=="" (
   IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
-  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-  .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe
+  %TMP_DIR_WIN%\\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if "%REBUILD%"=="" (
@@ -97,16 +100,17 @@ if "%REBUILD%"=="" (
 )
 
 :: Install ninja
-if "%REBUILD%"=="" ( pip install ninja )
+if "%REBUILD%"=="" ( pip install -q ninja )
 
 set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 cd %WORKING_DIR%
 
+git submodule sync --recursive
 git submodule update --init --recursive
 
-set PATH=%CD%\\tmp_bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
+set PATH=%TMP_DIR_WIN%\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
 set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDA_PATH_V9_0=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set NVTOOLSEXT_PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt
@@ -146,10 +150,10 @@ if not "%USE_CUDA%"=="0" (
         del /S /Q %%i
       )
     )
-    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+    copy %TMP_DIR_WIN%\\bin\\sccache.exe %TMP_DIR_WIN%\\bin\\nvcc.exe
   )
 
-  set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
+  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\\bin\\nvcc
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
@@ -158,15 +162,18 @@ if not "%USE_CUDA%"=="0" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
       mv %CD%\\build\\bin\\test_api.exe %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch\\lib
-      7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\caffe2 && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+      7z a %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\caffe2 && python %TMP_DIR_WIN%\\ci_scripts\\upload_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
     )
   )
 )
 
 EOL
 
-ci_scripts/build_pytorch.bat
-if [ ! -f $IMAGE_COMMIT_TAG.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
+$TMP_DIR/ci_scripts/build_pytorch.bat
+
+assert_git_not_dirty
+
+if [ ! -f ${TMP_DIR}/${IMAGE_COMMIT_TAG}.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
     exit 1
 fi
 echo "BUILD PASSED"
