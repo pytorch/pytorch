@@ -120,6 +120,19 @@ process. In other words, the ``device_ids`` needs to be ``[args.local_rank]``,
 and ``output_device`` needs to be ``args.local_rank`` in order to use this
 utility
 
+5. This module provide fetching ``local_rank`` by environment variable
+``LOCAL_RANK``, which can be achieve by launching the script with
+``--use_env=True``. All above examples are same by replacing
+``args.local_rank`` to ``os.environ['LOCAL_RANK']. ``--local_rank`` would not
+be passed in this usage.
+
+Fetching the ``os.environ['LOCAL_RANK']`` environment variable
+
+::
+
+    >>> import os
+    >>> os.environ['LOCAL_RANK']
+
 .. warning::
 
     ``local_rank`` is NOT globally unique: it is only unique per process
@@ -170,6 +183,11 @@ def parse_args():
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communciation during distributed "
                              "training")
+    parser.add_argument("--use_env", default=False, type=bool,
+                        help="Use enviroentment variable to pass "
+                             "'local rank'. The default value is False. "
+                             "If set to True, the script will not pass "
+                             "--local_rank as argument")
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -201,12 +219,17 @@ def main():
         # each process's rank
         dist_rank = args.nproc_per_node * args.node_rank + local_rank
         current_env["RANK"] = str(dist_rank)
+        current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
-        cmd = [sys.executable,
-               "-u",
-               args.training_script,
-               "--local_rank={}".format(local_rank)] + args.training_script_args
+        if args.use_env:
+            cmd = [sys.executable, "-u",
+                   args.training_script] + args.training_script_args
+        else:
+            cmd = [sys.executable,
+                   "-u",
+                   args.training_script,
+                   "--local_rank={}".format(local_rank)] + args.training_script_args
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
