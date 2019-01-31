@@ -129,6 +129,24 @@ struct ParserImpl {
         auto list = parseList('[', ',', ']', &ParserImpl::parseExp);
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
+      case '{': {
+        L.next();
+        std::vector<Expr> keys;
+        std::vector<Expr> values;
+        auto range = L.cur().range;
+        if (L.cur().kind != '}') {
+          do {
+            keys.push_back(parseExp());
+            L.expect(':');
+            values.push_back(parseExp());
+          } while (L.nextIf(','));
+        }
+        L.expect('}');
+        prefix = DictLiteral::create(
+            range,
+            List<Expr>::create(range, keys),
+            List<Expr>::create(range, values));
+      } break;
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
       } break;

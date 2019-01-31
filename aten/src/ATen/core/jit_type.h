@@ -21,6 +21,7 @@ _(CompleteTensorType) \
 _(UndefinedTensorType) \
 _(TupleType) \
 _(ListType) \
+_(DictType) \
 _(NumberType) \
 _(FloatType) \
 _(FutureType) \
@@ -508,6 +509,92 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr ofBools();
 private:
  ListType(TypePtr elem) : SingleElementType(elem) {}
+};
+
+struct DictType;
+using DictTypePtr = std::shared_ptr<DictType>;
+struct DictType : public Type {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::DictType;
+
+  static DictTypePtr create(TypePtr key, TypePtr value) {
+    switch (key->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+        return DictTypePtr(new DictType(key, value));
+      default:
+        AT_ERROR(
+            "Cannot create dict for key type ",
+            key->str(),
+            ", only int, float, and string keys are supported");
+    }
+  }
+
+  std::string str() const override {
+    return python_str();
+  }
+
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Dict[" << getKeyType()->python_str() << ", "
+       << getValueType()->python_str() << "]";
+    return ss.str();
+  }
+
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    if (contained_types.size() != 2) {
+      throw std::runtime_error("Expected 2 contained types");
+    }
+    return create(contained_types.at(0), contained_types.at(1));
+  }
+
+  TypePtr getKeyType() const {
+    return types.at(0);
+  }
+
+  TypePtr getValueType() const {
+    return types.at(1);
+  }
+
+  DEFINE_IS_SUBCLASS(DictType);
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (auto dict_rhs = rhs->cast<DictType>()) {
+      return getKeyType()->isSubtypeOf(dict_rhs->getKeyType()) &&
+          getValueType()->isSubtypeOf(dict_rhs->getValueType());
+    }
+    return false;
+  }
+
+  bool hasFreeVariables() const override {
+    return has_free_variables;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return types;
+  }
+
+  bool requires_grad() const override {
+    return getValueType()->requires_grad() || getKeyType()->requires_grad();
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (auto dict_rhs = rhs.cast<DictType>()) {
+      return *getKeyType() == *(dict_rhs->getKeyType()) &&
+          *getValueType() == *(dict_rhs->getValueType());
+    }
+    return false;
+  }
+
+ private:
+  DictType(TypePtr key, TypePtr value)
+      : Type(TypeKind::DictType),
+        types({key, value}),
+        has_free_variables(
+            key->hasFreeVariables() || value->hasFreeVariables()) {}
+  std::vector<TypePtr> types;
+  bool has_free_variables;
 };
 
 struct FutureType;
