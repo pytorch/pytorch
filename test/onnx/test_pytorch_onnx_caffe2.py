@@ -1020,6 +1020,22 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(RsubModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_flatten(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.flatten(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_flatten2D(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.flatten(input, 1)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 

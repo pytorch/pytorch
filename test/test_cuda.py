@@ -2553,6 +2553,10 @@ class TestCuda(TestCase):
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
     @skipIfRocm
+    def test_histc_cuda(self):
+        _TestTorchMixin._test_histc(self, device='cuda')
+
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
