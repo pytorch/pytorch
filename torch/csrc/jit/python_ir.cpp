@@ -76,12 +76,12 @@ std::vector<Node*> findAllNodes(
   std::vector<Node*> ret;
   for (Block* block : blocks) {
     for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        ret.push_back(n);
+      }
       if (recurse) {
         auto nodes = findAllNodes(n->blocks(), kind, recurse);
         ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-      if (n->kind() == kind) {
-        ret.push_back(n);
       }
     }
   }
@@ -99,14 +99,14 @@ Node* findNode(
     bool recurse = true) {
   for (Block* block : blocks) {
     for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        return n;
+      }
       if (recurse) {
         auto node = findNode(n->blocks(), kind, recurse);
         if (node != nullptr) {
           return node;
         }
-      }
-      if (n->kind() == kind) {
-        return n;
       }
     }
   }
@@ -291,23 +291,13 @@ void initPythonIRBindings(PyObject* module_) {
           "findNode",
           [](Graph& g, const std::string& kind, bool recurse) {
             return findNode(g.block(), Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findNode", // shorthand for recurse=True
-          [](Graph& g, const std::string& kind) {
-            return findNode(g.block(), Symbol::fromQualString(kind), true);
-          })
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
             return findAllNodes(
                 g.block(), Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findAllNodes", // shorthand for recurse=True
-          [](Graph& g, const std::string& kind) {
-            return findAllNodes(g.block(), Symbol::fromQualString(kind), true);
-          })
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
@@ -397,22 +387,12 @@ void initPythonIRBindings(PyObject* module_) {
           "findNode",
           [](Block& b, const std::string& kind, bool recurse) {
             return findNode(&b, Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findNode", // shorthand for recurse = True
-          [](Block& b, const std::string& kind /*recurse = True*/) {
-            return findNode(&b, Symbol::fromQualString(kind), true);
-          })
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Block& b, const std::string& kind, bool recurse) {
             return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findAllNodes", // shorthand for recurse = True
-          [](Block& b, const std::string& kind) {
-            return findAllNodes(&b, Symbol::fromQualString(kind), true);
-          });
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true);
 
 
 #define NS(name) def(#name, &Node ::name)
@@ -454,23 +434,13 @@ void initPythonIRBindings(PyObject* module_) {
           "findNode",
           [](Node& n, const std::string& kind, bool recurse) {
             return findNode(n.blocks(), Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findNode", // shorthand for recurse = True
-          [](Node& n, const std::string& kind /*recurse = True*/) {
-            return findNode(n.blocks(), Symbol::fromQualString(kind), true);
-          })
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Node& n, const std::string& kind, bool recurse) {
             return findAllNodes(
                 n.blocks(), Symbol::fromQualString(kind), recurse);
-          })
-      .def(
-          "findAllNodes", // shorthand for recurse = True
-          [](Node& n, const std::string& kind) {
-            return findAllNodes(n.blocks(), Symbol::fromQualString(kind), true);
-          })
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)

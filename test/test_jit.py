@@ -1793,13 +1793,12 @@ class TestJit(JitTestCase):
 
         graph = constant_prop.graph
         self.run_pass('constant_propagation', graph)
-        recurse = False
-        ifs = graph.findAllNodes("prim::If", recurse)
+        ifs = graph.findAllNodes("prim::If", recurse=False)
         snd_if_inlined = len(ifs) == 1
         self.assertTrue(snd_if_inlined)
         first_if = ifs[0]
         self.assertTrue(first_if.outputsSize() == 2)
-        second_if = first_if.findNode("prim::If", recurse)
+        second_if = first_if.findNode("prim::If", recurse=False)
         self.assertTrue(second_if.outputsSize() == 1)
         self.assertTrue(second_if.findNode("prim::If") is None)
 
