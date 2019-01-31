@@ -5,7 +5,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
