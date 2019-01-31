@@ -1,37 +1,91 @@
-#include <torch/csrc/python_headers.h>
+#include <torch/extension.h>
 
-#include <torch/csrc/utils/tensor_layouts.h>
+#include <ATen/ExtensionBackendRegistration.h>
 
-#include <torch/csrc/Layout.h>
-#include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Exceptions.h>
+using namespace at;
 
-#include <c10/core/ScalarType.h>
-#include <ATen/Layout.h>
+static int test_int;
 
-namespace torch { namespace utils {
-
-void initializeLayouts() {
-  auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) throw python_error();
-
-  PyObject *strided_layout = THPLayout_New(at::Layout::Strided, "torch.strided");
-  Py_INCREF(strided_layout);
-  if (PyModule_AddObject(torch_module, "strided", strided_layout) != 0) {
-    throw python_error();
-  }
-  // for now, let's look these up by Backend; we could create our own enum in the future.
-  registerLayoutObject((THPLayout*)strided_layout, at::Backend::CPU);
-  registerLayoutObject((THPLayout*)strided_layout, at::Backend::CUDA);
-  registerLayoutObject((THPLayout*)strided_layout, at::Backend::MSNPU);
-
-  PyObject *sparse_coo_layout = THPLayout_New(at::Layout::Sparse, "torch.sparse_coo");
-  Py_INCREF(sparse_coo_layout);
-  if (PyModule_AddObject(torch_module, "sparse_coo", sparse_coo_layout) != 0) {
-    throw python_error();
-  }
-  registerLayoutObject((THPLayout*)sparse_coo_layout, at::Backend::SparseCPU);
-  registerLayoutObject((THPLayout*)sparse_coo_layout, at::Backend::SparseCUDA);
+Tensor get_dummy_tensor() {
+  auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+      Storage(
+          caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
+      MSNPUTensorId(),
+      false);
+  return Tensor(std::move(tensor_impl));
 }
 
-}} // namespace torch::utils
+Tensor zeros_override(IntList size, const TensorOptions & options) {
+  test_int = 0;
+  return get_dummy_tensor();
+}
+
+Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
+  test_int = 1;
+  return get_dummy_tensor();
+}
+
+Tensor sum_override(const Tensor & self) {
+  test_int = 2;
+  return get_dummy_tensor();
+}
+
+Tensor kl_div_override(
+    const Tensor & self, const Tensor & target, int64_t reduction) {
+  test_int = 3;
+  return get_dummy_tensor();
+}
+
+Tensor kl_div_backward_override(
+    const Tensor & grad_output,
+    const Tensor & self,
+    const Tensor & target,
+    int64_t reduction) {
+  test_int = 4;
+  return get_dummy_tensor();
+}
+
+// numel and ones_like are needed for autograd backwards
+int64_t numel_override(const Tensor & self) {
+  return 1;
+}
+
+Tensor ones_like_override(const Tensor & self, const TensorOptions & options) {
+  return get_dummy_tensor();
+}
+
+void init_msnpu_extension() {
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "zeros(IntList size, TensorOptions options) -> Tensor", &zeros_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "sum(Tensor self) -> Tensor", &sum_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "kl_div(Tensor self, Tensor target, int64_t reduction) -> Tensor",
+    &kl_div_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor",
+    &kl_div_backward_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "numel(Tensor self) -> int64_t", &numel_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "ones_like(Tensor self, TensorOptions options) -> Tensor",
+    &ones_like_override);
+}
+
+int get_test_int() {
+  return test_int;
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("init_msnpu_extension", &init_msnpu_extension);
+  m.def("get_test_int", &get_test_int);
+}
