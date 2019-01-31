@@ -479,12 +479,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, torch::autograd::Variable v) {
-            return n.t_(Symbol::attr(name), v.set_requires_grad(false));
+            AT_ASSERT(!v.requires_grad());
+            return n.t_(Symbol::attr(name), v);
           })
       .def(
           "t",
           [](Node& n, const char* name) {
-            return const_cast<at::Tensor&>(n.t(Symbol::attr(name))).set_requires_grad(false);
+            return n.t(Symbol::attr(name));
           })
       // Tensors (ts_) -- manually written to unwrap variables into tensors.
       .def(
@@ -495,7 +496,8 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              tensors.push_back(variable.set_requires_grad(false));
+              AT_ASSERT(!variable.requires_grad());
+              tensors.push_back(variable);
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));
           })
@@ -506,7 +508,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<torch::autograd::Variable> variables;
             variables.reserve(tensors.size());
             for (auto& tensor : tensors) {
-              variables.push_back(std::move(tensor.set_requires_grad(false)));
+              variables.push_back(std::move(tensor));
             }
             return variables;
           })

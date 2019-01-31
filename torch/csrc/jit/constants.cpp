@@ -20,11 +20,7 @@ Value* insertConstant(
       n->destroy();
       return g.insertNode(g.createUndefined())->output();
     }
-    if (!ref.is_variable()) {
-      ref = autograd::make_variable(ref, /*requires_grad=*/false);
-    } else {
-      ref.set_requires_grad(false);
-    }
+    AT_ASSERT(ref.is_variable() && !ref.requires_grad());
     n->output()->inferTypeFrom(
         ref); // note: before t_ because of std::move(ref)
     n->t_(attr::value, std::move(ref));
@@ -49,7 +45,8 @@ Value* insertConstant(
     n->ts_(
         attr::value,
         fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
-          return const_cast<at::Tensor&>(t).set_requires_grad(false);
+          AT_ASSERT(t.is_variable() && !t.requires_grad());
+          return t;
         }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isString()) {
@@ -86,7 +83,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
           if (type->isSubtypeOf(DynamicType::get())) {
-            auto t = const_cast<at::Tensor&>(node->t(attr::value)).set_requires_grad(false);
+            auto t = node->t(attr::value);
             return [t](Stack& stack) {
               push(stack, t);
               return 0;
@@ -127,10 +124,7 @@ RegisterOperators reg({
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofTensors())) {
-            const auto& ts = fmap(
-                node->ts(attr::value), [](const at::Tensor& t) -> at::Tensor {
-                  return const_cast<at::Tensor&>(t).set_requires_grad(false);
-                });
+            const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
               push(stack, ts);
               return 0;
