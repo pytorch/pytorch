@@ -49,7 +49,7 @@ Value* insertConstant(
     n->ts_(
         attr::value,
         fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
-          return t.set_requires_grad(false);
+          return const_cast<at::Tensor&>(t).set_requires_grad(false);
         }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isString()) {
@@ -86,7 +86,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
           if (type->isSubtypeOf(DynamicType::get())) {
-            auto t = node->t(attr::value).set_requires_grad(false);
+            auto t = const_cast<at::Tensor&>(node->t(attr::value)).set_requires_grad(false);
             return [t](Stack& stack) {
               push(stack, t);
               return 0;
@@ -129,7 +129,7 @@ RegisterOperators reg({
           } else if (type->isSubtypeOf(ListType::ofTensors())) {
             const auto& ts = fmap(
                 node->ts(attr::value), [](const at::Tensor& t) -> at::Tensor {
-                  return t.set_requires_grad(false);
+                  return const_cast<at::Tensor&>(t).set_requires_grad(false);
                 });
             return [ts](Stack& stack) {
               push(stack, ts);

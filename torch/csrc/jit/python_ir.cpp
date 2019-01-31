@@ -484,7 +484,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t",
           [](Node& n, const char* name) {
-            return n.t(Symbol::attr(name)).set_requires_grad(false);
+            return const_cast<at::Tensor&>(n.t(Symbol::attr(name))).set_requires_grad(false);
           })
       // Tensors (ts_) -- manually written to unwrap variables into tensors.
       .def(
