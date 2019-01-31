@@ -37,8 +37,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   explicit OperatorBase(
       const c10::FunctionSchema&,
-      const std::vector<c10::IValue>&,
-      const std::vector<c10::IValue*>&);
+      std::vector<c10::IValue>,
+      std::vector<c10::IValue*>);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -593,8 +593,8 @@ class Operator : public OperatorBase {
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
-      const std::vector<c10::IValue>& inputs,
-      const std::vector<c10::IValue*>& outputs)
+      std::vector<c10::IValue> inputs,
+      std::vector<c10::IValue*> outputs)
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
@@ -1144,8 +1144,8 @@ C10_DECLARE_REGISTRY(
     FunctionSchemaOperatorRegistry,
     OperatorBase,
     const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
+    std::vector<c10::IValue>,
+    std::vector<c10::IValue*>);
 
 struct FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
@@ -1229,8 +1229,8 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
 // instantiate and run the operator.
 CAFFE2_API void RunOperator(
     c10::Symbol name,
-    std::vector<c10::IValue>& inputs,
-    std::vector<c10::IValue*>& outputs);
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs);
 
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
