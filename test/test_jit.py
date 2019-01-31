@@ -1666,17 +1666,20 @@ class TestJit(JitTestCase):
 
     def test_constant_prop_simple(self):
         @torch.jit.script
-        def constant_prop(input_tensor):
+        def constant_prop(input_int):
+            # type: (int) -> int
             a = 2 * 3
             b = a + 2
-            return b + input_tensor
+            return b - input_int
 
-        x = torch.tensor(2)
-        out_ref = constant_prop(x)
+        out_ref = constant_prop(2)
         self.run_pass('constant_propagation', constant_prop.graph)
-        out_test = constant_prop(torch.tensor(2))
+        out_test = constant_prop(2)
         self.assertEqual(out_ref, out_test)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph_str = str(constant_prop.graph)
+        self.assertTrue("aten::add" not in graph_str and "aten::mul" not in graph_str)
+        const = constant_prop.graph.findNode("prim::Constant").output().toIValue()
+        self.assertEqual(const, 8)
 
     def test_constant_prop_nested(self):
         @torch.jit.script
@@ -1691,7 +1694,10 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         out_test = constant_prop(torch.tensor(2))
         self.assertEqual(out_ref, out_test)
-        self.assertExpected(canonical(constant_prop.graph))
+        if_node = constant_prop.graph.findNode("prim::If")
+        for block in if_node.blocks():
+            for node in block.nodes():
+                self.assertTrue(node.kind() == "prim::Constant")
 
     def test_constant_prop_print(self):
         @torch.jit.script
@@ -1702,7 +1708,9 @@ class TestJit(JitTestCase):
             return b + input_tensor
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = constant_prop.graph
+        print_node = graph.findNode("prim::Print")
+        self.assertTrue(print_node.input().toIValue() == 6)
 
     def test_constant_prop_rand(self):
         @torch.jit.script
@@ -1712,7 +1720,7 @@ class TestJit(JitTestCase):
             return b
 
         self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        self.assertTrue("aten::randn" in str(constant_prop.graph))
 
     def test_constant_prop_none(self):
         @torch.jit.script
@@ -1783,8 +1791,16 @@ class TestJit(JitTestCase):
                 c2 = c2 + 4  # set to 5
             return a + c0 + c1 + c2
 
-        self.run_pass('constant_propagation', constant_prop.graph)
-        self.assertExpected(canonical(constant_prop.graph))
+        graph = constant_prop.graph
+        self.run_pass('constant_propagation', graph)
+        ifs = graph.findAllNodes("prim::If", recurse=False)
+        snd_if_inlined = len(ifs) == 1
+        self.assertTrue(snd_if_inlined)
+        first_if = ifs[0]
+        self.assertTrue(first_if.outputsSize() == 2)
+        second_if = first_if.findNode("prim::If", recurse=False)
+        self.assertTrue(second_if.outputsSize() == 1)
+        self.assertTrue(second_if.findNode("prim::If") is None)
 
     def test_constant_prop_loop_constant(self):
         @torch.jit.script
