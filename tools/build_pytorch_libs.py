@@ -69,18 +69,14 @@ def cmake_defines(lst, **kwargs):
 
 
 # Ninja
-try:
-    import ninja
+# The ninja package is different in Anaconda Cloud and PYPI. The one in Anaconda Cloud
+# doesn't have the python code (ninja_syntax.py) in it, while the one in PYPI does.
+# Since we don't use the python part here, it is also acceptable if we use the executable
+# directly if it is in `PATH`.
+if which('ninja'):
     USE_NINJA = True
-except ImportError:
-    # The ninja package is different in Anaconda Cloud and PYPI. The one in Anaconda Cloud
-    # doesn't have the python code (ninja_syntax.py) in it, while the one in PYPI does.
-    # Since we don't use the python part here, it is also acceptable if we use the executable
-    # directly if it is in `PATH`.
-    if which('ninja'):
-        USE_NINJA = True
-    else:
-        USE_NINJA = False
+else:
+    USE_NINJA = False
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 install_dir = base_dir + "/torch"
