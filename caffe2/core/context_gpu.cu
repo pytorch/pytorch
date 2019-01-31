@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "caffe2/core/THCCachingAllocator_gpu.h"
+#include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.
@@ -159,7 +159,7 @@ CudaMemoryPoolType g_cuda_memory_pool_type;
 
 std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 
-std::unique_ptr<THCCachingAllocator> g_thc_allocator;
+std::unique_ptr<c10::cuda::CUDACachingAllocator::Legacy> g_thc_allocator;
 
 // an unordered map that holds the map from the cuda memory pointer to the
 // device id that it is allocated from. This is used in the cuda memory pool
@@ -274,7 +274,7 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
-    g_thc_allocator.reset(new THCCachingAllocator());
+    g_thc_allocator.reset(new c10::cuda::CUDACachingAllocator::Legacy());
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
