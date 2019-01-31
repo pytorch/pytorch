@@ -8304,7 +8304,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
+        with self.assertRaisesRegex(RuntimeError, "only supported on lists, dictionaries, tensors, and tuples"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
