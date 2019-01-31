@@ -19,6 +19,7 @@ std::string runJITCPPTests() {
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);
   testDynamicDAG();
+  testEvalModeForLoadedModule();
   testFromQualString();
   testFusion();
   testGraphExecutor();
