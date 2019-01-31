@@ -261,12 +261,29 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
       toString(scalarType),
       " instead.");
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
-  if (iter->numel() == 0) {
-    result.fill_(std::numeric_limits<double>::quiet_NaN());
+  // TODO: the TensorIterator reduction implementation of mean
+  // (mean_kernel_impl()) is unvectorized and leads to very poor performance
+  // for production workloads. Once that's fixed, the following code can be used
+  // in lieu of the sum + divide implementation below.
+  //
+  // auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
+  // if (iter->numel() == 0) {
+  //   result.fill_(std::numeric_limits<double>::quiet_NaN());
+  // } else {
+  //   mean_stub(iter->device_type(), *iter);
+  // }
+
+  // === Start workaround impl ===
+  int64_t dim_prod = 1;
+  if (dim.size() == 0) {
+    dim_prod = self.numel();
   } else {
-    mean_stub(iter->device_type(), *iter);
+    for (auto d : dim) {
+      dim_prod *= self.size(d);
+    }
   }
+  at::sum_out(result, self, dim, keepdim, dtype).div_(dim_prod);
+  // === End workaround impl ===
   return result;
 }
 
