@@ -9,7 +9,7 @@ Operator createOperatorFromCaffe2(const std::string& name) {
   auto fn_wrap = caffe2::FunctionSchemaRegistry()->Create(symbolic_name.toUnqualString());
   CAFFE_ENFORCE(
       fn_wrap,
-      "Operator not registered with FunctionSchema constructor.",
+      "Operator not registered with FunctionSchema constructor:",
       name);
   auto fn = fn_wrap->getSchema();
 
