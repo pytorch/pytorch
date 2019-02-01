@@ -6,9 +6,11 @@
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/edit_distance.h>
 
 #include <functional>
 #include <memory>
+#include <queue>
 #include <utility>
 #include <vector>
 
@@ -70,7 +72,8 @@ struct SchemaParser {
   TreeRef parseIdent() {
     return String::create(L.expect(TK_IDENT).text());
   }
-  TypePtr parseBaseType() {
+  using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
+  TypeAndAlias parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
         {"Generator", GeneratorType::get()},
         {"ScalarType", IntType::get()},
@@ -89,11 +92,11 @@ struct SchemaParser {
       if (text.size() > 0 && islower(text[0])) {
         // lower case identifiers that are not otherwise valid types
         // are treated as type variables
-        return VarType::create(text);
+        return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
       }
       throw ErrorReport(tok.range) << "unknown type specifier";
     }
-    return it->second;
+    return TypeAndAlias(it->second, c10::nullopt);
   }
   // Examples:
   // Tensor(a) // Tensor is in set a
@@ -158,7 +161,9 @@ struct SchemaParser {
       value = DynamicType::get();
       alias_info = parseAliasAnnotation();
     } else {
-      value = parseBaseType();
+      auto value_alias = parseBaseType();
+      value = value_alias.first;
+      alias_info = value_alias.second;
     }
     while (true) {
       if (L.cur().kind == '[' && L.lookahead().kind == ']') {
@@ -413,7 +418,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      JIT_ASSERTM(
+      AT_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name);
@@ -430,6 +435,32 @@ struct OperatorRegistry {
     if (it != operators.end())
       return it->second;
     return empty;
+  }
+
+  std::vector<Symbol> findSimilarOperators(Symbol input_op) {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+
+    using EntryPair = std::pair<int64_t, Symbol>;
+    auto cmp = [](const EntryPair& lhs, const EntryPair& rhs) {
+      return lhs.first > rhs.first;
+    };
+
+    std::priority_queue<EntryPair, std::vector<EntryPair>, decltype(cmp)> rankings(cmp);
+    static constexpr size_t MAX_EDIT_DIST = 2u;
+    for (const auto& op : operators) {
+      auto edit_dist = script::ComputeEditDistance(
+          input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
+      if (edit_dist <= MAX_EDIT_DIST) {
+        rankings.emplace(edit_dist, op.first);
+      }
+    }
+    std::vector<Symbol> ret;
+    while (!rankings.empty()) {
+      ret.push_back(rankings.top().second);
+      rankings.pop();
+    }
+    return ret;
   }
 };
 
@@ -457,6 +488,11 @@ void registerOperator(Operator&& op) {
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
+
+std::vector<Symbol> findSimilarOperators(Symbol input_op) {
+  return getRegistry().findSimilarOperators(input_op);
+}
+
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

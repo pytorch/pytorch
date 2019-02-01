@@ -55,8 +55,8 @@ ChannelShuffleNHWCKernel(const int G, const int K, const float* X, float* Y) {
 template <>
 bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+  
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = this->group_;
@@ -86,8 +86,8 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+  
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int ndim = X.ndim();
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
@@ -125,8 +125,8 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+  
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
   const int G = this->group_;
@@ -156,8 +156,8 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+  
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int ndim = dY.ndim();
   const int N = dY.dim32(0);
   const int C = dY.dim32(ndim - 1);

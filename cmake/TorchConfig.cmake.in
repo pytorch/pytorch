@@ -25,10 +25,10 @@ else()
 endif()
 
 # Include directories.
-if (EXISTS "${TORCH_INSTALL_PREFIX}/lib/include")
+if (EXISTS "${TORCH_INSTALL_PREFIX}/include")
   set(TORCH_INCLUDE_DIRS
-    ${TORCH_INSTALL_PREFIX}/lib/include
-    ${TORCH_INSTALL_PREFIX}/lib/include/torch/csrc/api/include)
+    ${TORCH_INSTALL_PREFIX}/include
+    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
 else()
   set(TORCH_INCLUDE_DIRS
     ${TORCH_INSTALL_PREFIX}/include

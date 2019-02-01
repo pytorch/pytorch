@@ -1,8 +1,5 @@
 #pragma once
 
-#ifdef USE_CUDA
-#include <nvToolsExt.h>
-#endif
 #include <thread>
 #include <iostream>
 #include <mutex>
@@ -16,20 +13,55 @@
 #include <tuple>
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/cuda/cuda_check.h>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAContext.h>
-#include <cuda_runtime.h>
-#endif
 #ifndef _WIN32
 #include <ctime>
 #endif
+
+#include <torch/csrc/jit/code_template.h>
+
+typedef struct CUevent_st* CUDAEventStub;
 
 namespace torch { namespace autograd {
 
 struct Function;
 
 namespace profiler {
+
+struct TORCH_API CUDAStubs {
+  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
+    fail();
+  }
+  virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
+    fail();
+    return 0.f;
+  }
+  virtual void nvtxMarkA(const char* name) {
+    fail();
+  }
+  virtual void nvtxRangePushA(const char* name) {
+    fail();
+  }
+  virtual void nvtxRangePop() {
+    fail();
+  }
+  virtual bool enabled() {
+    return false;
+  }
+  virtual void onEachDevice(std::function<void(int)> op) {
+    fail();
+  }
+  virtual void synchronize() {
+    fail();
+  }
+  virtual ~CUDAStubs();
+
+private:
+  void fail() {
+    AT_ERROR("CUDA used in profiler but not enabled.");
+  }
+};
+
+TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
 
 constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
@@ -64,7 +96,7 @@ enum class EventKind : uint16_t {
   PopRange
 };
 
-struct Event final {
+struct TORCH_API Event final {
   Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
   : owned_name_(new std::string(std::move(name)))
   , name_ptr_(owned_name_->c_str())
@@ -75,19 +107,7 @@ struct Event final {
   , kind_(kind)
   , thread_id_(thread_id) { record(record_cuda); }
 
-  void record(bool record_cuda) {
-#ifdef USE_CUDA
-    if (record_cuda) {
-      TORCH_CUDA_CHECK(cudaGetDevice(&device_));
-      TORCH_CUDA_CHECK(cudaEventCreate(&event));
-      auto stream = at::cuda::getCurrentCUDAStream();
-      cpu_ns_ = getTime();
-      TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
-      return;
-    }
-#endif
-    cpu_ns_ = getTime();
-  }
+  void record(bool record_cuda);
   std::string kind() const {
     switch(kind_) {
       case EventKind::Mark: return "mark";
@@ -105,29 +125,9 @@ struct Event final {
   double cpu_elapsed_us(const Event & e) {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
-  double cuda_elapsed_us(const Event & e) {
-#ifdef USE_CUDA
-    if(!e.has_cuda() || !has_cuda()) {
-      throw std::logic_error("Events were not recorded for CUDA");
-    }
-    if(e.device() != device()) {
-      throw std::logic_error("Events are not on the same device");
-    }
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event));
-    TORCH_CUDA_CHECK(cudaEventSynchronize(e.event));
-    float ms;
-    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event, e.event));
-    return ms*1000.0;
-#else
-    throw std::logic_error("CUDA not enabled");
-#endif
-  }
+  double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
-#ifdef USE_CUDA
     return event != nullptr;
-#else
-    return false;
-#endif
   }
   int device() const {
     return device_;
@@ -142,9 +142,7 @@ private:
   EventKind kind_;
   uint16_t thread_id_;
   int device_ = -1;
-#ifdef USE_CUDA
-  cudaEvent_t event = nullptr;
-#endif
+  struct CUevent_st* event = nullptr;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -224,6 +222,26 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerState new_state);
 TORCH_API thread_event_lists disableProfiler();
+
+
+// Usage:
+//   {
+//     RecordProfile guard("filename.trace");
+//     // code you want to profile
+//   }
+// Then open filename.trace in chrome://tracing
+struct TORCH_API RecordProfile {
+  RecordProfile(std::ostream& out);
+  RecordProfile(const std::string& filename);
+
+  ~RecordProfile();
+private:
+  void init();
+  std::unique_ptr<std::ofstream> file_;
+  std::ostream& out_;
+  void processEvents(const std::vector<Event*>& events);
+};
+
 
 } // namespace profiler
 }} // namespace torch::autograd

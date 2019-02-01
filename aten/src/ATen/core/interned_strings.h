@@ -52,6 +52,8 @@ namespace c10 {
   _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
+  _(prim, DictConstruct)           \
+  _(prim, DictIndex)               \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
@@ -63,7 +65,6 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
-  _(prim, SumToSize)               \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
@@ -71,6 +72,8 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(aten, _grad_sum_to_size)       \
+  _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
   _(aten, __round_to_zero_floordiv)\
@@ -87,6 +90,8 @@ namespace c10 {
   _(aten, index_put_)              \
   _(aten, device)                  \
   _(aten, len)                     \
+  _(aten, wait)                    \
+  _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -115,6 +120,8 @@ namespace c10 {
   _(onnx, Less)                    \
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
+  _(onnx, Split)                   \
+  _(onnx, ConstantOfShape)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
@@ -140,7 +147,8 @@ namespace c10 {
   _(attr, a)                       \
   _(attr, b)                       \
   _(attr, beg)                     \
-  _(attr, idx)
+  _(attr, idx)                     \
+  _(attr, split)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

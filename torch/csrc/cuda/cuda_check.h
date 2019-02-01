@@ -1,6 +1,5 @@
 #pragma once
 
-#ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <nvrtc.h>
@@ -37,5 +36,3 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 #define TORCH_CUDA_CHECK(result) ::torch::cudaCheck(result,__FILE__,__LINE__);
 
 }
-
-#endif

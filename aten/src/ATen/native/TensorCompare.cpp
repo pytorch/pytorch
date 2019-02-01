@@ -57,6 +57,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   return close;
 }
 
+Tensor isnan(const Tensor& self) {
+  return self != self;
+}
+
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
   AT_ASSERT(n >= 0);

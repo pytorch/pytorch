@@ -7,7 +7,7 @@
 #endif
 
 
-#if !AT_CUDNN_ENABLED() || (CUDNN_VERSION < 7000)
+#if !AT_CUDNN_ENABLED()
 
 namespace at { namespace native {
 

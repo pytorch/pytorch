@@ -279,8 +279,8 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
   auto& Y = Input(1);
   auto& dY = Input(2);
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
   LpPoolBackwardNCHW<float>
       <<<CAFFE_GET_BLOCKS(X.size()),
@@ -315,8 +315,8 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
   auto& Y = Input(1);
   auto& dY = Input(2);
   CAFFE_ENFORCE_EQ(dY.ndim(), 4);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
   LpPoolBackwardNHWC<float>
       <<<CAFFE_GET_BLOCKS(X.size()),

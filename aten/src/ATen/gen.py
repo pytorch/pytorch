@@ -210,9 +210,9 @@ def postprocess_output_declarations(output_declarations):
                 if decl.inplace:
                     ret['name'] = 'self'
                 elif len(decl.returns) == 1:
-                    ret['name'] = 'result'
+                    ret['name'] = 'out'
                 else:
-                    ret['name'] = 'result' + str(n)
+                    ret['name'] = 'out' + str(n)
             else:
                 has_named_ret = True
 
@@ -428,8 +428,10 @@ def cmpfiles_with_eol_normalization(a, b, names):
     results = ([], [], [])    # match, mismatch, error
     for x in names:
         try:
-            ax = open(os.path.join(a, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
-            bx = open(os.path.join(b, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
+            with open(os.path.join(a, x)) as f:
+                ax = f.read().replace('\r\n', '\n').replace('\r', '\n')
+            with open(os.path.join(b, x)) as f:
+                bx = f.read().replace('\r\n', '\n').replace('\r', '\n')
             if ax == bx:
                 results[0].append(x)
             else:

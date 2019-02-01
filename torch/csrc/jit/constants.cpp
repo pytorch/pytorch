@@ -1,8 +1,8 @@
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
+#include <ATen/core/functional.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/utils/functional.h>
 
 namespace torch {
 namespace jit {
@@ -74,7 +74,6 @@ Value* insertConstant(
 }
 
 RegisterOperators reg({
-    // Implementation of constant node, computes and IValue
     Operator(
         FunctionSchema(
             prim::Constant,
@@ -119,7 +118,8 @@ RegisterOperators reg({
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
-            const auto& bs = node->is(attr::value);
+            const auto& int_list = node->is(attr::value);
+            const std::vector<bool> bs(int_list.begin(), int_list.end());
             return [bs](Stack& stack) {
               push(stack, bs);
               return 0;
