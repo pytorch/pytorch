@@ -695,6 +695,67 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   THCCachingAllocator_emptyCache();
 }
 
+
+//hot fix for #16610
+//specializing algorithm_search would be cleaner, as it is specialized already, but that would require also specializing getBestAlgorithm for bwdData, 
+//adding "strided" argument, so in the end this looks simpler.
+template<>
+void findAlgorithm(const ConvolutionArgs& args, bool benchmark, cudnnConvolutionBwdDataAlgo_t * algo) {
+  using search = algorithm_search<cudnnConvolutionBwdDataAlgo_t>;
+  auto& cache = search::cache();
+
+  if (cache.find(args.params, algo)) {
+    return;
+  }
+
+  if (args.params.deterministic && !benchmark) {
+    *algo = search::DEFAULT_ALGO;
+    return;
+  }
+  
+  int stride_dim = args.input.dim() - 2;
+  bool strided = false;
+  for (int i = 0; i< stride_dim; i++) {
+      if (args.params.stride[i] != 1) {
+         strided = true;
+         break;
+      }
+  }
+
+  if (!benchmark) {
+    search::getAlgorithm(args, algo);
+    if (strided && (*algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING || *algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
+       *algo = search::DEFAULT_ALGO;
+    }
+    return;
+  }
+
+  if (cache.find(args.params, algo)) {
+    // re-check cache since another thread may have benchmarked the algorithm
+    return;
+  }
+
+  auto perfResults = search::findAlgorithm(args);
+  // for deterministic algo, look at all the perf results and return the best
+  // deterministic algo
+  if (perfResults.status == CUDNN_STATUS_SUCCESS &&
+      !(args.params.deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
+      *algo = perfResults.algo;
+  } else {
+      *algo = search::DEFAULT_ALGO;
+  }
+  if (strided && (*algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING || *algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
+     *algo = search::DEFAULT_ALGO;
+  }
+  cache.insert(args.params, *algo);
+
+  // Free the cached blocks in our caching allocator. They are
+  // needed here because the above benchmarking uses a huge amount of memory,
+  // e.g. a few GBs.
+  THCCachingAllocator_emptyCache();
+}
+
+
 template<typename algo_t>
 Workspace chooseAlgorithm(
     const ConvolutionArgs& args,
