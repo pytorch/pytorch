@@ -192,7 +192,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
                       'values, and it will treat them as constants, likely rendering '
                       'the trace incorrect for any other combination of lengths.',
                       category=torch.jit.TracerWarning, stacklevel=2)
-    lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    lengths = torch.as_tensor(lengths, dtype=torch.int64, device='cpu')
     if enforce_sorted:
         sorted_indices = None
     else:
