@@ -662,6 +662,8 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
+  AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
+
   const auto& schema = node->schema();
   if (schema.is_vararg() || schema.is_varret()) {
     const auto hasMutableOutputs = std::any_of(
@@ -1287,7 +1289,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
     at::onnx::Shape,
     prim::AnyDefined,
     prim::AutogradAdd,
-    prim::fork,
+    prim::fork, // TODO: fork aliasing / futures
   };
 
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
