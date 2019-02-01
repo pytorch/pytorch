@@ -46,13 +46,6 @@ using ::c10::filter;
 
 namespace {
 
-inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
-  if(N == 0)
-    return c10::nullopt;
-  auto t = (stack.end() - N)->toTensor();
-  return c10::make_optional(t.device());
-}
-
 // TODO: remove the toOptionalTensor and toListOfOptionalTensor
 // when we remove the undefined tensor semantic from TH
 

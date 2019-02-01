@@ -2,6 +2,7 @@
 #include <torch/csrc/autograd/function.h>
 
 #include <sstream>
+#include <fstream>
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -191,5 +192,80 @@ double Event::cuda_elapsed_us(const Event & e) {
 }
 
 CUDAStubs::~CUDAStubs() = default;
+
+
+static jit::CodeTemplate event_template(R"(
+{
+  "name": "${name}",
+  "ph": "X",
+  "ts": ${ts},
+  "dur": ${dur},
+  "tid": ${tid},
+  "pid": "CPU Functions",
+  "args": {}
+})");
+
+
+RecordProfile::RecordProfile(std::ostream& out)
+: out_(out) {
+  init();
+}
+
+RecordProfile::RecordProfile(const std::string& filename)
+: file_(new std::ofstream(filename)), out_(*file_) {
+  init();
+}
+
+void RecordProfile::init() {
+  enableProfiler(ProfilerState::CPU);
+}
+
+RecordProfile::~RecordProfile() {
+  thread_event_lists event_lists = disableProfiler();
+  std::vector<Event*> events;
+  for(auto& l : event_lists) {
+    for(auto& e : l) {
+        events.push_back(&e);
+    }
+  }
+  processEvents(events);
+  if (file_){
+    file_->close();
+  }
+}
+
+void RecordProfile::processEvents(const std::vector<Event*>& events) {
+  AT_CHECK(out_, "could not open file");
+  Event* start = nullptr;
+  for (Event* e : events) {
+    if(0 == strcmp(e->name(), "__start_profile")) {
+      start = e;
+      break;
+    }
+  }
+  AT_CHECK(start, "could not find start?");
+  std::vector<Event*> stack;
+  out_ << "[\n";
+  bool first = true;
+  for(Event* e : events) {
+    if(e->kind() == "push") {
+      stack.push_back(e);
+    } else if(e->kind() == "pop") {
+      if(!first) {
+        out_ << ",\n";
+      }
+      first = false;
+      Event* e_start = stack.back();
+      stack.pop_back();
+      jit::TemplateEnv env;
+      env.s("name", e_start->name());
+      env.d("ts", start->cpu_elapsed_us(*e_start));
+      env.d("dur", e_start->cpu_elapsed_us(*e));
+      env.d("tid", e_start->thread_id());
+      out_ << event_template.format(env);
+    }
+  }
+  out_ << "]\n";
+}
 
 }}}
