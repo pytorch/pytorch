@@ -5,7 +5,7 @@ ${extension_backend_headers}
 namespace at {
 
 template <typename FnPtr>
-void register_extension_backend_op(
+inline void register_extension_backend_op(
     Backend backend,
     const char * schema,
     FnPtr fn) {
