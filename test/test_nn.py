@@ -4463,6 +4463,15 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
 
+    def test_pack_padded_sequence_default_cuda_tensor(self):
+        # Set default tensor type to cuda.FloatTensor, as this has triggered the error
+        torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        # Run all tests
+        self.test_pack_sequence()
+        self.test_pack_padded_sequence()
+        # Reset default tensor type to FloatTensor
+        torch.set_default_tensor_type(torch.FloatTensor)
+
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
             if var.size(0) == length:
