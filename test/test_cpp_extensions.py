@@ -664,7 +664,7 @@ class TestMSNPUTensor(common.TestCase):
         d = c.sum()
         self.assertEqual(msnpu_extension.get_test_int(), 2)
 
-        c.backward()
+        d.backward()
         self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 
