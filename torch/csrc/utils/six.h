@@ -13,7 +13,11 @@ inline bool isTuple(pybind11::handle input) {
   if (PyTuple_Check(input.ptr())) {
     return true;
   }
+#if PY_MAJOR_VERSION == 2
   return pybind11::cast<std::string>(input.get_type().attr("__module__")) == "torch.return_types";
+#else
+  return false;
+#endif
 }
 
 inline bool isTuple(PyObject* obj) {
