@@ -10,8 +10,10 @@ namespace six {
 // by a pytorch operator.
 
 inline bool isTuple(pybind11::handle input) {
-  std::string m = pybind11::str(input.get_type().attr("__module__"));
-  return pybind11::isinstance<pybind11::tuple>(input) || m == "torch.return_types";
+  if (PyTuple_Check(input.ptr())) {
+    return true;
+  }
+  return pybind11::str(input.get_type().attr("__module__")) == "torch.return_types";
 }
 
 inline bool isTuple(PyObject* obj) {
