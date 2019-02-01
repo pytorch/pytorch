@@ -660,9 +660,10 @@ void AliasDb::analyzeImpl(Node* node) {
       // If the node has a schema, fall through and analyze it normally
       break;
     }
+    default:
+      AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
-  AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
 
   const auto& schema = node->schema();
   if (schema.is_vararg() || schema.is_varret()) {
