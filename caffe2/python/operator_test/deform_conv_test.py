@@ -429,7 +429,7 @@ class TestConvolution(hu.HypothesisTestCase):
         inputs = [X, o, w, b] if use_bias else [X, o, w]
 
         # Error handling path.
-        if size + pad_h < kernel or size + pad_w < kernel:
+        if size + pad_h * 2 < kernel or size + pad_w * 2 < kernel:
             with self.assertRaises(RuntimeError):
                 self.assertDeviceChecks(dc, op, inputs, [0])
             return
