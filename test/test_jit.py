@@ -8814,7 +8814,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
