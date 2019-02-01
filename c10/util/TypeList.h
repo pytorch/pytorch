@@ -250,6 +250,12 @@ template<> struct reverse<typelist<>> final {
 template<class TypeList> using reverse_t = typename reverse<TypeList>::type;
 
 
+/**
+ * Find the index of the first type in a typelist fulfilling a type trait condition.
+ * Example:
+ *
+ * 2 == find_if<typelist<char, int, char&, int&>, std::is_reference>::value
+ */
 template<class TypeList, template<class> class Condition, class Enable = void> struct find_if final {
   static_assert(false_t<TypeList>::value, "In typelist::find_if<TypeList, Condition>, the TypeList argument must be typelist<...>.");
 };

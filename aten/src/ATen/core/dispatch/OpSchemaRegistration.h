@@ -20,8 +20,8 @@ public:
 private:
   c10::OperatorHandle opHandle_;
 };
-}
-}
+}  // namespace detail
+}  // namespace c10
 
 /**
  * Macro for defining an operator schema.  Every operator schema must
