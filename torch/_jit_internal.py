@@ -24,9 +24,6 @@ weak_types = weakref.WeakKeyDictionary()
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()
 
-# Listing of possible overloads for
-_overloaded_fns = weakref.WeakKeyDictionary()
-
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -152,18 +149,6 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         "arg_name": arg_name
     }
     return fn
-
-
-def overload(self, fn_name, fns):
-    entry = _overloaded_fns.get(self)
-    weak_fns = weakref.WeakSet(fns)
-
-    if entry is None:
-        _overloaded_fns[self] = {
-            fn_name: weak_fns,
-        }
-    else:
-        entry[fn_name] = weak_fns
 
 
 try:
