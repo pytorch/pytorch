@@ -178,6 +178,9 @@ fi
 # Test XLA build
 if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
+
+  pip install -q lark-parser
+
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
