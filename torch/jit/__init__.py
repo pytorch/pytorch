@@ -835,12 +835,6 @@ class OrderedDictWrapper(object):
     def __setitem__(self, k, v):
         raise NotImplementedError
 
-    def copy(self):
-        return type(self)(self.module_ref())
-
-    def set_module(self, module):
-        self.module_ref = weakref.ref(module)
-
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module):
