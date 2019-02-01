@@ -160,35 +160,6 @@ private:
 };
 
 
-
-inline OperatorHandle Dispatcher::registerSchema(FunctionSchema schema) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  operators_.emplace_back(std::move(schema));
-  return OperatorHandle(--operators_.end());
-}
-
-inline void Dispatcher::deregisterSchema(const OperatorHandle& op) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
-    AT_ERROR("Tried to deregister op schema that still has kernels registered");
-  }
-  operators_.erase(op.operatorDefIterator_);
-}
-
-inline void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
-}
-
-inline void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
-}
-
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
