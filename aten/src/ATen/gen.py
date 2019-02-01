@@ -155,11 +155,20 @@ case Backend::${Backend}:
     break;
 """)
 
-GET_VALID_SCHEMAS_SPECIALIZATION = CodeTemplate("""\
+API_NAME_TO_SCHEMAS_MAP_ENTRY = CodeTemplate("""\
+{${api_name}, {${schemas}}},
+""")
+
+CHECK_FUNCTION_POINTER_TYPE_SPECIALIZATION = CodeTemplate("""\
 template <>
-inline std::set<std::string>& get_valid_schemas<${function_ptr_type}>() {
-  static std::set<std::string> schemas = {${schemas}};
-  return schemas;
+inline void check_function_pointer_type<${function_ptr_type}>(const std::string & schema) {
+  static std::set<std::string> schemas = {
+    ${schemas}
+  };
+  if (schemas.find(schema) == schemas.end()) {
+    AT_ERROR("Attempting to register incorrect function pointer type for schema ", schema,
+        ". Expected type: ${function_ptr_type}");
+  }
 }
 """)
 
@@ -214,7 +223,8 @@ top_env = {
     'native_function_declarations': [],
     'extension_backend_headers': [],
     'extension_backend_register_switches': [],
-    'get_valid_schemas_specializations': [],
+    'api_name_to_schemas_map_entries' : [],
+    'check_function_pointer_type_specializations': [],
 }
 
 
@@ -370,14 +380,23 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
 
 def generate_extension_backend_schema_checker(declarations):
-    function_ptr_type_to_schemas = function_wrapper.map_function_ptr_type_to_schemas(declarations)
+    api_name_to_schemas, function_ptr_type_to_schemas = function_wrapper.create_extension_backend_schema_checker(
+        declarations
+    )
+
+    for api_name, schemas in api_name_to_schemas.items():
+        entry = API_NAME_TO_SCHEMAS_MAP_ENTRY.substitute(
+            api_name='"{}"'.format(api_name),
+            schemas=['"{}"'.format(schema) for schema in schemas]
+        )
+        top_env['api_name_to_schemas_map_entries'].append(entry)
 
     for function_ptr_type, schemas in function_ptr_type_to_schemas.items():
-        specialization = GET_VALID_SCHEMAS_SPECIALIZATION.substitute(
+        specialization = CHECK_FUNCTION_POINTER_TYPE_SPECIALIZATION.substitute(
             function_ptr_type=function_ptr_type,
-            schemas=['"{}"'.format(schema) for schema in (schemas)]
+            schemas=['"{}",'.format(schema) for schema in schemas]
         )
-        top_env['get_valid_schemas_specializations'].append(specialization)
+        top_env['check_function_pointer_type_specializations'].append(specialization)
 
 
 def generate_type_extension_backend(backend, declarations):

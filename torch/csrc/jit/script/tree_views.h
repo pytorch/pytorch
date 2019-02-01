@@ -283,6 +283,7 @@ struct Expr : public TreeView {
       case TK_VAR:
       case TK_LIST_LITERAL:
       case TK_TUPLE_LITERAL:
+      case TK_DICT_LITERAL:
       case '@':
       case TK_POW:
       case TK_FLOOR_DIV:
@@ -857,6 +858,24 @@ struct TupleLiteral : public Expr {
       const SourceRange& range,
       const List<Expr>& inputs) {
     return TupleLiteral(Compound::create(TK_TUPLE_LITERAL, range, {inputs}));
+  }
+};
+
+struct DictLiteral : public Expr {
+  explicit DictLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_DICT_LITERAL);
+  }
+  List<Expr> key_inputs() const {
+    return subtree(0);
+  }
+  List<Expr> value_inputs() const {
+    return subtree(1);
+  }
+  static DictLiteral create(
+      const SourceRange& range,
+      const List<Expr>& keys,
+      const List<Expr>& values) {
+    return DictLiteral(Compound::create(TK_DICT_LITERAL, range, {keys, values}));
   }
 };
 

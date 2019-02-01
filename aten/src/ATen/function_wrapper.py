@@ -1622,8 +1622,9 @@ def process_extension_backend_option(option):
     return option
 
 
-def map_function_ptr_type_to_schemas(declarations):
-    # type: (List[FunctionOption]) -> Dict[str, List[str]]
+def create_extension_backend_schema_checker(declarations):
+    # type: (List[FunctionOption]) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]
+    api_name_to_schemas = {} # type: Dict[str, List[str]]
     function_ptr_type_to_schemas = {}  # type: Dict[str, List[str]]
 
     for declaration in declarations:
@@ -1631,6 +1632,12 @@ def map_function_ptr_type_to_schemas(declarations):
             if not option.get('skip', False):
                 try:
                     option = process_extension_backend_option(option)
+
+                    if option['api_name'] not in api_name_to_schemas:
+                        api_name_to_schemas[option['api_name']] = [option['schema']]
+                    else:
+                        api_name_to_schemas[option['api_name']].append(option['schema'])
+
                     function_ptr_type = FUNCTION_PTR_TYPE.substitute(option)
                     if function_ptr_type not in function_ptr_type_to_schemas:
                         function_ptr_type_to_schemas[function_ptr_type] = [option['schema']]
@@ -1638,7 +1645,8 @@ def map_function_ptr_type_to_schemas(declarations):
                         function_ptr_type_to_schemas[function_ptr_type].append(option['schema'])
                 except NYIError:
                     pass
-    return function_ptr_type_to_schemas
+
+    return api_name_to_schemas, function_ptr_type_to_schemas
 
 
 def create_extension_backend(backend_type_env, declarations):

@@ -64,17 +64,24 @@ TEST(BackendExtensionTest, TestRegisterOp) {
       "empty(IntList size, TensorOptions options) -> Tensor", &empty_override)
   );
 
-  // Invalid registration: valid schema but mismatched function signature
+  // Invalid registration: bad operator name
   EXPECT_ANY_THROW(
     register_extension_backend_op(
       Backend::MSNPU,
-      "empty(IntList size, TensorOptions options) -> Tensor", &add_override)
+      "help(IntList size, TensorOptions options) -> Tensor", &add_override)
   );
 
-  // Invalid registration: bad schema
+  // Invalid registration: valid operator name but invalid schema
   EXPECT_ANY_THROW(
     register_extension_backend_op(
       Backend::MSNPU,
-      "blahblahblah", &add_override)
+      "zeros(TensorOptions options) -> Tensor", &add_override)
+  );
+
+  // Invalid registration: valid schema but mismatched function pointer type
+  EXPECT_ANY_THROW(
+    register_extension_backend_op(
+      Backend::MSNPU,
+      "zeros(IntList size, TensorOptions options) -> Tensor", &add_override)
   );
 }
