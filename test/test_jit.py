@@ -2020,6 +2020,23 @@ class TestJit(JitTestCase):
             torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
+    def test_trace_dict_input(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, a, b):
+                return self.foo({'a': a, 'b': b})['a']
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return {'a': x['a'] * x['b']}
+
+        x = (torch.rand(3), torch.rand(3))
+        model = Bar()
+        self.checkTrace(model, x)
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)
