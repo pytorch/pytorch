@@ -69,33 +69,53 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
-std::vector<Node*> findAllNodes(Block* block, Symbol kind) {
+std::vector<Node*> findAllNodes(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse = true) {
   std::vector<Node*> ret;
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      auto nodes = findAllNodes(b, kind);
-      ret.insert(ret.end(), nodes.begin(), nodes.end());
-    }
-    if (n->kind() == kind) {
-      ret.push_back(n);
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        ret.push_back(n);
+      }
+      if (recurse) {
+        auto nodes = findAllNodes(n->blocks(), kind, recurse);
+        ret.insert(ret.end(), nodes.begin(), nodes.end());
+      }
     }
   }
   return ret;
 }
 
-Node* findNode(Block* block, Symbol kind) {
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      auto node = findNode(b, kind);
-      if (node != nullptr) {
-        return node;
+std::vector<Node*> findAllNodes(Block* block, Symbol kind, bool recurse = true) {
+  std::vector<Block*> blocks = {block};
+  return findAllNodes(blocks, kind, recurse);
+}
+
+Node* findNode(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse = true) {
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        return n;
       }
-    }
-    if (n->kind() == kind) {
-      return n;
+      if (recurse) {
+        auto node = findNode(n->blocks(), kind, recurse);
+        if (node != nullptr) {
+          return node;
+        }
+      }
     }
   }
   return nullptr;
+}
+
+Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+  std::vector<Block*> blocks = {block};
+  return findNode(blocks, kind, recurse);
 }
 
 // execute a Python function, used for Ops we can't optimize but that we want to
@@ -269,14 +289,15 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "findNode",
-          [](Graph& g, const std::string& kind) {
-            return findNode(g.block(), Symbol::fromQualString(kind));
-          })
+          [](Graph& g, const std::string& kind, bool recurse) {
+            return findNode(g.block(), Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
-          [](Graph& g, const std::string& kind) {
-            return findAllNodes(g.block(), Symbol::fromQualString(kind));
-          })
+          [](Graph& g, const std::string& kind, bool recurse) {
+            return findAllNodes(
+                g.block(), Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
@@ -361,7 +382,18 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
       .def("nodes", [](Block& b) {
         return py::make_iterator(b.nodes().begin(), b.nodes().end());
-      });
+      })
+      .def(
+          "findNode",
+          [](Block& b, const std::string& kind, bool recurse) {
+            return findNode(&b, Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
+      .def(
+          "findAllNodes",
+          [](Block& b, const std::string& kind, bool recurse) {
+            return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true);
+
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
@@ -400,26 +432,16 @@ void initPythonIRBindings(PyObject* module_) {
       .def("outputsAt", [](Node& n, size_t i) { return n.outputs().at(i); })
       .def(
           "findNode",
-          [](Node& n, const std::string& kind) {
-            Node* node;
-            for (Block* b : n.blocks()) {
-              node = findNode(b, Symbol::fromQualString(kind));
-              if (node != nullptr) {
-                return node;
-              }
-            }
-            return node;
-          })
+          [](Node& n, const std::string& kind, bool recurse) {
+            return findNode(n.blocks(), Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
-          [](Node& n, const std::string& kind) {
-            std::vector<Node*> ret;
-            for (Block* b : n.blocks()) {
-              auto nodes = findAllNodes(b, Symbol::fromQualString(kind));
-              ret.insert(ret.end(), nodes.begin(), nodes.end());
-            }
-            return ret;
-          })
+          [](Node& n, const std::string& kind, bool recurse) {
+            return findAllNodes(
+                n.blocks(), Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
+      .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)
       .NS(replaceInput)

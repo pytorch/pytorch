@@ -130,10 +130,6 @@ void testCodeTemplate() {
   }
 }
 
-Value* appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(kind, inputs))->output();
-}
-
 void testFusion() {
   auto testSimple = [&] {
     Graph graph;
@@ -836,12 +832,6 @@ void testADFormulas() {
     assertAllClose(tensors_out, expected_tensors_out);
     assertAllClose(tensor_grads_out, expected_tensor_grads_out);
   }
-}
-
-std::string toString(std::shared_ptr<Graph>& graph) {
-  std::ostringstream s;
-  s << *graph;
-  return s.str();
 }
 
 void testDifferentiate(std::ostream& out = std::cout) {
@@ -1751,6 +1741,36 @@ void testDynamicDAG() {
   testContractEdgeBasic();
   testContractEdgeCycleDetection();
 }
+
+void testAutogradProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+  constexpr int seq_len = 32;
+
+  int hidden_size = 2 * input_size;
+  auto input = torch::randn({seq_len, batch_size, input_size}, at::kCPU);
+  auto hx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(torch::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(torch::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  std::stringstream ss;
+  {
+    autograd::profiler::RecordProfile guard(ss);
+    for (size_t i = 0; i < 100; ++i) {
+      std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+    }
+  }
+
+  std::string result = ss.str();
+  size_t count = 0;
+  for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
+       count++, pos++) {
+  }
+  AT_CHECK(count == 200);
+}
+
+
 } // namespace
 } // namespace jit
 } // namespace torch

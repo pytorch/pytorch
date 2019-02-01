@@ -88,7 +88,7 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
   return self.slice(dim, start, stop, step);
 }
 
-static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
+static Variable applySelect(const Variable& self, int64_t dim, int64_t index, int64_t real_dim=0) {
   if (index == 0 && dim == 0 && self.dim() == 0) {
     throw IndexError(
         "invalid index of a 0-dim tensor. "
@@ -97,7 +97,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
   int64_t size = self.size(dim);
   if (index < -size || index >= size) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
-      index, dim, size);
+      index, real_dim, size);
   }
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
@@ -152,7 +152,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
   for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPUtils_checkLong(obj)) {
-      result = applySelect(result, dim, THPUtils_unpackLong(obj));
+      result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
       dim++;
@@ -169,7 +169,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       auto scalar_type = var.type().scalarType();
       if (var.dim() == 0 && at::isIntegralType(scalar_type)) {
         if (scalar_type != at::kByte) {
-          result = applySelect(result, dim, THPUtils_unpackLong(obj));
+          result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
         } else {
           result = result.unsqueeze(dim);
           handle_var(boolToIndexingTensor(result, var.item<uint8_t>() != 0));
@@ -185,7 +185,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
         PyErr_Clear();
         invalid_index(obj);
       }
-      result = applySelect(result, dim, THPUtils_unpackLong(index));
+      result = applySelect(result, dim, THPUtils_unpackLong(index), i);
     }
   }
   return result;
