@@ -2,6 +2,7 @@
 
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
@@ -330,6 +331,39 @@ void testAliasAnalysis() {
     // may write to `a`.
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
+  }
+  {
+    // test fork/wait logic
+
+    // a = rand(1)
+    // fut = fork(a)
+    //    Subgraph is: return a.add_(1)
+    // ... some unrelated code
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto forkNode = graph->insertNode(graph->create(prim::fork));
+    auto forkBlock = forkNode->addBlock();
+    {
+      WithInsertPoint g(forkBlock);
+      auto aMut = graph->insert(aten::add_, {a, constant});
+      forkBlock->registerOutput(aMut);
+      forkNode->output()->setType(FutureType::create(aMut->type()));
+    }
+    script::lambdaLiftFork(forkNode);
+
+    auto fut = forkNode->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
 }
 
