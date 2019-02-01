@@ -143,8 +143,8 @@ def run_cmake(version,
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
 
-    cflags = os.getenv('CFLAGS') or ""
-    ldflags = os.getenv('LDFLAGS') or ""
+    cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
+    ldflags = os.getenv('LDFLAGS', "")
     if IS_WINDOWS:
         cflags += " /EHa"
 
@@ -161,12 +161,12 @@ def run_cmake(version,
         CMAKE_BUILD_TYPE=build_type,
         BUILD_TORCH="ON",
         BUILD_PYTHON=build_python,
-        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS") or "ON",
+        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
         BUILD_TEST=build_test,
         INSTALL_TEST=build_test,
         BUILD_CAFFE2_OPS=not check_negative_env_flag('BUILD_CAFFE2_OPS'),
-        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE") or "onnx_torch",
+        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
