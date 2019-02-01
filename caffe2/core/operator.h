@@ -37,8 +37,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   explicit OperatorBase(
       const c10::FunctionSchema&,
-      const std::vector<c10::IValue>&,
-      const std::vector<c10::IValue*>&);
+      std::vector<c10::IValue>,
+      std::vector<c10::IValue*>);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -603,8 +603,8 @@ class Operator : public OperatorBase {
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
-      const std::vector<c10::IValue>& inputs,
-      const std::vector<c10::IValue*>& outputs)
+      std::vector<c10::IValue> inputs,
+      std::vector<c10::IValue*> outputs)
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
@@ -1154,8 +1154,8 @@ C10_DECLARE_REGISTRY(
     FunctionSchemaOperatorRegistry,
     OperatorBase,
     const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
+    std::vector<c10::IValue>,
+    std::vector<c10::IValue*>);
 
 struct FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
@@ -1164,6 +1164,9 @@ struct FunctionSchemaStorageBase {
 };
 
 C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
+
+// Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
+// as they wrap it all in a Meyer's singleton accessible from Torch.
 
 #define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
@@ -1174,6 +1177,21 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
+
+#define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  void CAFFE2_MEYERS_OP_REGISTRATION_##name() {                      \
+    REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl);  \
+  }                                                                  \
+  static CAFFE2_STRUCT_OP_REGISTRATION_##name                        \
+      CAFFE2_STRUCT_OP_REGISTRATION_DEFN_##name;
+
+#define DECLARE_FUNCTION_SCHEMA_OPERATOR(name)             \
+  CAFFE2_API void CAFFE2_MEYERS_OP_REGISTRATION_##name();  \
+  struct CAFFE2_API CAFFE2_STRUCT_OP_REGISTRATION_##name { \
+    CAFFE2_STRUCT_OP_REGISTRATION_##name() {               \
+      CAFFE2_MEYERS_OP_REGISTRATION_##name();              \
+    }                                                      \
+  };
 
 #define GET_FUNCTION_SCHEMA(name) \
   FunctionSchemaRegistry()->Create(name)->getSchema()
@@ -1239,8 +1257,8 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
 // instantiate and run the operator.
 CAFFE2_API void RunOperator(
     c10::Symbol name,
-    std::vector<c10::IValue>& inputs,
-    std::vector<c10::IValue*>& outputs);
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs);
 
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,

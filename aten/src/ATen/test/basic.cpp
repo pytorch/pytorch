@@ -207,8 +207,7 @@ void TestTensorFromTH() {
   int a = 4;
   THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
   THFloatTensor_fill(t, a);
-  Tensor tt = CPU(kFloat).unsafeTensorFromTH(t, false);
-  ASSERT_NO_THROW(tt);
+  ASSERT_NO_THROW(CPU(kFloat).unsafeTensorFromTH(t, false));
 }
 
 void TestToCFloat() {

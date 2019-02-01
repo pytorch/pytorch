@@ -226,10 +226,10 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
   caffe2::CPUContext context;
   Cache* cache = static_cast<Cache*>(cache_);
   if (!cache->scale.has_value()) {
-    cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
+    cache->scale = at::Tensor(caffe2::empty({0}, at::dtype<float>()));
   }
   if (!cache->bias.has_value()) {
-    cache->bias = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
+    cache->bias = at::Tensor(caffe2::empty({0}, at::dtype<float>()));
   }
   caffe2::Tensor scale(*cache->scale);
   caffe2::Tensor bias(*cache->bias);
