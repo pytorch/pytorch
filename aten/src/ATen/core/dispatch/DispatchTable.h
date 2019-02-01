@@ -120,7 +120,7 @@ class DispatchTable final {
   explicit DispatchTable(const FunctionSchema& schema)
   : kernels_()
   , reverse_index_of_first_tensor_arg_(
-        schema.arguments().size() - 1 - get_index_of_first_tensor_arg_(schema))
+        schema.arguments().size() - get_index_of_first_tensor_arg_(schema))
   , operator_name_(schema.name()) {}
 
   DispatchTable(DispatchTable&&) = default;
@@ -186,8 +186,10 @@ class DispatchTable final {
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
-  // reverse_index means this is the index from the back of the argument list,
-  // i.e. from the top of the stack.
+  // reverse_index means this is the distance from the first tensor argument
+  // to argument_list.end(), i.e. from the top of the stack.
+  // Since it is distance to end(), this means it's 1-indexed,
+  // i.e. '1' is the last argument.
   size_t reverse_index_of_first_tensor_arg_;
   std::string operator_name_;
 };
