@@ -810,21 +810,6 @@ RegisterOperators reg({
       }
     ),
     Operator(
-        prim::DictIndex,
-        [](const Node* node) {
-          return [=](Stack& stack) {
-            auto index = pop(stack);
-            auto dict = pop(stack).toGenericDict();
-            const auto& elems = dict->elements();
-            auto value = elems.find(index);
-            if (value == elems.end()) {
-              AT_ERROR("KeyError: '", index, "'");
-            }
-            push(stack, value->second);
-            return 0;
-          };
-        }),
-    Operator(
         "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
@@ -1234,6 +1219,20 @@ Operation dictValues(const Node* node) {
   };
 }
 
+Operation dictIndex(const Node* node) {
+  return [=](Stack& stack) {
+    auto index = pop(stack);
+    auto dict = pop(stack).toGenericDict();
+    const auto& elems = dict->elements();
+    auto value = elems.find(index);
+    if (value == elems.end()) {
+      AT_ERROR("KeyError: '", index, "'");
+    }
+    push(stack, value->second);
+    return 0;
+  };
+}
+
 
 RegisterOperators reg2({
 
@@ -1505,12 +1504,13 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-    #define CREATE_DICT_OPS(key_type)                                     \
-      Operator("aten::len(Dict[" key_type ", t] self) -> int", dictLen),  \
-      Operator(                                                           \
-          "aten::keys(Dict[" key_type ", t] self) -> " key_type "[]",     \
-          dictKeys),                                                      \
-      Operator("aten::values(Dict[" key_type ", t] self) -> t[]", dictValues)
+    #define CREATE_DICT_OPS(key_type)                                           \
+      Operator("aten::len(Dict[" key_type ", t] self) -> int", dictLen),        \
+      Operator(                                                                 \
+          "aten::keys(Dict[" key_type ", t] self) -> " key_type "[]",           \
+          dictKeys),                                                            \
+      Operator("aten::values(Dict[" key_type ", t] self) -> t[]", dictValues),  \
+      Operator("prim::DictIndex(Dict[" key_type ", t] self, " key_type " key) -> t", dictIndex)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
