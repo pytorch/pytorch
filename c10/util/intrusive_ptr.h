@@ -576,7 +576,7 @@ class weak_intrusive_ptr final {
         // Return nullptr.
         return intrusive_ptr<TTarget, NullType>(NullType::singleton());
       }
-    } while (target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
+    } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
     return intrusive_ptr<TTarget, NullType>(target_);
   }
 

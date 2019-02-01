@@ -17,6 +17,8 @@
 #include <ctime>
 #endif
 
+#include <torch/csrc/jit/code_template.h>
+
 typedef struct CUevent_st* CUDAEventStub;
 
 namespace torch { namespace autograd {
@@ -220,6 +222,26 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerState new_state);
 TORCH_API thread_event_lists disableProfiler();
+
+
+// Usage:
+//   {
+//     RecordProfile guard("filename.trace");
+//     // code you want to profile
+//   }
+// Then open filename.trace in chrome://tracing
+struct TORCH_API RecordProfile {
+  RecordProfile(std::ostream& out);
+  RecordProfile(const std::string& filename);
+
+  ~RecordProfile();
+private:
+  void init();
+  std::unique_ptr<std::ofstream> file_;
+  std::ostream& out_;
+  void processEvents(const std::vector<Event*>& events);
+};
+
 
 } // namespace profiler
 }} // namespace torch::autograd

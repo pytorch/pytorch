@@ -130,8 +130,8 @@ class DispatchTable final {
    * @param args Arguments to invoke the function with
    * @return Kernel function pointing to the right kernel for the given arguments
    */
-   const DispatchTableEntry& lookup(ArrayRef<IValue> args) const {
-     auto dispatch_key = Schema::dispatch::dispatch_key(args);
+   const DispatchTableEntry& lookup(const Stack* stack) const {
+     auto dispatch_key = Schema::dispatch::dispatch_key(stack);
      const DispatchTableEntry* found = kernels_.lookup(dispatch_key);
      if (found == nullptr) {
        // TODO Better error message - include op name and dispatch key (i.e.
