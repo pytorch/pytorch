@@ -29,6 +29,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
 from multiprocessing.reduction import ForkingPickler
+from collections import namedtuple
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -231,6 +232,11 @@ class _TestTorchMixin(object):
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
+
+    def test_argparser_namedtuple_as_tuple(self):
+        a = torch.randn(5,5,5)
+        T = namedtuple('T', ['a', 'b'])
+        torch.norm(a, dim=T(0,1))
 
     def test_dot(self):
         types = {
