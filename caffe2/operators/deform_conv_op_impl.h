@@ -19,7 +19,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(FILTER);
   Tensor* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1);
-  CAFFE_ENFORCE_EQ(X.dim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(
       C == filter.dim32(1) * group_,
@@ -113,7 +113,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   if (InputSize() == 4) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == 1);
+    CAFFE_ENFORCE(bias.dim() == 1);
     CAFFE_ENFORCE(bias.dim32(0) == M);
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not image size, reshape and fill it
@@ -208,7 +208,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = this->GetDimsSize(dY);
 
   ConvPoolOpBase<Context>::ComputePads(input_dims);
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
 
@@ -218,9 +218,9 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       kernel_.size(),
       "d kernel.");
   CAFFE_ENFORCE(
-      offset.ndim() == 4,
+      offset.dim() == 4,
       "Deformable convolution only supports 4d offset, has ",
-      offset.ndim(),
+      offset.dim(),
       "d offset.");
   CAFFE_ENFORCE_EQ(offset.dim32(0), N);
   CAFFE_ENFORCE(
