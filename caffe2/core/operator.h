@@ -213,6 +213,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
+  at::optional<Tensor> OutputTensorOrNullopt(int idx) {
+    return BlobGetTensorOrNullopt(*outputs_.at(idx));
+  }
+
   inline Tensor*
   OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
     if (isLegacyOperator()) {

@@ -113,5 +113,13 @@ inline const Tensor& BlobGetTensor(const Blob& blob, DeviceType device_type) {
   CAFFE_THROW("Blob didn't contain a Tensor or the device_type doesn't match");
 }
 
+inline at::optional<Tensor> BlobGetTensorOrNullopt(const Blob& blob) {
+  if (blob.IsType<Tensor>()) {
+    return blob.Get<Tensor>().UnsafeSharedInstance();
+  } else {
+    return at::nullopt;
+  }
+}
+
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_BLOB_H_

@@ -116,13 +116,18 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   void pushOutputParameters_() {
+    std::cout << "\n\n\n--------------------------------------\n";
     for (size_t i = 0; i < num_output_parameters; ++i) {
-      // Intentionally sidestep the normal tensor conversion process
-      // because this tensor is coming from caffe2, might be half-initialized,
-      // and will eventually go back into a caffe2 kernel where that's ok.
-      // TODO Find a better way of doing this.
-      stack_.emplace_back(at::Tensor(Output(i)->getIntrusivePtr()));
+      auto preallocated_output_tensor = OperatorBase::OutputTensorOrNullopt(i);
+      if (preallocated_output_tensor.has_value()) {
+        std::cout << "preallocated\n";
+        stack_.emplace_back(at::Tensor(C10Tensor(std::move(*preallocated_output_tensor))));
+      } else {
+        std::cout << "not preallocated\n";
+        stack_.emplace_back(IValue());
+      }
     }
+    std::cout << "--------------------------------------\n\n" << std::endl;
   }
 
   void callKernel_() {
