@@ -1,0 +1,184 @@
+diff --git a/caffe2/sgd/hip/fp16_momentum_sgd_op.hip b/caffe2/sgd/hip/fp16_momentum_sgd_op.hip
+index b58b32faf..f5c037e22 100644
+--- a/caffe2/sgd/hip/fp16_momentum_sgd_op.hip
++++ b/caffe2/sgd/hip/fp16_momentum_sgd_op.hip
+@@ -12,6 +12,16 @@ typedef __half half;
+ typedef __half2 half2;
+ #endif
+
++
++// shim so it compiles
++float fmul(float a, float b) {
++    return fmaf(a, b, 0);
++}
++
++float fsub(float a, float b) {
++    return fmaf(1, a, fmaf(-1, b, 0));
++}
++
+ __global__ void FP16MomentumSGDKernel(
+     int N,
+     const half2* g,
+@@ -123,22 +133,22 @@ __global__ void FP16MomentumSGDFP32Kernel(
+       float2 g_float2 = __half22float2(g[i]);
+
+       float2 ng_float2;
+-      ng_float2.x = __fmaf_rn(weight_decay, param_float2.x, g_float2.x);
+-      ng_float2.y = __fmaf_rn(weight_decay, param_float2.y, g_float2.y);
++      ng_float2.x = fmaf(weight_decay, param_float2.x, g_float2.x);
++      ng_float2.y = fmaf(weight_decay, param_float2.y, g_float2.y);
+
+       float2 m_float2 = __half22float2(m[i]);
+       float2 adjusted_gradient_float2;
+       adjusted_gradient_float2.x =
+-          __fmaf_rn(LR, ng_float2.x, __fmul_rn(momentum, m_float2.x));
++          fmaf(LR, ng_float2.x, fmul(momentum, m_float2.x));
+       adjusted_gradient_float2.y =
+-          __fmaf_rn(LR, ng_float2.y, __fmul_rn(momentum, m_float2.y));
++          fmaf(LR, ng_float2.y, fmul(momentum, m_float2.y));
+
+       nm[i] = __float22half2_rn(adjusted_gradient_float2);
+       ng[i] = __float22half2_rn(adjusted_gradient_float2);
+
+       if (param) {
+-        param_float2.x = __fsub_rn(param_float2.x, adjusted_gradient_float2.x);
+-        param_float2.y = __fsub_rn(param_float2.y, adjusted_gradient_float2.y);
++        param_float2.x = fsub(param_float2.x, adjusted_gradient_float2.x);
++        param_float2.y = fsub(param_float2.y, adjusted_gradient_float2.y);
+         param[i] = __float22half2_rn(param_float2);
+       }
+     }
+@@ -151,29 +161,29 @@ __global__ void FP16MomentumSGDFP32Kernel(
+       float2 g_float2 = __half22float2(g[i]);
+
+       float2 ng_float2;
+-      ng_float2.x = __fmaf_rn(weight_decay, param_float2.x, g_float2.x);
+-      ng_float2.y = __fmaf_rn(weight_decay, param_float2.y, g_float2.y);
++      ng_float2.x = fmaf(weight_decay, param_float2.x, g_float2.x);
++      ng_float2.y = fmaf(weight_decay, param_float2.y, g_float2.y);
+
+       const float2 mi_float2 = __half22float2(m[i]);
+       float2 mom_mi_float2;
+-      mom_mi_float2.x = __fmul_rn(momentum, mi_float2.x);
+-      mom_mi_float2.y = __fmul_rn(momentum, mi_float2.y);
++      mom_mi_float2.x = fmul(momentum, mi_float2.x);
++      mom_mi_float2.y = fmul(momentum, mi_float2.y);
+       float2 mi_new_float2;
+-      mi_new_float2.x = __fmaf_rn(LR, ng_float2.x, mom_mi_float2.x);
+-      mi_new_float2.y = __fmaf_rn(LR, ng_float2.y, mom_mi_float2.y);
++      mi_new_float2.x = fmaf(LR, ng_float2.x, mom_mi_float2.x);
++      mi_new_float2.y = fmaf(LR, ng_float2.y, mom_mi_float2.y);
+
+       nm[i] = __float22half2_rn(mi_new_float2);
+-      ng_float2.x = __fsub_rn(
+-          __fmaf_rn(mi_new_float2.x, momentum, mi_new_float2.x),
++      ng_float2.x = fsub(
++          fmaf(mi_new_float2.x, momentum, mi_new_float2.x),
+           mom_mi_float2.x);
+-      ng_float2.y = __fsub_rn(
+-          __fmaf_rn(mi_new_float2.y, momentum, mi_new_float2.y),
++      ng_float2.y = fsub(
++          fmaf(mi_new_float2.y, momentum, mi_new_float2.y),
+           mom_mi_float2.y);
+       ng[i] = __float22half2_rn(ng_float2);
+
+       if (param) {
+-        param_float2.x = __fsub_rn(param_float2.x, ng_float2.x);
+-        param_float2.y = __fsub_rn(param_float2.y, ng_float2.y);
++        param_float2.x = fsub(param_float2.x, ng_float2.x);
++        param_float2.y = fsub(param_float2.y, ng_float2.y);
+         param[i] = __float22half2_rn(param_float2);
+       }
+     }
+diff --git a/caffe2/sgd/hip/fp32_momentum_sgd_op.hip b/caffe2/sgd/hip/fp32_momentum_sgd_op.hip
+index 99e4231b1..6fdff2e3e 100644
+--- a/caffe2/sgd/hip/fp32_momentum_sgd_op.hip
++++ b/caffe2/sgd/hip/fp32_momentum_sgd_op.hip
+@@ -7,6 +7,17 @@
+ namespace caffe2 {
+ namespace {
+
++
++// shim so it compiles
++float fmul(float a, float b) {
++    return fmaf(a, b, 0);
++}
++
++float fsub(float a, float b) {
++    return fmaf(1, a, fmaf(-1, b, 0));
++}
++
++
+ __global__ void FP32MomentumSGDKernel(
+     int N,
+     const float2* g,
+@@ -27,22 +38,22 @@ __global__ void FP32MomentumSGDKernel(
+   int n = N / 2;
+   if (!nesterov) {
+     HIP_1D_KERNEL_LOOP(i, n) {
+-      ng[i].x = __fmaf_rn(weight_decay, param[i].x, g[i].x);
+-      ng[i].y = __fmaf_rn(weight_decay, param[i].y, g[i].y);
++      ng[i].x = fmaf(weight_decay, param[i].x, g[i].x);
++      ng[i].y = fmaf(weight_decay, param[i].y, g[i].y);
+
+       float2 mi_float2 = m[i];
+       float2 adjusted_gradient_float2;
+       adjusted_gradient_float2.x =
+-          __fmaf_rn(LR, ng[i].x, __fmul_rn(momentum, mi_float2.x));
++          fmaf(LR, ng[i].x, fmul(momentum, mi_float2.x));
+       adjusted_gradient_float2.y =
+-          __fmaf_rn(LR, ng[i].y, __fmul_rn(momentum, mi_float2.y));
++          fmaf(LR, ng[i].y, fmul(momentum, mi_float2.y));
+
+       nm[i] = adjusted_gradient_float2;
+       ng[i] = adjusted_gradient_float2;
+
+       if (param) {
+-        param[i].x = __fsub_rn(param[i].x, adjusted_gradient_float2.x);
+-        param[i].y = __fsub_rn(param[i].y, adjusted_gradient_float2.y);
++        param[i].x = fsub(param[i].x, adjusted_gradient_float2.x);
++        param[i].y = fsub(param[i].y, adjusted_gradient_float2.y);
+       }
+     }
+   } else {
+@@ -50,28 +61,28 @@ __global__ void FP32MomentumSGDKernel(
+       // computing the term (grad + lambda*weight)
+       // might need to change in case of denormalization
+
+-      ng[i].x = __fmaf_rn(weight_decay, param[i].x, g[i].x);
+-      ng[i].y = __fmaf_rn(weight_decay, param[i].y, g[i].y);
++      ng[i].x = fmaf(weight_decay, param[i].x, g[i].x);
++      ng[i].y = fmaf(weight_decay, param[i].y, g[i].y);
+
+       const float2 mi_float2 = m[i];
+       float2 mom_mi_float2;
+-      mom_mi_float2.x = __fmul_rn(momentum, mi_float2.x);
+-      mom_mi_float2.y = __fmul_rn(momentum, mi_float2.y);
++      mom_mi_float2.x = fmul(momentum, mi_float2.x);
++      mom_mi_float2.y = fmul(momentum, mi_float2.y);
+       float2 mi_new_float2;
+-      mi_new_float2.x = __fmaf_rn(LR, ng[i].x, mom_mi_float2.x);
+-      mi_new_float2.y = __fmaf_rn(LR, ng[i].y, mom_mi_float2.y);
++      mi_new_float2.x = fmaf(LR, ng[i].x, mom_mi_float2.x);
++      mi_new_float2.y = fmaf(LR, ng[i].y, mom_mi_float2.y);
+
+       nm[i] = mi_new_float2;
+-      ng[i].x = __fsub_rn(
+-          __fmaf_rn(mi_new_float2.x, momentum, mi_new_float2.x),
++      ng[i].x = fsub(
++          fmaf(mi_new_float2.x, momentum, mi_new_float2.x),
+           mom_mi_float2.x);
+-      ng[i].y = __fsub_rn(
+-          __fmaf_rn(mi_new_float2.y, momentum, mi_new_float2.y),
++      ng[i].y = fsub(
++          fmaf(mi_new_float2.y, momentum, mi_new_float2.y),
+           mom_mi_float2.y);
+
+       if (param) {
+-        param[i].x = __fsub_rn(param[i].x, ng[i].x);
+-        param[i].y = __fsub_rn(param[i].y, ng[i].y);
++        param[i].x = fsub(param[i].x, ng[i].x);
++        param[i].y = fsub(param[i].y, ng[i].y);
+       }
+     }
+   }

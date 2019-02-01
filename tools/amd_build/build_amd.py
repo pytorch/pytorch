@@ -109,3 +109,8 @@ hipify_python.hipify(
     out_of_place_only=args.out_of_place_only,
     json_settings=json_settings,
     add_static_casts_option=args.add_static_casts)
+
+# Apply patch files in place post-transform
+patch_folder = os.path.join(amd_build_dir, "postpatch")
+for filename in os.listdir(os.path.join(amd_build_dir, "postpatch")):
+    subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
