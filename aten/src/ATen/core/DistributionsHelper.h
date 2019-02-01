@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/CPUGenerator.h>
-#include <ATen/core/PhiloxRNGEngine.h>
+#include <type_traits>
 
 // Distributions kernel adapted from THRandom.cpp
 // The kernels try to follow std::random distributions signature

@@ -2918,7 +2918,7 @@ class TestBatched(TestCase):
                                  idx.narrow(2, iter, max_len - iter)], 2)
                 idx = idx.narrow(2, 0, max_len)
             return idx
-        
+
         beam_batch = torch.jit.batch(batch_size=4)(beam)
 
         k = 5

@@ -3,8 +3,8 @@
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #define _USE_MATH_DEFINES
-#endif
 #include <math.h>
+#endif
 
 #include <stdint.h>
 
@@ -16,6 +16,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
+#include <cmath>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #define PHILOX_INLINE __forceinline__
@@ -26,6 +27,8 @@
 #define C10_HOST_INLINE C10_HOST PHILOX_INLINE
 #define C10_DEVICE_INLINE C10_DEVICE PHILOX_INLINE
 
+namespace at {
+
 // typedefs for holding vector data
 namespace {
 
@@ -35,8 +38,6 @@ typedef at::cuda::Array<double, 2> DOUBLE2;
 typedef at::cuda::Array<float, 2> FLOAT2;
 
 } // anonymous namespace
-
-namespace at {
 
 /*
 * Philox Engine implementation
