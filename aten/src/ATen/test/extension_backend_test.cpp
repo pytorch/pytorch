@@ -63,4 +63,18 @@ TEST(BackendExtensionTest, TestRegisterOp) {
       Backend::MSNPU,
       "empty(IntList size, TensorOptions options) -> Tensor", &empty_override)
   );
+
+  // Invalid registration: valid schema but mismatched function signature
+  EXPECT_ANY_THROW(
+    register_extension_backend_op(
+      Backend::MSNPU,
+      "empty(IntList size, TensorOptions options) -> Tensor", &add_override)
+  );
+
+  // Invalid registration: bad schema
+  EXPECT_ANY_THROW(
+    register_extension_backend_op(
+      Backend::MSNPU,
+      "blahblahblah", &add_override)
+  );
 }

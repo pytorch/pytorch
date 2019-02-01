@@ -123,6 +123,10 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 }
 """)
 
+# function ptr type of operator. used for generating schema checking for extension backends
+FUNCTION_PTR_TYPE = CodeTemplate("""\
+${return_type} (*)(${formals_types})""")
+
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -1607,6 +1611,36 @@ def create_derived(backend_type_env, declarations):
     return type_object_declarations, type_object_definitions
 
 
+def process_extension_backend_option(option):
+    # type: (FunctionOption) -> FunctionOption
+    option['formals_types'] = [f['type'] for f in option['formals_list']]
+    option['native_actuals'] = [f['name'] for f in option['formals_list']]
+    schema_args = ", ".join(
+        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
+    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+    return option
+
+
+def map_function_ptr_type_to_schemas(declarations):
+    # type: (List[FunctionOption]) -> Dict[str, List[str]]
+    function_ptr_type_to_schemas = {}  # type: Dict[str, List[str]]
+
+    for declaration in declarations:
+        for option in declaration['options']:
+            if not option.get('skip', False):
+                try:
+                    option = process_extension_backend_option(option)
+                    function_ptr_type = FUNCTION_PTR_TYPE.substitute(option)
+                    if function_ptr_type not in function_ptr_type_to_schemas:
+                        function_ptr_type_to_schemas[function_ptr_type] = [option['schema']]
+                    else:
+                        function_ptr_type_to_schemas[function_ptr_type].append(option['schema'])
+                except NYIError:
+                    pass
+    return function_ptr_type_to_schemas
+
+
 def create_extension_backend(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
     type_object_declarations = []
@@ -1616,12 +1650,7 @@ def create_extension_backend(backend_type_env, declarations):
         for option in declaration['options']:
             if not option.get('skip', False):
                 try:
-                    option['formals_types'] = [f['type'] for f in option['formals_list']]
-                    option['native_actuals'] = [f['name'] for f in option['formals_list']]
-                    schema_args = ", ".join(
-                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
-                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
-                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+                    option = process_extension_backend_option(option)
                     env = nested_dict(option, backend_type_env)
                     type_object_declarations.append(
                         TYPE_DERIVED_DECLARATION.substitute(env))

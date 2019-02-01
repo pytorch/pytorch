@@ -155,6 +155,14 @@ case Backend::${Backend}:
     break;
 """)
 
+GET_VALID_SCHEMAS_SPECIALIZATION = CodeTemplate("""\
+template <>
+inline std::set<std::string>& get_valid_schemas<${function_ptr_type}>() {
+  static std::set<std::string> schemas = {${schemas}};
+  return schemas;
+}
+""")
+
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
 cuda_file_manager = FileManager()
@@ -206,6 +214,7 @@ top_env = {
     'native_function_declarations': [],
     'extension_backend_headers': [],
     'extension_backend_register_switches': [],
+    'get_valid_schemas_specializations': [],
 }
 
 
@@ -358,6 +367,17 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include "ATen/{}.h"'.format(env['Type']))
 
     return env
+
+
+def generate_extension_backend_schema_checker(declarations):
+    function_ptr_type_to_schemas = function_wrapper.map_function_ptr_type_to_schemas(declarations)
+
+    for function_ptr_type, schemas in function_ptr_type_to_schemas.items():
+        specialization = GET_VALID_SCHEMAS_SPECIALIZATION.substitute(
+            function_ptr_type=function_ptr_type,
+            schemas=['"{}"'.format(schema) for schema in (schemas)]
+        )
+        top_env['get_valid_schemas_specializations'].append(specialization)
 
 
 def generate_type_extension_backend(backend, declarations):
@@ -521,6 +541,7 @@ def generate_outputs():
             backend, density, scalar_type, declarations))
     for backend in extension_backends:
         all_types.append(generate_type_extension_backend(backend, declarations))
+    generate_extension_backend_schema_checker(declarations)
 
     all_legacy_th_dispatchers = []
     for backend, density, scalar_type in iterate_types():
