@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/script/module.h>
 
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/passes/python_print.h>
@@ -22,6 +21,7 @@
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
 #include <cstddef>
@@ -35,6 +35,9 @@
 namespace torch {
 namespace jit {
 namespace script {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 using ResolutionCallback = std::function<py::function(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;

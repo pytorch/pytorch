@@ -189,17 +189,16 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t lp_char_stride = log_probs.stride(2);
   int64_t tg_target_stride;
 
-  int64_t max_target_length;
+  int64_t max_target_length = 0;
   auto tg_batch_offsets = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
   auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    max_target_length = 0;
     for (int64_t i = 0; i < batch_size; i++) {
       tg_batch_offsets_data[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
-	max_target_length = target_lengths[i];
+        max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
     checkSize(c, targets_arg, 0, pos);
@@ -209,9 +208,10 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     int64_t tg_batch_stride = targets.stride(0);
     for (int64_t i = 0; i < batch_size; i++) {
       tg_batch_offsets_data[i] = i * tg_batch_stride;
+      if (max_target_length < target_lengths[i])
+        max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(1);
-    max_target_length = targets.size(1);
     checkSize(c, targets_arg, 0, batch_size);
     AT_CHECK(targets.size(1) >= max_target_length,
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,

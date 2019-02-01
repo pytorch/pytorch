@@ -36,3 +36,6 @@ matrix:
         python: "3.6"
         script: tools/run-clang-tidy-in-ci.sh
 
+branches:
+  only:
+  - master
