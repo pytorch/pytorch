@@ -124,7 +124,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::MSNPU:
       return DeviceType::MSNPU;
     case Backend::XLA:
-      return DeviceType::TPU;
+      return DeviceType::XLA;
     case Backend::SparseCPU:
       return DeviceType::CPU;
     case Backend::SparseCUDA:
@@ -148,7 +148,7 @@ static inline Backend deviceTypeToBackend(DeviceType d) {
       return Backend::HIP;
     case DeviceType::MSNPU:
       return Backend::MSNPU;
-    case DeviceType::TPU:
+    case DeviceType::XLA:
       return Backend::XLA;
     default:
       AT_ERROR("Unknown device type ", d);
@@ -221,7 +221,7 @@ constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
-constexpr DeviceType kTPU = DeviceType::TPU;
+constexpr DeviceType kXLA = DeviceType::XLA;
 
 static inline const char* toString(Backend b) {
   switch (b) {

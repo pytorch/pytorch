@@ -4,7 +4,7 @@
 
 using namespace at;
 
-TEST(TpuTensorTest, TestNoStorage) {
+TEST(XlaTensorTest, TestNoStorage) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       XLATensorId(),
       caffe2::TypeMeta::Make<float>(),
