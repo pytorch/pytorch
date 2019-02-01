@@ -10,7 +10,8 @@ class IDEEPReluOp final : public IDEEPOperator {
   IDEEPReluOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws), alpha_(0.0) {
     // Figure out the Relu descriptor.
-    if (operator_def.type().substr(0, 4) == "Relu") {
+    if (operator_def.type().substr(0, 4) == "Relu"
+        || operator_def.type().substr(0, 8) == "Int8Relu") {
       alpha_ = 0.0;
     } else if (operator_def.type().substr(0, 9) == "LeakyRelu") {
       if (HasArgument("alpha")) {
@@ -83,5 +84,7 @@ REGISTER_IDEEP_OPERATOR(ReluGradient, IDEEPReluGradientOp);
 
 REGISTER_IDEEP_OPERATOR(LeakyRelu, IDEEPReluOp);
 REGISTER_IDEEP_OPERATOR(LeakyReluGradient, IDEEPReluGradientOp);
+
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Relu, DNNLOWP, IDEEPReluOp);
 
 } // namespace caffe2

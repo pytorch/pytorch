@@ -23,9 +23,11 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     pk_ = training_mode ? iprop::forward_training : iprop::forward_inference;
 
     // Figure out the pooling descriptor.
-    if (operator_def.type().substr(0, 7) == "MaxPool") {
+    if (operator_def.type().substr(0, 7) == "MaxPool"
+        || operator_def.type().substr(0, 11) == "Int8MaxPool") {
       algo_ = ialgo::pooling_max;
-    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool"
+        || operator_def.type().substr(0, 15) == "Int8AveragePool") {
       algo_ = ialgo::pooling_avg;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
@@ -103,5 +105,8 @@ REGISTER_IDEEP_OPERATOR(MaxPoolGradient, IDEEPPoolGradientOp);
 
 REGISTER_IDEEP_OPERATOR(AveragePool, IDEEPPoolOp);
 REGISTER_IDEEP_OPERATOR(AveragePoolGradient, IDEEPPoolGradientOp);
+
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8MaxPool, DNNLOWP, IDEEPPoolOp);
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8AveragePool, DNNLOWP, IDEEPPoolOp);
 
 } // namespace caffe2
