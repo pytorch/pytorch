@@ -30,6 +30,12 @@ Tensor sum_override(const Tensor & self) {
   return get_dummy_tensor();
 }
 
+// needed for sum backwards
+Tensor expand_override(const Tensor & self, IntList size, bool implicit) {
+  return get_dummy_tensor();
+}
+
+
 Tensor kl_div_override(
     const Tensor & self, const Tensor & target, int64_t reduction) {
   test_int = 3;
@@ -64,6 +70,10 @@ void init_msnpu_extension() {
   register_extension_backend_op(
     Backend::MSNPU,
     "sum(Tensor self) -> Tensor", &sum_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "expand(Tensor self, IntList size, bool implicit) -> Tensor",
+    &expand_override);
   register_extension_backend_op(
     Backend::MSNPU,
     "kl_div(Tensor self, Tensor target, int64_t reduction) -> Tensor",
