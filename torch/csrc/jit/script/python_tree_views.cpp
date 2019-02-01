@@ -218,7 +218,6 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Select, Expr>(m, "Select")
       .def(py::init([](const Expr& expr, const Ident& field) {
-        const auto& r = expr.range();
         return Select::create(expr.range(), expr, field);
       }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
@@ -233,6 +232,15 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<TupleLiteral, Expr>(m, "TupleLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
         return TupleLiteral::create(range, wrap_list(range, std::move(args)));
+      }));
+  py::class_<DictLiteral, Expr>(m, "DictLiteral")
+      .def(py::init([](const SourceRange& range,
+                       std::vector<Expr> keys,
+                       std::vector<Expr> values) {
+        return DictLiteral::create(
+            range,
+            wrap_list(range, std::move(keys)),
+            wrap_list(range, std::move(values)));
       }));
   py::class_<Subscript, Expr>(m, "Subscript")
       .def(py::init([](const Expr& base, std::vector<Expr> subscript_exprs) {

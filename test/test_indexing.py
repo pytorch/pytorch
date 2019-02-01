@@ -286,6 +286,15 @@ class TestIndexing(TestCase):
         x = torch.arange(0, 16).view(4, 4)
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
 
+    def test_out_of_bound_index(self):
+        x = torch.arange(0, 100).view(2, 5, 10)
+        self.assertRaisesRegex(IndexError, 'index 5 is out of bounds for dimension 1 with size 5', lambda: x[0, 5])
+        self.assertRaisesRegex(IndexError, 'index 4 is out of bounds for dimension 0 with size 2', lambda: x[4, 5])
+        self.assertRaisesRegex(IndexError, 'index 15 is out of bounds for dimension 2 with size 10',
+                               lambda: x[0, 1, 15])
+        self.assertRaisesRegex(IndexError, 'index 12 is out of bounds for dimension 2 with size 10',
+                               lambda: x[:, :, 12])
+
     def test_zero_dim_index(self):
         x = torch.tensor(10)
         self.assertEqual(x, x.item())
