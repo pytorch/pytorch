@@ -116,6 +116,13 @@ TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
+# Overrideable stubs to be used in user-extendable backends
+TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+    return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
+}
+""")
+
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -489,6 +496,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
+    'formals_types': List[str],
     'inferred_type': str,
     'inplace': bool,
     'matches_jit_signature': bool,
@@ -513,6 +521,8 @@ FunctionOption = TypedDict('FunctionOption', {
     'return': ReturnDecl,
     'returns': List[ReturnType],
     'scalar_check': str,
+    # schema used for extension backend operator registration
+    'schema': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -1592,6 +1602,31 @@ def create_derived(backend_type_env, declarations):
                         process_option(option)
                     else:
                         process_native(option)
+                except NYIError:
+                    pass
+    return type_object_declarations, type_object_definitions
+
+
+def create_extension_backend(backend_type_env, declarations):
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
+    type_object_declarations = []
+    type_object_definitions = []
+
+    for declaration in declarations:
+        for option in declaration['options']:
+            if not option.get('skip', False):
+                try:
+                    option['formals_types'] = [f['type'] for f in option['formals_list']]
+                    option['native_actuals'] = [f['name'] for f in option['formals_list']]
+                    schema_args = ", ".join(
+                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
+                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+                    env = nested_dict(option, backend_type_env)
+                    type_object_declarations.append(
+                        TYPE_DERIVED_DECLARATION.substitute(env))
+                    type_object_definitions.append(
+                        TYPE_DEFINITION_EXTENSION_BACKEND.substitute(env))
                 except NYIError:
                     pass
     return type_object_declarations, type_object_definitions
