@@ -203,6 +203,16 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
+  void SetOutputTensor(int idx, Tensor tensor) {
+    // also update the tensor in the hack
+    if (!isLegacyOperator()) {
+      output_tensors_[idx] = tensor.UnsafeSharedInstance();
+    }
+
+    // update the tensor in the workspace
+    BlobSetTensor(outputs_.at(idx), std::move(tensor));
+  }
+
   inline Tensor*
   OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
