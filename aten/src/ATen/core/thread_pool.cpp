@@ -1,16 +1,16 @@
-#include <ATen/core/thread_pool.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/thread_pool.h>
 
 namespace c10 {
 
-ThreadPool::ThreadPool(std::size_t pool_size, int numa_node_id)
-    : threads_(pool_size),
+ThreadPool::ThreadPool(c10::optional<std::size_t> pool_size, int numa_node_id)
+    : threads_(pool_size.has_value() ? pool_size.value() : 1),
       running_(true),
       complete_(true),
-      available_(pool_size),
-      total_(pool_size),
+      available_(pool_size.has_value() ? pool_size.value() : 1),
+      total_(pool_size.has_value() ? pool_size.value() : 1),
       numa_node_id_(numa_node_id) {
-  for (std::size_t i = 0; i < pool_size; ++i) {
+  for (std::size_t i = 0; i < threads_.size(); ++i) {
     threads_[i] = std::thread(std::bind(&ThreadPool::main_loop, this, i));
   }
 }
@@ -117,8 +117,18 @@ void ThreadPool::main_loop(std::size_t index) {
   } // while running_
 }
 
+c10::optional<size_t> num_threads(c10::optional<size_t> val) {
+  static c10::optional<size_t> n_threads = val;
+  if (val.has_value() && val != n_threads) {
+    throw std::runtime_error(
+        "Attempted to set number of ATen threads"
+        " multiple times.");
+  }
+  return n_threads;
+}
+
 ThreadPool& global_work_queue() {
-  static ThreadPool thread_pool(1);
+  static ThreadPool thread_pool(num_threads());
 
   return thread_pool;
 }
