@@ -270,8 +270,15 @@ struct CAFFE2_API Type {
   virtual Tensor irfft(const Tensor & self, int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const = 0;
   virtual Tensor index(const Tensor & self, TensorList indices) const = 0;
   virtual Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
+  virtual Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
   virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
   virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
+  virtual Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
+  virtual Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) const = 0;
+  virtual Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
+  virtual Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
+  virtual Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) const = 0;
+  virtual Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
