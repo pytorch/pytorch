@@ -20,6 +20,28 @@ const std::vector<std::string> functions = {
                 return grad_self, None
 
             return torch.adaptive_avg_pool2d(self, output_size), backward
+
+        def mean(self):
+            def backward(grad_output):
+                grad_self =  grad_output.expand(self.size()) / self.numel()
+                return grad_self
+
+            return torch.mean(self), backward
+
+        def var(self, unbiased: bool):
+            def backward(grad_output):
+                grad_self =  2.0 / (float(self.numel()) - float(unbiased)) * grad_output * (self - self.mean())
+                return grad_self, None
+
+            return torch.var(self, unbiased=unbiased), backward
+
+        def std(self, unbiased: bool):
+            std_out = torch.std(self, unbiased = unbiased)
+            def backward(grad_output):
+                grad = grad_output / (std_out * 2)
+                grad_self =  2.0 / (float(self.numel()) - float(unbiased)) * grad * (self - self.mean())
+                return grad_self, None
+            return std_out, backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
