@@ -8,14 +8,18 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(IntList size, const TensorOptions & options) {
-  test_int = 1;
+Tensor get_dummy_tensor() {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
       MSNPUTensorId(),
       false);
   return Tensor(std::move(tensor_impl));
+}
+
+Tensor empty_override(IntList size, const TensorOptions & options) {
+  test_int = 1;
+  return get_dummy_tensor();
 }
 
 Tensor empty_like_override(const Tensor & self, const TensorOptions & options) {
@@ -26,6 +30,20 @@ Tensor empty_like_override(const Tensor & self, const TensorOptions & options) {
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   test_int = 3;
   return a;
+}
+
+Tensor s_copy__override(Tensor & self, const Tensor & src, bool non_blocking) {
+  test_int = 4;
+  return get_dummy_tensor();
+}
+
+Tensor _s_copy_from_override(const Tensor & self, const Tensor & dst, bool non_blocking) {
+  test_int = 5;
+  return get_dummy_tensor();
+}
+
+Tensor expand_override(const Tensor & self, IntList size, bool implicit) {
+  return get_dummy_tensor();
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {
@@ -52,6 +70,25 @@ TEST(BackendExtensionTest, TestRegisterOp) {
     "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
   add(a, b);
   ASSERT_EQ(test_int, 3);
+
+  // copy has a double dispatch that needs to be tested
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "s_copy_(Tensor self, Tensor src, bool non_blocking) -> Tensor", &s_copy__override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "_s_copy_from(Tensor self, Tensor dst, bool non_blocking) -> Tensor", &_s_copy_from_override);
+  // expand is needed for copy_
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "expand(Tensor self, IntList size, bool implicit) -> Tensor",
+    &expand_override);
+  Tensor cpu_tensor = empty({}, at::kCPU);
+  Tensor msnpu_tensor = empty({}, at::kMSNPU);
+  msnpu_tensor.copy_(cpu_tensor, false);
+  ASSERT_EQ(test_int, 4);
+  cpu_tensor.copy_(msnpu_tensor, false);
+  ASSERT_EQ(test_int, 5);
 
   // Ensure that non-MSNPU operator still works
   Tensor d = empty({5, 5}, at::kCPU);
