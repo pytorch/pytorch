@@ -6,7 +6,7 @@ namespace c10 {
 namespace detail {
 class OpSchemaRegistrar final {
 public:
-  OpSchemaRegistrar(FunctionSchema schema)
+  explicit OpSchemaRegistrar(FunctionSchema schema)
   : opHandle_(c10::Dispatcher::singleton().registerSchema(std::move(schema))) {}
 
   ~OpSchemaRegistrar() {

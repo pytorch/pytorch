@@ -7,9 +7,10 @@ namespace c10 {
  * called multiple times. This is used by a lot of caffe2 kernels, for example
  * conv_op stores a set of tensors for intermediate values to avoid having
  * to reallocate them on each call.
- * This cache owned by the call site and passed in to the kernel as a function
- * argument. It must inherit from KernelCache so the call site knows how to
- * store and destruct it.
+ * This cache owned by the call site (i.e. stored inside the OpKernel object)
+ * kept at the call site to call into the kernel) and passed in to the kernel
+ * as a function argument. It must inherit from KernelCache so the call site
+ * knows how to store and destruct it.
  */
 class CAFFE2_API KernelCache {
 public:

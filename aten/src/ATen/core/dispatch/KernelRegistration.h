@@ -30,7 +30,7 @@ public:
    * @param kernel The concrete function implementation to register
    * @param dispatch_key  The dispatch key to register the function to
    */
-  KernelRegistrar(const OperatorHandle& (*op)(), TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
+  explicit KernelRegistrar(const OperatorHandle& (*op)(), TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
   : op_(std::move(op)), dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
     Dispatcher::singleton().registerKernel(op_(), dispatch_key_, kernel, cache_creator);
   }
@@ -179,10 +179,10 @@ private:
   KernelCacheCreatorFunction* cache_creator_;
 
  public:
-  constexpr KernelRegistrationBuilder(const OperatorHandle& (*op)())
+  constexpr explicit KernelRegistrationBuilder(const OperatorHandle& (*op)())
       : KernelRegistrationBuilder(std::move(op), c10::nullopt, nullptr, &defaultCacheCreator) {}
 
-  constexpr KernelRegistrationBuilder(
+  constexpr explicit KernelRegistrationBuilder(
       const OperatorHandle& (*op)(),
       c10::optional<TensorTypeId> dispatch_key,
       KernelFunction* kernel,
