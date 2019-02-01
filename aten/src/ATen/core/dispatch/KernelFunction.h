@@ -9,7 +9,7 @@ using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
 
 /**
  * This is the basic ABI for any kernel call. Each kernel is registered as a
- * pointer to a global C function of this type.
+ * function pointer `KernelFunction*`, i.e. kernels are not allowed to be closures.
  */
 using KernelFunction = void(Stack*, KernelCache* cache);
 

@@ -7,7 +7,7 @@
 
 namespace c10 {
 
-class CAFFE2_API Dispatcher;
+class CAFFE2_API OperatorHandle;
 
 /**
  * This class represents an operator kernel, i.e. an operator *after* it was
@@ -19,6 +19,8 @@ class CAFFE2_API Dispatcher;
  * Also, keeping around the OpKernel instance will keep around a local cache
  * that is used by some kernels to get better performance when they're called
  * multiple times (mostly Caffe2 kernels do that).
+ *
+ * OpKernel is not threadsafe.
  */
 class CAFFE2_API OpKernel final {
 public:
@@ -30,7 +32,7 @@ public:
   /**
    * Call the operator kernel with the given arguments.
    */
-  void call(Stack* stack) {
+  void call(Stack* stack) const {
     if (cache_.get() == nullptr) {
       AT_ASSERT(cache_creator_ != nullptr);
       cache_ = (*cache_creator_)();
@@ -43,36 +45,10 @@ private:
   : kernel_(kernel), cache_creator_(cache_creator) {}
   friend class Dispatcher;
 
-  // The kernel function is a global C function, not a std::function.
-  // That is, ownership is not an issue.
   KernelFunction* kernel_;
 
   KernelCacheCreatorFunction* cache_creator_;
-  std::unique_ptr<c10::KernelCache> cache_;
-};
-
-/**
- * This is a handle to an operator schema registered with the dispatcher.
- * This handle can be used to register kernels with the dispatcher or
- * to lookup a kernel for a certain set of arguments.
- */
-class CAFFE2_API OperatorHandle final {
-public:
-  OperatorHandle(OperatorHandle&&) = default;
-  OperatorHandle& operator=(OperatorHandle&&) = default;
-  OperatorHandle(const OperatorHandle&) = default;
-  OperatorHandle& operator=(const OperatorHandle&) = default;
-
-  const FunctionSchema& schema() const {
-    return dispatchTable_->schema();
-  }
-
-private:
-  explicit OperatorHandle(std::list<DispatchTable>::iterator dispatchTable)
-  : dispatchTable_(std::move(dispatchTable)) {}
-  friend class Dispatcher;
-
-  std::list<DispatchTable>::iterator dispatchTable_;
+  mutable std::unique_ptr<c10::KernelCache> cache_;
 };
 
 /**
@@ -96,6 +72,17 @@ class RegistrationListenerList;
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
  */
 class CAFFE2_API Dispatcher final {
+private:
+  struct OperatorDef final {
+    explicit OperatorDef(FunctionSchema schema_)
+    : dispatchTable(schema_)
+    , schema(std::move(schema_)) {}
+
+    DispatchTable dispatchTable;
+    FunctionSchema schema;
+  };
+  friend class OperatorHandle;
+
 public:
   ~Dispatcher();
 
@@ -112,9 +99,10 @@ public:
   OperatorHandle registerSchema(FunctionSchema schema);
 
   /**
-   * Remove a previously registered schema.
+   * Remove an operator from the dispatcher. Make sure you removed
+   * all kernels for this operatorbefore calling this.
    */
-  void deregisterSchema(OperatorHandle op);
+  void deregisterSchema(const OperatorHandle& op);
 
   /**
    * Register an operator to the dispatch table for an operator.
@@ -142,14 +130,68 @@ public:
 private:
   Dispatcher();
 
-  std::list<DispatchTable> operators_;
+  std::list<OperatorDef> operators_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
 
+/**
+ * This is a handle to an operator schema registered with the dispatcher.
+ * This handle can be used to register kernels with the dispatcher or
+ * to lookup a kernel for a certain set of arguments.
+ */
+class CAFFE2_API OperatorHandle final {
+public:
+  OperatorHandle(OperatorHandle&&) = default;
+  OperatorHandle& operator=(OperatorHandle&&) = default;
+  OperatorHandle(const OperatorHandle&) = default;
+  OperatorHandle& operator=(const OperatorHandle&) = default;
+
+  const FunctionSchema& schema() const {
+    return operatorDefIterator_->schema;
+  }
+
+private:
+  explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorDefIterator)
+  : operatorDefIterator_(std::move(operatorDefIterator)) {}
+  friend class Dispatcher;
+
+  std::list<Dispatcher::OperatorDef>::iterator operatorDefIterator_;
+};
+
+
+
+inline OperatorHandle Dispatcher::registerSchema(FunctionSchema schema) {
+  // we need a lock to avoid concurrent writes
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  operators_.emplace_back(std::move(schema));
+  return OperatorHandle(--operators_.end());
+}
+
+inline void Dispatcher::deregisterSchema(const OperatorHandle& op) {
+  // we need a lock to avoid concurrent writes
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
+    AT_ERROR("Tried to deregister op schema that still has kernels registered");
+  }
+  operators_.erase(op.operatorDefIterator_);
+}
+
+inline void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
+}
+
+inline void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
+}
+
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.dispatchTable_->lookup(stack);
+  const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
 }
 
