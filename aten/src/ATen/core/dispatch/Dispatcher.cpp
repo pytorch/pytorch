@@ -50,28 +50,28 @@ OperatorHandle Dispatcher::registerSchema(FunctionSchema schema) {
   return op;
 }
 
-void Dispatcher::deregisterSchema(OperatorHandle op) {
+void Dispatcher::deregisterSchema(const OperatorHandle& op) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (!op.dispatchTable_->isEmpty()) {
+  if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
     AT_ERROR("Tried to deregister op schema that still has kernels registered");
   }
 
   // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
   listeners_->callOnOperatorDeregistered(op);
 
-  operators_.erase(op.dispatchTable_);
+  operators_.erase(op.operatorDefIterator_);
 }
 
 void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.dispatchTable_->registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
+  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
 }
 
 void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.dispatchTable_->deregisterKernel(dispatch_key);
+  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
