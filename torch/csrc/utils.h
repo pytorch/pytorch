@@ -81,6 +81,14 @@
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
 
+#define THPBoolUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
+#define THPBoolUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
+#define THPBoolUtils_newReal(value)           PyFloat_FromDouble(value)
+#define THPBoolUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
+#define THPBoolUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
+#define THPBoolfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
+
+
 #define THPLongUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPLongUtils_unpackReal(object)       (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value)           THPUtils_newReal_INT(value)
@@ -145,6 +153,9 @@ struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateBoolType.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
