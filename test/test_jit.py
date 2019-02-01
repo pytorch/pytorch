@@ -9653,7 +9653,7 @@ a")
         self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         # Export and ensure ignored code not present
-        pp, constants = m._python_print(True)
+        pp, constants = m._python_print()
         printed = torch.jit.ScriptModule()
         ppv = "op_version_set = 0\n{}".format(pp)
         torch._C._jit_import_methods(printed, ppv, constants)

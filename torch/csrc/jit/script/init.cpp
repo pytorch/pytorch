@@ -824,12 +824,12 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "_python_print",
-          [](Module& self, bool enforce_importable) {
+          [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, enforce_importable);
+            PythonPrint(ss, self, tensors, true);
             return std::make_pair(ss.str(), tensors);
-          }, py::arg("enforce_importable") = true)
+          })
       .def_property_readonly(
           "code",
           [](Module& self) {
