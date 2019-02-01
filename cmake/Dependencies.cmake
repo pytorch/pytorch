@@ -692,7 +692,7 @@ if(USE_OPENMP)
   ENDIF()
 
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
-    FIND_PACKAGE(OpenMP)
+    FIND_PACKAGE(OpenMP QUIET)
     SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
 
     # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
