@@ -19,7 +19,7 @@ namespace c10 {
 
 /**
  * The type of a user-supplied function to initialize the kernel cache.
- * this is stored together with the kernel function in the dispatch table
+ * this is stored together with the KernelFunction in the DispatchTable
  * so we can create a new cache instance when a kernel is looked up
  * from the dispatch table.
  */
@@ -33,11 +33,11 @@ using KernelCacheCreatorFunction = std::unique_ptr<c10::KernelCache> ();
  * this same cache instance.
  */
 struct DispatchTableEntry final {
-  KernelFunction* kernel_func;
-  KernelCacheCreatorFunction* cache_creator_func;
+  /*not-nullable*/ KernelFunction* kernel_func;
+  /*not-nullable*/ KernelCacheCreatorFunction* cache_creator_func;
 };
 
-namespace details {
+namespace detail {
 /// Kernel implementations in a thread-safe hash table.
 class ThreadsafeOperatorTable_ final {
  public:
@@ -104,23 +104,29 @@ class ThreadsafeOperatorTable_ final {
 
    LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
 };
-} // namespace details
+} // namespace detail
 
 /**
  * Per-operator dispatch table.
  *
- * Given an operator specified by 'OpSchemaDef', this class records a dispatch
+ * Given an operator specified by a FunctionSchema, this class records a dispatch
  * table for various kernels provided for this operator.  For example, if we
  * consider the operator add(Tensor, Tensor), the dispatch table for this
  * operator may contain implementations for various dynamic tensor types, such
- * as (CPUFloatTensor, CPUFloatTensor), (CUDAFloatTensor, CUDAFloatTensor), etc.
+ * as CPUTensorId, CUDATensorId, etc.
  */
 class DispatchTable final {
  public:
-  DispatchTable(FunctionSchema schema)
-  : schema_(std::move(schema))
-  , kernels_()
-  , index_of_first_tensor_arg_(get_index_of_first_tensor_arg_(schema)) {}
+  explicit DispatchTable(const FunctionSchema& schema)
+  : kernels_()
+  , reverse_index_of_first_tensor_arg_(
+        schema.arguments().size() - 1 - get_index_of_first_tensor_arg_(schema))
+  , operator_name_(schema.name()) {}
+
+  DispatchTable(DispatchTable&&) = default;
+  DispatchTable& operator=(DispatchTable&&) = default;
+  DispatchTable(const DispatchTable&) = delete;
+  DispatchTable& operator=(const DispatchTable&) = delete;
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -130,7 +136,7 @@ class DispatchTable final {
   void registerKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    kernels_.emplace(dispatch_key, kernel, schema_.name());
+    kernels_.emplace(dispatch_key, kernel, operator_name_);
   }
 
   /**
@@ -142,7 +148,7 @@ class DispatchTable final {
   // override patterns! In this case, an operator will show up in multiple
   // slots, and erasing them one-by-one is probably not such a good idea.
   void deregisterKernel(TensorTypeId dispatch_key) {
-    kernels_.erase(dispatch_key, schema_.name());
+    kernels_.erase(dispatch_key, operator_name_);
   }
 
   /**
@@ -155,14 +161,10 @@ class DispatchTable final {
    const DispatchTableEntry& lookup(const Stack* stack) const {
      TensorTypeId dispatch_key = torch::jit::peek(
        *stack,
-       index_of_first_tensor_arg_,
-       schema_.arguments().size()
+       0,
+       reverse_index_of_first_tensor_arg_
      ).toTensor().type_id();
-     return *kernels_.lookup(dispatch_key, schema_.name());
-   }
-
-   const FunctionSchema& schema() const {
-     return schema_;
+     return *kernels_.lookup(dispatch_key, operator_name_);
    }
 
    bool isEmpty() const {
@@ -180,13 +182,14 @@ class DispatchTable final {
     AT_ERROR("Tried to create dispatch table for operator schema ", schema.name(), " that doesn't have tensor arguments.");
   }
 
-
-  FunctionSchema schema_;
-  details::ThreadsafeOperatorTable_ kernels_;
+  detail::ThreadsafeOperatorTable_ kernels_;
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
-  size_t index_of_first_tensor_arg_;
+  // reverse_index means this is the index from the back of the argument list,
+  // i.e. from the top of the stack.
+  size_t reverse_index_of_first_tensor_arg_;
+  std::string operator_name_;
 };
 
 } // namespace c10
