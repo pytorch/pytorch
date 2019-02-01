@@ -166,7 +166,7 @@ inline void check_function_pointer_type<${function_ptr_type}>(const std::string 
     ${schemas}
   };
   if (schemas.find(schema) == schemas.end()) {
-    AT_ERROR("Attempting to register incorrect function pointer type for schema ", schema,
+    AT_ERROR("Attempting to register invalid function pointer type for schema ", schema,
         ". Expected type: ${function_ptr_type}");
   }
 }
