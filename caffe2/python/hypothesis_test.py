@@ -1526,8 +1526,11 @@ class TestOperators(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support else [])),
-           do=st.sampled_from(hu.device_options))
-    def test_dag_net_forking(self, net_type, num_workers, do):
+           # This test is flaky on rocm caused by race condition in
+           # hcc HSAQueue, the fix will be coming in rocm 2.2 (see
+           # https://github.com/pytorch/pytorch/issues/16229
+           **hu.gcs_no_hip)
+    def test_dag_net_forking(self, net_type, num_workers, gc, dc):
         from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew
         m = ModelHelper(name="test_model")
@@ -1560,8 +1563,8 @@ class TestOperators(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
+        m.Proto().device_option.CopyFrom(gc)
+        m.param_init_net.Proto().device_option.CopyFrom(gc)
 
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
@@ -1577,10 +1580,10 @@ class TestOperators(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
