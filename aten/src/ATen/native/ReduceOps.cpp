@@ -265,25 +265,25 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  //
-  // auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
-  // if (iter->numel() == 0) {
-  //   result.fill_(std::numeric_limits<double>::quiet_NaN());
-  // } else {
-  //   mean_stub(iter->device_type(), *iter);
-  // }
-
-  // === Start workaround impl ===
-  int64_t dim_prod = 1;
-  if (dim.size() == 0 || self.ndimension() == 0) {
-    dim_prod = self.numel();
-  } else {
-    for (auto d : dim) {
-      dim_prod *= self.size(d);
+  if (!self.is_cuda() && self.is_hip()) {
+    int64_t dim_prod = 1;
+    if (dim.size() == 0 || self.ndimension() == 0) {
+      dim_prod = self.numel();
+    } else {
+      for (auto d : dim) {
+        dim_prod *= self.size(d);
+      }
     }
+    at::sum_out(result, self, dim, keepdim, dtype).div_(dim_prod);
+    return result;
   }
-  at::sum_out(result, self, dim, keepdim, dtype).div_(dim_prod);
-  // === End workaround impl ===
+
+  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    mean_stub(iter->device_type(), *iter);
+  }
   return result;
 }
 
