@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 export PATH="/usr/local/bin:$PATH"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -22,7 +22,7 @@ git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
 # Build PyTorch
-if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
   export CUDA_VERSION=9.2
   export TORCH_CUDA_ARCH_LIST=5.2
   export PATH=/Developer/NVIDIA/CUDA-${CUDA_VERSION}/bin${PATH:+:${PATH}}
@@ -51,7 +51,7 @@ if which sccache > /dev/null; then
   printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${PYTORCH_ENV_DIR}/clang"
   chmod a+x "${PYTORCH_ENV_DIR}/clang"
 
-  if [[ "${JOB_BASE_NAME}" == *cuda* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
     printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${PYTORCH_ENV_DIR}/nvcc"
     chmod a+x "${PYTORCH_ENV_DIR}/nvcc"
     export CUDA_NVCC_EXECUTABLE="${PYTORCH_ENV_DIR}/nvcc"
