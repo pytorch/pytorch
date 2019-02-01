@@ -103,7 +103,7 @@ typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(Arr
 template<class FuncType, FuncType* func, class... ExtraArgs>
 typename guts::function_traits<FuncType>::return_type call_with_ivalue_args(ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args) {
   constexpr size_t num_ivalue_args = guts::function_traits<FuncType>::number_of_parameters - sizeof...(ExtraArgs);
-  AT_ASSERT(num_ivalue_args == ivalue_args.size(), "Wrong number of ivalue arguments");
+  AT_ASSERTM(num_ivalue_args == ivalue_args.size(), "Wrong number of ivalue arguments");
   return call_with_ivalue_args_<FuncType, func>(ivalue_args, guts::make_index_sequence<num_ivalue_args>(), std::forward<ExtraArgs>(extra_args)...);
 }
 
