@@ -35,9 +35,9 @@ namespace caffe2 {
   template <typename TInd, typename TData>
   bool SparseToDenseOp<CUDAContext>::DoRunWithType2() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& sparse_values = Input(VALUES);
-    CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
+    CAFFE_ENFORCE_GE(sparse_values.dim(), 1);
     CAFFE_ENFORCE_EQ(sparse_indices.size(), sparse_values.dim(0));
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();

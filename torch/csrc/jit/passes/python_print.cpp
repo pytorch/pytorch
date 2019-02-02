@@ -596,6 +596,15 @@ struct PythonPrintPass {
   void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
+    if (node->kind() == prim::PythonOp) {
+      auto value = static_cast<const PythonOp*>(node);
+      if (enforce_importable_ && value->ignore_on_export) {
+          // Op has been marked as ignored, so insert an error in its place
+          indent();
+          out << "ops.prim.IgnoredPythonOp()\n";
+          return;
+      }
+    }
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -629,7 +638,6 @@ struct PythonPrintPass {
         out << useOf(node->input()) << "\n";
         break;
       default:
-
         std::stringstream ss;
         printRHS(ss, node);
 
@@ -704,7 +712,7 @@ struct PythonPrintPass {
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
-              << ". Remove calls to python functions before export.";
+              << ". Remove calls to Python functions before export";
         }
 
         stmt << "^" << value->name();

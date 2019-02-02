@@ -10,7 +10,9 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
+        conv_algorithm_(
+            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -36,6 +38,11 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
+    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
+      aalgorithm = ideep::algorithm::convolution_winograd;
+    }
+
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
@@ -50,7 +57,8 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
               pad_tl(),
               pad_br(),
               dilation_,
-              group_);
+              group_,
+              aalgorithm);
       filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
           expected_descriptor);
       ideep::reorder::compute(filter_in, filter_);
@@ -73,7 +81,9 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           dilation_,
           pad_tl(),
           pad_br(),
-          group_);
+          group_,
+          ideep::descriptor_group::attr_t(),
+          aalgorithm);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -84,7 +94,9 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
           dilation_,
           pad_tl(),
           pad_br(),
-          group_);
+          group_,
+          ideep::descriptor_group::attr_t(),
+          aalgorithm);
     }
 
     return true;
@@ -95,6 +107,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(OUTPUT);
 
   bool training_mode_;
+  int conv_algorithm_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
 };

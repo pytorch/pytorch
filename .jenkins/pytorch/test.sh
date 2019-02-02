@@ -148,12 +148,14 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
     echo "Testing libtorch"
+    python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$CPP_BUILD"/caffe2/bin/test_jit
     else
       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
     fi
+    python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
     assert_git_not_dirty
