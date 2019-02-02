@@ -8,7 +8,7 @@ This is modified from [the file included in CMake 3.13 release](https://github.c
 
 + Update the `separate_arguments` commands to not use `NATIVE_COMMAND` which is not supported in CMake 3.5 (our min supported version).
 
-+ Make it respect the `QUIET` flag so that, when it is set, `try_compile` does not use the compiler verbose options, and compilation failures are not reported.
++ Make it respect the `QUIET` flag so that, when it is set, `try_compile` failures are not reported.
 
 + For `AppleClang` compilers, use `-Xpreprocessor` instead of `-Xclang` as the later is not documented.
 
