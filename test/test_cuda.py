@@ -2325,6 +2325,9 @@ class TestCuda(TestCase):
     def test_min_with_inf(self):
         _TestTorchMixin._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
+    def test_rpow(self):
+        _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
+
     def test_int_pow(self):
         _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
