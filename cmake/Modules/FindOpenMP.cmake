@@ -85,18 +85,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
 
     set(OMP_FLAG_GNU "-fopenmp")
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
-    # Since we might set MACOSX_DEPLOYMENT_TARGET for macos build[1], cmake
-    # will also setup the CMAKE_OSX_SYSROOT in [2]. Then, cmake will just
-    # try to search libomp in CMAKE_OSX_SYSROOT folder which might not include
-    # the actual libomp path. Thus, we add the "brew libomp" default install
-    # path in the candidates.
-    # [1] https://github.com/pytorch/pytorch/blob/9757ad35b0b56cf955f294e751de9b437f9bb4ff/.jenkins/pytorch/macos-build.sh#L43
-    # [2] https://github.com/Kitware/CMake/blob/02f7e997e939dbd0c753514edcd580083cebd37c/Modules/Platform/Darwin-Initialize.cmake#L53
-    if(CMAKE_OSX_SYSROOT)
-      set(OMP_FLAG_AppleClang "-Xclang -fopenmp -I/usr/local/opt/libomp/include")
-    else()
-      set(OMP_FLAG_AppleClang "-Xclang -fopenmp")
-    endif()
+    set(OMP_FLAG_AppleClang "-Xclang -fopenmp")
     set(OMP_FLAG_HP "+Oopenmp")
     if(WIN32)
       set(OMP_FLAG_Intel "-Qopenmp")
@@ -289,7 +278,9 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeError.log
         "Detecting ${LANG} OpenMP failed with the following output:\n${OpenMP_TRY_COMPILE_OUTPUT}\n\n")
     endif()
-    message(STATUS "OpenMP try_compile log:\n${OpenMP_TRY_COMPILE_OUTPUT}\n\n")
+    if (NOT ${OpenMP_${LANG}_FIND_QUIETLY})
+      message(STATUS "OpenMP try_compile log:\n${OpenMP_TRY_COMPILE_OUTPUT}\n\n")
+    endif()
     set("${OPENMP_LIB_NAMES_VAR}" "NOTFOUND" PARENT_SCOPE)
     set("${OPENMP_FLAG_VAR}" "NOTFOUND" PARENT_SCOPE)
   endforeach()
