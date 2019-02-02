@@ -42,14 +42,14 @@ import re as _re
 # pylint: disable=unused-import
 from six import StringIO
 from six.moves import range
-from .proto.summary_pb2 import Summary
-from .proto.summary_pb2 import HistogramProto
-from .proto.summary_pb2 import SummaryMetadata
-from .proto.tensor_pb2 import TensorProto
-from .proto.tensor_shape_pb2 import TensorShapeProto
-from .proto.plugin_pr_curve_pb2 import PrCurvePluginData
-from .proto.plugin_text_pb2 import TextPluginData
-from .proto import layout_pb2
+from tensorboard.compat.proto.summary_pb2 import Summary
+from tensorboard.compat.proto.summary_pb2 import HistogramProto
+from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
+from tensorboard.compat.proto.tensor_pb2 import TensorProto
+from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
+from tensorboard.compat.proto.plugin_pr_curve_pb2 import PrCurvePluginData
+from tensorboard.compat.proto.plugin_text_pb2 import TextPluginData
+from tensorboard.compat.proto import layout_pb2
 from .x2num import make_np
 from .utils import _prepare_video, convert_to_HWC
 
@@ -389,8 +389,8 @@ def custom_scalars(layout):
 
 def text(tag, text):
     import json
-    PluginData = [SummaryMetadata.PluginData(
-        plugin_name='text', content=TextPluginData(version=0).SerializeToString())]
+    PluginData = SummaryMetadata.PluginData(
+        plugin_name='text', content=TextPluginData(version=0).SerializeToString())
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_STRING',
                          string_val=[text.encode(encoding='utf_8')],
@@ -404,8 +404,8 @@ def pr_curve_raw(tag, tp, fp, tn, fn, precision, recall, num_thresholds=127, wei
     data = np.stack((tp, fp, tn, fn, precision, recall))
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = [SummaryMetadata.PluginData(
-        plugin_name='pr_curves', content=pr_curve_plugin_data)]
+    PluginData = SummaryMetadata.PluginData(
+        plugin_name='pr_curves', content=pr_curve_plugin_data)
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),
@@ -421,8 +421,8 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
                          num_thresholds=num_thresholds, weights=weights)
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = [SummaryMetadata.PluginData(
-        plugin_name='pr_curves', content=pr_curve_plugin_data)]
+    PluginData = SummaryMetadata.PluginData(
+        plugin_name='pr_curves', content=pr_curve_plugin_data)
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),

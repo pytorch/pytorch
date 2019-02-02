@@ -3,12 +3,13 @@ import warnings
 import itertools
 from distutils.version import LooseVersion
 from collections import OrderedDict
-from .proto.attr_value_pb2 import AttrValue
-from .proto.graph_pb2 import GraphDef
-from .proto.node_def_pb2 import NodeDef
-from .proto.step_stats_pb2 import RunMetadata, StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
-from .proto.tensor_shape_pb2 import TensorShapeProto
-from .proto.versions_pb2 import VersionDef
+from tensorboard.compat.proto.attr_value_pb2 import AttrValue
+from tensorboard.compat.proto.graph_pb2 import GraphDef
+from tensorboard.compat.proto.node_def_pb2 import NodeDef
+from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
+from tensorboard.compat.proto.config_pb2 import RunMetadata
+from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
+from tensorboard.compat.proto.versions_pb2 import VersionDef
 from .proto_graph import Node_proto
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',

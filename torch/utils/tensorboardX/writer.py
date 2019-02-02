@@ -24,17 +24,17 @@ import six
 import time
 
 from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
-from ..tensorboardnotf.event_file_writer import EventFileWriter
+from tensorboard.compat.tensorboardX.event_file_writer import EventFileWriter
 from .onnx_graph import gg
 from .pytorch_graph import graph
-from .proto import event_pb2
-from .proto import summary_pb2
-from .proto import graph_pb2
+from tensorboard.compat.proto import event_pb2
+from tensorboard.compat.proto import summary_pb2
+from tensorboard.compat.proto import graph_pb2
 from .summary import scalar, histogram, image, audio, text, pr_curve, pr_curve_raw, video, custom_scalars
 from .utils import figure_to_image
-from tensorboardX.proto.event_pb2 import SessionLog
-from tensorboardX.proto.event_pb2 import Event
-from tensorboardX.summary import image_boxes
+from tensorboard.compat.proto.event_pb2 import SessionLog
+from tensorboard.compat.proto.event_pb2 import Event
+from .summary import image_boxes
 
 
 class SummaryToEventTransformer(object):
