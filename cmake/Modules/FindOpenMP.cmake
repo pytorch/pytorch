@@ -85,7 +85,18 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
 
     set(OMP_FLAG_GNU "-fopenmp")
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
-    set(OMP_FLAG_AppleClang "-Xclang -fopenmp")
+
+    # AppleClang may need a header file, search for omp.h with hints to brew
+    # default include dir and MKL include dir
+    find_package(MKL QUIET)
+    if (MKL_FOUND)
+      set(__mkl_include_dir $MKL_INCLUDE_DIR)
+    else()
+      set(__mkl_include_dir "")
+    endif()
+    find_path(__header_dir "omp.h" HINTS "${__mkl_include_dir}" "/usr/local/include")
+    set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
+
     set(OMP_FLAG_HP "+Oopenmp")
     if(WIN32)
       set(OMP_FLAG_Intel "-Qopenmp")
@@ -256,10 +267,19 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       AND CMAKE_${LANG}_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
 
       # Check for separate OpenMP library on AppleClang 7+
-      find_library(OpenMP_libomp_LIBRARY
-        NAMES omp gomp iomp5
-        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-      )
+      find_package(MKL QUIET)
+      if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
+        # If we already link OpenMP via MKL, use that. Otherwise at run-time
+        # OpenMP will complain about being initialized twice (OMP: Error #15),
+        # can may cause incorrect behavior.
+        set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
+      else()
+        find_library(OpenMP_libomp_LIBRARY
+          NAMES omp gomp iomp5
+          HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+          DOC "libomp location for OpenMP"
+        )
+      endif()
       mark_as_advanced(OpenMP_libomp_LIBRARY)
 
       if(OpenMP_libomp_LIBRARY)
