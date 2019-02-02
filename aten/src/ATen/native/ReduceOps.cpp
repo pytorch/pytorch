@@ -316,6 +316,42 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtyp
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
+int64_t _safe_size(IntList sizes, IntList dim) {
+  int64_t size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
+}
+
+Tensor unsqueeze_multiple(const Tensor & t, IntList dim, size_t n_dims) {
+    auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
+    Tensor res = t;
+    for (size_t i = 0; i < n_dims; i++){
+      if (dims_to_unsqueeze[i]) {
+        res = res.unsqueeze(i);
+      }
+    }
+    return res;
+}
+
+Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
+    } else {
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
+      return res.expand(sizes);
+    }
+  } else {
+    return grad.expand(sizes);
+  }
+}
+
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
   return at::native::prod_out(
       result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
@@ -571,6 +607,21 @@ Tensor var(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
 
 Tensor &var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, false);
+}
+
+Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
+  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
+}
+
+Tensor var_backward(const Tensor & grad, const Tensor & self, IntList dim, bool unbiased, bool keepdim) {
+  if (self.dim() == 0) {
+    return at::var_backward(grad, self, unbiased);
+  }
+  Tensor unsqueezed_grad = grad;
+  if (!keepdim && self.dim() > 1) {
+    unsqueezed_grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+  }
+  return (2.0 / (at::_safe_size(self.sizes(), dim) - unbiased)) * unsqueezed_grad * (self - self.mean(dim, true));
 }
 
 Tensor std(const Tensor& self, bool unbiased) {

@@ -27,6 +27,16 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   }
 }
 
+bool needTrimGrad(Node* n) {
+  static OperatorSet need_trim_grad_ops = {
+      "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
+  };
+  if (need_trim_grad_ops.find(n)) {
+    return true;
+  }
+  return false;
+}
+
 bool isDifferentiable(Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
@@ -71,6 +81,7 @@ bool isDifferentiable(Node* n) {
       "aten::acos(Tensor self) -> Tensor",
       "aten::asin(Tensor self) -> Tensor",
       "aten::atan(Tensor self) -> Tensor",
+      //"aten::cat(Tensor[] tensors, int dim) -> Tensor",
       "aten::ceil(Tensor self) -> Tensor",
       "aten::cos(Tensor self) -> Tensor",
       "aten::cosh(Tensor self) -> Tensor",
@@ -194,15 +205,20 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     auto fw_graph = compiled_graphs->forward;
     new_outputs = inlineCallTo(
         *graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
-      new_outputs.at(i)->setType(node->outputs()[i]->type());
-      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    auto outputs = node->outputs();
+    JIT_ASSERT(new_outputs.size() == outputs.size() + 1);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      new_outputs[i]->setType(outputs[i]->type());
+      outputs[i]->replaceAllUsesWith(new_outputs[i]);
     }
   }
 
   // Use backward graph to construct reverse_block
   auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
+  if (needTrimGrad(node)) {
+    grad_vec.erase(grad_vec.begin()+1, grad_vec.end());
+  }
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
@@ -775,6 +791,11 @@ static std::vector<Value*> linearGradientForNode(
     Node* node,
     ArrayRef<Value*> grad_values) {
   auto& graph = *node->owningGraph();
+
+  // FIXME: In case forward has multi outputs, we only support one requires grad
+  if (needTrimGrad(node)) {
+    grad_values = grad_values.at(0);
+  }
   auto linear = graph.insertNode(graph.create(prim::GradOf, {grad_values}, 0));
   // to make reading gradient graphs easier, remember the name of the forward op
   linear->s_(attr::name, node->kind().toDisplayString());

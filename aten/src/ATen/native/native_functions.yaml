@@ -49,6 +49,10 @@
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
+- func: index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) -> Tensor
+
+- func: select_backward(Tensor grad, IntList input_sizes, int64_t dim, int64_t index) -> Tensor
+
 - func: _fused_dropout(Tensor self, double p, Generator* generator=nullptr) -> (Tensor, Tensor)
   variants: function
   dispatch:
@@ -1184,6 +1188,8 @@
 
 - func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
+- func: sum_backward(Tensor grad, IntList sizes, IntList dims, bool keepdim) -> Tensor
+
 - func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
 
@@ -1358,6 +1364,8 @@
 
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: permute_backwards(Tensor grad, IntList fwd_dims) -> Tensor
 
 - func: pixel_shuffle(Tensor self, int64_t upscale_factor) -> Tensor
 
@@ -1601,9 +1609,13 @@
   variants: function, method
   device_guard: false
 
+- func: _safe_size(IntList sizes, IntList dim) -> int64_t
+
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
   variants: function, method
   device_guard: false
+
+- func: slice_backward(Tensor grad, IntList input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) -> Tensor
 
 - func: slogdet(Tensor self) -> (Tensor, Tensor)
   matches_jit_signature: True
@@ -1680,6 +1692,10 @@
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
   variants: function, method
   device_guard: false
+
+- func: unsqueeze_to(Tensor self, IntList sizes) -> Tensor
+
+- func: unsqueeze_to(Tensor self, int64_t dim, IntList sizes) -> Tensor
 
 - func: squeeze_(Tensor self) -> Tensor
   variants: method
@@ -1925,6 +1941,10 @@
   variants: function, method
 
 - func: var_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
+
+- func: var_backward(Tensor grad, Tensor self, bool unbiased) -> Tensor
+
+- func: var_backward(Tensor grad, Tensor self, IntList dim, bool unbiased, bool keepdim) -> Tensor
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   matches_jit_signature: True
