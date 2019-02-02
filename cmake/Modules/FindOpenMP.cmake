@@ -200,6 +200,35 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       string(APPEND OPENMP_FLAGS_TEST " ${OpenMP_VERBOSE_COMPILE_OPTIONS}")
     endif()
     string(REGEX REPLACE "[-/=+]" "" OPENMP_PLAIN_FLAG "${OPENMP_FLAG}")
+
+    find_package(MKL QUIET)
+    if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
+      # If we already link OpenMP via MKL, use that. Otherwise at run-time
+      # OpenMP will complain about being initialized twice (OMP: Error #15),
+      # can may cause incorrect behavior.
+      set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
+    else()
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES omp gomp iomp5
+        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
+      )
+    endif()
+    mark_as_advanced(OpenMP_libomp_LIBRARY)
+
+    if (OpenMP_libomp_LIBRARY)
+      try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
+        CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
+        LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG} ${OpenMP_libomp_LIBRARY}
+        OUTPUT_VARIABLE OpenMP_TRY_COMPILE_OUTPUT
+      )
+      if(OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG})
+        set("${OPENMP_FLAG_VAR}" "${OPENMP_FLAG}" PARENT_SCOPE)
+        set("${OPENMP_LIB_NAMES_VAR}" "libomp" PARENT_SCOPE)
+        break()
+      endif()
+    endif()
+
     try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
       CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
       LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG}
@@ -266,20 +295,19 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     elseif(CMAKE_${LANG}_COMPILER_ID STREQUAL "AppleClang"
       AND CMAKE_${LANG}_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
 
+      # LLVM 3.7 supports OpenMP 3.1, and continues to add more features to
+      # support newer OpenMP standards in new versions.
+      # http://releases.llvm.org/3.7.0/tools/clang/docs/ReleaseNotes.html#openmp-support
+      #
+      # Apple Clang 7.0 is the first version based on LLVM 3.7 or later.
+      # https://en.wikipedia.org/wiki/Xcode#Latest_versions
+      #
       # Check for separate OpenMP library on AppleClang 7+
-      find_package(MKL QUIET)
-      if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
-        # If we already link OpenMP via MKL, use that. Otherwise at run-time
-        # OpenMP will complain about being initialized twice (OMP: Error #15),
-        # can may cause incorrect behavior.
-        set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
-      else()
-        find_library(OpenMP_libomp_LIBRARY
-          NAMES omp gomp iomp5
-          HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-          DOC "libomp location for OpenMP"
-        )
-      endif()
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES omp gomp iomp5
+        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
+      )
       mark_as_advanced(OpenMP_libomp_LIBRARY)
 
       if(OpenMP_libomp_LIBRARY)
