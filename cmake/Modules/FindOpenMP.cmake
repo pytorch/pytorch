@@ -217,7 +217,7 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     #
     # So here, before we test each flag combination, we first try directly
     # linking against any `libomp` MKL has found (if any). This allows us to
-    # do sensible things in tricky conditions like:
+    # do sensible things in tricky (yet common) conditions like:
     #   - using `clang` (so no native GNU OpenMP), and
     #   - having `brew` `libomp` installed at `/usr/local/`, and
     #   - having `conda` `mkl` installed at `$HOME/conda/`, with includes a copy
@@ -228,8 +228,9 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     # Crucially, we only do so for non-GNU compilers. For GNU ones,
     # `FindMKL.cmake` calls `FindOpenMP.cmake` when trying to find `gomp` and
     # thus will cause infinite recursion if this is not taken care of. Moreover,
-    # for them, `FindOpenMP.cmake` should just use the compiler provided
-    # `-fopenmp` and link no extra libraries anyways.
+    # for them, since the compiler provices the OpenMP library, it is most
+    # likely that only one viable gomp library can be found in search path by
+    # `FindOpenMP.cmake`, so the chance of having conflicts is slow.
     #
     # TODO: refactor to solve this weird dependency where
     #         - for non-GNU, FindOpenMP.cmake replies on FindMKL.cmake to finish first, but

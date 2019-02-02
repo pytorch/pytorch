@@ -318,7 +318,7 @@ find_package(OpenMP QUIET)
 if(OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
-    "OpenMP linked libraries: ${OpenMP_CXX_LIBRARIES}.")
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
