@@ -10,7 +10,7 @@ namespace caffe2 {
 namespace {
 
 template <typename InputType, typename IndexType>
-void sparse_lengths_sum_op_cpu_impl(
+void sparse_lengths_sum_op_cpu_impl_(
     const at::Tensor& dataInput_,
     const at::Tensor& indicesInput_,
     const at::Tensor& lengthsInput_,
@@ -55,62 +55,37 @@ void sparse_lengths_sum_op_cpu_impl(
       USE_MEAN,
       out_data);
 }
+
+template<typename IndexType>
+void sparse_lengths_sum_op_cpu_impl(
+  const at::Tensor& dataInput,
+  const at::Tensor& indicesInput,
+  const at::Tensor& lengthsInput,
+  const at::Tensor& output) {
+  switch (dataInput.scalar_type()) {
+    case ScalarType::Float: return sparse_lengths_sum_op_cpu_impl_<float, IndexType>(dataInput, indicesInput, lengthsInput, output);
+    case ScalarType::Half: return sparse_lengths_sum_op_cpu_impl_<at::Half, IndexType>(dataInput, indicesInput, lengthsInput, output);
+    default: throw std::runtime_error(string() + "Unsupported dtype for input data " + toString(dataInput.scalar_type()));
+  }
+}
+
+void sparse_lengths_sum_op_cpu(
+  const at::Tensor& dataInput,
+  const at::Tensor& indicesInput,
+  const at::Tensor& lengthsInput,
+  const at::Tensor& output) {
+  switch (indicesInput.scalar_type()) {
+    case ScalarType::Int: return sparse_lengths_sum_op_cpu_impl<int>(dataInput, indicesInput, lengthsInput, output);
+    case ScalarType::Long: return sparse_lengths_sum_op_cpu_impl<int64_t>(dataInput, indicesInput, lengthsInput, output);
+    default: throw std::runtime_error(string() + "Unsupported dtype for input indices " + toString(dataInput.scalar_type()));
+  }
+}
+
 } // namespace
 } // namespace caffe2
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int32_t>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int32_t>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<int>()}});
-C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int32_t>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<at::Half>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int32_t>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<int>()}});
-C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<float, int64_t>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int64_t>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<int>()}});
-C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel<&caffe2::sparse_lengths_sum_op_cpu_impl<at::Half, int64_t>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<at::Half>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int64_t>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<int>()}});
+    .kernel<decltype(caffe2::sparse_lengths_sum_op_cpu), &caffe2::sparse_lengths_sum_op_cpu>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

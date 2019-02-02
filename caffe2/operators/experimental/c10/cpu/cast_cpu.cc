@@ -74,62 +74,22 @@ void cast_op_cpu_impl(
       CAFFE_THROW("Unexpected 'to' argument value: ", to);
   }
 }
+void cast_op_cpu(
+    const at::Tensor& input,
+    const at::Tensor& output,
+    int64_t to) {
+  switch (input.scalar_type()) {
+#define CASE(ctype,name,_2) case ScalarType:: name : return cast_op_cpu_impl<ctype>(input, output, to);
+    AT_FORALL_SCALAR_TYPES(CASE)
+#undef CASE
+    default: throw std::runtime_error(string() + "Unsupported scalar type " + toString(input.scalar_type()));
+  }
+}
 } // namespace
 } // namespace caffe2
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<float>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<float>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<int32_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<int32_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<bool>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<bool>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<uint8_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<uint8_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<int8_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<int8_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<uint16_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<uint16_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<int16_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<int16_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<int64_t>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<int64_t>()}});
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<&caffe2::cast_op_cpu_impl<double>>()
-    .dispatchKey(c10::DispatchKey<1>{c10::details::TensorParameterDispatchKey{
-        DeviceTypeId::CPU,
-        LayoutId(0),
-        caffe2::TypeMeta::Id<double>()}});
+    .kernel<decltype(caffe2::cast_op_cpu), &caffe2::cast_op_cpu>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10
