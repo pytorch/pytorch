@@ -795,11 +795,10 @@ binary_linux_upload: &binary_linux_upload
           retry conda install -yq anaconda-client
           set +x
           echo 'If there is no more output then logging into Anaconda failed'
-          retry timeout 30 \
+          retry timeout 120 \
               yes | anaconda login \
                   --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD" \
-                  >/dev/null 2>&1
+                  --password "$CONDA_PASSWORD"
           set -x
           anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
@@ -926,8 +925,7 @@ binary_mac_upload: &binary_mac_upload
           echo 'If there is no more output then logging into Anaconda failed'
           retry yes | anaconda login \
                   --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD" \
-                  >/dev/null 2>&1 \
+                  --password "$CONDA_PASSWORD"
           set -x
           retry anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
