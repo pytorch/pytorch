@@ -314,9 +314,11 @@ endif()
 
 target_link_libraries(torch caffe2_library)
 
-find_package(OpenMP)
+find_package(OpenMP QUIET)
 if(OPENMP_FOUND)
-  message(STATUS "The pytorch is compiling with OpenMP. cxx_flags: ${OpenMP_CXX_FLAGS}, link_libs: ${OpenMP_CXX_LIBRARIES}")
+  message(STATUS "pytorch is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP linked libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
