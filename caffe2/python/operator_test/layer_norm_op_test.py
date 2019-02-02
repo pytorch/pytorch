@@ -117,6 +117,35 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
+    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @unittest.skip("Tensor interop enforcement needs fixing")
+    def test_layer_norm_op_c10(self, X, gc, dc):
+        X = X[0]
+        if len(X.shape) == 1:
+            X = np.expand_dims(X, axis=0)
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+        op = core.CreateOperator(
+            "C10LayerNorm_DontUseThisOpYet",
+            ["input"],
+            ["output", "mean", "stdev"],
+            axis=axis,
+            epsilon=epsilon,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=partial(_layer_norm_ref, axis, epsilon)
+        )
+        self.assertDeviceChecks(
+            device_options=dc,
+            op=op,
+            inputs=[X],
+            outputs_to_check=[0, 1, 2],
+        )
+
     @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_op_pytorch(self, X, gc, dc):
         X = X[0]
@@ -127,6 +156,27 @@ class TestLayerNormOp(serial.SerializedTestCase):
 
         expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
         actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), axis, epsilon)
+
+        torch.testing.assert_allclose(expected_norm, actual_norm)
+        torch.testing.assert_allclose(expected_mean, actual_mean)
+        torch.testing.assert_allclose(expected_stdev, actual_stdev)
+
+    @given(X=hu.tensors(n=1), **hu.gcs)
+    def test_layer_norm_op_jit(self, X, gc, dc):
+        @torch.jit.script
+        def jit_layer_norm(tensor, axis, epsilon):
+            # type: (Tensor, int, float) -> Tuple[Tensor, Tensor, Tensor]
+            norm, mean, stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(tensor, axis, epsilon)
+            return norm, mean, stdev
+
+        X = X[0]
+        if len(X.shape) == 1:
+            X = np.expand_dims(X, axis=0)
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        actual_norm, actual_mean, actual_stdev = jit_layer_norm(torch.tensor(X), axis, epsilon)
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
 
         torch.testing.assert_allclose(expected_norm, actual_norm)
         torch.testing.assert_allclose(expected_mean, actual_mean)
