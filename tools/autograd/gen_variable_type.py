@@ -98,11 +98,8 @@ if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alia
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  ${tensorlist_name}_storage_saved[i] =
-    ${tensorlist_name}[i].has_storage() ?
-      ${tensorlist_name}[i].storage() : Storage();
-}
+for (Tensor tensor : ${tensorlist_name})
+  ${tensorlist_name}_storage_saved.push_back(tensor.has_storage() ? tensor.storage() : Storage());
 """)
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
@@ -114,9 +111,8 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 """)
 
 SAVE_TENSOR_IMPL = CodeTemplate("""\
-c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> ${tensor_name}_impl_saved;
-if (${tensor_name}.has_storage())
-  ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
+c10::intrusive_ptr<TensorImpl> ${tensor_name}_impl_saved;
+if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
 """)
 
 ENFORCE_SAME_TENSOR_IMPL = CodeTemplate("""\
@@ -124,12 +120,9 @@ if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_n
 """)
 
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
-std::vector<c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>>
-  ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
-for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}[i].has_storage())
-    ${tensorlist_name}_impl_saved[i] = ${tensorlist_name}[i].getIntrusivePtr();
-}
+std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
+for (Tensor tensor : ${tensorlist_name})
+  if (tensor.defined()) ${tensorlist_name}_impl_saved.push_back(tensor.getIntrusivePtr());
 """)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
