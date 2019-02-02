@@ -224,9 +224,12 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_C.BoolStorageBase, _StorageBase):
+    pass
+
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage
+    CharStorage, ByteStorage, HalfStorage, BoolStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -275,6 +278,7 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
+del BoolStorageBase
 
 ################################################################################
 # Import most common subpackages
