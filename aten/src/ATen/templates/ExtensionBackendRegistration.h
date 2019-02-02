@@ -12,7 +12,7 @@ std::unordered_map<std::string, std::set<std::string>> api_name_to_schemas = {
 
 inline void check_schema_existence(const std::string & schema) {
   auto index = schema.find_first_of("(");
-  if (index == -1) {
+  if (index == std::string::npos) {
     AT_ERROR("Error parsing operator name from schema: ", schema);
   }
   auto api_name = schema.substr(0, index);
