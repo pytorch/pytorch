@@ -32,9 +32,9 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return a;
 }
 
-Tensor s_copy__override(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor & s_copy__override(Tensor & self, const Tensor & src, bool non_blocking) {
   test_int = 4;
-  return get_dummy_tensor();
+  return self;
 }
 
 Tensor _s_copy_from_override(const Tensor & self, const Tensor & dst, bool non_blocking) {
