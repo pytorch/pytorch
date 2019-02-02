@@ -361,9 +361,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-                # TODO: Type currently maps to ScalarType, figure out a cleaner solution
-                if typename == 'const Type &':
-                    default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
@@ -584,7 +581,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
-            py_default_dtype = 'self.type()' if is_like_function_with_options else None
+            py_default_dtype = 'self.scalar_type()' if is_like_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',

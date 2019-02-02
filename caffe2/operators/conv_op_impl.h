@@ -45,6 +45,12 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_size *= kernel_[i];
   }
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+
+  if (N == 0) {
+    Y->template mutable_data<T>();
+    return true;
+  }
+
   const vector<int> X_dims = GetDims(X);
   const vector<int> Y_dims = GetDims(*Y);
   const int X_HxW = X.numel() / (N * C);
@@ -213,6 +219,12 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     kernel_size *= kernel_[i];
   }
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+
+  if (N == 0) {
+    Y->template mutable_data<T>();
+    return true;
+  }
+
   const vector<int> Y_dims = GetDims(*Y);
   const int X_HxW = X.numel() / (N * C);
   const int Y_HxW = Y->numel() / (N * M);
@@ -507,14 +519,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
-  // The offset corresponding to a single input image, and a single output
-  // image.
-  const int input_offset = C / group_ * input_image_size;
-  const int output_offset = dY.numel() / dY.dim32(0) / group_;
-  const int filter_offset = filter.numel() / group_;
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
-
   vector<int> img_shape;
   img_shape.assign(X.sizes().begin() + 1, X.sizes().end());
   vector<int> col_buffer_shape;
@@ -565,6 +571,22 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
 
+  if (N == 0) {
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      auto* dX = Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T>());
+      dX->template mutable_data<T>();
+    }
+    return true;
+  }
+
+  // The offset corresponding to a single input image, and a single output
+  // image.
+  const int input_offset = C / group_ * input_image_size;
+  const int output_offset = dY.numel() / dY.dim32(0) / group_;
+  const int filter_offset = filter.numel() / group_;
   for (int image_id = 0; image_id < N; ++image_id) {
     for (int group_id = 0; group_id < group_; ++group_id) {
       // When we compute the gradient with respect to the filters, we need to do
@@ -725,10 +747,6 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
-  // The offset corresponding to a single input image, and a single output
-  // image.
-  const int input_offset = C * input_image_size;
-  const int output_offset = dY.numel() / dY.dim32(0);
 
   // The col buffer is stored in HWC order as well - the height and width, and
   // kernel_dim.
@@ -778,6 +796,21 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         &context_);
   }
 
+  if (N == 0) {
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      auto* dX = Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T>());
+      dX->template mutable_data<T>();
+    }
+    return true;
+  }
+
+  // The offset corresponding to a single input image, and a single output
+  // image.
+  const int input_offset = C * input_image_size;
+  const int output_offset = dY.numel() / dY.dim32(0);
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
