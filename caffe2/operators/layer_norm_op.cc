@@ -4,7 +4,6 @@
 #include <ATen/core/dispatch/KernelRegistration.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/dispatch/OpSchemaRegistration.h>
-#include "caffe2/core/c10_operator.h"
 
 namespace caffe2 {
 
@@ -27,16 +26,6 @@ void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
   EigenVectorArrayMap<T>(bias, N) =
       -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
 }
-
-template <>
-LayerNormOp<CPUContext>::LayerNormOp(
-    const c10::FunctionSchema& f,
-    const std::vector<c10::IValue>& i,
-    const std::vector<c10::IValue*>& o)
-    : Operator<CPUContext>(f, i, o),
-      axis_(static_cast<int>(this->GetSingleArgument<int>("axis", 1))),
-      epsilon_(static_cast<float>(
-          this->GetSingleArgument<float>("epsilon", 1e-5f))) {}
 
 template <>
 template <typename T>

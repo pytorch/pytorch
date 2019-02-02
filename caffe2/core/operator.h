@@ -1356,4 +1356,6 @@ std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
 
+#include "caffe2/core/c10_operator.h"
+
 #endif  // CAFFE2_CORE_OPERATOR_H_
