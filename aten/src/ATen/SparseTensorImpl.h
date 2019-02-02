@@ -88,7 +88,7 @@ public:
   // (this could make some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
     AT_CHECK(allow_tensor_metadata_change(), "resize_ is not allowed on Tensor created from .data or .detach()");
-    AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
+    AT_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
     if (nnz() > 0) {
       auto alt_options_msg = "You could try the following options:\n\
 1. If you need an empty sparse tensor of this size, call `x = torch.sparse_coo_tensor(size)`.\n\
@@ -146,7 +146,7 @@ public:
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
     AT_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ is not allowed on Tensor created from .data or .detach()");
-    AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
+    AT_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
     sizes_ = size.vec();
     sparse_dim_ = sparse_dim;
