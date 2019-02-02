@@ -80,65 +80,13 @@ DONT_REQUIRE_DERIVATIVE = {
     '_coalesced_',
 }
 
-# When a function modifies its input tensors, it should never change the the input tensors'
-# underlying c10::TensorImpl pointers or c10::Storage pointers.
+# NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
 #
-# The following code templates
-# - `SAVE_TENSOR_STORAGE`
-# - `ENFORCE_SAME_TENSOR_STORAGE`
-# - `SAVE_TENSORLIST_STORAGE`
-# - `ENFORCE_SAME_TENSORLIST_STORAGE`
-# - `SAVE_TENSOR_IMPL`
-# - `ENFORCE_SAME_TENSOR_IMPL`
-# - `SAVE_TENSORLIST_IMPL`
-# - `ENFORCE_SAME_TENSORLIST_IMPL`
-# implement the checks for this invariant.
+# When a function modifies its input tensors (via inplace or out-variants),
+# it should never change the the input tensors' underlying c10::TensorImpl pointers
+# or c10::Storage pointers.
 #
-# The following list contains functions that we don't enforce the invariant on.
-DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
-    # These functions are expected to change impl or storage of input tensors
-    '_th_set_', '_cudnn_rnn_flatten_weight',
-    # TODO: Fix these functions to update input tensor in-place
-    'tril_', 'triu_',
-}
-
-METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
-""")
-
-METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
-  ${type_definition_body}
-}
-""")
-
-UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
-
-UNPACK_OPTIONS = CodeTemplate("""\
-auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
-
-DECLARE_GRAD_FN = CodeTemplate("""\
-std::shared_ptr<${op}> grad_fn;
-""")
-
-SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad( ${args_with_derivatives} )) {
-  ${setup}
-}
-""")
-
-ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
-grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
-""")
-
-CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
-
-CALL_VIA_DERIVED = CodeTemplate("""\
-baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
-
+# The following code templates implement the checks for this invariant:
 SAVE_TENSOR_STORAGE = CodeTemplate("""\
 Storage ${tensor_name}_storage_saved =
   (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage() : Storage();
@@ -190,6 +138,52 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
 }
 """)
+
+# The following list contains functions that we don't enforce the invariant on.
+DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
+    # These functions are expected to change impl or storage of input tensors
+    '_th_set_', '_cudnn_rnn_flatten_weight',
+    # TODO: Fix these functions to update input tensor in-place
+    'tril_', 'triu_',
+}
+# END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
+
+METHOD_DECLARATION = CodeTemplate("""\
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+""")
+
+METHOD_DEFINITION = CodeTemplate("""\
+${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+  ${type_definition_body}
+}
+""")
+
+UNPACK_TENSOR = CodeTemplate("""\
+auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+
+UNPACK_OPTIONS = CodeTemplate("""\
+auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
+
+DECLARE_GRAD_FN = CodeTemplate("""\
+std::shared_ptr<${op}> grad_fn;
+""")
+
+SETUP_DERIVATIVE = CodeTemplate("""\
+if (compute_requires_grad( ${args_with_derivatives} )) {
+  ${setup}
+}
+""")
+
+ASSIGN_GRAD_FN = CodeTemplate("""\
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+""")
+
+CALL_VIA_TYPE = CodeTemplate("""\
+TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+
+CALL_VIA_DERIVED = CodeTemplate("""\
+baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
 # If the `baseType` operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
