@@ -1624,7 +1624,7 @@ def process_extension_backend_option(option):
 
 def create_extension_backend_schema_checker(declarations):
     # type: (List[FunctionOption]) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]
-    api_name_to_schemas = {} # type: Dict[str, List[str]]
+    api_name_to_schemas = {}  # type: Dict[str, List[str]]
     function_ptr_type_to_schemas = {}  # type: Dict[str, List[str]]
 
     for declaration in declarations:
