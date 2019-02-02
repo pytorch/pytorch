@@ -26,9 +26,10 @@ GPU (nproc_per_node - 1)*.
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-               YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other
-               arguments of your training script)
+
+    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+            YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other
+            arguments of your training script)
 
 2. Multi-Node multi-process distributed training: (e.g. two nodes)
 
@@ -37,25 +38,25 @@ Node 1: *(IP: 192.168.1.1, and has a free port: 1234)*
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-               --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
-               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
-               and all other arguments of your training script)
+     python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+            --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
+            --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+            and all other arguments of your training script)
 
 Node 2:
 
 ::
 
-    >>> python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-               --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
-               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
-               and all other arguments of your training script)
+    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+            --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
+            --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+            and all other arguments of your training script)
 
 3. To look up what optional arguments this module offers:
 
 ::
 
-    >>> python -m torch.distributed.launch --help
+    python -m torch.distributed.launch --help
 
 
 **Important Notices:**
@@ -89,8 +90,8 @@ or
 
 ::
 
-    >>> with torch.cuda.device(arg.local_rank):
-    >>>    # your code to run
+    with torch.cuda.device(arg.local_rank):
+       # your code to run
 
 3. In your training program, you are supposed to call the following function
 at the beginning to start the distributed backend. You need to make sure that

@@ -99,12 +99,12 @@ def load(f, map_location=None):
             >>> torch.jit.load('scriptmodule.pt')
             # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
-                    buffer = io.BytesIO(f.read())
-            # Load all tensors to the original device
+            ...     buffer = io.BytesIO(f.read())
+            >>> # Load all tensors to the original device
             >>> torch.jit.load(buffer)
-            # Load all tensors onto CPU, using a device
+            >>> # Load all tensors onto CPU, using a device
             >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
-            # Load all tensors onto CPU, using a string
+            >>> # Load all tensors onto CPU, using a string
             >>> torch.jit.load(buffer, map_location='cpu')
     """
     m = ScriptModule()

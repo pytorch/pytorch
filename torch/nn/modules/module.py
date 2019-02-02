@@ -217,10 +217,10 @@ class Module(object):
         Example::
 
             >>> def init_weights(m):
-                    print(m)
-                    if type(m) == nn.Linear:
-                        m.weight.data.fill_(1.0)
-                        print(m.weight)
+            ...     print(m)
+            ...     if type(m) == nn.Linear:
+            ...         m.weight.data.fill_(1.0)
+            ...         print(m.weight)
 
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
@@ -925,7 +925,7 @@ class Module(object):
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> Sequential (
               (0): Linear (2 -> 2)
@@ -953,8 +953,7 @@ class Module(object):
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-                    print(idx, '->', m)
-
+            ...     print(idx, '->', m)
             0 -> ('', Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)

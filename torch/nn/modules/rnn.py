@@ -686,8 +686,8 @@ class RNNCell(RNNCellBase):
         >>> hx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-                hx = rnn(input[i], hx)
-                output.append(hx)
+        ...     hx = rnn(input[i], hx)
+        ...     output.append(hx)
     """
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
 
@@ -779,8 +779,8 @@ class LSTMCell(RNNCellBase):
         >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-                hx, cx = rnn(input[i], (hx, cx))
-                output.append(hx)
+        ...     hx, cx = rnn(input[i], (hx, cx))
+        ...     output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
@@ -861,8 +861,8 @@ class GRUCell(RNNCellBase):
         >>> hx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-                hx = rnn(input[i], hx)
-                output.append(hx)
+        ...     hx = rnn(input[i], hx)
+        ...     output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
