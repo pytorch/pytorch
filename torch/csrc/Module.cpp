@@ -593,6 +593,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPShortStorage_init(module));
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
+  ASSERT_TRUE(THPBoolStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
