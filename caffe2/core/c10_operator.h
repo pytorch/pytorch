@@ -1,6 +1,8 @@
 #pragma once
 
 #include <vector>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include <ATen/core/function_schema.h>
 
 namespace caffe2 {
@@ -37,7 +39,7 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TO
     outputsVec.push_back(&output);
   }
 
-  Caffe2Operator(caffe2::LayerNorm().schema(), std::move(inputsVec), std::move(outputsVec)).Run();
+  Caffe2Operator(schema, std::move(inputsVec), std::move(outputsVec)).Run();
 
   torch::jit::drop(*stack, total_num_arguments);
   for (auto& output: outputsVec_) {
@@ -49,14 +51,14 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TO
   //                might reuse one of the preallocated tensors but doesn't have to.
 }
 
-c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
+inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
   // actual_inputs is the real inputs plus an optional tensor argument for each output.
   // this can be used to pass in a preallocated output tensor.
   std::vector<c10::Argument> actual_inputs = inputs;
   actual_inputs.reserve(inputs.size() + outputs.size());
   for (const auto& elem : outputs) {
-    AT_ASSERT(elem.type()->kind() == TypeKind::DynamicType); // DynamicType means type is tensor
-    actual_inputs.push_back(c10::Argument(elem.name(), OptionalType::ofTensor(), nullopt, IValue()));
+    AT_ASSERT(elem.type()->isSubtypeOf(DynamicType::get())); // DynamicType means type is tensor
+    actual_inputs.push_back(c10::Argument(elem.name(), OptionalType::create(elem.type()), nullopt, IValue()));
   }
 
   return c10::FunctionSchema(
@@ -81,7 +83,7 @@ c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::
   /* Store the c10 operator handle so call_caffe2_op_from_c10 can access it */                    \
   namespace caffe2 { namespace detail {                                                           \
   template<>                                                                                      \
-  const c10::OperatorHandle& c10_op_handle_for_c2_op<caffe2::LayerNormOp<caffe2::CPUContext>>() { \
+  const c10::OperatorHandle& c10_op_handle_for_c2_op<OperatorClass<caffe2::CPUContext>>() {       \
     return caffe2::OperatorName();                                                                \
   }                                                                                               \
   }}                                                                                              \
