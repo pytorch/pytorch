@@ -9700,6 +9700,39 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    def test_ignore_decorator(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                tensor = torch.zeros(1, requires_grad=False)
+                self.register_buffer('some_state', torch.nn.Parameter(tensor))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                self.ignored_code(x)
+                return x
+
+            @torch.jit.ignore
+            def ignored_code(self, x):
+                self.some_state = torch.tensor((100,))
+
+        # Assert ignored code is run
+        m = M()
+        self.assertEqual(m.some_state, torch.zeros(1))
+        m(torch.ones(1))
+        self.assertEqual(m.some_state, torch.zeros(1) + 100)
+
+        # Export and ensure ignored code not present
+        pp, constants = m._python_print()
+        printed = torch.jit.ScriptModule()
+        ppv = "op_version_set = 0\n{}".format(pp)
+        torch._C._jit_import_methods(printed, ppv, constants)
+        self.assertIn('IgnoredPythonOp', ppv)
+        self.assertNotIn('ignored_code', ppv)
+
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
+            printed(torch.ones(1))
+
     def test_view_write(self):
         def fn(x, y):
             l = []
