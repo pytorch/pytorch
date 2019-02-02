@@ -5,7 +5,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/Type.h>
 #include <ATen/core/TensorMethods.h>
-
+#include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
 #include <memory>
@@ -233,6 +233,7 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     ss << "Optional[" << getElementType()->python_str() << "]";
     return ss.str();
   }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -982,26 +983,51 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
-template <typename T>
-TypePtr getTypePtr() {
-#define TYPE_STR(Type) #Type, " ",
-  AT_ERROR(
-      "Type ",
-      c10::demangle_type<T>(),
-      " could not be converted to any of the known types { ",
-      C10_FORALL_TYPES(TYPE_STR) "}");
-#undef TYPE_STR
-}
+namespace detail {
+template <typename T> struct getTypePtr_ final {
+  static_assert(guts::false_t<T>::value, "Type could not be converted to any of the known types.");
+};
 
-template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
-template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
-template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
-template<> inline TypePtr getTypePtr<bool>() { return BoolType::get(); }
-template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
-template<> inline TypePtr getTypePtr<std::string>() { return StringType::get(); }
-template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
-template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
-template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
+template<> struct getTypePtr_<at::Tensor> final {
+  static TypePtr call() { return DynamicType::get(); }
+};
+template<> struct getTypePtr_<double> final {
+  static TypePtr call() { return FloatType::get(); }
+};
+template<> struct getTypePtr_<int64_t> final {
+  static TypePtr call() { return IntType::get(); }
+};
+template<> struct getTypePtr_<bool> final {
+  static TypePtr call() { return BoolType::get(); }
+};
+template<> struct getTypePtr_<at::Scalar> final {
+  static TypePtr call() { return NumberType::get(); }
+};
+template<> struct getTypePtr_<std::string> final {
+  static TypePtr call() { return StringType::get(); }
+};
+template<class T> struct getTypePtr_<std::vector<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template<class T> struct getTypePtr_<ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template<class T> struct getTypePtr_<at::optional<T>> final {
+  static TypePtr call() {
+    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+}
+template<class T> inline TypePtr getTypePtr() {
+  return detail::getTypePtr_<T>::call();
+}
 
 CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
 CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);

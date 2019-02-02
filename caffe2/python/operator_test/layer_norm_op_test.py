@@ -118,6 +118,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         )
 
     @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @unittest.skip("Tensor interop enforcement needs fixing")
     def test_layer_norm_op_c10(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:

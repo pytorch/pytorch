@@ -41,6 +41,7 @@ namespace c10 {
   _(prim, Placeholder) /* debug */ \
   _(prim, Print)                   \
   _(prim, PythonOp)                \
+  _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
