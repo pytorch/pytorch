@@ -28,8 +28,6 @@ void enforce_finite_op_impl_cpu(const at::Tensor& input_) {
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::EnforceFinite)
-    .kernel<&caffe2::enforce_finite_op_impl_cpu<float>>()
-    .dispatchKey({DeviceTypeId::CPU,
-                  LayoutId(0),
-                  caffe2::TypeMeta::Id<float>()});
+    .kernel<decltype(caffe2::enforce_finite_op_impl_cpu<float>), &caffe2::enforce_finite_op_impl_cpu<float>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

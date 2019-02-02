@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/onnx.h>
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
@@ -18,7 +18,7 @@ void removePrintOps(Block* block) {
       removePrintOps(b);
     }
     if (it->kind() == prim::Print || it->kind() == aten::warn) {
-      for (auto i = 0; i < it->inputs().size();) {
+      for (size_t i = 0; i < it->inputs().size();) {
         auto input = it->inputs().at(i);
         // only handling constants bc of potential side effects
         if (input->uses().size() == 1 &&
@@ -226,11 +226,11 @@ void BlockToONNX(
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    IR_IFM(node, PythonOp)
-    callPySymbolicMethod(value);
-    IR_ELSE()
-    callPySymbolicFunction(node);
-    IR_END()
+    if (node->kind() == prim::PythonOp) {
+      callPySymbolicMethod(static_cast<PythonOp*>(node));
+    } else {
+      callPySymbolicFunction(node);
+    }
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));

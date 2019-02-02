@@ -2,11 +2,10 @@
 #include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
-
-#include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 
 #include <algorithm>
@@ -42,14 +41,10 @@ using at::Tensor;
 using at::TensorOptions;
 using at::DeviceGuard;
 
-namespace {
+using ::c10::fmap;
+using ::c10::filter;
 
-inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
-  if(N == 0)
-    return c10::nullopt;
-  auto t = (stack.end() - N)->toTensor();
-  return c10::make_optional(t.device());
-}
+namespace {
 
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {

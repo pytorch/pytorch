@@ -277,7 +277,7 @@ RegisterOperators reg({
         }),
     // reference function parse_to_conversion in python_arg_parsing.h
     Operator(
-        "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool non_blocking;
@@ -291,7 +291,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool non_blocking;
@@ -305,7 +305,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a)",
+        "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor self;
@@ -377,7 +377,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::cpu(Tensor(a) self) -> Tensor(a)",
+        "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -387,7 +387,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::cuda(Tensor(a) self) -> Tensor(a)",
+        "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -458,7 +458,7 @@ RegisterOperators reg({
             std::vector<int64_t> last_shape = shape;
             int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
             AT_CHECK(
-                dim < regular_shape.size(), "Dimension out of range for chunk");
+                dim < (int64_t)regular_shape.size(), "Dimension out of range for chunk");
             int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
             regular_shape[dim] = split_size;
             if (shape[dim] % chunks == 0) {
@@ -494,6 +494,20 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             throw JITException(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
+    Operator(
+        "prim::IgnoredPythonOp(...) -> ()",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            throw JITException(
+                "This Python function is annotated to be ignored"
+                " and cannot be and has not been included in the exported"
+                " binary, meaning that it cannot be executed now."
+                " Make sure that ignored operations are never executed after"
+                " import");
             return 0;
           };
         }),
@@ -581,7 +595,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;
@@ -788,6 +802,40 @@ RegisterOperators reg({
               return 0;
             };
           }
+        }),
+    Operator(
+      prim::DictConstruct,
+      [](const Node* node) -> Operation {
+        const auto num_inputs = node->inputs().size();
+        if (num_inputs % 2 != 0) {
+          throw std::runtime_error("DictConstruct must have an even number of inputs");
+        }
+        return [=](Stack& stack) {
+          c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+          for (size_t i = 0; i < num_inputs; i += 2) {
+            auto val = pop(stack);
+            auto key = pop(stack);
+            vals[key] = val;
+          }
+          push(stack, std::move(vals));
+          return 0;
+        };
+      }
+    ),
+    Operator(
+        prim::DictIndex,
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            auto index = pop(stack);
+            auto dict = pop(stack).toGenericDict();
+            const auto& elems = dict->elements();
+            auto value = elems.find(index);
+            if (value == elems.end()) {
+              AT_ERROR("KeyError: '", index, "'");
+            }
+            push(stack, value->second);
+            return 0;
+          };
         }),
     Operator(
         "aten::_unwrap_optional(t(a)? optional) -> t(a)",
@@ -1428,32 +1476,6 @@ RegisterOperators reg2({
           };
         }),
 });
-
-// checking one of size & scale_factor is set
-// if scale_factor is a double list check that it's len == dim
-// reference: _check_size_scale_factor in torch/nn/functional.py
-void _check_size_factor(
-    size_t dim,
-    const IValue& size,
-    const IValue& scale_factor) {
-  if (size.isNone() && scale_factor.isNone()) {
-    throw std::runtime_error("either size or scale_factor should be defined");
-  }
-  if (!size.isNone() && !scale_factor.isNone()) {
-    throw std::runtime_error(
-        "only one of size or scale_factor should be defined");
-  }
-  if (scale_factor.isDoubleList()) {
-    auto scale_len = scale_factor.toDoubleListRef().size();
-    if (scale_len != dim) {
-      std::stringstream str;
-      str << "scale_factor shape must match input shape. Input is " << dim
-          << "D, scale_factor size is " << scale_len;
-      throw std::runtime_error(
-          "only one of size or scale_factor should be defined");
-    }
-  }
-}
 
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist

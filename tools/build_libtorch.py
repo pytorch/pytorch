@@ -14,24 +14,12 @@ sys.path.append(pytorch_root)
 # If you want to modify flags or environmental variables that is set when
 # building torch, you should do it in tools/setup_helpers/configure.py.
 # Please don't add it here unless it's only used in LibTorch.
-from tools.setup_helpers.configure import get_libtorch_env_with_flags, IS_WINDOWS
+from tools.build_pytorch_libs import build_caffe2
 
 if __name__ == '__main__':
     # Placeholder for future interface. For now just gives a nice -h.
     parser = argparse.ArgumentParser(description='Build libtorch')
     options = parser.parse_args()
 
-    tools_path = os.path.dirname(os.path.abspath(__file__))
-    if IS_WINDOWS:
-        build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.bat')
-    else:
-        build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.sh')
-
-    command = [build_pytorch_libs]
-    my_env, extra_flags = get_libtorch_env_with_flags()
-    command.extend(extra_flags)
-    command.append('caffe2')
-
-    sys.stdout.flush()
-    sys.stderr.flush()
-    subprocess.check_call(command, universal_newlines=True, env=my_env)
+    build_caffe2(version=None, cmake_python_library=None,
+                 build_python=False, rerun_cmake=True, build_dir='.')

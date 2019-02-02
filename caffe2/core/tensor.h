@@ -31,14 +31,10 @@ class CAFFE2_API Tensor final {
   using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
   TensorImplPtr impl_;
 
+  void enforce_invariants();
+
  public:
   Tensor() : impl_() {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
-      : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
-    }
-  }
 
   // caffe2::Tensor is explicitly marked as moveable-only because before
   // the refactoring the class used to be a value type and a lot of user code
@@ -82,12 +78,6 @@ class CAFFE2_API Tensor final {
   }
 
   /**
-   * @brief Creates a caffe2 tensor from an ATen tensor
-   */
-  explicit Tensor(const at::Tensor& tensor)
-      : impl_(std::move(tensor.getIntrusivePtr())) {}
-
-  /**
    * @brief Creates a tensor of the given dimension.
    *
    * Note that the actual data allocation is not going to be carried out until
@@ -121,8 +111,34 @@ class CAFFE2_API Tensor final {
     CopyFrom(src);
   }
 
-  explicit Tensor(C10Tensor tensor)
-      : impl_(std::move(tensor).impl()) {}
+  /**
+   * @brief Mutual conversion with at::Tensor
+   *
+   * The tensor will share the same instance (data, strides, sizes, etc) but
+   * a different subset of APIs would be available
+   */
+  explicit Tensor(const at::Tensor& tensor)
+      : impl_(std::move(tensor.getIntrusivePtr())) {
+    enforce_invariants();
+  }
+
+  explicit operator at::Tensor() const& {
+    return at::Tensor::wrap_tensor_impl(impl_);
+  }
+
+  explicit operator at::Tensor() && {
+    return at::Tensor::wrap_tensor_impl(std::move(impl_));
+  }
+
+  /**
+   * @brief Mutual conversion with C10Tensor
+   *
+   * The tensor will share the same instance (data, strides, sizes, etc) but
+   * a different subset of APIs would be available
+   */
+  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
+    enforce_invariants();
+  }
 
   explicit operator C10Tensor() const & {
     return C10Tensor(impl_);
@@ -139,6 +155,35 @@ class CAFFE2_API Tensor final {
   Tensor Clone() const {
     Tensor x(GetDevice());
     x.CopyFrom(*this);
+    return x;
+  }
+
+  /**
+   * Clone self as a Tensor that share the same Storage,
+   * that is, both Tensors are views on the same Storage.
+   * If we change the sizes or strides of one Tensor, it
+   * does not affect the other Tensor that it shares Storage
+   * with.
+   * A similar yet different usage is `Tensor x = y;`, this
+   * will make x and y pointing to the same Tensor and resizing
+   * one of them will resize the other as well.
+   *
+   * TODO: Deduplicate this with THTensor_(newWithTensor)
+   * (exposed in ATen as at::alias but not otherwise available)
+   */
+  Tensor Alias() const {
+    Tensor x(sizes(), GetDevice());
+    if (!dtype_initialized()) {
+      C10_LOG_EVERY_MS(WARNING, 1000) <<
+                   "Cloning a tensor that don't have a data type (did you call mutable_data<T> on the tensor?)";
+    }
+    AT_ASSERTM(
+        storage_initialized(),
+        "Cloning a tensor that has no content and has size > 0");
+    // set_storage already sets data_type_ of TensorImpl
+    x.impl_->set_storage(storage());
+    x.impl_->set_storage_offset(impl_->storage_offset());
+    x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
   }
 
@@ -311,14 +356,7 @@ class CAFFE2_API Tensor final {
     return ss.str();
   }
 
-  // NB: a.swap(b) is not equivalent to std::swap(a, b);
-  // swap method swaps the CONTENTS of the tensors, while std::swap
-  // swaps the POINTERS.
-  void swap(const Tensor& other) const noexcept {
-    // NB: use get() to get a non-const pointer!
-    std::swap(*impl_.get(), *other.impl_.get());
-  }
-
+  // To be deprecated
   void ShareData(const Tensor& src) const {
     impl_.get()->ShareData(*src.impl_.get());
   }
@@ -466,11 +504,6 @@ class CAFFE2_API Tensor final {
     return impl_.get()->sizes();
   }
 
-  // To be deprecated
-  inline at::IntList dims() const {
-    return impl_.get()->sizes();
-  }
-
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }
@@ -502,7 +535,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::IntList strides() {
+  inline at::IntList strides() const {
     return impl_.get()->strides();
   }
 

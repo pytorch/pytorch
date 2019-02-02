@@ -362,7 +362,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto tid = type_id();
-    if (tid == CUDATensorId() || tid == HIPTensorId()) {
+    if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
     }
@@ -374,7 +374,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: This is a little convoluted so it would be good to investigate
     // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
     const auto tid = type_id();
-    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId()) {
+    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId()) {
       // NB: storage(), not storage_, b/c of Variable.
       const auto& mystorage = storage();
       if (mystorage) {
@@ -1073,7 +1073,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = 0;
   }
 
-  /**
+   /**
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
@@ -1085,6 +1085,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * The source tensor should already have its data allocated.
    */
+  // To be deprecated
   void ShareData(const TensorImpl& src) {
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add

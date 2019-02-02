@@ -137,5 +137,11 @@ namespace test_map_types_to_values {
         static_assert(std::is_same<decltype(expected), decltype(result)>::value, "");
         EXPECT_EQ(expected, result);
     }
+}
 
+namespace test_find_if {
+  static_assert(0 == find_if<typelist<char&>, std::is_reference>::value, "");
+  static_assert(0 == find_if<typelist<char&, int, char&, int&>, std::is_reference>::value, "");
+  static_assert(2 == find_if<typelist<char, int, char&, int&>, std::is_reference>::value, "");
+  static_assert(3 == find_if<typelist<char, int, char, int&>, std::is_reference>::value, "");
 }
