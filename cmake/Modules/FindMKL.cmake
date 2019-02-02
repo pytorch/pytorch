@@ -149,11 +149,19 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
           # Use FindOpenMP to find gomp
           FIND_PACKAGE(OpenMP QUIET)
           IF(OPENMP_FOUND)
-            IF (NOT ${OpenMP_CXX_LIB_NAMES} MATCHES "iomp")
-              # this doesn't necessarily mean that we have gomp... but it is
-              # probably good enough since on gcc we should already have
-              # OpenMP_CXX_FLAGS="-fopenmp" and OpenMP_CXX_LIB_NAMES="".
+            # Test that none of the found library names contains "iomp" (Intel
+            # OpenMP). This doesn't necessarily mean that we have gomp... but it
+            # is probably good enough since on gcc we should already have
+            # OpenMP_CXX_FLAGS="-fopenmp" and OpenMP_CXX_LIB_NAMES="".
+            SET(_found_gomp true)
+            FOREACH(_lib_name ${OpenMP_CXX_LIB_NAMES})
+              IF (_found_gomp AND "${_lib_name}" MATCHES "iomp")
+                SET(_found_gomp false)
+              ENDIF()
+            ENDFOREACH()
+            IF(_found_gomp)
               SET(${_prefix}_${_library}_LIBRARY ${OpenMP_CXX_FLAGS})
+              SET(_openmp_library "${${_prefix}_${_library}_LIBRARY}")
             ENDIF()
           ENDIF(OPENMP_FOUND)
         ELSEIF(${_library} MATCHES "iomp")

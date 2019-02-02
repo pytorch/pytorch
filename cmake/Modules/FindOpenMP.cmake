@@ -87,14 +87,8 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
 
     # AppleClang may need a header file, search for omp.h with hints to brew
-    # default include dir and MKL include dir
-    find_package(MKL QUIET)
-    if (MKL_FOUND)
-      set(__mkl_include_dir $MKL_INCLUDE_DIR)
-    else()
-      set(__mkl_include_dir "")
-    endif()
-    find_path(__header_dir "omp.h" HINTS "${__mkl_include_dir}" "/usr/local/include")
+    # default include dir
+    find_path(__header_dir "omp.h" HINTS "/usr/local/include")
     set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
 
     set(OMP_FLAG_HP "+Oopenmp")
@@ -201,31 +195,73 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     endif()
     string(REGEX REPLACE "[-/=+]" "" OPENMP_PLAIN_FLAG "${OPENMP_FLAG}")
 
-    find_package(MKL QUIET)
-    if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
-      # If we already link OpenMP via MKL, use that. Otherwise at run-time
-      # OpenMP will complain about being initialized twice (OMP: Error #15),
-      # can may cause incorrect behavior.
-      set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
-    else()
-      find_library(OpenMP_libomp_LIBRARY
-        NAMES omp gomp iomp5
-        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-        DOC "libomp location for OpenMP"
-      )
-    endif()
-    mark_as_advanced(OpenMP_libomp_LIBRARY)
+    # NOTE [ Linking both MKL and OpenMP ]
+    #
+    # It is crucial not to link two `libomp` libraries together, even when they
+    # are both Intel or GNU. Otherwise, you will end up with this nasty error,
+    # and may get incorrect results.
+    #
+    #   OMP: Error #15: Initializing libomp.dylib, but found libiomp5.dylib
+    #   already initialized.
+    #
+    #   OMP: Hint This means that multiple copies of the OpenMP runtime have
+    #   been linked into the program. That is dangerous, since it can degrade
+    #   performance or cause incorrect results. The best thing to do is to
+    #   ensure that only a single OpenMP runtime is linked into the process,
+    #   e.g. by avoiding static linking of the OpenMP runtime in any library. As
+    #   an unsafe, unsupported, undocumented workaround you can set the
+    #   environment variable KMP_DUPLICATE_LIB_OK=TRUE to allow the program to
+    #   continue to execute, but that may cause crashes or silently produce
+    #   incorrect results. For more information, please see
+    #   http://openmp.llvm.org/
+    #
+    # So here, before we test each flag combination, we first try directly
+    # linking against any `libomp` MKL has found (if any). This allows us to
+    # do sensible things in tricky conditions like:
+    #   - using `clang` (so no native GNU OpenMP), and
+    #   - having `brew` `libomp` installed at `/usr/local/`, and
+    #   - having `conda` `mkl` installed at `$HOME/conda/`, with includes a copy
+    #     of `libiomp5`.
+    # Rather than blindly picking one, we pick what ever `FindMKL.cmake` choses
+    # to avoid conflicts.
+    #
+    # Crucially, we only do so for non-GNU compilers. For GNU ones,
+    # `FindMKL.cmake` calls `FindOpenMP.cmake` when trying to find `gomp` and
+    # thus will cause infinite recursion if this is not taken care of. Moreover,
+    # for them, `FindOpenMP.cmake` should just use the compiler provided
+    # `-fopenmp` and link no extra libraries anyways.
+    #
+    # TODO: refactor to solve this weird dependency where
+    #         - for non-GNU, FindOpenMP.cmake replies on FindMKL.cmake to finish first, but
+    #         - for GNU,     FindMKL.cmake replies on FindOpenMP.cmake to finish first.
 
-    if (OpenMP_libomp_LIBRARY)
-      try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
-        CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
-        LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG} ${OpenMP_libomp_LIBRARY}
-        OUTPUT_VARIABLE OpenMP_TRY_COMPILE_OUTPUT
-      )
-      if(OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG})
-        set("${OPENMP_FLAG_VAR}" "${OPENMP_FLAG}" PARENT_SCOPE)
-        set("${OPENMP_LIB_NAMES_VAR}" "libomp" PARENT_SCOPE)
-        break()
+    if(NOT "${CMAKE_${LANG}_COMPILER_ID}" STREQUAL "GNU")
+      find_package(MKL QUIET)
+      if(MKL_FOUND AND (NOT "${MKL_OPENMP_LIBRARY}" STREQUAL ""))
+        # If we already link OpenMP via MKL, use that. Otherwise at run-time
+        # OpenMP will complain about being initialized twice (OMP: Error #15),
+        # can may cause incorrect behavior.
+        set(OpenMP_libomp_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libomp location for OpenMP")
+      else()
+        find_library(OpenMP_libomp_LIBRARY
+          NAMES omp gomp iomp5
+          HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+          DOC "libomp location for OpenMP"
+        )
+      endif()
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+
+      if (OpenMP_libomp_LIBRARY)
+        try_compile( OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG} ${CMAKE_BINARY_DIR} ${_OPENMP_TEST_SRC}
+          CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${OPENMP_FLAGS_TEST}"
+          LINK_LIBRARIES ${CMAKE_${LANG}_VERBOSE_FLAG} ${OpenMP_libomp_LIBRARY}
+          OUTPUT_VARIABLE OpenMP_TRY_COMPILE_OUTPUT
+        )
+        if(OpenMP_COMPILE_RESULT_${FLAG_MODE}_${OPENMP_PLAIN_FLAG})
+          set("${OPENMP_FLAG_VAR}" "${OPENMP_FLAG}" PARENT_SCOPE)
+          set("${OPENMP_LIB_NAMES_VAR}" "libomp" PARENT_SCOPE)
+          break()
+        endif()
       endif()
     endif()
 

@@ -12,9 +12,9 @@ This is modified from [the file included in CMake 3.13 release](https://github.c
 
 + For `AppleClang` compilers, use `-Xpreprocessor` instead of `-Xclang` as the later is not documented.
 
-+ For `AppleClang` compilers, an extra flag option is tried, which is `-Xpreprocessor -openmp -I${DIR_OF_omp_h}`, where `${DIR_OF_omp_h}` is a obtained using `find_path` on `omp.h` with MKL's include directory and `brew`'s default include directory as hints. Without this, the compiler will complain about missing headers as they are not natively included in Apple's LLVM.
++ For `AppleClang` compilers, an extra flag option is tried, which is `-Xpreprocessor -openmp -I${DIR_OF_omp_h}`, where `${DIR_OF_omp_h}` is a obtained using `find_path` on `omp.h` with `brew`'s default include directory as a hint. Without this, the compiler will complain about missing headers as they are not natively included in Apple's LLVM.
 
-+ Whenever we try a candidate OpenMP flag, first try it with directly linking MKL's `libomp` if it has one. Otherwise, we may end up linking two `libomp`s and end up with this nasty error:
++ For non-GNU compilers, whenever we try a candidate OpenMP flag, first try it with directly linking MKL's `libomp` if it has one. Otherwise, we may end up linking two `libomp`s and end up with this nasty error:
 
   ```
   OMP: Error #15: Initializing libomp.dylib, but found libiomp5.dylib already
@@ -30,3 +30,5 @@ This is modified from [the file included in CMake 3.13 release](https://github.c
   that may cause crashes or silently produce incorrect results. For more
   information, please see http://openmp.llvm.org/
   ```
+
+  See NOTE [ Linking both MKL and OpenMP ] for details.
