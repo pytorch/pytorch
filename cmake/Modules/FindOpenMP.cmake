@@ -292,8 +292,8 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
         set("${OPENMP_LIB_NAMES_VAR}" "" PARENT_SCOPE)
       endif()
       break()
-    elseif(CMAKE_${LANG}_COMPILER_ID STREQUAL "AppleClang"
-      AND CMAKE_${LANG}_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
+    elseif((CMAKE_${LANG}_COMPILER_ID STREQUAL "AppleClang") AND
+           (NOT CMAKE_${LANG}_COMPILER_VERSION VERSION_LESS "7.0"))
 
       # LLVM 3.7 supports OpenMP 3.1, and continues to add more features to
       # support newer OpenMP standards in new versions.
