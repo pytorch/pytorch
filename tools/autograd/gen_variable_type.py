@@ -89,7 +89,7 @@ DONT_REQUIRE_DERIVATIVE = {
 # The following code templates implement the checks for this invariant:
 SAVE_TENSOR_STORAGE = CodeTemplate("""\
 Storage ${tensor_name}_storage_saved =
-  (${tensor_name}.defined() && !${tensor_name}.is_sparse()) ? ${tensor_name}.storage() : Storage();
+  ${tensor_name}.has_storage() ? ${tensor_name}.storage() : Storage();
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
@@ -100,7 +100,7 @@ SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   ${tensorlist_name}_storage_saved[i] =
-    (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse()) ?
+    ${tensorlist_name}[i].has_storage() ?
       ${tensorlist_name}[i].storage() : Storage();
 }
 """)
@@ -115,7 +115,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 SAVE_TENSOR_IMPL = CodeTemplate("""\
 c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> ${tensor_name}_impl_saved;
-if (${tensor_name}.defined() && !${tensor_name}.is_sparse())
+if (${tensor_name}.has_storage())
   ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
 """)
 
@@ -127,7 +127,7 @@ SAVE_TENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>>
   ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}[i].defined() && !${tensorlist_name}[i].is_sparse())
+  if (${tensorlist_name}[i].has_storage())
     ${tensorlist_name}_impl_saved[i] = ${tensorlist_name}[i].getIntrusivePtr();
 }
 """)

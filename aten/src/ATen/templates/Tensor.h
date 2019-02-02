@@ -170,6 +170,9 @@ public:
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
   }
+  bool has_storage() const {
+    return defined() && impl_->has_storage();
+  }
   const Storage& storage() const {
     return impl_->storage();
   }
