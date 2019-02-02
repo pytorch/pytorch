@@ -1251,6 +1251,10 @@ struct PythonOp : public Node {
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);
