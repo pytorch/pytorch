@@ -1,6 +1,7 @@
 import types
 import math
 import torch
+import copy
 from torch._six import inf
 from collections import Counter
 from functools import partial
@@ -365,7 +366,10 @@ class ReduceLROnPlateau(object):
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
-            self.best = current
+            if isinstance(current, torch.Tensor):
+                self.best = current.clone().detach()
+            else:
+                self.best = copy.deepcopy(current)
             self.num_bad_epochs = 0
         else:
             self.num_bad_epochs += 1
