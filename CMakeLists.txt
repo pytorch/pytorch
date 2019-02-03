@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 #cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
-# Not settings this sometimes make XCode C compiler gets detected as "Clang"
+# Not setting this sometimes makes XCode C compiler gets detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
 cmake_policy(SET CMP0025 NEW)
 
