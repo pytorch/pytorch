@@ -3,24 +3,43 @@ import torch.jit
 from torch.cuda._utils import _get_device_index
 
 
+
 # Check if we can safely replicate the module.
 # there are three types of module:
 # 1. python modules
-# 2. weak python modules (nn.module annotated by @weak_module)
+# 2. weak python modules (nn.Module annotated by @weak_module)
 # 3. ScriptModule
 #
-# currently a module cannot be replicated properly if the parents of any python
-# modules (type 1 above) contains ScriptModule
-def _replicatable_module(module):
+# currently a module cannot be replicated properly if the descendant of
+# any ScriptModule contains python module (type 1 above)
+def _replicatable_module(module, memo=None):
+
+    def legal_submodule(m):
+        return isinstance(m, torch.jit.ScritModule) \
+            or torch.jit._is_weak_type(type(m))
+
+    # module.modules() contains module itself as the first element
+    def descendant_modules(module):
+        return next(module.modules())
+
     if not torch.jit._enabled:
         return True
-    # TODO: implement the logic
+    if memo is None:
+        memo = set()
+
+    memo.add(module)
+    if isinstance(module, torch.jit.ScriptModule):
+        memo.update(descendant_modules(module))
+        return all(legal_submodule(descendant) for
+                   descendant in descendant_modules(module))
+
+    for child in module.children():
+        if child in memo:
+            continue
+        if not _replicatable_module(module, memo):
+            return False
+
     return True
-
-
-def _get_root_script_modules(module):
-    # TODO: implement this
-    return []
 
 
 def _copy_module_methods(module):
@@ -52,7 +71,7 @@ def replicate(network, devices, detach=False):
     modules = list(network.modules())
     module_copies = [[] for device in devices]
     module_indices = {}
-    scriptmodule_skip_attr = set(["_paramaters", "_buffers", "_modules"])
+    scriptmodule_skip_attr = {"_paramaters", "_buffers", "_modules"}
 
     for i, module in enumerate(modules):
         module_indices[module] = i
@@ -106,11 +125,15 @@ def replicate(network, devices, detach=False):
                     replica = module_copies[j][i]
                     replica._buffers[key] = buffer_copies[j][buffer_idx]
 
-    root_script_modules = _get_root_script_modules(network)
-    for j in range(num_replicas):
-        for root_module in root_script_modules:
-            module_index = module_indices[root_module]
-            replicated_root_module = module_copies[j][module_index]
-            _copy_module_methods(root_module, replicated_root_module)
+    for i, module in enumerate(modules):
+        if not isinstance(module, torch.jit.ScriptModule):
+            continue
+        for j in range(num_replicas):
+            replica = module_copies[j][i]
+
+            def replica_param_lookup(param):
+                param_idx = param_indices[param]
+                return param_copies[j][param_idx]
+            replica._copy_methods(module, replica_param_lookup)
 
     return [module_copies[j][0] for j in range(num_replicas)]

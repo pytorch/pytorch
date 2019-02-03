@@ -585,6 +585,18 @@ struct Module {
     }
   }
 
+  void copy_methods(
+    std::function<at::Tensor*(at::Tensor*)> param_lookup,
+    std::shared_ptr<Module> orig) {
+    for (auto& kv : orig->get_methods()) {
+      std::vector<at::Tensor*> params;
+      for (auto& p : kv.value()->params()) {
+        params.push_back(param_lookup(p));
+      }
+      create_method(kv.key(), kv.value()->graph()->copy(), params);
+    }
+  }
+
  private:
   void to_impl(
       const c10::optional<at::Device>& device,
