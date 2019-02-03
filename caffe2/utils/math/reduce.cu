@@ -10,19 +10,13 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/fixed_divisor.h"
+#include "caffe2/utils/math/reduce.cuh"
 #include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
 namespace math {
 
 namespace {
-
-template <typename T>
-using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T, int kBlockDimX, int kBlockDimY>
-using BlockReduce2D = cub::
-    BlockReduce<T, kBlockDimX, cub::BLOCK_REDUCE_WARP_REDUCTIONS, kBlockDimY>;
 
 template <typename T>
 __global__ void
@@ -229,23 +223,18 @@ CAFFE2_CUDA_EXPORT void MomentsCUDA(
   int N;
   int K;
   if (utils::IsBothEndsReduce(ndim, X_dims, Y_dims, &M, &N, &K)) {
-    if (K >= 128) {
-      BothEndsMomentsCUDAKernel<T, 1, 128>
-          <<<N, dim3(1, 128), 0, context->cuda_stream()>>>(
-              M, N, K, X, mean, var);
-    } else if (K >= 64) {
-      BothEndsMomentsCUDAKernel<T, 2, 64>
-          <<<N, dim3(2, 64), 0, context->cuda_stream()>>>(
-              M, N, K, X, mean, var);
-    } else if (K >= 32) {
-      BothEndsMomentsCUDAKernel<T, 4, 32>
-          <<<N, dim3(4, 32), 0, context->cuda_stream()>>>(
-              M, N, K, X, mean, var);
-    } else {
-      BothEndsMomentsCUDAKernel<T, 8, 16>
-          <<<N, dim3(8, 16), 0, context->cuda_stream()>>>(
-              M, N, K, X, mean, var);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        K,
+        BothEndsMomentsCUDAKernel,
+        T,
+        N,
+        context->cuda_stream(),
+        M,
+        N,
+        K,
+        X,
+        mean,
+        var);
     return;
   }
   std::vector<int> axes(ndim);
