@@ -22,6 +22,8 @@ RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-la
 ENV PATH /opt/conda/bin:$PATH
 RUN pip install ninja
 # This must be done before pip so that requirements.txt is available
+WORKDIR /opt
+RUN git clone https://github.com/pytorch/pytorch.git
 WORKDIR /opt/pytorch
 COPY . .
 
