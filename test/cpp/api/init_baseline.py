@@ -43,13 +43,13 @@ def run(initializer):
     torch.manual_seed(0)
     
     layer1 = torch.nn.Linear(7, 15)
-    torch.nn.init.xavier_uniform_(layer1.weight)
+    INITIALIZERS[initializer](layer1.weight)
     
     layer2 = torch.nn.Linear(15, 15)
-    torch.nn.init.xavier_uniform_(layer2.weight)
+    INITIALIZERS[initializer](layer2.weight)
     
     layer3 = torch.nn.Linear(15, 2)
-    torch.nn.init.xavier_uniform_(layer3.weight)
+    INITIALIZERS[initializer](layer3.weight)
 
     weight1 = layer1.weight.data.numpy()
     weight2 = layer2.weight.data.numpy()
