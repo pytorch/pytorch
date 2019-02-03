@@ -353,7 +353,7 @@ class Tensor(torch._C._TensorBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
     def __floordiv__(self, other):
         result = self / other
