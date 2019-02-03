@@ -195,7 +195,7 @@ macos_brew_update: &macos_brew_update
     # `parallel` first, and relink it afterwards
     brew update
     brew unlink parallel
-    brew install moreutils --without-parallel
+    brew install moreutils
     brew link parallel --overwrite
     brew install expect
 
