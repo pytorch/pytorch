@@ -1026,6 +1026,8 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_det_dim2_null',
     'test_det_rank1',
     'test_det_rank2',
+    # `other` expand_as(self, other) is not used in autograd.
+    'test_expand_as',
     'test_logdet',
     'test_logdet_1x1',
     'test_logdet_symmetric',

@@ -28,23 +28,18 @@ const std::vector<std::string> functions = {
 
             return torch.erf(self), backward
 
-        def detach(self):
-            def backward(grad_output):
-                return None
-            return torch.detach(self), backward
-
         def expand(self,
                    size: List[int],
                    implicit: bool=False):
             def backward(grad_output):
-                grad_self = torch.sum_to_size(grad_output, self.size())
+                grad_self = torch._grad_sum_to_size(grad_output, self.size())
                 return grad_self, None, None
 
             return torch.expand(self, size, implicit=implicit), backward
 
         def expand_as(self, other):
             def backward(grad_output):
-                grad_self = grad_output.sum_to_size(self.size())
+                grad_self = grad_output._grad_sum_to_size(self.size())
                 return grad_self, None
 
             return torch.expand_as(self, other), backward
@@ -55,14 +50,6 @@ const std::vector<std::string> functions = {
                 return None, None
 
             return torch.full_like(self, fill_value), backward
-
-        def index(self,
-                  indices: List[Tensor]):
-            def backward(grad_output):
-                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
-                return grad_self, None
-
-            return torch.index(self, indices), backward
 
         def kthvalue(self,
                      k: int,
@@ -87,7 +74,7 @@ const std::vector<std::string> functions = {
                    keepdim: bool):
             def backward(grad_output):
                 grad_self = torch.sum_backward(grad_output, self.size(), dim, keepdim) / torch._safe_size(self.size(), dim)
-                return grad_self, None
+                return grad_self, None, None
 
             return torch.mean(self, dim, keepdim), backward
 
@@ -129,8 +116,8 @@ const std::vector<std::string> functions = {
 
         def pow_1(self, exponent):
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1)).sum_to_size(self.size())
-                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(self).sum_to_size(exponent.size())
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self.size())
+                grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent.size())
                 return grad_self, grad_exponent
 
             return torch.pow(self, exponent), backward
@@ -146,8 +133,8 @@ const std::vector<std::string> functions = {
         def rsub_0(self, other,
                    alpha: float = 1.0):
             def backward(grad_output):
-                grad_self = (- grad_output * alpha).sum_to_size(self.size())
-                grad_other = (grad_output).sum_to_size(other.size())
+                grad_self = (- grad_output * alpha)._grad_sum_to_size(self.size())
+                grad_other = (grad_output)._grad_sum_to_size(other.size())
                 return grad_self, grad_other, None
 
             return torch.rsub(self, other, alpha), backward
@@ -156,7 +143,7 @@ const std::vector<std::string> functions = {
                    other: float,
                    alpha: float = 1.0):
             def backward(grad_output):
-                grad_self = (- grad_output * alpha).sum_to_size(self.size())
+                grad_self = (- grad_output * alpha)._grad_sum_to_size(self.size())
                 return grad_self, None, None
 
             return torch.rsub(self, other, alpha), backward
@@ -339,7 +326,7 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
 
     // modify canonical string for function overloading
     // prefer not to modify the schema name
-    auto schema_name = actual_schema.name();
+    const auto& schema_name = actual_schema.name();
     auto pos = schema_name.find_last_of('_');
     auto schema_name_suffix = schema_name.substr(pos + 1);
     std::string key = canonicalSchemaString(actual_schema);
