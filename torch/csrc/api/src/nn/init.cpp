@@ -180,6 +180,7 @@ Tensor kaiming_uniform_(
     double a,
     FanMode mode,
     Nonlinearity nonlinearity) {
+  NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
   const auto bound = std::sqrt(3.0) * std;
@@ -191,6 +192,8 @@ Tensor kaiming_normal_(
     double a,
     FanMode mode,
     Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   return tensor.normal_(0, std);
 }
