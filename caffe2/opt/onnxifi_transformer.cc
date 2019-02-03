@@ -18,18 +18,24 @@ namespace caffe2 {
 namespace {
 
 const std::string kNetPos("net_pos");
-const std::string kNetId("model_id");
+const std::string kModelId("model_id");
 constexpr size_t kBufferSize = 64;
 
-// TODO: We probably don't want use protobuf as annotation in the future.
-void AnnotateOpIndex(NetDef* net) {
+void AnnotateOpIndex(NetDef* net, const std::string& net_id) {
   int i = 0;
-  auto net_id =
-      ArgumentHelper(*net).GetSingleArgument<std::string>("model_id", "");
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
-    AddArgument(kNetId, net_id, &op);
   }
+}
+
+std::string GetModelId(const NetDef& net) {
+  static std::atomic<size_t> seq_id{0};
+  auto model_id =
+      ArgumentHelper(net).GetSingleArgument<std::string>("model_id", "");
+  if (model_id.empty()) {
+    model_id = "unnamed_" + c10::to_string(seq_id++);
+  }
+  return model_id;
 }
 
 // Wrap TensorShape into TensorProto
@@ -278,6 +284,10 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   // Tell Onnxifi op which backend id to use
   AddArgument("backend_id", idx_, &op);
 
+  // Add model_id and net_pos to the onnxifi model
+  AddArgument(kModelId, model_id_, &op);
+  AddArgument(kNetPos, c10::to_string(onnxifi_op_id_++), &op);
+
   return op;
 }
 
@@ -482,7 +492,7 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
-  AnnotateOpIndex(pred_net);
+  AnnotateOpIndex(pred_net, model_id_);
   std::vector<std::string> external_inputs;
   for (const auto kv : input_mapping_) {
     reverse_input_mapping_.emplace(kv.second, kv.first);
@@ -722,6 +732,10 @@ void OnnxifiTransformer::Transform(
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
+
+  // Get model id and  reset Onnxifi op id to 0
+  model_id_ = GetModelId(*pred_net);
+  onnxifi_op_id_ = 0;
 
   // SSA Rewrite the net
   auto shape_hints_ordered =

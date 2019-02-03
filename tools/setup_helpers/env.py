@@ -10,7 +10,6 @@ IS_LINUX = (platform.system() == 'Linux')
 IS_PPC = (platform.machine() == 'ppc64le')
 IS_ARM = (platform.machine() == 'aarch64')
 
-
 IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
@@ -53,3 +52,9 @@ def hotpatch_build_env_vars():
     # Also hotpatch a few with BUILD_* equivalent
     build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
     [hotpatch_var(v, 'BUILD_') for v in build_env_vars]
+
+hotpatch_build_env_vars()
+
+DEBUG = check_env_flag('DEBUG')
+REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
+USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'ON')

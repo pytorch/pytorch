@@ -7,7 +7,7 @@
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/utils/functional.h>
+#include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
@@ -191,7 +191,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0].type());
 
     int64_t count = inputs[0].numel();
-    std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
@@ -271,7 +271,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0].type());
 
     int64_t count = inputs[0].numel();
-    std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
@@ -334,7 +334,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     ncclDataType_t data_type = _get_data_type(inputs[0].type());
 
     int64_t count = inputs[0].numel() / len;
-    std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;

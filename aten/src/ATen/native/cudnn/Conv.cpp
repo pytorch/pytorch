@@ -692,7 +692,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   // Free the cached blocks in our caching allocator. They are
   // needed here because the above benchmarking uses a huge amount of memory,
   // e.g. a few GBs.
-  THCCachingAllocator_emptyCache();
+  c10::cuda::CUDACachingAllocator::emptyCache();
 }
 
 template<typename algo_t>
