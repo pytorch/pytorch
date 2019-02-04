@@ -185,7 +185,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival->toTensor());
-    if (tensor.GetDeviceType() != type) {
+    if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
       tensor = Tensor(type);
       auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
