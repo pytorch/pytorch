@@ -45,7 +45,6 @@ static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
-  XLA, // TODO: move to extension_backends list in gen.py.
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,

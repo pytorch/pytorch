@@ -75,7 +75,7 @@ enum class TypeID {
   SparseCUDALong,
   SparseCUDAShort,
   MSNPU,
-  XLA, // TODO: move to extension_backends list in gen.py.
+  XLA,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,
