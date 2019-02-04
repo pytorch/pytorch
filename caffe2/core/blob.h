@@ -33,6 +33,9 @@ inline Tensor GetSizedTensorWithOptions(
     at::IntList dims,
     at::TensorOptions options) {
   Tensor tensor = std::move(previous_tensor);
+  if (!tensor.defined()) {
+    return caffe2::empty(dims, options);
+  }
   if (tensor.GetDevice() == options.device() ||
       (!tensor.GetDevice().has_index() &&
        tensor.GetDeviceType() == options.device().type())) {
