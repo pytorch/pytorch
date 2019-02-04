@@ -3,7 +3,6 @@ import torch.jit
 from torch.cuda._utils import _get_device_index
 
 
-
 # Check if we can safely replicate the module.
 # there are three types of module:
 # 1. python modules
@@ -42,9 +41,31 @@ def _replicatable_module(module, memo=None):
     return True
 
 
-def _copy_module_methods(module):
-    # TODO: implement this
-    return
+def _build_param_dict(modules, module_copies, module_indices):
+    param_dict = {}
+    for module in modules:
+        if not isinstance(m, torch.jit.ScriptModule):
+            continue
+        replica = module_copies[module_indices[module]]
+        for name, param in module.named_parameters(recurse=False):
+            param_dict[param] = (replica, name)
+        for name, buffer in module.named_buffer(recurse=False):
+            param_dict[buffer] = (replica, name)
+    return param_dict
+
+
+def _copy_scriptmodule_methods(modules, module_copies, module_indices):
+    params_map = _build_param_dict(modules, module_copies, module_indices)
+    for i, module in enumerate(modules):
+        if not isinstance(module, torch.jit.ScriptModule):
+            continue
+        replica = module_copies[j][i]
+        for method_name in module._method_names():
+            method = module._get_method(name)
+            param_list = []
+            for param in method.params():
+                param_list.append(param_dict[param])
+            replica._copy_method(method_name, param_list, module)
 
 
 def replicate(network, devices, detach=False):
@@ -125,15 +146,8 @@ def replicate(network, devices, detach=False):
                     replica = module_copies[j][i]
                     replica._buffers[key] = buffer_copies[j][buffer_idx]
 
-    for i, module in enumerate(modules):
-        if not isinstance(module, torch.jit.ScriptModule):
-            continue
-        for j in range(num_replicas):
-            replica = module_copies[j][i]
+    for j in range(num_replicas):
+        _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
 
-            def replica_param_lookup(param):
-                param_idx = param_indices[param]
-                return param_copies[j][param_idx]
-            replica._copy_methods(module, replica_param_lookup)
 
     return [module_copies[j][0] for j in range(num_replicas)]

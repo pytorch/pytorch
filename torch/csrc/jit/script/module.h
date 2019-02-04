@@ -585,16 +585,19 @@ struct Module {
     }
   }
 
-  void copy_methods(
-    std::function<at::Tensor*(at::Tensor*)> param_lookup,
+  void copy_method(
+    std::string name,
+    std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
     std::shared_ptr<Module> orig) {
-    for (auto& kv : orig->get_methods()) {
-      std::vector<at::Tensor*> params;
-      for (auto& p : kv.value()->params()) {
-        params.push_back(param_lookup(p));
-      }
-      create_method(kv.key(), kv.value()->graph()->copy(), params);
+
+    std::vector<at::Tensor*> member_inputs;
+    for (auto& p : params) {
+      NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+      member_inputs.push_back(np->slot());
     }
+
+    Method* orig_method = orig->find_method(name);
+    create_method(name, orig_method->graph()->copy(), member_inputs);
   }
 
  private:
