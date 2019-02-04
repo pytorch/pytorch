@@ -5,7 +5,7 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # TODO: Migrate all centos jobs to use proper devtoolset
-if [[ "$BUILD_ENVIRONMENT" == "py2-cuda9.0-cudnn7-centos7" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py2-cuda9.0-cudnn7-centos7* ]]; then
   # There is a bug in pango packge on Centos7 that causes undefined
   # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
   # https://bugs.centos.org/view.php?id=15495
@@ -134,7 +134,7 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
