@@ -2,7 +2,7 @@
 #
 # This module sets the following variables:
 #  MKL_FOUND - set to true if a library implementing the CBLAS interface is found
-#  MKL_VERSION - best guess
+#  MKL_VERSION - best guess of the found mkl version
 #  MKL_INCLUDE_DIR - path to include dir.
 #  MKL_LIBRARIES - list of libraries for base mkl
 #  MKL_LAPACK_LIBRARIES - list of libraries to add for lapack
@@ -126,7 +126,9 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES _name _list _flags)
       set(__list "${_elem}")
     endif(__list)
   endforeach(_elem)
-  message(STATUS "Checking for [${__list}]")
+  IF (NOT MKL_FIND_QUIETLY)
+    message(STATUS "Checking for [${__list}]")
+  ENDIF ()
   FOREACH(_library ${_list})
     SET(_combined_name ${_combined_name}_${_library})
     IF(_libraries_work)
@@ -141,11 +143,13 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES _name _list _flags)
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       SET(${LIBRARIES} ${${LIBRARIES}} ${${_prefix}_${_library}_LIBRARY})
       SET(_libraries_work ${${_prefix}_${_library}_LIBRARY})
-      IF(${_prefix}_${_library}_LIBRARY)
-        MESSAGE(STATUS "  Library ${_library}: ${${_prefix}_${_library}_LIBRARY}")
-      ELSE(${_prefix}_${_library}_LIBRARY)
-        MESSAGE(STATUS "  Library ${_library}: not found")
-      ENDIF(${_prefix}_${_library}_LIBRARY)
+      IF (NOT MKL_FIND_QUIETLY)
+        IF(${_prefix}_${_library}_LIBRARY)
+          MESSAGE(STATUS "  Library ${_library}: ${${_prefix}_${_library}_LIBRARY}")
+        ELSE(${_prefix}_${_library}_LIBRARY)
+          MESSAGE(STATUS "  Library ${_library}: not found")
+        ENDIF(${_prefix}_${_library}_LIBRARY)
+      ENDIF ()
     ENDIF(_libraries_work)
   ENDFOREACH(_library ${_list})
   # Test this combination of libraries.
@@ -278,8 +282,16 @@ SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
 IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
 ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
+  if (MKL_LIBRARIES AND NOT MKL_INCLUDE_DIR)
+    MESSAGE(WARNING "MKL libraries files are found, but MKL header files are \
+      not. You can get them by `conda install mkl-include` if using conda (if \
+      it is missing, run `conda upgrade -n root conda` first), and \
+      `pip install mkl-devel` if using pip. If build fails with header files \
+      available in the system, please make sure that CMake will search the \
+      directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+  endif()
   SET(MKL_FOUND FALSE)
-  SET(MKL_VERSION)
+  SET(MKL_VERSION)  # clear MKL_VERSION
 ENDIF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
 
 # Standard termination

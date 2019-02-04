@@ -1,8 +1,8 @@
 #pragma once
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/function_schema.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
@@ -13,6 +13,7 @@
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -31,6 +32,9 @@
 namespace torch {
 namespace jit {
 namespace script {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // A method in a module, e.g. f in:
 //
@@ -57,7 +61,7 @@ struct Method {
         optimize(optimize),
         member_inputs(std::move(initial_members)),
         method_creator(std::move(method_creator)) {
-    JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
+    AT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
     for (at::Tensor* member : member_inputs) {
       member_input_index[member] = i++;
@@ -151,7 +155,7 @@ struct Method {
           ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(retval);
     }
-    JIT_ASSERT(retval->inputs().size() == inputs.size());
+    AT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i = 0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
@@ -162,10 +166,10 @@ struct Method {
     at::ArrayRef<Value*> output_values = retval->outputs();
     // patch this to still work if we are returning a tuple of multiple values
     if (output_values.at(0)->type()->kind() == TupleType::Kind) {
-      JIT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
+      AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
       output_values = output_values.at(0)->node()->inputs();
     }
-    JIT_ASSERT(output_values.size() == outputs.size());
+    AT_ASSERT(output_values.size() == outputs.size());
     for (size_t i = 0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
@@ -193,7 +197,7 @@ struct Method {
   }
 
   std::string pretty_print_schema() const {
-    JIT_ASSERT(schema);
+    AT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
     return ss.str();
@@ -265,12 +269,8 @@ struct Method {
     for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
       const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
-        // XXX - this fails to handle generic aggregates
-        // and should be replaced with a function isSubvalueOf(ivalue, type)
-        // That asks if the specific value is a valid instance of type.
-        const TypePtr inputType = incompleteInferTypeFrom(inputs[pos]);
-        AT_CHECK(
-            inputType->isSubtypeOf(argument.type()),
+        if (!isSubvalueOf(inputs[pos], argument.type())) {
+          AT_ERROR(
             "Expected value of type ",
             *argument.type(),
             " for argument '",
@@ -278,9 +278,10 @@ struct Method {
             "' in position ",
             pos,
             ", but instead got value of type ",
-            *inputType,
+            attemptToRecoverType(inputs[pos])->str(),
             ". Declaration: ",
             schema);
+        }
       } else if (argument.default_value()) {
         inputs.push_back(*argument.default_value());
       } else {
@@ -405,7 +406,7 @@ struct Module {
       const std::string& name,
       std::shared_ptr<Graph> graph,
       std::vector<at::Tensor*> member_inputs) {
-    JIT_ASSERT(graph);
+    AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
         name,
@@ -480,6 +481,26 @@ struct Module {
       submod.value().module->apply(fn);
     }
     fn(*this);
+  }
+  /// Enables "training" mode.
+  void train(bool on = true) {
+    for (auto& submod : get_modules()) {
+      submod->module->train(on);
+    }
+    register_parameter("training", torch::tensor(on ? 1 : 0, at::kLong), /*is_buffer=*/true);
+  }
+  /// Calls train(false) to enable "eval" mode.
+  /// Do not override this method, override `train()` instead.
+  void eval() {
+    train(/*on=*/false);
+  }
+  /// True if the module is in training mode.
+  bool is_training() {
+    if (auto p = find_parameter("training")) {
+      return p->slot()->item<int64_t>() == 1;
+    }
+    // We are in training mode by default
+    return true;
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

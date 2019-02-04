@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {

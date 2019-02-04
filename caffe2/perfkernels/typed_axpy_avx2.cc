@@ -13,7 +13,7 @@ void TypedAxpyHalffloat__avx2_fma(
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
-  while (((unsigned long)x % 16) && N) {
+  while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
     *(y++) += _cvtsh_ss((*(x++)).x) * a;
     --N;
   }
@@ -48,8 +48,8 @@ void TypedAxpy_uint8_float__avx2_fma(
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
-  while (((unsigned long)x % 16) && N) {
-    *(y++) += (float)(*(x++)) * a;
+  while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
+    *(y++) += static_cast<float>(*(x++)) * a;
     --N;
   }
 

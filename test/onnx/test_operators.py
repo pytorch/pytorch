@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
 import torch
 import torch.onnx
 from torch.autograd import Variable, Function
-from torch.nn import Module
+from torch.nn import Module, functional
 import torch.nn as nn
 
 import itertools
@@ -62,6 +62,7 @@ class TestOperators(TestCase):
             m = f
         else:
             m = FuncModule(f, params)
+        m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
         subname = kwargs.pop('subname', None)
         self.assertExpected(onnx_model_pbtxt, subname)
@@ -290,14 +291,6 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.clamp(max=0.1), x)
 
-    def test_unique(self):
-        x = torch.randn(10, requires_grad=True)
-        self.assertONNX(lambda x: torch.unique(x), x)
-
-    def test_unique_dim(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        self.assertONNX(lambda x: torch.unique(x, dim=1), x)
-
     def test_hardtanh(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.nn.Hardtanh(-0.5, 0.5)(x), x)
@@ -417,10 +410,17 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.atan(), x)
 
-    def test_flatten(self):
-        # Flatten is a special case of Reshape when the output is a 2-D tensor.
+    def test_view_flatten(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.view(x.size()[0], x.numel() // x.size()[0]), x)
+
+    def test_flatten(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.flatten(x), x)
+
+    def test_flatten2D(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
     def test_logsoftmax(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -521,6 +521,11 @@ class TestOperators(TestCase):
     def test_erf(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: x.erf(), x)
+
+    def test_dropout(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

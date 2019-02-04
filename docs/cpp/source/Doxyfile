@@ -31,6 +31,7 @@ STRIP_FROM_PATH        = ../../..
 # What folders / files Doxygen should process.
 INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
+                         ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
@@ -57,7 +58,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
                          ../../../torch/csrc/jit/custom_operator.h \
                          ../../../torch/csrc/jit/import.h \
-                         ../../../torch/csrc/jit/ivalue.h \
                          ../../../torch/csrc/jit/script/module.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
