@@ -42,6 +42,9 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
@@ -72,6 +75,9 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
@@ -120,6 +126,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NCHW>(
@@ -156,6 +165,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NHWC>(

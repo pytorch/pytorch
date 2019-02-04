@@ -27,26 +27,33 @@ namespace jit {
 namespace {
 RegisterOperators reg({
   Operator(
-    "caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon) -> (Tensor, Tensor, Tensor)",
+    //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output = None, Tensor? output_mean = None, Tensor? output_stdev = None) -> (Tensor, Tensor, Tensor)
+    c10::core::opschema::LayerNorm().schema(),
     [](Stack& stack) {
-        Tensor tensor_input = std::move(stack[stack.size()-3]).toTensor();
+        Tensor tensor_input = std::move(stack[stack.size()-6]).toTensor();
         if (tensor_input.requires_grad()) {
           throw std::runtime_error("Autograd not yet supported for c10 ops.");
         }
         auto device = tensor_input.device();
-        torch::jit::peek(stack, 0, 3) = torch::autograd::Variable(std::move(tensor_input)).data();
 
-        // push output fields as outputs to stack
-        push(stack, at::empty({0}, device), at::empty({0}, device), at::empty({0}, device));
+        // unwrap inputs from variable
+        torch::jit::peek(stack, 0, 6) = torch::autograd::Variable(std::move(tensor_input)).data();
 
-        c10::Dispatcher<c10::core::opschema::LayerNorm>::lookup(&stack).call(&stack);
-
-        // move outputs down the stack to where the inputs were before
-        for (int i = 0; i < 3; ++i) {
-          torch::jit::peek(stack, i, 6) = torch::autograd::make_variable(std::move(torch::jit::peek(stack, i, 3)).toTensor(), false);
+        // allocate the output tensors that aren't set yet
+        for (int i = 3; i < 6; ++i) {
+          // TODO this should just check for isNone, not for undefined tensor. @wanchaol is working on this.
+          if (torch::jit::peek(stack, i, 6).isNone() || !torch::jit::peek(stack, i, 6).toTensor().defined()) {
+            torch::jit::peek(stack, i, 6) = at::empty({0}, device);
+          }
         }
 
-        drop(stack, 3); // drop inputs
+        // call caffe2 kernel
+        c10::Dispatcher::singleton().lookup(c10::core::opschema::LayerNorm(), &stack).call(&stack);
+
+        // wrap outputs into Variable
+        for (int i = 0; i < 3; ++i) {
+          torch::jit::peek(stack, i, 3) = torch::autograd::make_variable(std::move(torch::jit::peek(stack, i, 3)).toTensor(), false);
+        }
 
         return 0;
       })

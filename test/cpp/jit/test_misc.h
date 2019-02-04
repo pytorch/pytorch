@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -1416,6 +1417,17 @@ void testCustomOperators() {
 
     tracer::abandon();
   }
+}
+
+void testEvalModeForLoadedModule() {
+  if (isSandcastle()) return;  // The module file to load is not generated in Sandcastle
+  std::string module_path = "dropout_model.pt";
+  std::shared_ptr<torch::jit::script::Module> module = torch::jit::load(module_path);
+  AT_ASSERT(module->get_module("dropout")->is_training());
+  module->eval();
+  AT_ASSERT(!module->get_module("dropout")->is_training());
+  module->train();
+  AT_ASSERT(module->get_module("dropout")->is_training());
 }
 
 // test a few features that are not directly used in schemas yet
