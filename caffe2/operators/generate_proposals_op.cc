@@ -345,6 +345,30 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+DEFINE_FUNCTION_SCHEMA_OPERATOR(
+    GenerateProposals,
+    (std::vector<c10::Argument>{
+        c10::Argument("scores"),
+        c10::Argument("bbox_deltas"),
+        c10::Argument("im_info"),
+        c10::Argument("anchors"),
+        c10::Argument("spatial_scale", FloatType::get()),
+        c10::Argument("pre_nms_topN", IntType::get()),
+        c10::Argument("post_nms_topN", IntType::get()),
+        c10::Argument("nms_thresh", FloatType::get()),
+        c10::Argument("min_size", FloatType::get()),
+        c10::Argument("correct_transform_coords", BoolType::get()),
+        c10::Argument("angle_bound_on", BoolType::get()),
+        c10::Argument("angle_bound_lo", IntType::get()),
+        c10::Argument("angle_bound_hi", IntType::get()),
+        c10::Argument("clip_angle_thresh", FloatType::get()),
+    }),
+    (std::vector<c10::Argument>{
+        c10::Argument("output_0"),
+        c10::Argument("output_1"),
+    }),
+    GenerateProposalsOp<CPUContext>);
+
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
