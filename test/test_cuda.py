@@ -2325,6 +2325,9 @@ class TestCuda(TestCase):
     def test_min_with_inf(self):
         _TestTorchMixin._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
+    def test_rpow(self):
+        _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
+
     def test_int_pow(self):
         _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
@@ -2551,6 +2554,10 @@ class TestCuda(TestCase):
         t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+
+    @skipIfRocm
+    def test_histc_cuda(self):
+        _TestTorchMixin._test_histc(self, device='cuda')
 
     @skipIfRocm
     def test_tiny_half_norm_(self):

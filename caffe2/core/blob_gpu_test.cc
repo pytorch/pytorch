@@ -172,7 +172,8 @@ TEST_SERIALIZATION_GPU_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_GPU_WITH_TYPE(int64_t, int64_data)
 
 TEST(TensorConstruction, ReinitializeTensorTest) {
-  Tensor x = caffe2::empty({1}, at::dtype<float>().device(CUDA, 1));
+  if (!HasCudaGPU()) return;
+  Tensor x = caffe2::empty({1}, at::dtype<float>().device(CUDA, 0));
   auto* data_before = x.template mutable_data<float>();
   // We'll only compare device_type in ReinitializeTensor,
   // so no tensor reallocation will happen here

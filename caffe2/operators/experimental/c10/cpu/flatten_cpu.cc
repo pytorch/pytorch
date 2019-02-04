@@ -12,7 +12,7 @@ template <class DataType, class Context>
 void flatten_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
-    int axis) {
+    int64_t axis) {
   Tensor input{C10Tensor(input_)};
   Tensor output{C10Tensor(output_)};
   CPUContext context;
@@ -30,8 +30,6 @@ void flatten_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Flatten)
-    .kernel<&caffe2::flatten_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey({DeviceTypeId::CPU,
-                  LayoutId(0),
-                  caffe2::TypeMeta::Id<float>()});
+    .kernel<decltype(caffe2::flatten_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::flatten_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

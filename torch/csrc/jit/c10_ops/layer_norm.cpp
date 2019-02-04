@@ -3,7 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/custom_operator.h>
 
 using at::Tensor;
@@ -27,38 +27,34 @@ namespace jit {
 namespace {
 RegisterOperators reg({
   Operator(
-    "caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon) -> (Tensor, Tensor, Tensor)",
+    //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output = None, Tensor? output_mean = None, Tensor? output_stdev = None) -> (Tensor, Tensor, Tensor)
+    c10::core::opschema::LayerNorm().schema(),
     [](Stack& stack) {
-        ArrayRef<IValue> inputs = last(stack, 3);
-        Tensor input = std::move(inputs[0]).toTensor();
-        const IValue& axis = inputs[1];
-        const IValue& epsilon = inputs[2];
-        drop(stack, 3);
-
-        if (input.requires_grad()) {
+        Tensor tensor_input = std::move(stack[stack.size()-6]).toTensor();
+        if (tensor_input.requires_grad()) {
           throw std::runtime_error("Autograd not yet supported for c10 ops.");
         }
+        auto device = tensor_input.device();
 
-        Tensor c10_output(at::empty({0}, input.device()));
-        Tensor c10_output_mean(at::empty({0}, input.device()));
-        Tensor c10_output_stdev(at::empty({0}, input.device()));
+        // unwrap inputs from variable
+        torch::jit::peek(stack, 0, 6) = torch::autograd::Variable(std::move(tensor_input)).data();
 
-        c10::intrusive_ptr<caffe2::Blob> cache = c10::make_intrusive<caffe2::Blob>();
-        cache->GetMutable<c10::core::opschema::LayerNorm::Cache>(); // initialize cache
-        c10::Dispatcher<c10::core::opschema::LayerNorm>::call(ArrayRef<c10::IValue>{
-          IValue(torch::autograd::Variable(std::move(input)).data()),
-          IValue(c10_output),
-          IValue(c10_output_mean),
-          IValue(c10_output_stdev),
-          axis,
-          epsilon,
-          IValue(cache)
-        });
-        push(stack, Tuple::create({
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),
-          torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
-        }));
+        // allocate the output tensors that aren't set yet
+        for (int i = 3; i < 6; ++i) {
+          // TODO this should just check for isNone, not for undefined tensor. @wanchaol is working on this.
+          if (torch::jit::peek(stack, i, 6).isNone() || !torch::jit::peek(stack, i, 6).toTensor().defined()) {
+            torch::jit::peek(stack, i, 6) = at::empty({0}, device);
+          }
+        }
+
+        // call caffe2 kernel
+        c10::Dispatcher::singleton().lookup(c10::core::opschema::LayerNorm(), &stack).call(&stack);
+
+        // wrap outputs into Variable
+        for (int i = 0; i < 3; ++i) {
+          torch::jit::peek(stack, i, 3) = torch::autograd::make_variable(std::move(torch::jit::peek(stack, i, 3)).toTensor(), false);
+        }
+
         return 0;
       })
   });

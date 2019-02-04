@@ -18,6 +18,9 @@
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
@@ -113,17 +116,17 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "]";
 }
 
-static std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while (pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
+static void printStrList(
+    std::ostream& out,
+    const std::vector<std::string>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    printQuotedString(out, item);
   }
-  return s;
+  out << "]";
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
@@ -141,10 +144,10 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      out << "\"" << escapeString(s(name)) << "\"";
+      printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
-      printPrimList(out, ss(name));
+      printStrList(out, ss(name));
       break;
     case AttributeKind::t: {
       at::Tensor tensor = t(name);
@@ -368,37 +371,47 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  IR_IF(this, Constant)
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Return)
-  // Return uses is zero
-  AT_ASSERT(outputs().size() == 0);
-  IR_ELSEIF(Param)
-  // Param inputs is zero
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIFM_CONST(PythonOp)
-  // Python operator cconv is correct
-  size_t n_scalars = 0, n_tensors = 0;
-  for (auto c : value->cconv) {
-    if (c == 'c') {
-      n_scalars++;
-    } else if (c == 'd') {
-      n_tensors++;
-    } else {
-      AT_ASSERT(0);
+  switch (kind()) {
+    case prim::Constant:
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::Return:
+      // Return uses is zero
+      AT_ASSERT(outputs().size() == 0);
+      break;
+    case prim::Param:
+      // Param inputs is zero
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::PythonOp: {
+      // Python operator cconv is correct
+      size_t n_scalars = 0, n_tensors = 0;
+      auto* value = static_cast<const PythonOp*>(this);
+      for (auto c : value->cconv) {
+        if (c == 'c') {
+          n_scalars++;
+        } else if (c == 'd') {
+          n_tensors++;
+        } else {
+          AT_ASSERT(0);
+        }
+        AT_ASSERT(static_cast<bool>(value->pyobj));
+      }
+      AT_ASSERT(n_scalars == value->scalar_args.size());
+      AT_ASSERT(n_tensors == inputs_.size());
+      break;
     }
-    AT_ASSERT(static_cast<bool>(value->pyobj));
+    case prim::Eval:
+      // TODO: add invariants
+      // TODO: It's not good for these ops to be top-level, it makes cases
+      // longer.
+      break;
+    case prim::FusionGroup:
+      checkSameDevice(this);
+      // TODO: Typecheck the parameters
+      g(attr::Subgraph)->lint();
+      break;
   }
-  AT_ASSERT(n_scalars == value->scalar_args.size());
-  AT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIF(Eval)
-  // TODO: add invariants
-  // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(FusionGroup)
-  checkSameDevice(value);
-  // TODO: Typecheck the parameters
-  value->g(attr::Subgraph)->lint();
-  IR_END()
 }
 
 // TODO: When lint fails, give better indication about which
@@ -806,6 +819,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -1235,6 +1249,33 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   for (size_t i = 0; i < size; ++i) {
     n->addOutput()->setType(elem_type);
   }
+  return n;
+}
+
+Node* Graph::createDict(
+    const TypePtr& key_type,
+    const TypePtr& value_type,
+    at::ArrayRef<Value*> keys,
+    at::ArrayRef<Value*> values) {
+  AT_ASSERT(keys.size() == values.size());
+  auto n = create(prim::DictConstruct, 1);
+  for (size_t i = 0; i < keys.size(); ++i) {
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+
+    n->addInput(keys[i]) ;
+    n->addInput(values[i]);
+  }
+  n->output()->setType(DictType::create(key_type, value_type));
+  return n;
+}
+
+Node* Graph::createDictIndex(Value* dict, Value* index) {
+  auto dict_type = dict->type()->expect<DictType>();
+  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+
+  auto n = create(prim::DictIndex, {dict, index});
+  n->output()->setType(dict_type->getValueType());
   return n;
 }
 
