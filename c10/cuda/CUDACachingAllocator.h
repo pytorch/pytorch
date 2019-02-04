@@ -25,6 +25,9 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
+C10_CUDA_API void* raw_alloc(size_t nbytes);
+C10_CUDA_API void raw_delete(void* ptr);
+
 C10_CUDA_API Allocator* get();
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
@@ -40,16 +43,6 @@ C10_CUDA_API void     resetMaxMemoryCached(int device);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
-
-// Caffe2 legacy entrypoint
-
-struct THCCachingAllocator;
-
-class C10_CUDA_API Legacy {
- public:
-  cudaError_t Alloc(void** refPtr, size_t nbytes, cudaStream_t stream);
-  cudaError_t Free(void* ptr);
-};
 
 } // namespace CUDACachingAllocator
 

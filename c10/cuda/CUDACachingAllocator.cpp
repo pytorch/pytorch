@@ -660,17 +660,19 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return sp;
 }
 
-cudaError_t
-Legacy::Alloc(void** refPtr, size_t nbytes, cudaStream_t stream) {
-  caching_allocator.malloc(refPtr, nbytes, stream);
-  return cudaSuccess;
+void* raw_alloc(size_t nbytes) {
+  int device;
+  C10_CUDA_CHECK(cudaGetDevice(&device));
+  void* r = nullptr;
+  if (nbytes != 0) {
+    caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
+  }
+  return r;
 }
 
-cudaError_t Legacy::Free(void* ptr) {
+void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
-  return cudaSuccess;
 }
-
 
 } // namespace CUDACachingAllocator
 
