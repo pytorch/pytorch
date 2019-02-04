@@ -265,7 +265,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  if (!self.is_cuda() && self.is_hip()) {
+  if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
     if (dim.size() == 0 || self.ndimension() == 0) {
       dim_prod = self.numel();
