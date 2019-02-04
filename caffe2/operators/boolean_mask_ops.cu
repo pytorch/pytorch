@@ -33,8 +33,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     const auto& mask = Input(1);
     auto* dest = Output(0);
 
-    CAFFE_ENFORCE(src.ndim() >= 1);
-    CAFFE_ENFORCE_EQ(mask.ndim(), 1);
+    CAFFE_ENFORCE(src.dim() >= 1);
+    CAFFE_ENFORCE_EQ(mask.dim(), 1);
     CAFFE_ENFORCE(src.size(0) == mask.size(0));
 
     const auto* maskData = mask.data<bool>();
