@@ -126,13 +126,11 @@ fi
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   WERROR=1 python setup.py install
-elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+else
   python setup.py install
 fi
 
-
-# Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
+assert_git_not_dirty
 
 # Test documentation build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
@@ -141,6 +139,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   pip install -q -r requirements.txt || true
   LC_ALL=C make html
   popd
+  assert_git_not_dirty
 fi
 
 # Test standalone c10 build
@@ -150,6 +149,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   cmake ..
   make -j
   popd
+  assert_git_not_dirty
 fi
 
 # Test no-Python build
@@ -172,11 +172,15 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
   make VERBOSE=1
   popd
+  assert_git_not_dirty
 fi
 
 # Test XLA build
 if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
+
+  pip install -q lark-parser
+
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
   sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
@@ -217,4 +221,5 @@ if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
 
   python setup.py install
   popd
+  assert_git_not_dirty
 fi

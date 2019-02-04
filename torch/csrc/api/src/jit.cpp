@@ -1,7 +1,7 @@
 #include <torch/jit.h>
 
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <memory>
 #include <string>

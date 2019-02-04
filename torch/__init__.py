@@ -240,7 +240,7 @@ _tensor_classes = set()
 def manager_path():
     if platform.system() == 'Windows':
         return b""
-    path = get_file_path('torch', 'lib', 'torch_shm_manager')
+    path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
@@ -295,6 +295,7 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
+import torch.backends.openmp
 
 _C._init_names(list(torch._storage_classes))
 

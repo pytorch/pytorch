@@ -51,7 +51,7 @@ bool isValidReturnForRunning(Value* v) {
 class ShapePropagator {
  public:
   explicit ShapePropagator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(std::move(graph))) {}
+      : aliasDb_(std::move(graph)) {}
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
     for (Node* node : block->nodes()) {
@@ -874,7 +874,7 @@ class ShapePropagator {
 
     static const auto multidim_reduce_with_postprocess =
         [](Node* node,
-           size_t num_reduced_dim,
+           int64_t num_reduced_dim,
            bool upcast_integer) -> type_vec_t {
       auto maybe_keepdim = node->get<bool>(attr::keepdim);
       if (!maybe_keepdim)

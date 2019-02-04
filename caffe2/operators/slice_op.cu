@@ -61,16 +61,16 @@ bool SliceImplGpu(
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.size());
   CAFFE_ENFORCE_EQ(starts.size(), ends.size());
 
-  std::vector<int> starts_idx(data.ndim());
-  std::vector<int> ends_idx(data.ndim());
-  std::vector<int> dst_sizes(data.ndim());
+  std::vector<int> starts_idx(data.dim());
+  std::vector<int> ends_idx(data.dim());
+  std::vector<int> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (i >= starts.size()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.size(i);
@@ -114,7 +114,7 @@ bool SliceImplGpu(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");

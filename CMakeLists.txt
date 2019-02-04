@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
+# Use compiler ID "AppleClang" instead of "Clang" for XCode.
+# Not setting this sometimes makes XCode C compiler gets detected as "Clang",
+# even when the C++ one is detected as "AppleClang".
+cmake_policy(SET CMP0025 NEW)
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -125,7 +130,7 @@ option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" ON)
-option(USE_OPENMP "Use OpenMP for parallel code" OFF)
+option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
