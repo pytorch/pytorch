@@ -69,7 +69,7 @@ class PoolOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
@@ -155,7 +155,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);

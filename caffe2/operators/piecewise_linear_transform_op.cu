@@ -195,7 +195,7 @@ template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.dim(), 2);
   int64_t N = X.dim32(0);
   int64_t M = X.dim32(1);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
@@ -227,9 +227,9 @@ template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE(X.ndim() == 1 || X.ndim() == 2);
+  CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
   int64_t N = X.dim32(0);
-  int64_t M = X.ndim() == 2 ? X.dim32(1) : 1;
+  int64_t M = X.dim() == 2 ? X.dim32(1) : 1;
   CAFFE_ENFORCE(
       M == 1 || M == 2,
       "If binary is set to true, the input must be Nx2 or Nx1 tensor");
