@@ -24,6 +24,10 @@ weak_types = weakref.WeakKeyDictionary()
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()
 
+# Python Op functions that should be ignored by the compiler. These will be replaced
+# with an operator that always throws an error
+ignored_fns = weakref.WeakSet()
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -148,6 +152,11 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         "default": default,
         "arg_name": arg_name
     }
+    return fn
+
+
+def ignore(fn):
+    ignored_fns.add(fn)
     return fn
 
 

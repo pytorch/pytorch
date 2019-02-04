@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
+#include "caffe2/operators/conv_pool_op_base.h"
+
 #include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/conv_op.h"
-#include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -47,10 +49,10 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_for_bias_));
     MIOPEN_ENFORCE(miopenCreateConvolutionDescriptor(&conv_desc_));
 
-    if(group_ > 1) {
-        mode_ = miopenGroupConv;
+    if (group_ > 1) {
+      mode_ = miopenGroupConv;
     } else {
-        mode_ = miopenConvolution;
+      mode_ = miopenConvolution;
     }
 
     if (mode_ == miopenGroupConv) {
@@ -238,6 +240,11 @@ bool MIOPENConvOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
+  if (N == 0) {
+    Y->template mutable_data<T_Y>();
+    return true;
+  }
+
   bool input_changed = (X.sizes() != mio_input_dims_);
   bool weight_changed = (Weight.sizes() != mio_weight_dims_);
 
@@ -261,8 +268,7 @@ bool MIOPENConvOp::DoRunWithType() {
           dilation_h(),
           dilation_w()));
 
-      MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(
-          conv_desc_, group_));
+      MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           weight_desc_,
@@ -301,11 +307,11 @@ bool MIOPENConvOp::DoRunWithType() {
           top_desc_,
           &fwdConvWsSize_));
       if ((fwdConvWsSize_ > 0) && (fwdConvWs_ == nullptr)) {
-          HIP_CHECK(hipMalloc(&fwdConvWs_, fwdConvWsSize_));
+        HIP_CHECK(hipMalloc(&fwdConvWs_, fwdConvWsSize_));
       }
 
       miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenFindConvolutionForwardAlgorithm(
+        MIOPEN_ENFORCE(miopenFindConvolutionForwardAlgorithm(
             state->miopen_handle(),
             bottom_desc_,
             X.template data<T_X>(),
@@ -326,7 +332,7 @@ bool MIOPENConvOp::DoRunWithType() {
     }
   }
   miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-      MIOPEN_ENFORCE(miopenConvolutionForward(
+    MIOPEN_ENFORCE(miopenConvolutionForward(
         state->miopen_handle(),
         &alpha_,
         bottom_desc_,
@@ -343,12 +349,12 @@ bool MIOPENConvOp::DoRunWithType() {
   });
 
   if (InputSize() == 3) {
-      auto& bias = Input(BIAS);
+    auto& bias = Input(BIAS);
 
-      CAFFE_ENFORCE_EQ(bias.ndim(), 1);
-      CAFFE_ENFORCE_EQ(bias.dim32(0), M);
-      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-        MIOPEN_ENFORCE(miopenConvolutionForwardBias(
+    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim32(0), M);
+    miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+      MIOPEN_ENFORCE(miopenConvolutionForwardBias(
           state->miopen_handle(),
           &alpha_,
           bias_desc_,
@@ -356,7 +362,7 @@ bool MIOPENConvOp::DoRunWithType() {
           &beta_,
           top_desc_,
           Y->template mutable_data<T_Y>()));
-      });
+    });
   }
   return true;
 }
@@ -370,7 +376,7 @@ bool MIOPENConvOp::RunOnDevice() {
         float, // B
         float, // Math
         float>(); // Y
-    } else if (Input(0).IsType<at::Half>()) {
+  } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<
         at::Half, // X
         at::Half, // W
@@ -435,9 +441,28 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-  bool doBwdDataComputation = (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
+  bool doBwdDataComputation =
+      (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
   bool input_changed = (X.sizes() != mio_input_dims_);
   bool weight_changed = (Weight.sizes() != mio_weight_dims_);
+
+  if (N == 0) {
+    math::Set<T_DW, HIPContext>(
+        dW->numel(), T_DW(0), dW->template mutable_data<T_DW>(), &context_);
+    if (!no_bias_) {
+      auto* dbias = Output(BIAS_OR_INPUT_GRAD);
+      dbias->Resize(M);
+      math::Set<T_DB, HIPContext>(
+          dbias->numel(),
+          T_DB(0),
+          dbias->template mutable_data<T_DB>(),
+          &context_);
+    }
+    if (doBwdDataComputation) {
+      dX->template mutable_data<T_DX>();
+    }
+    return true;
+  }
 
   if (input_changed || weight_changed) {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
@@ -459,8 +484,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
           dilation_h(),
           dilation_w()));
 
-      MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(
-          conv_desc_, group_));
+      MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           weight_desc_,
@@ -484,8 +508,8 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         top_desc_, miopenTypeWrapper<T_X>::type, N_out, C_out, H_out, W_out));
 
     if (!no_bias_) {
-        MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-            bias_desc_, miopenTypeWrapper<T_B>::type, 1, M, 1, 1));
+      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
+          bias_desc_, miopenTypeWrapper<T_B>::type, 1, M, 1, 1));
     }
 
     while ((!bestDataAlgoFound_) && doBwdDataComputation) {
@@ -499,25 +523,25 @@ bool MIOPENConvGradientOp::DoRunWithType() {
           bottom_desc_,
           &bwdDataWsSize_));
       if ((bwdDataWsSize_ > 0) && (bwdDataWs_ == nullptr)) {
-          HIP_CHECK(hipMalloc(&bwdDataWs_, bwdDataWsSize_));
+        HIP_CHECK(hipMalloc(&bwdDataWs_, bwdDataWsSize_));
       }
 
       miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
         MIOPEN_ENFORCE(miopenFindConvolutionBackwardDataAlgorithm(
-          state->miopen_handle(),
-          top_desc_,
-          dY.template data<T_DY>(),
-          weight_desc_,
-          Weight.template data<T_W>(),
-          conv_desc_,
-          bottom_desc_,
-          dX->template mutable_data<T_DX>(),
-          requestAlgoCount_,
-          &returnedAlgoCount_,
-          &perf,
-          bwdDataWs_,
-          bwdDataWsSize_,
-          false));
+            state->miopen_handle(),
+            top_desc_,
+            dY.template data<T_DY>(),
+            weight_desc_,
+            Weight.template data<T_W>(),
+            conv_desc_,
+            bottom_desc_,
+            dX->template mutable_data<T_DX>(),
+            requestAlgoCount_,
+            &returnedAlgoCount_,
+            &perf,
+            bwdDataWs_,
+            bwdDataWsSize_,
+            false));
       });
 
       bestDataAlgoFound_ = true;
@@ -525,21 +549,21 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     }
 
     while (!bestWeightAlgoFound_) {
-        miopenConvAlgoPerf_t perf;
+      miopenConvAlgoPerf_t perf;
 
-        MIOPEN_ENFORCE(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-            miopen_wrapper_.inline_miopen_handle(),
-            top_desc_,
-            bottom_desc_,
-            conv_desc_,
-            weight_desc_,
-            &bwdWeightWsSize_));
-        if ((bwdWeightWsSize_ > 0) && (bwdWeightWs_ == nullptr)) {
-          HIP_CHECK(hipMalloc(&bwdWeightWs_, bwdWeightWsSize_));
-        }
+      MIOPEN_ENFORCE(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
+          miopen_wrapper_.inline_miopen_handle(),
+          top_desc_,
+          bottom_desc_,
+          conv_desc_,
+          weight_desc_,
+          &bwdWeightWsSize_));
+      if ((bwdWeightWsSize_ > 0) && (bwdWeightWs_ == nullptr)) {
+        HIP_CHECK(hipMalloc(&bwdWeightWs_, bwdWeightWsSize_));
+      }
 
-        miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenFindConvolutionBackwardWeightsAlgorithm(
+      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+        MIOPEN_ENFORCE(miopenFindConvolutionBackwardWeightsAlgorithm(
             state->miopen_handle(),
             top_desc_,
             dY.template data<T_DY>(),
@@ -554,14 +578,14 @@ bool MIOPENConvGradientOp::DoRunWithType() {
             bwdWeightWs_,
             bwdWeightWsSize_,
             false));
-        });
-        bestWeightAlgoFound_ = true;
-        bwdWeiAlgo_ = perf.bwd_weights_algo;
+      });
+      bestWeightAlgoFound_ = true;
+      bwdWeiAlgo_ = perf.bwd_weights_algo;
     }
   }
   if (doBwdDataComputation) {
-      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-        MIOPEN_ENFORCE(miopenConvolutionBackwardData(
+    miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+      MIOPEN_ENFORCE(miopenConvolutionBackwardData(
           state->miopen_handle(),
           &alpha_,
           top_desc_,
@@ -575,24 +599,24 @@ bool MIOPENConvGradientOp::DoRunWithType() {
           dX->template mutable_data<T_DX>(),
           bwdDataWs_,
           bwdDataWsSize_));
-        });
+    });
   }
 
   miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
     MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
-      state->miopen_handle(),
-      &alpha_,
-      top_desc_,
-      dY.template data<T_DY>(),
-      bottom_desc_,
-      X.template data<T_X>(),
-      conv_desc_,
-      bwdWeiAlgo_,
-      &beta_,
-      weight_desc_,
-      dW->template mutable_data<T_DW>(),
-      bwdWeightWs_,
-      bwdWeightWsSize_));
+        state->miopen_handle(),
+        &alpha_,
+        top_desc_,
+        dY.template data<T_DY>(),
+        bottom_desc_,
+        X.template data<T_X>(),
+        conv_desc_,
+        bwdWeiAlgo_,
+        &beta_,
+        weight_desc_,
+        dW->template mutable_data<T_DW>(),
+        bwdWeightWs_,
+        bwdWeightWsSize_));
   });
 
   // Synchronize the work across groups.
@@ -600,10 +624,10 @@ bool MIOPENConvGradientOp::DoRunWithType() {
 
   ////////////////////////////////////// BIAS ///////////////////////////
   if (!no_bias_) {
-      auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-      dbias->Resize(M);
-      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-        MIOPEN_ENFORCE(miopenConvolutionBackwardBias(
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
+    dbias->Resize(M);
+    miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+      MIOPEN_ENFORCE(miopenConvolutionBackwardBias(
           state->miopen_handle(),
           &alpha_,
           top_desc_,
@@ -611,7 +635,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
           &beta_,
           bias_desc_,
           dbias->template mutable_data<T_DB>()));
-      });
+    });
   }
 
   return true;
@@ -628,7 +652,7 @@ bool MIOPENConvGradientOp::RunOnDevice() {
         float, // dX
         float, // dW
         float>(); // db
-    } else if (Input(0).IsType<at::Half>()){
+  } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<
         at::Half, //  X
         at::Half, // dY

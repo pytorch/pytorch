@@ -100,12 +100,16 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
@@ -238,7 +242,7 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
@@ -248,6 +252,10 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);

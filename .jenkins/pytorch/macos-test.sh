@@ -50,6 +50,14 @@ if [ -z "${IN_CIRCLECI}" ]; then
   7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
 
+# Test that OpenMP is enabled
+pushd test
+if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
+  echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
+  exit 1
+fi
+popd
+
 test_python_all() {
   echo "Ninja version: $(ninja --version)"
   python test/run_test.py --verbose

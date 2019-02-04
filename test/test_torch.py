@@ -1974,9 +1974,18 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
-    def test_rpow(self):
-        m = torch.randn(10, 10)
+    @staticmethod
+    def _test_rpow(self, cast):
+        m = cast(torch.randn(10, 10))
         self.assertEqual(torch.pow(2, m), 2**m)
+
+        # test with scalar
+        m = cast(torch.randn(1).squeeze())
+        assert m.dim() == 0, "m is intentionally a scalar"
+        self.assertEqual(torch.pow(2, m), 2**m)
+
+    def test_rpow(self):
+        self._test_rpow(self, lambda x: x)
 
     @staticmethod
     def _test_int_pow(self, cast):
@@ -3441,6 +3450,7 @@ class _TestTorchMixin(object):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+            full1d = cast(torch.randn(*dims_full).flatten().float())
             small = cast(torch.randn(*dims_small).float())
             large = cast(torch.randn(*dims_large).float())
             small_expanded = small.expand(*dims_full)
@@ -3457,8 +3467,7 @@ class _TestTorchMixin(object):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            # TODO: fix masked_scatter and masked_fill broadcasting
-            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
+            if hasattr(large_expanded, fn):
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
@@ -3468,6 +3477,10 @@ class _TestTorchMixin(object):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
+                    elif fn == "masked_scatter":
+                        return myfn(t1 < 0.5, full1d)
+                    elif fn == "masked_fill":
+                        return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3495,7 +3508,7 @@ class _TestTorchMixin(object):
                     elif fn == "masked_select":
                         return fntorch(t1, t2 < 0)
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                        return fntorch(t1, t2 < 0.5, full1d)
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
@@ -3526,7 +3539,7 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
+                    return t0_fn(t1 < 0.5, full1d)
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
                 elif fn == "map":

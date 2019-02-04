@@ -1,34 +1,8 @@
 #pragma once
 
-#if defined(USE_GTEST)
-#include <gtest/gtest.h>
-#include <test/cpp/common/support.h>
-#else
-#include "c10/util/Exception.h"
-#define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
-#define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
-#define ASSERT_TRUE AT_ASSERT
-#define ASSERT_FALSE(x) ASSERT_TRUE(!(x))
-#define ASSERT_THROWS_WITH(statement, substring)                         \
-  try {                                                                  \
-    (void)statement;                                                     \
-    ASSERT_TRUE(false);                                                  \
-  } catch (const std::exception& e) {                                    \
-    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
-  }
-#define ASSERT_ANY_THROW(statement)   \
-  bool threw = false;                 \
-  try {                               \
-    (void)statement;                  \
-  } catch (const std::exception& e) { \
-    threw = true;                     \
-  }                                   \
-  ASSERT_TRUE(threw);
-
-#endif // defined(USE_GTEST)
+#include "test/cpp/jit/test_base.h"
 
 #include "ATen/core/interned_strings.h"
-#include "c10/util/Exception.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -38,9 +12,8 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -156,10 +129,6 @@ void testCodeTemplate() {
     // std::cout << "'" << ct_expect << "'\n";
     ASSERT_EQ(s, ct_expect);
   }
-}
-
-Value* appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(kind, inputs))->output();
 }
 
 void testFusion() {
@@ -866,12 +835,6 @@ void testADFormulas() {
   }
 }
 
-std::string toString(std::shared_ptr<Graph>& graph) {
-  std::ostringstream s;
-  s << *graph;
-  return s.str();
-}
-
 void testDifferentiate(std::ostream& out = std::cout) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
@@ -1456,6 +1419,17 @@ void testCustomOperators() {
   }
 }
 
+void testEvalModeForLoadedModule() {
+  if (isSandcastle()) return;  // The module file to load is not generated in Sandcastle
+  std::string module_path = "dropout_model.pt";
+  std::shared_ptr<torch::jit::script::Module> module = torch::jit::load(module_path);
+  AT_ASSERT(module->get_module("dropout")->is_training());
+  module->eval();
+  AT_ASSERT(!module->get_module("dropout")->is_training());
+  module->train();
+  AT_ASSERT(module->get_module("dropout")->is_training());
+}
+
 // test a few features that are not directly used in schemas yet
 void testSchemaParser() {
   // nested arrays
@@ -1780,296 +1754,35 @@ void testDynamicDAG() {
   testContractEdgeCycleDetection();
 }
 
-// Fixture to set up a graph and make assertions clearer
-struct TopoMoveTestFixture {
-  TopoMoveTestFixture() {
-    createGraph();
-    aliasDb = torch::make_unique<AliasDb>(graph);
-  }
+void testAutogradProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+  constexpr int seq_len = 32;
 
-  // Nodes are named after their output.
-  // e.g. "a" is an alias for "the node that outputs the value `a`"
-  void createGraph() {
-    graph = std::make_shared<Graph>();
-    createNode("a", {});
-    createNode("b", {"a"});
-    createNode("c", {});
-    createNode("d", {"a", "b"});
-    createNode("e", {"c", "b"});
-    createNode("f", {"e"});
-    createNode("g", {"e"});
-    createNode("h", {"g"});
-    createNode("i", {"g"});
-    createNode("j", {"i"});
-    createNode("k", {"i"});
-    createNode("l", {"a"});
-    createNode("m", {}, {"l"}); // block depends on l
-    createNode("n", {"m"});
-    createNode("o", {"n"});
-    createNode("p", {});
-    createNode("q", {});
-    createNode("r", {"q"});
-    createNode("s", {"q"});
+  int hidden_size = 2 * input_size;
+  auto input = torch::randn({seq_len, batch_size, input_size}, at::kCPU);
+  auto hx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(torch::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(torch::randn({4 * hidden_size, hidden_size}, at::kCPU));
 
-    graph->lint();
-  }
-
-  void createNode(
-      const std::string& name,
-      const std::vector<std::string>& inputNames,
-      const std::vector<std::string>& blockInputNames = {}) {
-    std::vector<Value*> inputs;
-    for (const auto name : inputNames) {
-      inputs.push_back(nodes.at(name)->output());
-    }
-    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
-    node->output()->setUniqueName(name);
-    nodes[name] = node;
-
-    if (blockInputNames.size() != 0) {
-      node->addBlock();
-      std::vector<Value*> blockDeps;
-      for (const auto name : blockInputNames) {
-        blockDeps.push_back(nodes.at(name)->output());
-      }
-
-      auto block = node->blocks().at(0);
-      block->appendNode(graph->create(prim::Undefined, blockDeps));
+  std::stringstream ss;
+  {
+    autograd::profiler::RecordProfile guard(ss);
+    for (size_t i = 0; i < 100; ++i) {
+      std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
     }
   }
 
-  bool moveBeforeTopologicallyValid(
-      const std::string& toInsert,
-      const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func =
-        [this](Node* toInsert, Node* insertPoint) {
-          return aliasDb->moveBeforeTopologicallyValid(toInsert, insertPoint);
-        };
-    return moveWithChecks(toInsert, insertPoint, func);
+  std::string result = ss.str();
+  size_t count = 0;
+  for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
+       count++, pos++) {
   }
-
-  bool moveAfterTopologicallyValid(
-      const std::string& toInsert,
-      const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func =
-        [this](Node* toInsert, Node* insertPoint) {
-          return aliasDb->moveAfterTopologicallyValid(toInsert, insertPoint);
-        };
-    return moveWithChecks(toInsert, insertPoint, func);
-  }
-
-  bool moveWithChecks(
-      const std::string& toInsert,
-      const std::string& insertPoint,
-      std::function<bool(Node*, Node*)> func) {
-    auto n = nodes.at(toInsert);
-    auto insert = nodes.at(insertPoint);
-    bool isAfter = n->isAfter(insert);
-
-    std::vector<Node*> originalOrdering;
-    Node* original = isAfter ? n->next() : n->prev();
-
-    auto curNode = original;
-    while (curNode != n->owningBlock()->return_node()) {
-      originalOrdering.push_back(curNode);
-      if (isAfter) {
-        curNode = curNode->next();
-      } else {
-        curNode = curNode->prev();
-      }
-    }
-
-    const auto couldMove = func(n, insert);
-    // Check the graph is okay
-    graph->lint();
-
-    // If this is the picture of nodes
-    // <some nodes> ... toInsert ... <some more nodes> ... insertPoint
-    // ^----------^ check that these nodes haven't moved
-    curNode = original;
-    size_t idx = 0;
-    while (curNode != n->owningBlock()->return_node()) {
-      AT_ASSERT(originalOrdering[idx] == curNode);
-      if (isAfter) {
-        curNode = curNode->next();
-      } else {
-        curNode = curNode->prev();
-      }
-      idx++;
-    }
-
-    return couldMove;
-  }
-
-  void checkPostCondition(
-      const std::string& toInsert,
-      const std::string& insertPoint,
-      bool after) {
-    if (after) {
-      AT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
-    } else {
-      AT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
-    }
-  }
-
-  std::shared_ptr<Graph> graph;
-  std::unique_ptr<AliasDb> aliasDb;
-  std::unordered_map<std::string, Node*> nodes;
-};
-
-void testTopologicalMove() {
-  {
-    // Check that we are removing `this`'s deps properly when we need to split
-    // `this` and deps (see code for what the hell that means)
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
-    fixture.checkPostCondition("q", "s", false);
-  }
-  // Move after
-  {
-    // Simple move backward
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("c", "a"));
-    fixture.checkPostCondition("c", "a", true);
-  }
-  {
-    // simple invalid move backward
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(!fixture.moveAfterTopologicallyValid("d", "a"));
-  }
-  {
-    // doesn't actually move anything
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("f", "e"));
-    fixture.checkPostCondition("f", "e", true);
-  }
-  {
-    // move backward with multiple dependencies
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("e", "c"));
-    fixture.checkPostCondition("e", "c", true);
-  }
-  {
-    // Move backward with non-zero working set
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("k", "f"));
-    fixture.checkPostCondition("k", "f", true);
-  }
-  {
-    // Simple move forward
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("c", "d"));
-    fixture.checkPostCondition("c", "d", true);
-  }
-  {
-    // Move forward with non-zero working set
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveAfterTopologicallyValid("f", "l"));
-    fixture.checkPostCondition("f", "l", true);
-  }
-
-  // Move before
-  {
-    // Simple move forward
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("b", "d"));
-    fixture.checkPostCondition("b", "d", false);
-  }
-  {
-    // Simple move backward
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("c", "a"));
-    fixture.checkPostCondition("c", "a", false);
-  }
-  {
-    // doesn't actually move anything
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("a", "b"));
-    fixture.checkPostCondition("a", "b", false);
-  }
-  {
-    // move forward with deps
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("f", "m"));
-    fixture.checkPostCondition("f", "m", false);
-  }
-  {
-    // move backward with deps
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("l", "f"));
-    fixture.checkPostCondition("l", "f", false);
-  }
-
-  // check that dependencies in blocks are recognized
-  {
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(!fixture.moveAfterTopologicallyValid("l", "m"));
-    AT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
-    AT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
-    AT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
-  }
-
-  // Test that moveAfter(n) and moveBefore(n->next()) are not necessarily
-  // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
-  // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
-  // `p`)
-  {
-    TopoMoveTestFixture fixture;
-    AT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
-    AT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
-    fixture.checkPostCondition("o", "p", false);
-  }
+  AT_CHECK(count == 200);
 }
 
-void testAliasAnalysis() {
-  {
-    auto graph = std::make_shared<Graph>();
-    auto a = graph->addInput();
-    auto b = graph->addInput();
 
-    // addsB = b + b
-    // c = a + b
-    // a += b
-    // d = c + c
-    auto addsB = graph->insert(aten::add, {b, b});
-    auto c = graph->insert(aten::add, {a, b});
-    auto aMut = graph->insert(aten::add_, {a, b});
-    auto d = graph->insert(aten::add, {c, c});
-
-    graph->lint();
-
-    AliasDb aliasDb(graph);
-    // Can't move past a mutation of a used value
-    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
-    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
-
-    // b should alias to a (since they are both inputs)
-    AT_ASSERT(
-        !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
-    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
-
-    graph->lint();
-  }
-  {
-    auto graph = std::make_shared<Graph>();
-    auto a = graph->addInput();
-    auto b = graph->addInput();
-
-    auto constant = graph->insertConstant(1);
-    auto fresh = graph->insert(aten::rand, {constant});
-    auto usesB = graph->insert(aten::add, {b, fresh});
-    auto aliasesB = graph->insert(aten::select, {a, constant, constant});
-    auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
-    graph->insert(aten::add, {fresh, aliasesB});
-    graph->lint();
-
-    AliasDb aliasDb(graph);
-    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
-        aliasesB->node(), mutatesAliasOfB->node()));
-    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
-        usesB->node(), mutatesAliasOfB->node()));
-  }
-}
 } // namespace
 } // namespace jit
 } // namespace torch
