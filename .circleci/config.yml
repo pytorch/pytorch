@@ -385,6 +385,65 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+caffe2_linux_bench_defaults: &caffe2_linux_bench_defaults
+  machine:
+    image: default
+  steps:
+  - run:
+      <<: *setup_ci_environment
+  - run:
+      name: Bench
+      no_output_timeout: "1h"
+      command: |
+        set -e
+        # TODO: merge this into Caffe2 test.sh
+        cat >/home/circleci/project/ci_bench_script.sh <<EOL
+        # =================== The following code will be executed inside Docker container ===================
+        set -ex
+
+        export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+        # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
+        sudo ln /dev/null /dev/raw1394
+
+        # conda must be added to the path for Anaconda builds (this location must be
+        # the same as that in install_anaconda.sh used to build the docker image)
+        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+          export PATH=/opt/conda/bin:$PATH
+        fi
+
+        # Upgrade SSL module to avoid old SSL warnings
+        pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
+
+        pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+
+        # Build
+        ./.jenkins/caffe2/bench.sh
+
+        # Remove benign core dumps.
+        # These are tests for signal handling (including SIGABRT).
+        rm -f ./crash/core.fatal_signal_as.*
+        rm -f ./crash/core.logging_test.*
+        # =================== The above code will be executed inside Docker container ===================
+        EOL
+        chmod +x /home/circleci/project/ci_bench_script.sh
+
+        if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+        else
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+        fi
+        echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+        docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+        if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+        else
+          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+        fi
+        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+
+        export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_bench_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+        echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
 ##############################################################################
 # Macos build defaults
@@ -1446,6 +1505,15 @@ jobs:
       BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
+
+  caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_bench:
+    environment:
+      JOB_BASE_NAME: caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-bench
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:238"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+      BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
+    resource_class: gpu.medium
+    <<: *caffe2_linux_bench_defaults
 
   caffe2_py2_mkl_ubuntu16_04_build:
     environment:
@@ -3038,6 +3106,9 @@ workflows:
             - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
       - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
+          requires:
+            - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_bench:
           requires:
             - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
       - caffe2_py2_mkl_ubuntu16_04_build
