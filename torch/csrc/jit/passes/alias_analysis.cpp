@@ -660,6 +660,9 @@ void AliasDb::analyzeImpl(Node* node) {
       // If the node has a schema, fall through and analyze it normally
       break;
     }
+    case prim::Print:
+      // These ops do nothing
+      return;
     default:
       AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
