@@ -103,7 +103,7 @@ bool AffineChannelGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
   
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
-  const int ndim = dY.ndim();
+  const int ndim = dY.dim();
   const int C = dY.dim32(ndim - 1);
   const int rows = dY.size() / C;
   const int cols = C;

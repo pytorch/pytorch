@@ -32,7 +32,7 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& label = Input(1);
 
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -40,7 +40,7 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   auto* Y = Output(0, vector<int64_t>(size_t(1), N), at::dtype<float>());
   LabelCrossEntropyKernel<<<
@@ -64,7 +64,7 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(2);
   
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -72,9 +72,9 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CUDAContext>(
@@ -243,7 +243,7 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
   std::vector<int64_t> dims;
@@ -284,7 +284,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto& logits = Input(1);
   auto& targets = Input(2);
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
@@ -364,7 +364,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::
   auto& weights = Input(2);
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
   CAFFE_ENFORCE(weights.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
   std::vector<int64_t> dims;
@@ -397,7 +397,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto& weights = Input(3);
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
   CAFFE_ENFORCE(weights.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
