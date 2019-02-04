@@ -166,7 +166,7 @@ bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   CAFFE_ENFORCE_EQ(R.dim32(1), 6);
 
   assert(sampling_ratio_ >= 0);

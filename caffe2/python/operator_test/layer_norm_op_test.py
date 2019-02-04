@@ -58,11 +58,8 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
 
 
 class TestLayerNormOp(serial.SerializedTestCase):
-    @serial.given(X=hu.tensors(n=1), **hu.gcs)
+    @serial.given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_grad_op(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -89,11 +86,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -117,12 +111,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     @unittest.skip("Tensor interop enforcement needs fixing")
     def test_layer_norm_op_c10(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -146,11 +137,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_pytorch(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
 
@@ -161,7 +149,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_jit(self, X, gc, dc):
         @torch.jit.script
         def jit_layer_norm(tensor, axis, epsilon):
@@ -169,9 +157,6 @@ class TestLayerNormOp(serial.SerializedTestCase):
             norm, mean, stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(tensor, axis, epsilon)
             return norm, mean, stdev
 
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
 
@@ -182,11 +167,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         scale_dim = [1] * np.ndim(X)
         scale_dim[axis] = X.shape[axis]
