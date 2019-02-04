@@ -102,11 +102,6 @@ if "%REBUILD%"=="" (
 :: Install ninja
 if "%REBUILD%"=="" ( pip install -q ninja )
 
-set WORKING_DIR=%CD%
-call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
-call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
-cd %WORKING_DIR%
-
 git submodule sync --recursive
 git submodule update --init --recursive
 
@@ -126,8 +121,6 @@ sccache --start-server
 sccache --zero-stats
 set CC=sccache cl
 set CXX=sccache cl
-
-set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 

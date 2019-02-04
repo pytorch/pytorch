@@ -42,6 +42,9 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
@@ -66,12 +69,15 @@ class PoolOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
@@ -120,6 +126,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NCHW>(
@@ -146,7 +155,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
@@ -156,6 +165,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NHWC>(

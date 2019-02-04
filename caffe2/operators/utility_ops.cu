@@ -282,7 +282,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
 
   CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
   CAFFE_ENFORCE_GT(X0.size(), 0);
-  CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
+  CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
   CAFFE_ENFORCE_EQ(weight0.size(), 1);
 
   int64_t M = X0.size();
