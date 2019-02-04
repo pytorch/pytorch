@@ -9,6 +9,7 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
+from torch._jit_internal import ignore
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -736,6 +737,14 @@ def _try_get_weak_module(mod):
     if not isinstance(mod, Module):
         return None
     return _jit_internal.weak_modules.get(mod)
+
+
+def _try_get_ignored_op(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return fn in _jit_internal.ignored_fns
 
 
 def _is_weak_type(cls):

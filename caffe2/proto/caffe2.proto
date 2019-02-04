@@ -178,8 +178,9 @@ enum DeviceTypeProto {
   PROTO_IDEEP = 5;                  // IDEEP.
   PROTO_HIP = 6;                    // AMD HIP
   PROTO_FPGA = 7;                   // FPGA
+  PROTO_MSNPU = 8;                  // MSNPU
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 8;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 9;
   PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -480,6 +481,26 @@ struct Module {
       submod.value().module->apply(fn);
     }
     fn(*this);
+  }
+  /// Enables "training" mode.
+  void train(bool on = true) {
+    for (auto& submod : get_modules()) {
+      submod->module->train(on);
+    }
+    register_parameter("training", torch::tensor(on ? 1 : 0, at::kLong), /*is_buffer=*/true);
+  }
+  /// Calls train(false) to enable "eval" mode.
+  /// Do not override this method, override `train()` instead.
+  void eval() {
+    train(/*on=*/false);
+  }
+  /// True if the module is in training mode.
+  bool is_training() {
+    if (auto p = find_parameter("training")) {
+      return p->slot()->item<int64_t>() == 1;
+    }
+    // We are in training mode by default
+    return true;
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

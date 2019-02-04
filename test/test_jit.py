@@ -1303,9 +1303,12 @@ class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
+        from cpp.jit import tests_setup
+        tests_setup.setup()
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
         self.assertExpected(torch._C._jit_run_cpp_tests())
+        tests_setup.shutdown()
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
@@ -2016,6 +2019,23 @@ class TestJit(JitTestCase):
         x, lengths, h0, c0 = \
             torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
+
+    def test_trace_dict_input(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, a, b):
+                return self.foo({'a': a, 'b': b})['a']
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return {'a': x['a'] * x['b']}
+
+        x = (torch.rand(3), torch.rand(3))
+        model = Bar()
+        self.checkTrace(model, x)
 
     def test_trace_variable_instantiation(self):
         def random_foo(x):
@@ -9679,6 +9699,39 @@ a")
             return python_list_op(lst)
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
+    def test_ignore_decorator(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                tensor = torch.zeros(1, requires_grad=False)
+                self.register_buffer('some_state', torch.nn.Parameter(tensor))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                self.ignored_code(x)
+                return x
+
+            @torch.jit.ignore
+            def ignored_code(self, x):
+                self.some_state = torch.tensor((100,))
+
+        # Assert ignored code is run
+        m = M()
+        self.assertEqual(m.some_state, torch.zeros(1))
+        m(torch.ones(1))
+        self.assertEqual(m.some_state, torch.zeros(1) + 100)
+
+        # Export and ensure ignored code not present
+        pp, constants = m._python_print()
+        printed = torch.jit.ScriptModule()
+        ppv = "op_version_set = 0\n{}".format(pp)
+        torch._C._jit_import_methods(printed, ppv, constants)
+        self.assertIn('IgnoredPythonOp', ppv)
+        self.assertNotIn('ignored_code', ppv)
+
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
+            printed(torch.ones(1))
 
     def test_view_write(self):
         def fn(x, y):

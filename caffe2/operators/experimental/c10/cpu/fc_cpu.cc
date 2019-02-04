@@ -12,7 +12,7 @@ using caffe2::Tensor;
 namespace caffe2 {
 namespace {
 
-struct State final : public c10::KernelState {
+struct Cache final : public c10::KernelCache {
   vector<int64_t> Y_shape_cache_;
   at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
 };
@@ -23,9 +23,9 @@ void fc_op_cpu_impl(
     const at::Tensor& W_,
     const at::Tensor& b_,
     const at::Tensor& Y_,
-    int axis,
-    int axis_w,
-    State* state) {
+    int64_t axis,
+    int64_t axis_w,
+    Cache* cache) {
   Tensor X{C10Tensor(X_)};
   Tensor W{C10Tensor(W_)};
   Tensor b{C10Tensor(b_)};
@@ -68,12 +68,12 @@ void fc_op_cpu_impl(
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
   CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
-  state->Y_shape_cache_ = X.sizes().vec();
+  cache->Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
-  DCHECK_LE(canonical_axis + 1, state->Y_shape_cache_.size());
-  state->Y_shape_cache_.resize(canonical_axis + 1);
-  state->Y_shape_cache_[canonical_axis] = N;
-  Y.Resize(state->Y_shape_cache_);
+  DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
+  cache->Y_shape_cache_.resize(canonical_axis + 1);
+  cache->Y_shape_cache_[canonical_axis] = N;
+  Y.Resize(cache->Y_shape_cache_);
   CAFFE_ENFORCE(M * N == Y.numel(), dimErrorString());
 
   if (X.numel() == 0) {
@@ -103,7 +103,7 @@ void fc_op_cpu_impl(
       static_cast<Context*>(&context),
       math_type);
   // Add bias term
-  Tensor bias_multiplier(state->bias_multiplier_);
+  Tensor bias_multiplier(cache->bias_multiplier_);
   ReinitializeTensor(&bias_multiplier, {M}, at::dtype<DataType>().device(CPU));
   caffe2::math::Set<DataType, Context>(
       M,
@@ -129,17 +129,7 @@ void fc_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
-    .withState<caffe2::State>()
-    .kernel<&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .withCache<caffe2::Cache>()
+    .kernel<decltype(caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10
