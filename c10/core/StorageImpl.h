@@ -15,19 +15,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
       int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
-      bool resizable)
-      : data_type_(data_type),
-        data_ptr_(std::move(data_ptr)),
-        numel_(numel),
-        resizable_(resizable),
-        allocator_(allocator) {
-    if (numel > 0) {
-      if (data_type_.id() == caffe2::TypeIdentifier::uninitialized()) {
-        AT_ERROR(
-            "Constructing a storage with meta of unknown type and non-zero numel");
-      }
-    }
-  }
+      bool resizable);
 
   StorageImpl(
       caffe2::TypeMeta data_type,
@@ -53,12 +41,9 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() = default;
+  ~StorageImpl();
 
-  void reset() {
-    data_ptr_.clear();
-    numel_ = 0;
-  }
+  void reset();
 
   template <typename T>
   inline bool IsType() const {
@@ -85,9 +70,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
-  void release_resources() override {
-    data_ptr_.clear();
-  }
+  void release_resources() override;
 
   size_t itemsize() const {
     return data_type_.itemsize();
