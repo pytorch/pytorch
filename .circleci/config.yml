@@ -592,10 +592,16 @@ binary_checkout: &binary_checkout
       git reset --hard "$CIRCLE_SHA1"
     fi
     git submodule update --init --recursive
+    echo "Using Pytorch from "
+    git log --max-count 1
     popd
 
     # Clone the Builder master repo
     git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+    pushd "$BUILDER_ROOT"
+    echo "Using builder from "
+    git log --max-count 1
+    popd
 
 binary_install_miniconda: &binary_install_miniconda
   name: Install miniconda
