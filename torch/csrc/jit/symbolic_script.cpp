@@ -359,7 +359,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // JIT doesn't support keyword only arguments.
     // Remove ' *,' in schema before looking up
-    // TODO: Properly support keyword only arguments.
+    // TODO: Properly support keyword only arguments in JIT.
     auto n = schema_str.find("*, ");
     if (n != std::string::npos) {
       schema_str = schema_str.erase(n, 3);
