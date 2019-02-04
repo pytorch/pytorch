@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # For distributed, four environmental configs:
@@ -30,7 +30,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
   sudo mkdir -p /var/run/sshd
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
 
@@ -116,7 +116,7 @@ if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
 fi
 
 # Patch required to build xla
-if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   patch -p1 < xla/pytorch.patch
 fi
@@ -176,7 +176,7 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
 fi
 
 # Test XLA build
-if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
   pip install -q lark-parser
