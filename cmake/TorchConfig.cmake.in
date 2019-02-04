@@ -59,10 +59,11 @@ if (@USE_CUDA@)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
       ${CUDA_LIBRARIES})
   else()
+    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_CUDA_LIB}
       ${CUDA_NVRTC_LIB}
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
+      ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
