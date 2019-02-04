@@ -184,7 +184,7 @@ setup_ci_environment: &setup_ci_environment
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
 
 macos_brew_update: &macos_brew_update
-  name: Brew update and install moreutils and expect
+  name: Brew update and install moreutils, expect and libomp
   no_output_timeout: "1h"
   command: |
     set -ex
@@ -195,9 +195,10 @@ macos_brew_update: &macos_brew_update
     # `parallel` first, and relink it afterwards
     brew update
     brew unlink parallel
-    brew install moreutils --without-parallel
+    brew install moreutils
     brew link parallel --overwrite
     brew install expect
+    brew install libomp
 
 
 ##############################################################################
@@ -246,7 +247,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       <<: *setup_ci_environment
   - run:
       name: Test
-      no_output_timeout: "1h"
+      no_output_timeout: "90m"
       command: |
         set -e
         export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
@@ -795,11 +796,10 @@ binary_linux_upload: &binary_linux_upload
           retry conda install -yq anaconda-client
           set +x
           echo 'If there is no more output then logging into Anaconda failed'
-          retry timeout 30 \
+          retry timeout 120 \
               yes | anaconda login \
                   --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD" \
-                  >/dev/null 2>&1
+                  --password "$CONDA_PASSWORD"
           set -x
           anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
@@ -926,8 +926,7 @@ binary_mac_upload: &binary_mac_upload
           echo 'If there is no more output then logging into Anaconda failed'
           retry yes | anaconda login \
                   --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD" \
-                  >/dev/null 2>&1 \
+                  --password "$CONDA_PASSWORD"
           set -x
           retry anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then

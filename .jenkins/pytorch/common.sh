@@ -81,7 +81,7 @@ if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
   rm ~/sccache_error.log || true
-  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
+  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
   sccache --zero-stats

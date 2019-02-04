@@ -224,6 +224,13 @@ if(NOT BUILD_ATEN_ONLY)
   endif()
 endif()
 
+if (USE_OPENMP AND OPENMP_FOUND)
+  message(STATUS "Caffe2 is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
