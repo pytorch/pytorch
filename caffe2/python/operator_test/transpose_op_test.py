@@ -38,9 +38,9 @@ class TestTransposeOp(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support, "no gpu support")
+    @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(X=hu.tensor(dtype=np.float32), use_axes=st.booleans(),
-           **hu.gcs_gpu_only)
+           **hu.gcs_cuda_only)
     def test_transpose_cudnn(self, X, use_axes, gc, dc):
         ndim = len(X.shape)
         axes = np.arange(ndim)
@@ -49,11 +49,11 @@ class TestTransposeOp(serial.SerializedTestCase):
         if (use_axes):
             op = core.CreateOperator(
                 "Transpose", ["X"], ["Y"], axes=axes, engine="CUDNN",
-                device_option=hu.gpu_do)
+                device_option=hu.cuda_do)
         else:
             op = core.CreateOperator(
                 "Transpose", ["X"], ["Y"], engine="CUDNN",
-                device_option=hu.gpu_do)
+                device_option=hu.cuda_do)
 
         def transpose_ref(X):
             if use_axes:

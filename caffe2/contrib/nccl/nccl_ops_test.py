@@ -38,7 +38,7 @@ def benchmark(ws, net, warmups=5, iters=100):
     return after - before
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "NCCL only on GPU")
+@unittest.skipIf(not workspace.has_cuda_support, "NCCL only on CUDA GPU")
 class NCCLOpsTest(hu.HypothesisTestCase):
     @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
            m=st.integers(min_value=1, max_value=1000),
