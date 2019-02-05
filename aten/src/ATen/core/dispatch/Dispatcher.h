@@ -58,7 +58,7 @@ private:
  */
 class CAFFE2_API OpRegistrationListener {
 public:
-  virtual ~OpRegistrationListener() = default;
+  virtual ~OpRegistrationListener();
 
   virtual void onOperatorRegistered(const OperatorHandle& op) = 0;
   virtual void onOperatorDeregistered(const OperatorHandle& op) = 0;

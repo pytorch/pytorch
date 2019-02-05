@@ -222,13 +222,13 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
 
   caffe2::Tensor Y, mean, sig;
   if (outputs[0].isTensor()) {
-    Y = caffe2::Tensor(std::move(outputs[0]).toTensor());
+    Y = caffe2::Tensor(std::move(torch::jit::peek(*stack, 0, 3)).toTensor());
   }
   if (outputs[1].isTensor()) {
-    mean = caffe2::Tensor(std::move(outputs[1]).toTensor());
+    mean = caffe2::Tensor(std::move(torch::jit::peek(*stack, 1, 3)).toTensor());
   }
   if (outputs[2].isTensor()) {
-    sig = caffe2::Tensor(std::move(outputs[2]).toTensor());
+    sig = caffe2::Tensor(std::move(torch::jit::peek(*stack, 2, 3)).toTensor());
   }
   if (!Y.defined()) {
     Y = caffe2::empty({0}, device);
