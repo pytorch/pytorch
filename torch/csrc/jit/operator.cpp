@@ -162,12 +162,12 @@ struct SchemaParser {
       alias_info = parseAliasAnnotation();
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
       L.next();
-      L.expect('[');
+      L.expect('(');
       auto key_type = parseType().first;
       L.expect(',');
       auto value_type = parseType().first;
       alias_info = parseAliasAnnotation();
-      L.expect(']');
+      L.expect(')');
       value = DictType::create(key_type, value_type);
     } else {
       auto value_alias = parseBaseType();

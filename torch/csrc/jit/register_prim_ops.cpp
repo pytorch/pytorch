@@ -1199,52 +1199,44 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
-Operation dictLen(const Node* node) {
-  return [=](Stack& stack) {
-    auto dict = pop(stack).toGenericDictRef();
-    push(stack, int64_t(dict.size()));
-    return 0;
-  };
+int dictLen(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  push(stack, int64_t(dict.size()));
+  return 0;
 }
 
-Operation dictKeys(const Node* node) {
-  return [=](Stack& stack) {
-    auto dict = pop(stack).toGenericDictRef();
-    std::vector<IValue> keys;
-    keys.reserve(dict.size());
-    for (auto item : dict) {
-      keys.push_back(item.first);
-    }
-    push(stack, IValue(keys));
-    return 0;
-  };
+int dictKeys(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> keys;
+  keys.reserve(dict.size());
+  for (auto item : dict) {
+    keys.push_back(item.first);
+  }
+  push(stack, IValue(keys));
+  return 0;
 }
 
-Operation dictValues(const Node* node) {
-  return [=](Stack& stack) {
-    auto dict = pop(stack).toGenericDictRef();
-    std::vector<IValue> values;
-    values.reserve(dict.size());
-    for (auto item : dict) {
-      values.push_back(item.second);
-    }
-    push(stack, IValue(values));
-    return 0;
-  };
+int dictValues(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> values;
+  values.reserve(dict.size());
+  for (auto item : dict) {
+    values.push_back(item.second);
+  }
+  push(stack, IValue(values));
+  return 0;
 }
 
-Operation dictIndex(const Node* node) {
-  return [=](Stack& stack) {
-    auto index = pop(stack);
-    auto dict = pop(stack).toGenericDict();
-    const auto& elems = dict->elements();
-    auto value = elems.find(index);
-    if (value == elems.end()) {
-      AT_ERROR("KeyError: '", index, "'");
-    }
-    push(stack, value->second);
-    return 0;
-  };
+int dictIndex(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    AT_ERROR("KeyError: '", index, "'");
+  }
+  push(stack, value->second);
+  return 0;
 }
 
 
@@ -1519,12 +1511,12 @@ RegisterOperators reg2({
           };
         }),
     #define CREATE_DICT_OPS(key_type)                                           \
-      Operator("aten::len(Dict[" key_type ", t] self) -> int", dictLen),        \
+      Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),        \
       Operator(                                                                 \
-          "aten::keys(Dict[" key_type ", t] self) -> " key_type "[]",           \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",           \
           dictKeys),                                                            \
-      Operator("aten::values(Dict[" key_type ", t] self) -> t[]", dictValues),  \
-      Operator("prim::DictIndex(Dict[" key_type ", t] self, " key_type " key) -> t", dictIndex)
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues),  \
+      Operator("prim::DictIndex(Dict(" key_type ", t) self, " key_type " key) -> t", dictIndex)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
