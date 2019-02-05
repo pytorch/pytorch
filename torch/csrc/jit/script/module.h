@@ -75,6 +75,10 @@ struct Method {
     get_executor().run(stack);
   }
 
+  void run(Stack&& stack) {
+    run(stack);
+  }
+
   IValue operator()(std::vector<IValue> stack) {
     checkInputsAgainstSchema(stack);
     run(stack);
