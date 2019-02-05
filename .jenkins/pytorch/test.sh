@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -85,9 +85,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   pip install -q psutil "librosa>=0.6.2" --user
 fi
 
-if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
@@ -188,8 +188,8 @@ test_xla() {
   assert_git_not_dirty
 }
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-  if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     test_torchvision
     test_xla
   else
@@ -201,10 +201,10 @@ if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
     test_custom_script_ops
   fi
 else
-  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_torchvision
     test_python_nn
-  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_torchvision
     test_python_all_except_nn
     test_aten
