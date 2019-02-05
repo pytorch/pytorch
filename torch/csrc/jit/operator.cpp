@@ -493,7 +493,6 @@ std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
 
-
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);
 }
