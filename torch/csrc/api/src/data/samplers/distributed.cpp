@@ -39,7 +39,10 @@ DistributedRandomSampler::DistributedRandomSampler(
     size_t num_replicas,
     size_t rank,
     bool allow_duplicates)
-    : DistributedSampler(size, num_replicas, rank, allow_duplicates) {
+    : DistributedSampler(size, num_replicas, rank, allow_duplicates),
+      begin_index_(0),
+      end_index_(0),
+      sample_index_(0) {
   populate_indices();
   // shuffle first time.
   reset(size_);
@@ -116,7 +119,10 @@ DistributedSequentialSampler::DistributedSequentialSampler(
     size_t num_replicas,
     size_t rank,
     bool allow_duplicates)
-    : DistributedSampler(size, num_replicas, rank, allow_duplicates) {
+    : DistributedSampler(size, num_replicas, rank, allow_duplicates),
+      begin_index_(0),
+      end_index_(0),
+      sample_index_(0) {
   populate_indices();
 }
 
@@ -134,8 +140,8 @@ optional<std::vector<size_t>> DistributedSequentialSampler::next(
   std::vector<size_t> res(end - sample_index_);
   std::iota(std::begin(res), std::end(res), sample_index_);
   if (end >= size_) {
-    for (size_t i = 0; i < res.size(); ++i) {
-      res[i] = res[i] % size_;
+    for (size_t& index : res) {
+      index = index % size_;
     }
   }
   sample_index_ = end;
