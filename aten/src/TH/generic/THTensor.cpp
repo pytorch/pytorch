@@ -478,17 +478,29 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-  self->resize_dim(self->dim() + 1);
-  for (d = self->dim()-1; d > dimension; d--) {
-    self->set_size(d, self->size(d-1));
-    self->set_stride(d, self->stride(d-1));
+  std::vector<int64_t> newSize(/* size */ self->dim()+1);
+  std::vector<int64_t> newStride(/* size */ self->dim()+1);
+
+  for(d = self->dim(); d > dimension; d--)
+  {
+    newSize[d] = self->size(d-1);
+    newStride[d] = self->stride(d-1);
   }
-  if (dimension+1 < self->dim()) {
-    self->set_stride(dimension, self->size(dimension+1) * self->stride(dimension+1));
-  } else {
-    self->set_stride(dimension, 1);
+  if (dimension < self->dim())
+  {
+    newStride[dimension] = self->size(dimension) * self->stride(dimension);
   }
-  self->set_size(dimension, 1);
+  else
+  {
+    newStride[dimension] = 1;
+  }
+  newSize[dimension] = 1;
+  for(d = dimension - 1; d >= 0; d--)
+  {
+    newSize[d] = self->size(d);
+    newStride[d] = self->stride(d);
+  }
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 int THTensor_(isTransposed)(const THTensor *self)

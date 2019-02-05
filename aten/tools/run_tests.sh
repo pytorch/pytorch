@@ -17,6 +17,7 @@ VALGRIND=${VALGRIND:=ON}
 ./scalar_tensor_test
 ./tensor_interop_test
 ./undefined_tensor_test
+./extension_backend_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi

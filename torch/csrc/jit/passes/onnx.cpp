@@ -18,7 +18,7 @@ void removePrintOps(Block* block) {
       removePrintOps(b);
     }
     if (it->kind() == prim::Print || it->kind() == aten::warn) {
-      for (auto i = 0; i < it->inputs().size();) {
+      for (size_t i = 0; i < it->inputs().size();) {
         auto input = it->inputs().at(i);
         // only handling constants bc of potential side effects
         if (input->uses().size() == 1 &&

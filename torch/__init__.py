@@ -295,6 +295,7 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
+import torch.backends.openmp
 
 _C._init_names(list(torch._storage_classes))
 
