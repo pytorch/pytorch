@@ -3619,7 +3619,7 @@ a")
             return x.sum(dim=4)
 
         self.assertExpected(canonical(func.graph), subname='1')
-        # test that shape analysis is written correctly for sum with IntList[1] dim argument
+        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         torch._C._jit_pass_shape_analysis(
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
