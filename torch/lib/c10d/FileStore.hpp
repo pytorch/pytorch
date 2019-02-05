@@ -10,10 +10,7 @@ namespace c10d {
 
 class FileStore : public Store {
  public:
-  explicit FileStore(
-      const std::string& path,
-      int numWorkers,
-      std::chrono::milliseconds timeout=kDefaultTimeout);
+  explicit FileStore(const std::string& path, int numWorkers);
 
   virtual ~FileStore();
 

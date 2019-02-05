@@ -4,13 +4,10 @@ except ImportError:
     from urlparse import urlparse
 
 import os
-from datetime import timedelta
-
 from . import FileStore, TCPStore
 
 
 _rendezvous_handlers = {}
-_default_store_timeout = timedelta(minutes=5)
 
 
 def register_rendezvous_handler(scheme, handler):
@@ -56,7 +53,7 @@ def _rendezvous_error(msg):
     return ValueError("Error initializing torch.distributed using " + msg)
 
 
-def _file_rendezvous_handler(url, timeout=_default_store_timeout):
+def _file_rendezvous_handler(url):
     def _error(msg):
         return _rendezvous_error("file:// rendezvous: " + msg)
 
@@ -72,14 +69,14 @@ def _file_rendezvous_handler(url, timeout=_default_store_timeout):
 
     rank = int(query["rank"])
     world_size = int(query["world_size"])
-    store = FileStore(path, world_size, timeout)
+    store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url, timeout=_default_store_timeout):
+def _tcp_rendezvous_handler(url):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
@@ -95,14 +92,14 @@ def _tcp_rendezvous_handler(url, timeout=_default_store_timeout):
     rank = int(query["rank"])
     world_size = int(query["world_size"])
     start_daemon = rank == 0
-    store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
+    store = TCPStore(result.hostname, result.port, world_size, start_daemon)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url, timeout=_default_store_timeout):
+def _env_rendezvous_handler(url):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
@@ -143,7 +140,7 @@ def _env_rendezvous_handler(url, timeout=_default_store_timeout):
 
     # Now start the TCP store daemon on the rank 0
     start_daemon = rank == 0
-    store = TCPStore(master_addr, master_port, world_size, start_daemon, timeout)
+    store = TCPStore(master_addr, master_port, world_size, start_daemon)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it

@@ -279,10 +279,8 @@ TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
     int numWorkers,
-    bool isServer,
-    std::chrono::milliseconds timeout)
-    : Store(timeout),
-      isServer_(isServer),
+    bool isServer)
+    : isServer_(isServer),
       tcpStoreAddr_(masterAddr),
       tcpStorePort_(masterPort),
       numWorkers_(numWorkers),

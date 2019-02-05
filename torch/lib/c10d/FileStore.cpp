@@ -206,11 +206,8 @@ off_t refresh(
 
 } // namespace
 
-FileStore::FileStore(
-    const std::string& path,
-    int numWorkers,
-    std::chrono::milliseconds timeout)
-    : Store(timeout),
+FileStore::FileStore(const std::string& path, int numWorkers)
+    : Store(),
       path_(path),
       pos_(0),
       numWorkers_(numWorkers),

@@ -66,7 +66,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
   }
 
   void wait(const std::vector<std::string>& keys) override {
-    store_->wait(keys);
+    store_->wait(keys, Store::kDefaultTimeout);
   }
 
   void wait(

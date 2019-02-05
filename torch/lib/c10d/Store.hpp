@@ -15,8 +15,7 @@ class Store {
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
 
-  Store(std::chrono::milliseconds timeout=kDefaultTimeout)
-      : timeout_(timeout) {}
+  Store() : timeout_(kDefaultTimeout) {}
 
   virtual ~Store();
 

@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import timedelta
@@ -497,6 +498,42 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self):
         return self.rank == 0
+
+
+class TimeoutTest(TestCase):
+    def _test_store_timeout(self, backend, init_method, c2p):
+        c10d.distributed_c10d.init_process_group(
+            backend=backend, init_method=init_method, world_size=1, rank=0,
+            timeout=timedelta(seconds=1))
+        default_store = c10d.distributed_c10d._get_default_store()
+        tik = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            default_store.get("nonexistent key")
+        tok = time.time()
+        c10d.destroy_process_group()
+        c2p.append(tok - tik)
+
+    def _init_methods(self):
+        f = tempfile.NamedTemporaryFile(delete=False)
+        yield "file://%s" % f.name
+        f.close()
+        yield "tcp://127.0.0.1:%d" % common.find_free_port()
+
+    @retry_on_address_already_in_use_error
+    def test_default_store_timeout(self):
+        for backend in ['gloo', 'nccl']:
+            for init_method in self._init_methods():
+                c2p = []
+                t = threading.Thread(
+                    target=self._test_store_timeout,
+                    args=(backend, init_method, c2p))
+                t.daemon = True
+                t.start()
+                t.join(5)
+
+                self.assertEqual(1, len(c2p))
+                # waiting time should be ~200ms, use 1s to rule out false alarm
+                self.assertGreater(3, c2p[0])
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
