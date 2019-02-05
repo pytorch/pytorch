@@ -662,7 +662,7 @@ CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
 template <typename T>
 Tensor TensorCPUFromValues(at::IntList dims, at::ArrayRef<T> values) {
   Tensor r = empty(dims, at::device(CPU).dtype<T>());
-  CAFFE_ENFORCE_EQ(values.size(), r.size());
+  CAFFE_ENFORCE_EQ(values.size(), r.numel());
   CPUContext context;
   context.CopyItemsFromCPU(
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());
