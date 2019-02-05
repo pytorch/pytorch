@@ -42,7 +42,9 @@ class DataLoader(object):
             (default: ``0``)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
-            into CUDA pinned memory before returning them.
+            into CUDA pinned memory before returning them.  If your data elements
+            are a custom type, or your ``collate_fn`` returns a batch that is a custom type
+            see the Warning below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
@@ -65,6 +67,15 @@ class DataLoader(object):
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
+
+    .. warning:: The default memory pinning logic only recognizes Tensors and maps and iterables
+                 containg Tensors.  By default, if the pinning logic sees a batch that is a custom type,
+                 (which will occur if you have a ``collate_fn`` that returns a custom batch type),
+                 or if each element of your batch is a custom type, the pinning logic will not
+                 recognize them, and it will return that batch (or those elements)
+                 without pinning the memory.  To enable memory pinning for custom batch or data types,
+                 define a pin_memory method on your custom type(s).  See ``SimpleCustomBatch`` and
+                 ``TestCustomPinFn`` in tests/test_dataloader.py for an example.
     """
 
     __initialized = False
