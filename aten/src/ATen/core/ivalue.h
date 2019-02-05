@@ -111,7 +111,7 @@ struct CAFFE2_API Tuple : public List<IValue> {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 };
-using IntArrayRef = List<int64_t>;
+using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
@@ -135,7 +135,7 @@ using GenericDict = Dict<IValue, IValue>;
   _(Int) \
   _(Bool) \
   _(Tuple) \
-  _(IntArrayRef) \
+  _(IntList) \
   _(DoubleList) \
   _(BoolList) \
   _(String) \
@@ -319,7 +319,7 @@ struct CAFFE2_API IValue final {
     return payload.as_bool;
   }
 
-  // IntArrayRef
+  // IntList
   IValue(c10::intrusive_ptr<ivalue::IntList> v);
   IValue(std::vector<int64_t> v);
   IValue(at::ArrayRef<int64_t> v)

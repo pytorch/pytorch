@@ -389,15 +389,8 @@ class CAFFE2_API Tensor {
   Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntArrayRef signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
-  Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor index_fill(int64_t dim, const Tensor & index, Scalar source) const;
-  Tensor scatter(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor masked_scatter(const Tensor & mask, const Tensor & source) const;
-  Tensor masked_fill(const Tensor & mask, Scalar source) const;
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
@@ -418,11 +411,11 @@ class CAFFE2_API Tensor {
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
-  Tensor logsumexp(int64_t dim, bool keepdim=false) const;
+  Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
-  Tensor max_values(int64_t dim, bool keepdim=false) const;
+  Tensor max_values(IntArrayRef dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
   Tensor mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const;
@@ -430,7 +423,7 @@ class CAFFE2_API Tensor {
   Tensor mean(IntArrayRef dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
-  Tensor min_values(int64_t dim, bool keepdim=false) const;
+  Tensor min_values(IntArrayRef dim, bool keepdim=false) const;
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
   Tensor mul(const Tensor & other) const;
