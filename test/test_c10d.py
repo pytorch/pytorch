@@ -519,22 +519,28 @@ class TimeoutTest(TestCase):
         f.close()
         yield "tcp://127.0.0.1:%d" % common.find_free_port()
 
+    def _test_default_store_timeout(self, backend):
+        for init_method in self._init_methods():
+            c2p = []
+            t = threading.Thread(
+                target=self._test_store_timeout,
+                args=(backend, init_method, c2p))
+            t.daemon = True
+            t.start()
+            t.join(5)
+
+            self.assertEqual(1, len(c2p))
+            # waiting time should be 1s, use 3s to rule out false alarm
+            self.assertGreater(3, c2p[0])
+
     @retry_on_address_already_in_use_error
-    def test_default_store_timeout(self):
-        for backend in ['gloo', 'nccl']:
-            for init_method in self._init_methods():
-                c2p = []
-                t = threading.Thread(
-                    target=self._test_store_timeout,
-                    args=(backend, init_method, c2p))
-                t.daemon = True
-                t.start()
-                t.join(5)
+    @skip_if_not_nccl
+    def test_default_store_timeout_nccl(self):
+        self._test_default_store_timeout('nccl')
 
-                self.assertEqual(1, len(c2p))
-                # waiting time should be 1s, use 3s to rule out false alarm
-                self.assertGreater(3, c2p[0])
-
+    @retry_on_address_already_in_use_error
+    def test_default_store_timeout_gloo(self):
+        self._test_default_store_timeout('gloo')
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
