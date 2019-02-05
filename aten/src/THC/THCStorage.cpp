@@ -8,6 +8,9 @@
 #include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateBoolType.h>
+
 #include <c10/util/intrusive_ptr.h>
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
