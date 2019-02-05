@@ -1974,9 +1974,18 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
-    def test_rpow(self):
-        m = torch.randn(10, 10)
+    @staticmethod
+    def _test_rpow(self, cast):
+        m = cast(torch.randn(10, 10))
         self.assertEqual(torch.pow(2, m), 2**m)
+
+        # test with scalar
+        m = cast(torch.randn(1).squeeze())
+        assert m.dim() == 0, "m is intentionally a scalar"
+        self.assertEqual(torch.pow(2, m), 2**m)
+
+    def test_rpow(self):
+        self._test_rpow(self, lambda x: x)
 
     @staticmethod
     def _test_int_pow(self, cast):
@@ -2215,6 +2224,15 @@ class _TestTorchMixin(object):
                 lambda t, d: t.var(d, unbiased=unbiased),
                 lambda n, d: n.var(d, ddof=1 if unbiased else 0),
                 use_integral=False)
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    def test_logsumexp_dim(self):
+        from scipy.special import logsumexp
+        self._test_dim_ops(
+            lambda t, d: t.logsumexp(d),
+            lambda n, d: logsumexp(n, d),
+            use_integral=False)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)

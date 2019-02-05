@@ -165,7 +165,7 @@ DimVector TensorIterator::compatible_stride(int element_size) const {
   return stride;
 }
 
-DimVector TensorIterator::invert_perm(IntList input) const {
+DimVector TensorIterator::invert_perm(IntArrayRef input) const {
   // Invert the permutation caused by reorder_dimensions. This is not valid
   // after coalesce_dimensions is called.
   AT_ASSERT(!has_coalesced_dimensions_);
@@ -264,7 +264,7 @@ DimVector TensorIterator::get_dim_strides(int dim) const {
   return inner_strides;
 }
 
-SmallVector<char*, 4> TensorIterator::get_data_ptrs(ArrayRef<char*> base, IntList counter) const {
+SmallVector<char*, 4> TensorIterator::get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const {
   auto ptrs = SmallVector<char*, 4>(base);
   for (int dim = 0; dim < ndim(); dim++) {
     int64_t value = counter[dim];
@@ -292,10 +292,10 @@ bool TensorIterator::is_dim_reduced(int dim) const {
   return false;
 }
 
-void TensorIterator::permute_dimensions(IntList perm) {
+void TensorIterator::permute_dimensions(IntArrayRef perm) {
   AT_ASSERT(perm.size() == ndim());
 
-  auto reorder = [perm](IntList data) {
+  auto reorder = [perm](IntArrayRef data) {
     auto res = DimVector(data.size(), 0);
     for (size_t i = 0; i < perm.size(); i++) {
       res[i] = data[perm[i]];
@@ -429,7 +429,7 @@ void TensorIterator::remove_operand(int arg) {
   operands_.erase(operands_.begin() + arg);
 }
 
-void TensorIterator::replace_operand(int arg, void* data, IntList stride) {
+void TensorIterator::replace_operand(int arg, void* data, IntArrayRef stride) {
   operands_[arg].data = data;
   operands_[arg].stride_bytes = stride;
 }
@@ -453,7 +453,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   }
 }
 
-void TensorIterator::select_all_keeping_dim(int start_dim, IntList indices) {
+void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) {
   AT_ASSERT(start_dim <= ndim());
   for (int i = start_dim; i < ndim(); ++i) {
     for (auto& op : operands_) {
@@ -542,7 +542,7 @@ void TensorIterator::compute_shape() {
   }
 }
 
-static DimVector compute_stride(const Tensor& tensor, IntList shape) {
+static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
   int ndim = shape.size();
   auto original_shape = tensor.sizes();
   auto original_stride = tensor.strides();
@@ -677,7 +677,7 @@ SplitUntil32Bit::iterator SplitUntil32Bit::end() const {
   return SplitUntil32Bit::iterator();
 }
 
-DimCounter::DimCounter(IntList shape, Range range)
+DimCounter::DimCounter(IntArrayRef shape, Range range)
   : shape(shape)
   , range(range)
   , values(shape.size(), 0)

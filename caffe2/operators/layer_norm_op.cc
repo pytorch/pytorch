@@ -181,20 +181,29 @@ to the end.)
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
-} // namespace caffe2
+DEFINE_FUNCTION_SCHEMA_OPERATOR(
+    LayerNorm,
+    (std::vector<c10::Argument>{c10::Argument("input_0"),
+                                c10::Argument("axis", IntType::get()),
+                                c10::Argument("epsilon", FloatType::get())}),
+    (std::vector<c10::Argument>{c10::Argument("output_0"),
+                                c10::Argument("output_1"),
+                                c10::Argument("output_2")}),
+    LayerNormOp<CPUContext>);
 
+} // namespace caffe2
 
 // Register layer norm with c10
 namespace {
-struct State final : public c10::KernelState {
+struct Cache final : public c10::KernelCache {
     at::optional<at::Tensor> scale = at::nullopt;
     at::optional<at::Tensor> bias = at::nullopt;
 };
 
 template <class DataType>
-void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass in correct state type
+void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass in correct cache type
   c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, 3, 6);
-  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 0, 3, 3);
+  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 3, 3, 6);
 
   caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
   int64_t axis = inputs[1].toInt();
@@ -204,12 +213,12 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass i
   caffe2::Tensor sig{c10::C10Tensor(outputs[2].toTensor())};
 
   caffe2::CPUContext context;
-  State* cache = static_cast<State*>(state);
+  Cache* cache = static_cast<Cache*>(cache_);
   if (!cache->scale.has_value()) {
-    cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
+    cache->scale = at::Tensor(caffe2::empty({0}, at::dtype<float>()));
   }
   if (!cache->bias.has_value()) {
-    cache->bias = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
+    cache->bias = at::Tensor(caffe2::empty({0}, at::dtype<float>()));
   }
   caffe2::Tensor scale(*cache->scale);
   caffe2::Tensor bias(*cache->bias);
@@ -224,19 +233,19 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelState* state) { // TODO Pass i
     X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
   );
 
-  torch::jit::peek(*stack, 0, 3) = at::Tensor(c10::C10Tensor(std::move(Y)));
-  torch::jit::peek(*stack, 1, 3) = at::Tensor(c10::C10Tensor(std::move(mean)));
-  torch::jit::peek(*stack, 2, 3) = at::Tensor(c10::C10Tensor(std::move(sig)));
+  torch::jit::drop(*stack, 6);
+  torch::jit::push(*stack,
+    at::Tensor(c10::C10Tensor(std::move(Y))),
+    at::Tensor(c10::C10Tensor(std::move(mean))),
+    at::Tensor(c10::C10Tensor(std::move(sig)))
+  );
 
   return;
 }
 }
 namespace c10 {
 C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
-    .withState<State>()
+    .withCache<Cache>()
     .kernel<&layer_norm_c10<float>>()
-    .dispatchKey(c10::DispatchKey<1>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()}});
+    .dispatchKey(CPUTensorId());
 } // namespace c10

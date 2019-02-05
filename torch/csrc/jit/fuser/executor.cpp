@@ -27,7 +27,7 @@ namespace fuser {
 static c10::optional<std::vector<int64_t>> getMapSize(
     const KernelSpec& spec,
     at::TensorList args,
-    at::IntList arg_subset) {
+    at::IntArrayRef arg_subset) {
   // TODO: this keeps reallocating map_size at every iteration, but we know
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
@@ -141,8 +141,8 @@ static std::vector<int64_t> computeMapSize(
 // Tries to compress sizes and strides according to cont. Emits the result t
 // c_sizes, c_strides and throws an error on failure (if can't compress)
 static void compressContiguous(
-    const at::IntList& sizes,
-    const at::IntList& strides,
+    const at::IntArrayRef& sizes,
+    const at::IntArrayRef& strides,
     const std::vector<bool>& cont,
     uint32_t* c_sizes,
     uint32_t* c_strides) {
@@ -191,7 +191,7 @@ void launchFusion(
   AT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
 
   // Computes map_size, numel from the first input
-  at::IntList map_size;
+  at::IntArrayRef map_size;
   uint32_t numel;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
@@ -220,8 +220,8 @@ void launchFusion(
 
   auto addTensorInfoRaw = [&](const TensorDesc& desc,
                               void* data_ptr,
-                              at::IntList sizes,
-                              at::IntList strides) {
+                              at::IntArrayRef sizes,
+                              at::IntArrayRef strides) {
     const auto nDim = desc.nDim(); // NOTE: this is the compressed dim
     AT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
@@ -297,14 +297,17 @@ bool runFusion(const int64_t key, Stack& stack) {
   auto& spec = *(*maybe_spec);
 
   // Acquires inputs from stack
-  auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {
-    return i.toTensor();
-  });
+  auto all_inputs = last(stack, spec.nInputs());
+  std::vector<at::Tensor> inputs;
+  inputs.reserve(spec.nTensorInputs());
+  // we know that tensor inputs are first
+  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+    inputs.emplace_back(all_inputs[i].toTensor());
+  }
 
   // Determines device to dispatch to. If there's a device mismatch in the
   // inputs, we use the fallback (which should give a nice error message).
   at::Device device = inputs.at(0).device();
-  at::ScalarType dtype = inputs[0].type().scalarType();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
     if (t.device() != device) {
       return false;
@@ -336,8 +339,18 @@ bool runFusion(const int64_t key, Stack& stack) {
   AT_ASSERT(maybe_kernel);
 
   // Launches fusion
-  std::vector<at::Tensor> outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, outputs);
+  std::vector<at::Tensor> raw_outputs;
+  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
+
+  auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
+    if (omap.needsSumToSize()) {
+      return at::sum_to(
+          raw_outputs[omap.offset()],
+          all_inputs[omap.sizeInput()].toIntList()->elements());
+    } else {
+      return raw_outputs[omap.offset()];
+    }
+  });
 
   // Updates stack
   drop(stack, spec.nInputs());

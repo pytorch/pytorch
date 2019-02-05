@@ -8,12 +8,73 @@ using c10::C10Tensor;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
 
-C10_DEFINE_OP_SCHEMA(caffe2::ops::ConstantFill);
-C10_DEFINE_OP_SCHEMA(caffe2::ops::UniformFill);
-
-C10_DEFINE_OP_SCHEMA(caffe2::ops::GivenTensorFill<float>);
-C10_DEFINE_OP_SCHEMA(caffe2::ops::GivenTensorFill<int>);
-C10_DEFINE_OP_SCHEMA(caffe2::ops::GivenTensorFill<int64_t>);
+namespace caffe2 {
+namespace ops {
+// TODO Parse schema strings instead of creating FunctionSchema manually
+C10_DEFINE_OP_SCHEMA(ConstantFill, FunctionSchema(
+    "_c10_experimental::ConstantFill",
+    (std::vector<c10::Argument>{
+      c10::Argument("inputs", ListType::ofTensors()),
+      c10::Argument("output"),
+      c10::Argument("shape", ListType::ofInts()),
+      c10::Argument("extra_shape", ListType::ofInts()),
+      c10::Argument("input_as_shape", BoolType::get()),
+      c10::Argument("dtype", IntType::get()),
+      c10::Argument("value", NumberType::get())
+    }), (std::vector<c10::Argument>{
+    })
+));
+C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
+    "_c10_experimental::ConstantFill",
+    (std::vector<c10::Argument>{
+      c10::Argument("inputs", ListType::ofTensors()),
+      c10::Argument("output"),
+      c10::Argument("shape", ListType::ofInts()),
+      c10::Argument("extra_shape", ListType::ofInts()),
+      c10::Argument("input_as_shape", BoolType::get()),
+      c10::Argument("min", FloatType::get()),
+      c10::Argument("max", FloatType::get())
+    }), (std::vector<c10::Argument>{
+    })
+));
+C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
+    "_c10_experimental::ConstantFill",
+    (std::vector<c10::Argument>{
+      c10::Argument("inputs", ListType::ofTensors()),
+      c10::Argument("output"),
+      c10::Argument("shape", ListType::ofInts()),
+      c10::Argument("extra_shape", ListType::ofInts()),
+      c10::Argument("input_as_shape", BoolType::get()),
+      c10::Argument("values"),
+    }), (std::vector<c10::Argument>{
+    })
+));
+C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
+    "_c10_experimental::ConstantFill",
+    (std::vector<c10::Argument>{
+      c10::Argument("inputs", ListType::ofTensors()),
+      c10::Argument("output"),
+      c10::Argument("shape", ListType::ofInts()),
+      c10::Argument("extra_shape", ListType::ofInts()),
+      c10::Argument("input_as_shape", BoolType::get()),
+      c10::Argument("values"),
+    }), (std::vector<c10::Argument>{
+    })
+));
+C10_DEFINE_OP_SCHEMA(GivenTensorInt64Fill, FunctionSchema(
+    "_c10_experimental::ConstantFill",
+    (std::vector<c10::Argument>{
+      c10::Argument("inputs", ListType::ofTensors()),
+      c10::Argument("output"),
+      c10::Argument("shape", ListType::ofInts()),
+      c10::Argument("extra_shape", ListType::ofInts()),
+      c10::Argument("input_as_shape", BoolType::get()),
+      c10::Argument("values"),
+    }), (std::vector<c10::Argument>{
+    })
+));
+}
+}
 
 namespace {
 struct ShapeParameter final {
@@ -136,6 +197,7 @@ namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::ConstantFill,
     C10ConstantFill_DontUseThisOpYet,
+    1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
@@ -144,6 +206,7 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     ops::UniformFill,
     C10UniformFill_DontUseThisOpYet,
+    1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
@@ -151,22 +214,25 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     MaxParameter)
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
-    ops::GivenTensorFill<float>,
+    ops::GivenTensorFill,
     C10GivenTensorFill_DontUseThisOpYet,
+    1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
     ValuesParameter<float>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
-    ops::GivenTensorFill<int>,
+    ops::GivenTensorIntFill,
     C10GivenTensorIntFill_DontUseThisOpYet,
+    1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
     ValuesParameter<int>)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
-    ops::GivenTensorFill<int64_t>,
+    ops::GivenTensorInt64Fill,
     C10GivenTensorInt64Fill_DontUseThisOpYet,
+    1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,

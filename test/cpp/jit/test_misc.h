@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -128,10 +129,6 @@ void testCodeTemplate() {
     // std::cout << "'" << ct_expect << "'\n";
     ASSERT_EQ(s, ct_expect);
   }
-}
-
-Value* appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(kind, inputs))->output();
 }
 
 void testFusion() {
@@ -838,12 +835,6 @@ void testADFormulas() {
   }
 }
 
-std::string toString(std::shared_ptr<Graph>& graph) {
-  std::ostringstream s;
-  s << *graph;
-  return s.str();
-}
-
 void testDifferentiate(std::ostream& out = std::cout) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
@@ -987,7 +978,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
+autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
@@ -998,7 +989,7 @@ int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
 }
 
-bool isEqual(at::IntList lhs, at::IntList rhs) {
+bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
   return lhs.size() == rhs.size() &&
       std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
@@ -1428,6 +1419,17 @@ void testCustomOperators() {
   }
 }
 
+void testEvalModeForLoadedModule() {
+  if (isSandcastle()) return;  // The module file to load is not generated in Sandcastle
+  std::string module_path = "dropout_model.pt";
+  std::shared_ptr<torch::jit::script::Module> module = torch::jit::load(module_path);
+  AT_ASSERT(module->get_module("dropout")->is_training());
+  module->eval();
+  AT_ASSERT(!module->get_module("dropout")->is_training());
+  module->train();
+  AT_ASSERT(module->get_module("dropout")->is_training());
+}
+
 // test a few features that are not directly used in schemas yet
 void testSchemaParser() {
   // nested arrays
@@ -1751,6 +1753,36 @@ void testDynamicDAG() {
   testContractEdgeBasic();
   testContractEdgeCycleDetection();
 }
+
+void testAutogradProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+  constexpr int seq_len = 32;
+
+  int hidden_size = 2 * input_size;
+  auto input = torch::randn({seq_len, batch_size, input_size}, at::kCPU);
+  auto hx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = torch::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(torch::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(torch::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  std::stringstream ss;
+  {
+    autograd::profiler::RecordProfile guard(ss);
+    for (size_t i = 0; i < 100; ++i) {
+      std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+    }
+  }
+
+  std::string result = ss.str();
+  size_t count = 0;
+  for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
+       count++, pos++) {
+  }
+  AT_CHECK(count == 200);
+}
+
+
 } // namespace
 } // namespace jit
 } // namespace torch

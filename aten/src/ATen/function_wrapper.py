@@ -116,6 +116,13 @@ TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
+# Overrideable stubs to be used in user-extendable backends
+TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+    return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
+}
+""")
+
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -201,7 +208,7 @@ TYPE_FORMAL_GENERIC = {
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
-    'IntListSize': 'IntList',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -217,7 +224,7 @@ DYNAMIC_TYPE = {
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
-    'IntListSize': 'IntList',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -288,13 +295,13 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
     # This is a cast done via direct-construction
-    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
+    'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
             'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
+    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
 CHECKED_USE = {
@@ -489,6 +496,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
+    'formals_types': List[str],
     'inferred_type': str,
     'inplace': bool,
     'matches_jit_signature': bool,
@@ -513,6 +521,8 @@ FunctionOption = TypedDict('FunctionOption', {
     'return': ReturnDecl,
     'returns': List[ReturnType],
     'scalar_check': str,
+    # schema used for extension backend operator registration
+    'schema': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -547,12 +557,12 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
 ])
 
 
-def device_guard(option, formals, is_factory_method, dispatch_options, dispatch_tensor):
+def device_guard(option, formals, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
     if option.get('device_guard', True):
         if dispatch_options:
             return 'const DeviceGuard device_guard({}.device());'.format(dispatch_options['name'])
-        if not is_factory_method and dispatch_tensor:
+        if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
 
@@ -836,7 +846,7 @@ def create_generic(top_env, declarations):
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         if option['mode'] == 'TH':
             option['device_guard'] = False
-        option['device_guard_declaration'] = device_guard(option, formals, False, False, dispatch_tensor)
+        option['device_guard_declaration'] = device_guard(option, formals, False, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 
@@ -1057,13 +1067,8 @@ def create_generic(top_env, declarations):
                 option['name'], ", ".join(option['method_formals_with_defaults']))
 
         type_method_dispatch = option['type_method_definition_dispatch']
-        backend_dispatch = isinstance(type_method_dispatch, dict)
 
-        # We only dispatch via options if there is backend-specific dispatch
-        # (otherwise it's a factory function that can dispatch directly to the
-        # native function).
-        dispatch_options = (find_formal('TensorOptions', formals)
-                            if backend_dispatch else None)
+        dispatch_options = find_formal('TensorOptions', formals)
         # Only dispatch via tensor if there is no Options argument
         dispatch_tensor = None if dispatch_options else find_dispatch_tensor(formals)
 
@@ -1081,8 +1086,7 @@ def create_generic(top_env, declarations):
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
-        option['device_guard_declaration'] = device_guard(option, formals, is_factory_method,
-                                                          dispatch_options, dispatch_tensor)
+        option['device_guard_declaration'] = device_guard(option, formals, dispatch_options, dispatch_tensor)
 
         env = nested_dict(option, top_env)
 
@@ -1091,15 +1095,13 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        # Factory methods are not dispatched over `Type`.
-        if not is_factory_method:
-            if option['extended_method']:
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            else:
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+        if option['extended_method']:
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+        else:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+        top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1115,7 +1117,7 @@ def create_generic(top_env, declarations):
             abstract = True
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        elif not is_factory_method:
+        else:
             body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
@@ -1153,10 +1155,7 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
-            if is_factory_method:
-                top_env['function_definitions'].append(FACTORY_DEFINITION.substitute(env))
-            else:
-                top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
+            top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
         output_options.append(OutputDeclaration(
@@ -1212,7 +1211,7 @@ def create_derived(backend_type_env, declarations):
 
     def requires_checked_cast(argument):
         # type: (THFormal) -> bool
-        if argument['type'] == 'IntList':
+        if argument['type'] == 'IntArrayRef':
             return 'size' in argument
         return argument['type'] in CHECKED_CAST
 
@@ -1389,7 +1388,7 @@ def create_derived(backend_type_env, declarations):
         output_count = 0
 
         # scalar_check is the heuristic conditions when a result may be a scalar_check
-        # if there is a IntListSize argument, then its dimensions are used to determine scalar.
+        # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
         scalar_check_is_from_option = False
@@ -1405,7 +1404,7 @@ def create_derived(backend_type_env, declarations):
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'IntListSize' and not scalar_check_is_from_option:
+            if arg['type'] == 'IntArrayRefSize' and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':
@@ -1603,6 +1602,31 @@ def create_derived(backend_type_env, declarations):
                         process_option(option)
                     else:
                         process_native(option)
+                except NYIError:
+                    pass
+    return type_object_declarations, type_object_definitions
+
+
+def create_extension_backend(backend_type_env, declarations):
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
+    type_object_declarations = []
+    type_object_definitions = []
+
+    for declaration in declarations:
+        for option in declaration['options']:
+            if not option.get('skip', False):
+                try:
+                    option['formals_types'] = [f['type'] for f in option['formals_list']]
+                    option['native_actuals'] = [f['name'] for f in option['formals_list']]
+                    schema_args = ", ".join(
+                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
+                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+                    env = nested_dict(option, backend_type_env)
+                    type_object_declarations.append(
+                        TYPE_DERIVED_DECLARATION.substitute(env))
+                    type_object_definitions.append(
+                        TYPE_DEFINITION_EXTENSION_BACKEND.substitute(env))
                 except NYIError:
                     pass
     return type_object_declarations, type_object_definitions

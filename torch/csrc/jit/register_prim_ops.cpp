@@ -13,6 +13,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/thread_pool.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/SmallVector.h>
 
@@ -458,7 +459,7 @@ RegisterOperators reg({
             std::vector<int64_t> last_shape = shape;
             int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
             AT_CHECK(
-                dim < regular_shape.size(), "Dimension out of range for chunk");
+                dim < (int64_t)regular_shape.size(), "Dimension out of range for chunk");
             int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
             regular_shape[dim] = split_size;
             if (shape[dim] % chunks == 0) {
@@ -498,6 +499,20 @@ RegisterOperators reg({
           };
         }),
 
+    Operator(
+        "prim::IgnoredPythonOp(...) -> ()",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            throw JITException(
+                "This Python function is annotated to be ignored"
+                " and cannot be and has not been included in the exported"
+                " binary, meaning that it cannot be executed now."
+                " Make sure that ignored operations are never executed after"
+                " import");
+            return 0;
+          };
+        }),
+
     // Load x, y
     // loads values from registers onto the stack, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs
@@ -525,7 +540,7 @@ RegisterOperators reg({
             pop(stack, input, shape);
             shape = shape.contiguous();
             AT_ASSERT(shape.ndimension() == 1);
-            at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+            at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
             push(stack, input.reshape(shape_list));
             return 0;
           };
@@ -535,7 +550,7 @@ RegisterOperators reg({
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
-            at::IntList sizes = t.sizes();
+            at::IntArrayRef sizes = t.sizes();
             auto sizes_tensor = torch::empty(
                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
@@ -581,7 +596,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;
@@ -789,6 +804,25 @@ RegisterOperators reg({
             };
           }
         }),
+    Operator(
+      prim::DictConstruct,
+      [](const Node* node) -> Operation {
+        const auto num_inputs = node->inputs().size();
+        if (num_inputs % 2 != 0) {
+          throw std::runtime_error("DictConstruct must have an even number of inputs");
+        }
+        return [=](Stack& stack) {
+          c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+          for (size_t i = 0; i < num_inputs; i += 2) {
+            auto val = pop(stack);
+            auto key = pop(stack);
+            vals[key] = val;
+          }
+          push(stack, std::move(vals));
+          return 0;
+        };
+      }
+    ),
     Operator(
         "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
@@ -1062,6 +1096,14 @@ Operation listNe<Shared<TensorList>>(const Node* node) {
   };
 }
 
+Operation listList(const Node* node) {
+  return [=](Stack& stack) {
+    // Intentional no-op, needed to match Python semantics for list(iterable),
+    // but in JIT these will already be lists
+    return 0;
+  };
+}
+
 template <class TList, class TElement>
 Operation listAdd(const Node* node) {
   return [=](Stack& stack) {
@@ -1157,6 +1199,46 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
+int dictLen(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  push(stack, int64_t(dict.size()));
+  return 0;
+}
+
+int dictKeys(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> keys;
+  keys.reserve(dict.size());
+  for (auto item : dict) {
+    keys.push_back(item.first);
+  }
+  push(stack, IValue(keys));
+  return 0;
+}
+
+int dictValues(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> values;
+  values.reserve(dict.size());
+  for (auto item : dict) {
+    values.push_back(item.second);
+  }
+  push(stack, IValue(values));
+  return 0;
+}
+
+int dictIndex(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    AT_ERROR("KeyError: '", index, "'");
+  }
+  push(stack, value->second);
+  return 0;
+}
+
 
 RegisterOperators reg2({
 
@@ -1225,7 +1307,8 @@ RegisterOperators reg2({
             "aten::slice(" decl_type                                                  \
             "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
             "[]",                                                                     \
-            listSlice<Shared<c_type>, c_type::ElemType>)
+            listSlice<Shared<c_type>, c_type::ElemType>),                             \
+        Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
 
       CREATE_LIST_OPS("int", IntList),
       CREATE_LIST_OPS("float", DoubleList),
@@ -1427,33 +1510,19 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-});
+    #define CREATE_DICT_OPS(key_type)                                           \
+      Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),        \
+      Operator(                                                                 \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",           \
+          dictKeys),                                                            \
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues),  \
+      Operator("prim::DictIndex(Dict(" key_type ", t) self, " key_type " key) -> t", dictIndex)
 
-// checking one of size & scale_factor is set
-// if scale_factor is a double list check that it's len == dim
-// reference: _check_size_scale_factor in torch/nn/functional.py
-void _check_size_factor(
-    size_t dim,
-    const IValue& size,
-    const IValue& scale_factor) {
-  if (size.isNone() && scale_factor.isNone()) {
-    throw std::runtime_error("either size or scale_factor should be defined");
-  }
-  if (!size.isNone() && !scale_factor.isNone()) {
-    throw std::runtime_error(
-        "only one of size or scale_factor should be defined");
-  }
-  if (scale_factor.isDoubleList()) {
-    auto scale_len = scale_factor.toDoubleListRef().size();
-    if (scale_len != dim) {
-      std::stringstream str;
-      str << "scale_factor shape must match input shape. Input is " << dim
-          << "D, scale_factor size is " << scale_len;
-      throw std::runtime_error(
-          "only one of size or scale_factor should be defined");
-    }
-  }
-}
+    CREATE_DICT_OPS("str"),
+    CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("float"),
+    #undef CREATE_DICT_OPS
+});
 
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist
