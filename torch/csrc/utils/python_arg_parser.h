@@ -303,10 +303,10 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
-      // information before they are turned into an IntList
+      // information before they are turned into an IntArrayRef
       if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
-        jit::tracer::ArgumentStash::stashIntListElem(
+        jit::tracer::ArgumentStash::stashIntArrayRefElem(
             signature.params[i].name, size, idx, var);
         res[idx] = var.item<int64_t>();
         continue;

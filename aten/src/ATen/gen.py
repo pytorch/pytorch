@@ -191,7 +191,7 @@ generators = {
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse']
-extension_backends = ['MSNPU']
+extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [

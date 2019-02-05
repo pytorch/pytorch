@@ -50,7 +50,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   register_extension_backend_op(
     Backend::MSNPU,
-    "empty(IntList size, TensorOptions options) -> Tensor", &empty_override);
+    "empty(IntArrayRef size, TensorOptions options) -> Tensor", &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -98,7 +98,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(
     register_extension_backend_op(
       Backend::MSNPU,
-      "empty(IntList size, TensorOptions options) -> Tensor", &empty_override)
+      "empty(IntArrayRef size, TensorOptions options) -> Tensor", &empty_override)
   );
 
   // Invalid registration: bad operator name

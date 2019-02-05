@@ -45,8 +45,9 @@ inline void register_extension_backend_op(
     Backend backend,
     const char * schema,
     FnPtr fn) {
-      detail::check_schema_existence(schema);
-      detail::check_function_pointer_type<FnPtr>(schema);
+      std::string schema_str(schema);
+      detail::check_schema_existence(schema_str);
+      detail::check_function_pointer_type<FnPtr>(schema_str);
   switch (backend) {
         ${extension_backend_register_switches}
         default:
