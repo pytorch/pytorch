@@ -100,6 +100,8 @@ class Module(object):
 
         Example::
 
+            >>> self = Module()
+            >>> num_features = 10
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
@@ -356,6 +358,7 @@ class Module(object):
             >>> linear.weight
             tensor([[..., ...],
                     [..., ...]], dtype=torch.float16, device='cuda:1')
+            >>> # xdoctest: -SKIP
             >>> cpu = torch.device("cpu")
             >>> linear.to(cpu)
             Linear(in_features=2, out_features=2, bias=True)
