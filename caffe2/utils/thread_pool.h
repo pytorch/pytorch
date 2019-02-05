@@ -10,7 +10,7 @@ namespace caffe2 {
 class CAFFE2_API TaskThreadPool : public c10::ThreadPool {
  public:
   explicit TaskThreadPool(
-      c10::optional<std::size_t> pool_size,
+      std::size_t pool_size,
       int numa_node_id = -1)
       : ThreadPool(pool_size, numa_node_id) {}
 

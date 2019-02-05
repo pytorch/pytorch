@@ -3,12 +3,12 @@
 
 namespace c10 {
 
-ThreadPool::ThreadPool(c10::optional<std::size_t> pool_size, int numa_node_id)
-    : threads_(pool_size.has_value() ? pool_size.value() : 1),
+ThreadPool::ThreadPool(std::size_t pool_size, int numa_node_id)
+    : threads_(pool_size),
       running_(true),
       complete_(true),
-      available_(pool_size.has_value() ? pool_size.value() : 1),
-      total_(pool_size.has_value() ? pool_size.value() : 1),
+      available_(threads_.size()),
+      total_(threads_.size()),
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
     threads_[i] = std::thread(std::bind(&ThreadPool::main_loop, this, i));
@@ -117,20 +117,17 @@ void ThreadPool::main_loop(std::size_t index) {
   } // while running_
 }
 
-c10::optional<size_t> num_threads(c10::optional<size_t> val) {
-  static c10::optional<size_t> n_threads = val;
-  if (val.has_value() && val != n_threads) {
-    throw std::runtime_error(
-        "Attempted to set number of ATen threads"
-        " multiple times.");
+// constexpr initialization guaranteed to be before any static initialization
+std::atomic<int> num_threads{0};
+void setNumThreads(size_t v) {
+  if(-1  == num_threads.exchange(v)) {
+   throw std::runtime_error("Error: cannot set num threads after pool has started");
   }
-  return n_threads;
 }
 
 ThreadPool& global_work_queue() {
-  static ThreadPool thread_pool(num_threads());
-
-  return thread_pool;
+   static ThreadPool thread_pool(num_threads.exchange(-1));
+   return thread_pool;
 }
 
 } // namespace c10

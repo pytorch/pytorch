@@ -64,7 +64,7 @@ class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
   ThreadPool() = delete;
 
   explicit ThreadPool(
-      c10::optional<std::size_t> pool_size,
+      std::size_t pool_size,
       int numa_node_id = -1);
 
   ~ThreadPool();
@@ -100,11 +100,7 @@ class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
   void main_loop(std::size_t index);
 };
 
-// Set or get the number of threads we want in the thread pool.
-// `val` can only be non-empty on the first invocation of this function in the
-// process.
-CAFFE2_API at::optional<std::size_t> num_threads(
-    at::optional<std::size_t> val = {});
+CAFFE2_API void setNumThreads(size_t v);
 
 CAFFE2_API ThreadPool& global_work_queue();
 
