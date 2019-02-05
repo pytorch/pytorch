@@ -200,6 +200,7 @@ C10_DEFINE_OP_SCHEMA(LayerNorm, FunctionSchema(
 
 } // namespace caffe2
 
+} // namespace caffe2
 
 // Register layer norm with c10
 namespace {
