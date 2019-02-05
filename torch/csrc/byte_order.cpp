@@ -165,6 +165,14 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
 // copu from sorce. order doesnt matter
+// FIX
+// FIX
+// FIX
+// FIX
+// FIX
+// FIX
+// FIX
+
 }
 
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len)
