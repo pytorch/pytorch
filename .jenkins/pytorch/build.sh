@@ -130,6 +130,9 @@ else
   python setup.py install
 fi
 
+# Uninstall typing, as it is a build-time only dependency
+pip uninstall typing
+
 assert_git_not_dirty
 
 # Test documentation build
