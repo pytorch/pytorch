@@ -820,7 +820,11 @@ class Operator : public OperatorBase {
         this->RecordLastFailedOpNetPosition();
       }
 
-      StopAllObservers();
+      if (HasAsyncPart() && !IsEventDisabled() && event().SupportsCallback()) {
+        event().SetCallback([this] { StopAllObservers(); });
+      } else {
+        StopAllObservers();
+      }
 
       return result;
     } catch (EnforceNotMet& err) {
