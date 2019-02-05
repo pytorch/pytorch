@@ -25,7 +25,7 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   if (is_test_) {
     if (Y != &X) {
       context_.CopySameDevice<float>(
-          X.size(), X.data<float>(), Y->template mutable_data<float>());
+          X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
@@ -36,13 +36,13 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
     auto* mask = Output(1, X.sizes(), at::dtype<bool>());
     CAFFE_ENFORCE(X.data<float>() != Ydata, "In-place GPU dropout is broken");
     CURAND_ENFORCE(
-        curandGenerateUniform(context_.curand_generator(), Ydata, X.size()));
+        curandGenerateUniform(context_.curand_generator(), Ydata, X.numel()));
     DropoutKernel<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        X.size(),
+        X.numel(),
         ratio_,
         X.data<float>(),
         Ydata,
@@ -71,19 +71,19 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   if (is_test_) {
     if (dX != &dY) {
       context_.CopySameDevice<float>(
-          dY.size(), dY.data<float>(), dX->template mutable_data<float>());
+          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
     auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
+    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
     const float scale = 1. / (1. - ratio_);
     DropoutGradientKernel<<<
-        CAFFE_GET_BLOCKS(dY.size()),
+        CAFFE_GET_BLOCKS(dY.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        dY.size(),
+        dY.numel(),
         dY.data<float>(),
         mask.data<bool>(),
         scale,

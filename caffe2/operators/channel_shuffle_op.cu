@@ -61,11 +61,11 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const int C = X.dim32(1);
   const int G = this->group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
   const int K = C / G;
-  const int HxW = X.size() / (N * C);
+  const int HxW = X.numel() / (N * C);
   const int S = (HxW + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
@@ -93,11 +93,11 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const int C = X.dim32(ndim - 1);
   const int G = this->group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
   const int K = C / G;
-  const int HxW = X.size() / (N * C);
+  const int HxW = X.numel() / (N * C);
   const int outer_size = N * HxW;
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
@@ -131,11 +131,11 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const int C = dY.dim32(1);
   const int G = this->group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
-  if (dY.size() == 0) {
+  if (dY.numel() == 0) {
     return true;
   }
   const int K = C / G;
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const int S = (HxW + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
@@ -163,11 +163,11 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const int C = dY.dim32(ndim - 1);
   const int G = this->group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
-  if (dY.size() == 0) {
+  if (dY.numel() == 0) {
     return true;
   }
   const int K = C / G;
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const int outer_size = N * HxW;
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();

@@ -26,7 +26,7 @@ static void AddLinSpacedInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.setLinSpaced(min_val, max_val);
 
   return;
@@ -64,7 +64,7 @@ void AddInput<CPUContext>(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
@@ -75,7 +75,7 @@ void AddInput<CUDAContext>(
     const string& name,
     Workspace* ws) {
   Tensor tmp(shape, CPU);
-  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
+  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.numel());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);

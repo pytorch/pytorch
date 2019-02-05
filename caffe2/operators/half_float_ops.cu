@@ -25,11 +25,11 @@ bool FloatToHalfOp<CUDAContext>::RunOnDevice() {
 
   auto* Y = Output(0, X.sizes(), at::dtype<at::Half>());
   FloatToHalfKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       X.data<float>(),
       reinterpret_cast<half*>(Y->template mutable_data<at::Half>()));
   return true;
@@ -41,11 +41,11 @@ bool HalfToFloatOp<CUDAContext>::RunOnDevice() {
 
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   HalfToFloatKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       reinterpret_cast<const half*>(X.data<at::Half>()),
       Y->template mutable_data<float>());
   return true;
