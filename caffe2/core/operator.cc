@@ -195,11 +195,17 @@ unique_ptr<OperatorBase> _CreateOperator(
     } else {
       // If the above fails, we will just return the normal case with the
       // default implementation.
-      VLOG(1) << "Engine " << engine
-              << " is not available for operator " << op_type << ".";
+      VLOG(1) << "Engine " << engine << " is not available for operator "
+              << op_type << ".";
     }
   }
-  if (operator_def.engine().size() && !VLOG_IS_ON(1)) {
+  if (operator_def.engine().size() &&
+      // avoid duplicated warning
+      !VLOG_IS_ON(1) &&
+      // if CUDA is not available, no warning about cudnn because it's so
+      // common cudnn engine is still specified during inference as a remnant
+      // from training.
+      (HasCudaRuntime() || operator_def.engine() != "CUDNN")) {
     static int log_occurrences = 0;
     if (log_occurrences <= 64) {
       ++log_occurrences;
