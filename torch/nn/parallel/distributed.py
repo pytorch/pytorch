@@ -66,6 +66,7 @@ class DistributedDataParallel(Module):
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
+        >>> # xdoctest: +SKIP
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
@@ -176,6 +177,7 @@ class DistributedDataParallel(Module):
         module (Module): the module to be parallelized
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """

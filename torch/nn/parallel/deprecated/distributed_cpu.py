@@ -64,6 +64,7 @@ class DistributedDataParallelCPU(Module):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> torch.distributed.deprecated.init_process_group(world_size=4, init_method='...')
         >>> net = torch.nn.DistributedDataParallelCPU(model)
     """

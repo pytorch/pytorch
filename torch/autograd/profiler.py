@@ -148,17 +148,16 @@ class profile(object):
         ...     y.backward()
         >>> # NOTE: some columns were removed for brevity
         ... print(prof)  # xdoctest: +IGNORE_WANT
-        -------------------------------------  ---------------  ---------------
-        Name                                          CPU time        CUDA time
-        -------------------------------------  ---------------  ---------------
-        PowConstant                                  142.036us          0.000us
-        N5torch8autograd9GraphRootE                   63.524us          0.000us
-        PowConstantBackward                          184.228us          0.000us
-        MulConstant                                   50.288us          0.000us
-        PowConstant                                   28.439us          0.000us
-        Mul                                           20.154us          0.000us
-        N5torch8autograd14AccumulateGradE             13.790us          0.000us
-        N5torch8autograd5CloneE                        4.088us          0.000us
+        -----------------------------------  ---------------  ---------------
+        Name                                        CPU time        CUDA time
+        -----------------------------------  ---------------  ---------------
+        pow                                         57.735us          0.000us
+        torch::autograd::GraphRoot                   1.866us          0.000us
+        PowBackward0                               129.027us          0.000us
+        pow                                         29.839us          0.000us
+        mul                                         52.655us          0.000us
+        mul                                          8.638us          0.000us
+        torch::autograd::AccumulateGrad              8.518us          0.000us
     """
 
     def __init__(self, enabled=True, use_cuda=False):

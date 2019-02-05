@@ -19,13 +19,13 @@ class Independent(Distribution):
         >>> scale = torch.ones(3)
         >>> mvn = MultivariateNormal(loc, scale_tril=torch.diag(scale))
         >>> [mvn.batch_shape, mvn.event_shape]
-        [torch.Size(()), torch.Size((3,))]
+        [torch.Size([]), torch.Size([3])]
         >>> normal = Normal(loc, scale)
         >>> [normal.batch_shape, normal.event_shape]
-        [torch.Size((3,)), torch.Size(())]
+        [torch.Size([3]), torch.Size([])]
         >>> diagn = Independent(normal, 1)
         >>> [diagn.batch_shape, diagn.event_shape]
-        [torch.Size(()), torch.Size((3,))]
+        [torch.Size([]), torch.Size([3])]
 
     Args:
         base_distribution (torch.distributions.distribution.Distribution): a

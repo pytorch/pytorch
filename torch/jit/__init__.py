@@ -191,6 +191,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
 
     Example: Trace a cell.
 
+        >>> # xdoctest: +SKIP
         >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
         >>> print(trace)
     """

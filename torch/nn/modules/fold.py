@@ -204,7 +204,7 @@ class Unfold(Module):
         >>> # or equivalently (and avoiding a copy),
         >>> # out = out_unf.view(1, 2, 7, 8)
         >>> (torch.nn.functional.conv2d(inp, w) - out).abs().max()
-        tensor(1.9073e-06)
+        tensor(...)
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md

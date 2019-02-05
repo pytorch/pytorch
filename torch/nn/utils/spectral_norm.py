@@ -224,9 +224,10 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
     Example::
 
         >>> m = spectral_norm(nn.Linear(20, 40))
-        Linear (20 -> 40)
+        >>> print(m)
+        Linear(in_features=20, out_features=40, bias=True)
         >>> m.weight_u.size()
-        torch.Size([20])
+        torch.Size([40])
 
     """
     if dim is None:

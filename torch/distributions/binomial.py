@@ -19,8 +19,8 @@ class Binomial(Distribution):
 
         >>> m = Binomial(torch.tensor([[5.], [10.]]), torch.tensor([0.5, 0.8]))
         >>> m.sample()
-        tensor([[..., ...]
-                [..., ...])
+        tensor([[...,...],
+                [...,...])
 
     Args:
         total_count (int or Tensor): number of Bernoulli trials

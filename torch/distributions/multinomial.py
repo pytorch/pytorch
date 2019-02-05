@@ -27,7 +27,8 @@ class Multinomial(Distribution):
     Example::
 
         >>> m = Multinomial(100, torch.tensor([ 1., 1., 1., 1.]))
-        >>> m.sample()  # equal probability of 0, 1, 2, 3
+        >>> x = m.sample()  # equal probability of 0, 1, 2, 3
+        >>> print(x)
         tensor([..., ..., ..., ...])
 
         >>> Multinomial(probs=torch.tensor([1., 1., 1., 1.])).log_prob(x)

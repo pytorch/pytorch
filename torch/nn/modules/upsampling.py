@@ -86,7 +86,6 @@ class Upsample(Module):
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
 
         >>> # Try scaling the same data in a larger tensor
-        >>>
         >>> input_3x3 = torch.zeros(3, 3).view(1, 1, 3, 3)
         >>> input_3x3[:, :, :2, :2].copy_(input)
         tensor([[[[ 1.,  2.],
@@ -169,17 +168,17 @@ class UpsamplingNearest2d(Upsample):
 
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2).float()
         >>> input
-        tensor([[[[ 1.,  2.],
-                  [ 3.,  4.]]]])
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
 
         >>> m = nn.UpsamplingNearest2d(scale_factor=2)
         >>> m(input)
-        tensor([[[[ 1.,  1.,  2.,  2.],
-                  [ 1.,  1.,  2.,  2.],
-                  [ 3.,  3.,  4.,  4.],
-                  [ 3.,  3.,  4.,  4.]]]])
+        tensor([[[[1., 1., 2., 2.],
+                  [1., 1., 2., 2.],
+                  [3., 3., 4., 4.],
+                  [3., 3., 4., 4.]]]])
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')

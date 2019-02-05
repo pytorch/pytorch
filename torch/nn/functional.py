@@ -1545,8 +1545,8 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
         >>> F.embedding_bag(embedding_matrix, input, offsets)
-        tensor([[ 0.3397,  0.3552,  0.5545],
-                [ 0.5893,  0.4386,  0.5882]])
+        tensor([[..., ..., ...],
+                [..., ..., ...]]...)
     """
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)

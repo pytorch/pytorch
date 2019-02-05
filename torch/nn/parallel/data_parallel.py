@@ -104,6 +104,7 @@ class DataParallel(Module):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
         >>> output = net(input_var)
     """

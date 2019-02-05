@@ -61,7 +61,7 @@ class Embedding(Module):
                  [-0.6431,  0.0748,  0.6969],
                  [ 1.4970,  1.3448, -0.9685],
                  [-0.3677, -2.7265, -0.1685]],
-
+                ...
                 [[ 1.4970,  1.3448, -0.9685],
                  [ 0.4362, -0.4004,  0.9400],
                  [-0.6431,  0.0748,  0.6969],
@@ -157,7 +157,7 @@ class Embedding(Module):
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
             >>> embedding(input)  # xdoctest: +IGNORE_WHITESPACE
-            tensor([[ 4.0000,  5.1000,  6.3000]])
+            tensor([[4.0000, 5.1000, 6.3000]])
         """
         assert embeddings.dim() == 2, \
             'Embeddings parameter is expected to be 2-dimensional'

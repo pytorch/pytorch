@@ -221,21 +221,16 @@ class Module(object):
             ...     if type(m) == nn.Linear:
             ...         m.weight.data.fill_(1.0)
             ...         print(m.weight)
-
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
-            >>> net.apply(init_weights)
+            >>> result = net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
-            Sequential(
-              (0): Linear(in_features=2, out_features=2, bias=True)
-              (1): Linear(in_features=2, out_features=2, bias=True)
-            )
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
@@ -346,28 +341,28 @@ class Module(object):
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
             Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]])
+            tensor([[..., ...],
+                    [..., ...]])
             >>> linear.to(torch.double)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
             Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]], dtype=torch.float64)
+            tensor([[..., ...],
+                    [..., ...]], dtype=torch.float64, requires_grad=True)
+            >>> # xdoctest: +SKIP
             >>> gpu1 = torch.device("cuda:1")
             >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
+            tensor([[..., ...],
+                    [..., ...]], dtype=torch.float16, device='cuda:1')
             >>> cpu = torch.device("cpu")
             >>> linear.to(cpu)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
             Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16)
+            tensor([[..., ...],
+                    [..., ...]], dtype=torch.float64, requires_grad=True)
 
         """
 
@@ -613,7 +608,8 @@ class Module(object):
 
         Example::
 
-            >>> module.state_dict().keys()
+            >>> module = nn.Linear(1, 2)
+            >>> sorted(module.state_dict().keys())
             ['bias', 'weight']
 
         """
@@ -798,10 +794,11 @@ class Module(object):
 
         Example::
 
+            >>> model = nn.Linear(1, 2)
             >>> for param in model.parameters():
             >>>     print(type(param.data), param.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            <class 'torch.Tensor'> torch.Size([2, 1])
+            <class 'torch.Tensor'> torch.Size([2])
 
         """
         for name, param in self.named_parameters(recurse=recurse):
@@ -846,10 +843,12 @@ class Module(object):
 
         Example::
 
+            >>> model = nn.BatchNorm2d(1)
             >>> for buf in model.buffers():
             >>>     print(type(buf.data), buf.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            <class 'torch.Tensor'> torch.Size([1])
+            <class 'torch.Tensor'> torch.Size([1])
+            <class 'torch.Tensor'> torch.Size([])
 
         """
         for name, buf in self.named_buffers(recurse=recurse):
@@ -870,9 +869,11 @@ class Module(object):
 
         Example::
 
+            >>> self = nn.BatchNorm2d(1)
             >>> for name, buf in self.named_buffers():
             >>>    if name in ['running_var']:
             >>>        print(buf.size())
+            torch.Size([1])
 
         """
         gen = self._named_members(
@@ -899,9 +900,13 @@ class Module(object):
 
         Example::
 
+            >>> model = nn.Module()
+            >>> model.foo = nn.Linear(2, 2)
+            >>> model.bar = nn.Conv2d(2, 2, 2)
             >>> for name, module in model.named_children():
-            >>>     if name in ['conv4', 'conv5']:
-            >>>         print(module)
+            >>>     print('name={}; module={}'.format(name, module))
+            name=foo; module=Linear(in_features=2, out_features=2, bias=True)
+            name=bar; module=Conv2d(2, 2, kernel_size=(2, 2), stride=(1, 1))
 
         """
         memo = set()
@@ -926,13 +931,11 @@ class Module(object):
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
             ...     print(idx, '->', m)
-
-            0 -> Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            1 -> Linear (2 -> 2)
-
+            1 -> Linear(in_features=2, out_features=2, bias=True)
         """
         for name, module in self.named_modules():
             yield module

@@ -86,7 +86,8 @@ def weight_norm(module, name='weight', dim=0):
     Example::
 
         >>> m = weight_norm(nn.Linear(20, 40), name='weight')
-        Linear (20 -> 40)
+        >>> print(m)
+        Linear(in_features=20, out_features=40, bias=True)
         >>> m.weight_g.size()
         torch.Size([40, 1])
         >>> m.weight_v.size()
