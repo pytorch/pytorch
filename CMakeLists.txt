@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
+# Use compiler ID "AppleClang" instead of "Clang" for XCode.
+# Not setting this sometimes makes XCode C compiler gets detected as "Clang",
+# even when the C++ one is detected as "AppleClang".
+cmake_policy(SET CMP0025 NEW)
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -125,7 +130,7 @@ option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" ON)
-option(USE_OPENMP "Use OpenMP for parallel code" OFF)
+option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
@@ -278,9 +283,14 @@ if(NOT MSVC)
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
-  if ($ENV{WERROR})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-  endif($ENV{WERROR})
+  if (WERROR)
+    check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
+    if (NOT COMPILER_SUPPORT_WERROR)
+      set(WERROR FALSE)
+    else()
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+    endif()
+  endif(WERROR)
   if (NOT APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")

@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -34,6 +34,10 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
 
   # TODO: move this to Docker
   pip install -q hypothesis --user
+
+  # mypy will fail to install on Python <3.4.  In that case,
+  # we just won't run these tests.
+  pip install mypy --user || true
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -78,21 +82,23 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
   # ROCm CI is using Caffe2 docker images, which doesn't have several packages
   # needed in testing. We install them here.
-  pip install -q psutil librosa>=0.6.2 --user
+  pip install -q psutil "librosa>=0.6.2" --user
 fi
 
-if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
 test_python_nn() {
   time python test/run_test.py --include nn --verbose
+  assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
   time python test/run_test.py --exclude nn --verbose
+  assert_git_not_dirty
 }
 
 test_aten() {
@@ -116,6 +122,7 @@ test_aten() {
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
+    assert_git_not_dirty
   fi
 }
 
@@ -135,19 +142,23 @@ test_torchvision() {
   #time python setup.py install
   pip install -q --user .
   popd
+  rm -rf vision
 }
 
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-     echo "Testing libtorch"
-     CPP_BUILD="$PWD/../cpp-build"
-     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/caffe2/bin/test_jit
-     else
-       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
-     fi
-     python tools/download_mnist.py --quiet -d mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+    echo "Testing libtorch"
+    python test/cpp/jit/tests_setup.py setup
+    CPP_BUILD="$PWD/../cpp-build"
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      "$CPP_BUILD"/caffe2/bin/test_jit
+    else
+      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+    fi
+    python test/cpp/jit/tests_setup.py shutdown
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    assert_git_not_dirty
   fi
 }
 
@@ -156,13 +167,14 @@ test_custom_script_ops() {
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
-    cp -r "$CUSTOM_OP_BUILD" build
+    cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
     popd
+    assert_git_not_dirty
   fi
 }
 
@@ -173,10 +185,11 @@ test_xla() {
   python test/test_operations.py
   python test/test_train_mnist.py --tidy
   popd
+  assert_git_not_dirty
 }
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-  if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     test_torchvision
     test_xla
   else
@@ -188,10 +201,10 @@ if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
     test_custom_script_ops
   fi
 else
-  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_torchvision
     test_python_nn
-  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_torchvision
     test_python_all_except_nn
     test_aten

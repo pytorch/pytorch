@@ -3710,10 +3710,16 @@
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+  dispatch:
+    CPU: _histc_out_cpu
+    CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   matches_jit_signature: True
   variants: method, function
+  dispatch:
+    CPU: _histc_cpu
+    CUDA: _histc_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True

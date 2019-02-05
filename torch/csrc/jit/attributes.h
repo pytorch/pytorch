@@ -1,13 +1,9 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <ATen/Utils.h>
-#include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
 #include <ATen/core/interned_strings.h>
-#include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -100,6 +96,7 @@ struct GraphAttr : public AttributeValue {
   AttributeKind kind() const override {
     return AttributeKind::g;
   }
+
  private:
   std::shared_ptr<Graph> value_;
 };

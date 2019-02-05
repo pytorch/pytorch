@@ -707,7 +707,7 @@ class MultiLabelMarginLoss(_Loss):
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
-        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -949,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']

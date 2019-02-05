@@ -392,22 +392,28 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    b = b.type_as(a)
-                    b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
-                    # check that NaNs are in the same locations
-                    nan_mask = a != a
-                    self.assertTrue(torch.equal(nan_mask, b != b), message)
+                    if a.device.type == 'cpu' and a.dtype == torch.float16:
+                        # CPU half tensors don't have the methods we need below
+                        a = a.to(torch.float32)
+                    if TEST_WITH_ROCM:
+                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
+                        # TODO: remove after the bug is resolved.
+                        b = b.to(a.dtype).to(a.device)
+                    else:
+                        b = b.to(a)
                     diff = a - b
-                    diff[nan_mask] = 0
-                    # inf check if allow_inf=True
-                    if allow_inf:
-                        inf_mask = (a == float("inf")) | (a == float("-inf"))
-                        self.assertTrue(torch.equal(inf_mask,
-                                                    (b == float("inf")) | (b == float("-inf"))),
-                                        message)
-                        diff[inf_mask] = 0
-                    # TODO: implement abs on CharTensor
-                    if diff.is_signed() and 'CharTensor' not in diff.type():
+                    if a.is_floating_point():
+                        # check that NaNs are in the same locations
+                        nan_mask = torch.isnan(a)
+                        self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
+                        diff[nan_mask] = 0
+                        # inf check if allow_inf=True
+                        if allow_inf:
+                            inf_mask = torch.isinf(a)
+                            self.assertTrue(torch.equal(inf_mask, torch.isinf(b)), message)
+                            diff[inf_mask] = 0
+                    # TODO: implement abs on CharTensor (int8)
+                    if diff.is_signed() and diff.dtype != torch.int8:
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)

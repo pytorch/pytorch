@@ -2224,8 +2224,37 @@ struct to_ir {
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
+      case TK_DICT_LITERAL: {
+        auto dl = DictLiteral(tree);
+        auto key_trees = dl.key_inputs().tree()->trees();
+        auto value_trees = dl.value_inputs().tree()->trees();
+        AT_ASSERT(key_trees.size() == value_trees.size());
+        std::vector<Value*> keys, values;
+        for(size_t i = 0; i < keys.size(); ++i) {
+          keys.push_back(emitExpr(Expr(key_trees[i])));
+          values.push_back(emitExpr(Expr(value_trees[i])));
+        }
+
+        TypePtr key_type = nullptr;
+        TypePtr value_type = nullptr;
+
+        if (type_hint && type_hint->kind() == TypeKind::DictType) {
+          auto dict_type = type_hint->expect<DictType>();
+          key_type = dict_type->getKeyType();
+          value_type = dict_type->getValueType();
+        } else if (!keys.empty()) {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
+        } else {
+          key_type = StringType::get();
+          value_type = DynamicType::get();
+        }
+        AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
+      } break;
       default:
-        throw ErrorReport(tree) << "NYI: " << tree;
+        throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
         break;
     }
   }
@@ -2343,9 +2372,9 @@ struct to_ir {
         continue;
       }
       throw ErrorReport(loc)
-          << "Unsupported operation: indexing tensor with unsupported index type "
+          << "Unsupported operation: indexing tensor with unsupported index type '"
           << index->type()->str()
-          << ". Only ints, slices, and tensors are supported.";
+          << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a TensorList where some tensors can be undefined.
     // Convert NULL tensorIndices to undefined tensors to pass to at::index.
@@ -2438,6 +2467,7 @@ struct to_ir {
     }
     return adj_index;
   }
+
   Value* emitTupleIndex(
       const SourceRange& loc,
       Value* tuple_val,
@@ -2446,6 +2476,16 @@ struct to_ir {
     auto adj_index = getTupleIndexVal(
         loc, tuple_typ, idx_val, /*allow_out_of_bounds*/ false);
     return graph->insertNode(graph->createTupleIndex(tuple_val, adj_index))
+        ->output();
+  }
+
+  Value* emitDictIndex(
+      const SourceRange& loc,
+      Value* dict_val,
+      Value* key_val) {
+    auto dict_type = dict_val->type()->cast<DictType>();
+    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
 
@@ -2511,9 +2551,13 @@ struct to_ir {
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitTupleIndex(loc, gatherable, idx);
+    } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
+      auto* idx = emitExpr(subscript_exprs[0]);
+      return emitDictIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
-          << "Indexing only supported on lists, tensors, and tuples.";
+          << "Indexing only supported on lists, dictionaries, "
+             "tensors, and tuples";
     }
   }
 };

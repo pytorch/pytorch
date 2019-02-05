@@ -615,11 +615,11 @@ Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
   return at::legacy::th::_th_lerp(self, end, weight);
 }
 
-Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
 
-Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _histc_cpu(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc(self, bins, min, max);
 }
 

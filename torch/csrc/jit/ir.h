@@ -1,19 +1,17 @@
 #pragma once
 
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
-#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -62,6 +60,8 @@ using ::c10::TypePtr;
 using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
+
+using ::c10::fmap;
 
 namespace prim {
 using namespace ::c10::prim;
@@ -139,6 +139,7 @@ template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using topo_position_t = int64_t;
+using ValueSet = std::unordered_set<const Value*>;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -1049,6 +1050,12 @@ struct Graph {
       const TypePtr& elem_type,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value* v, size_t size);
+  TORCH_API Node* createDict(
+      const TypePtr& key_type,
+      const TypePtr& value_type,
+      at::ArrayRef<Value*> keys,
+      at::ArrayRef<Value*> values);
+  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   Node* createPythonOp(
@@ -1145,27 +1152,43 @@ struct Graph {
   TORCH_API void freeBlock(Block* b);
 };
 
-struct WithInsertPoint : public ResourceGuard {
-  WithInsertPoint(Node* n)
-      : ResourceGuard([this] { prev->owningGraph()->setInsertPoint(prev); }),
-        prev(n->owningGraph()->insertPoint()) {
+/** \brief An utility class for setting temporary insertion points.
+ *
+ * When an object of this class is created, it stores the current insertion
+ * point, sets the new one, and restores the original insertion point  when the
+ * object is destroyed.
+ */
+struct WithInsertPoint {
+  WithInsertPoint(Node* n) : prev_(n->owningGraph()->insertPoint()) {
     n->owningGraph()->setInsertPoint(n);
   }
   WithInsertPoint(Block* b) : WithInsertPoint(b->return_node()) {}
 
- private:
-  Node* prev;
-};
-
-struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph& g, ScopePtr scope)
-      : ResourceGuard([&g, this]() { g.set_current_scope(prev_scope); }),
-        prev_scope(g.current_scope()) {
-    g.set_current_scope(std::move(scope));
+  ~WithInsertPoint() {
+    prev_->owningGraph()->setInsertPoint(prev_);
   }
 
  private:
-  ScopePtr prev_scope;
+  Node* prev_;
+};
+
+/** \brief An utility class for setting temporary scopes.
+ *
+ * When an object of this class is created, it stores the current scope, sets
+ * the new one, and restores the original scope when the object is destroyed.
+ */
+struct WithCurrentScope {
+  WithCurrentScope(Graph& g, ScopePtr scope)
+      : graph_(&g), prev_scope_(g.current_scope()) {
+    g.set_current_scope(std::move(scope));
+  }
+  ~WithCurrentScope() {
+    graph_->set_current_scope(prev_scope_);
+  }
+
+ private:
+  Graph* graph_;
+  ScopePtr prev_scope_;
 };
 
 inline Value::Value(Node* node_, size_t offset_)
@@ -1192,49 +1215,6 @@ inline Graph* Value::owningGraph() {
 inline const Graph* Value::owningGraph() const {
   return node()->owningGraph();
 }
-
-// Helper macros for constructing switch statements over Node types
-// instead of heavy-weight visitors
-// read 'between' these defines to see how they turn into a big switch
-// statement
-
-// Mutable case
-// The IFM/ELSEIFM indicate that subclass *refinement* occurs.
-// This is only valid for node types for which we have subclasses.
-#define IR_IFM(x, Kind) GENERIC_IF(, prim::Kind, x, Kind)
-#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(, prim::Kind, Kind)
-
-#define IR_IFM_CONST(x, Kind) GENERIC_IF(const, prim::Kind, x, Kind)
-#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const, prim::Kind, Kind)
-
-#define IR_IF(x, Kind)           \
-  auto&& __match_key = x;        \
-  switch (__match_key->kind()) { \
-    case ::c10::prim::Kind: {    \
-      auto* value = __match_key; \
-      (void)value;
-#define IR_ELSEIF(Kind)        \
-  }                            \
-  break;                       \
-  case ::c10::prim::Kind: {    \
-    auto* value = __match_key; \
-    (void)value;
-
-#define IR_ELSE() GENERIC_ELSE()
-#define IR_END() GENERIC_END()
-
-/* example:
-  Node * n = ...;
-  IR_IF(n,Select)
-    cout << "Select of" << value->input() << "\n";
-  IR_ELSEIF(PythonOp)
-    cout << value->pyobj << "\n";
-  IR_ELSEIF(Add)
-    cout << "Add" << \n";
-  IR_ELSE() // optional
-    cout << "something else\n";
-  IR_END()
-*/
 
 /************* All nodes not required to be defined before Graph **************/
 
@@ -1272,6 +1252,10 @@ struct PythonOp : public Node {
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);
