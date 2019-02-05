@@ -151,6 +151,7 @@ def set_default_tensor_type(t):
         >>> torch.set_default_tensor_type(torch.DoubleTensor)
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> torch.set_default_tensor_type(torch.FloatTensor)  # reset
 
     """
     if isinstance(t, _string_classes):
@@ -175,6 +176,7 @@ def set_default_dtype(d):
         >>> torch.set_default_dtype(torch.float64)
         >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
         torch.float64
+        >>> torch.set_default_tensor_type(torch.FloatTensor)  # reset
 
     """
     _C._set_default_dtype(d)

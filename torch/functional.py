@@ -417,17 +417,19 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
         >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
         >>> output
-        tensor([ 2,  3,  1])
+        tensor([2, 3, 1])
 
+        >>> # xdoctest: +IGNORE_WHITESPACE
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
+        >>>     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices
         tensor([ 0,  2,  1,  2])
 
+        >>> # xdoctest: +IGNORE_WHITESPACE
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
+        >>>     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices
@@ -469,16 +471,15 @@ def argmax(input, dim=None, keepdim=False):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> a = torch.randn(4, 4)
         >>> a
-        tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-                [-0.7401, -0.8805, -0.3402, -1.1936],
-                [ 0.4907, -1.3948, -1.0691, -0.3132],
-                [-1.6092,  0.5419, -0.2993,  0.3195]])
-
-
+        tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+                [ 0.8487,  0.6920, -0.3160, -2.1152],
+                [ 0.3223, -1.2633,  0.3500,  0.3081],
+                [ 0.1198,  1.2377,  1.1168, -0.2473]])
         >>> torch.argmax(a, dim=1)
-        tensor([ 0,  2,  0,  1])
+        tensor([2, 0, 2, 1])
     """
     if dim is None:
         return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
@@ -500,16 +501,15 @@ def argmin(input, dim=None, keepdim=False):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> a = torch.randn(4, 4)
         >>> a
-        tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-                [ 1.0100, -1.1975, -0.0102, -0.4732],
-                [-0.9240,  0.1207, -0.7506, -1.0213],
-                [ 1.7809, -1.2960,  0.9384,  0.1438]])
-
-
+        tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+                [ 0.8487,  0.6920, -0.3160, -2.1152],
+                [ 0.3223, -1.2633,  0.3500,  0.3081],
+                [ 0.1198,  1.2377,  1.1168, -0.2473]])
         >>> torch.argmin(a, dim=1)
-        tensor([ 2,  1,  3,  1])
+        tensor([1, 3, 1, 3])
     """
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
@@ -552,12 +552,13 @@ def tensordot(a, b, dims=2):
                 [4796., 5162.],
                 [4928., 5306.]])
 
-        >>> a = torch.randn(3, 4, 5, device='cuda')
-        >>> b = torch.randn(4, 5, 6, device='cuda')
+        >>> torch.manual_seed(0)
+        >>> a = torch.randn(2, 3, 4, device='cuda')
+        >>> b = torch.randn(3, 4, 5, device='cuda')
         >>> c = torch.tensordot(a, b, dims=2).cpu()
-        tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
-                [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
-                [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
+        >>> print(c)
+        tensor([[ 3.4930, -4.2449,  7.9082,  5.7295, -3.2473],
+                [-0.3836,  2.3736,  1.4149,  2.7023, -1.3841]])
 
     """
     if isinstance(dims, (list, tuple)) or \
@@ -620,11 +621,12 @@ def cartesian_prod(*tensors):
 
         >>> a = [1, 2, 3]
         >>> b = [4, 5]
+        >>> import itertools
         >>> list(itertools.product(a, b))
         [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
         >>> tensor_a = torch.tensor(a)
         >>> tensor_b = torch.tensor(b)
-        >>> torch.cartesian_prod(tensor_a, tensor_b)
+        >>> cartesian_prod(tensor_a, tensor_b)
         tensor([[1, 4],
                 [1, 5],
                 [2, 4],
@@ -748,14 +750,15 @@ def chain_matmul(*matrices):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)
         >>> c = torch.randn(5, 6)
         >>> d = torch.randn(6, 7)
         >>> torch.chain_matmul(a, b, c, d)
-        tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
-                [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
-                [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
+        tensor([[ 17.6916,  -5.1054,  -8.0613, -20.3951,  29.9474,  14.5372,  15.5054],
+                [  1.1059,   2.8440,   0.8046,  -3.9986,  -1.4778,  -6.6784,   2.8142],
+                [  6.3175,   1.0317,  -0.6468,  -2.4530,  -1.0262,   0.0600,   3.9942]])
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
