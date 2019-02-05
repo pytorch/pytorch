@@ -168,7 +168,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   max = hist.Min() + bin_width * (end_bin + 1);
 
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
-  return qfactory->ChooseQuantizationParams(min, max);
+  return qfactory->ChooseQuantizationParams(
+      min, max, precision, preserve_sparsity);
 }
 
 TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
@@ -306,7 +307,8 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   max = hist.Min() + bin_width * (best_start_bin + best_nbins_selected);
 
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
-  return qfactory->ChooseQuantizationParams(min, max);
+  return qfactory->ChooseQuantizationParams(
+      min, max, precision, preserve_sparsity);
 } // ChooseQuantizationParams
 
 } // namespace dnnlowp
