@@ -418,7 +418,7 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
         >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
         >>> output
-        tensor([2, 3, 1])
+        tensor([1, 2, 3])
 
         >>> output, inverse_indices = torch.unique(
         >>>     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
