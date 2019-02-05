@@ -259,6 +259,7 @@ def _get_default_group():
                            "please make sure to call init_process_group.")
     return _default_pg
 
+
 def _get_default_store():
     """
     Getting the default store created by init_process_group
@@ -269,6 +270,7 @@ def _get_default_store():
                            "please make sure to call init_process_group.")
     _, default_store = _pg_map[_default_pg]
     return default_store
+
 
 def get_backend(group=group.WORLD):
     """
