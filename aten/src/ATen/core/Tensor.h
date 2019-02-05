@@ -411,11 +411,11 @@ class CAFFE2_API Tensor {
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
-  Tensor logsumexp(int64_t dim, bool keepdim=false) const;
+  Tensor logsumexp(IntList dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
-  Tensor max_values(int64_t dim, bool keepdim=false) const;
+  Tensor max_values(IntList dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
   Tensor mean(IntList dim, bool keepdim, ScalarType dtype) const;
@@ -423,7 +423,7 @@ class CAFFE2_API Tensor {
   Tensor mean(IntList dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
-  Tensor min_values(int64_t dim, bool keepdim=false) const;
+  Tensor min_values(IntList dim, bool keepdim=false) const;
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
   Tensor mul(const Tensor & other) const;
