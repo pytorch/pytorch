@@ -167,6 +167,21 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
+    @given(X=hu.tensors(n=1), **hu.gcs)
+    def test_layer_norm_op_pytorch_2(self, X, gc, dc):
+        X = X[0]
+        if len(X.shape) == 1:
+            X = np.expand_dims(X, axis=0)
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X), axis, epsilon)
+
+        torch.testing.assert_allclose(expected_norm, actual_norm)
+        torch.testing.assert_allclose(expected_mean, actual_mean)
+        torch.testing.assert_allclose(expected_stdev, actual_stdev)
+
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
