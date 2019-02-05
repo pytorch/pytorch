@@ -13,6 +13,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/thread_pool.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/SmallVector.h>
 
@@ -823,21 +824,6 @@ RegisterOperators reg({
       }
     ),
     Operator(
-        prim::DictIndex,
-        [](const Node* node) {
-          return [=](Stack& stack) {
-            auto index = pop(stack);
-            auto dict = pop(stack).toGenericDict();
-            const auto& elems = dict->elements();
-            auto value = elems.find(index);
-            if (value == elems.end()) {
-              AT_ERROR("KeyError: '", index, "'");
-            }
-            push(stack, value->second);
-            return 0;
-          };
-        }),
-    Operator(
         "aten::_unwrap_optional(t(a)? optional) -> t(a)",
         [](const Node* node) -> Operation {
           return [=](Stack& stack) {
@@ -1110,6 +1096,14 @@ Operation listNe<Shared<TensorList>>(const Node* node) {
   };
 }
 
+Operation listList(const Node* node) {
+  return [=](Stack& stack) {
+    // Intentional no-op, needed to match Python semantics for list(iterable),
+    // but in JIT these will already be lists
+    return 0;
+  };
+}
+
 template <class TList, class TElement>
 Operation listAdd(const Node* node) {
   return [=](Stack& stack) {
@@ -1205,6 +1199,46 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
+int dictLen(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  push(stack, int64_t(dict.size()));
+  return 0;
+}
+
+int dictKeys(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> keys;
+  keys.reserve(dict.size());
+  for (auto item : dict) {
+    keys.push_back(item.first);
+  }
+  push(stack, IValue(keys));
+  return 0;
+}
+
+int dictValues(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> values;
+  values.reserve(dict.size());
+  for (auto item : dict) {
+    values.push_back(item.second);
+  }
+  push(stack, IValue(values));
+  return 0;
+}
+
+int dictIndex(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    AT_ERROR("KeyError: '", index, "'");
+  }
+  push(stack, value->second);
+  return 0;
+}
+
 
 RegisterOperators reg2({
 
@@ -1273,7 +1307,8 @@ RegisterOperators reg2({
             "aten::slice(" decl_type                                                  \
             "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
             "[]",                                                                     \
-            listSlice<Shared<c_type>, c_type::ElemType>)
+            listSlice<Shared<c_type>, c_type::ElemType>),                             \
+        Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
 
       CREATE_LIST_OPS("int", IntList),
       CREATE_LIST_OPS("float", DoubleList),
@@ -1475,6 +1510,18 @@ RegisterOperators reg2({
             return 0;
           };
         }),
+    #define CREATE_DICT_OPS(key_type)                                           \
+      Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),        \
+      Operator(                                                                 \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",           \
+          dictKeys),                                                            \
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues),  \
+      Operator("prim::DictIndex(Dict(" key_type ", t) self, " key_type " key) -> t", dictIndex)
+
+    CREATE_DICT_OPS("str"),
+    CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("float"),
+    #undef CREATE_DICT_OPS
 });
 
 // reference: _output_size in torch/nn/functional.py
