@@ -19,30 +19,28 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) {
   const size_t total_num_arguments = schema.arguments().size();
   const size_t num_inputs = total_num_arguments - num_outputs;
 
-  c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, num_inputs, total_num_arguments);
-  c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, num_inputs, num_outputs, total_num_arguments);
-
-  auto inputsVec = inputs.vec();
-  auto outputsVec_ = outputs.vec();
+  // TODO Avoid vector allocation. One idea would be to keep the std::vector instances in the cache.
+  auto outputs = torch::jit::pop(*stack, num_outputs);
+  auto inputs = torch::jit::pop(*stack, num_inputs);
 
   const auto device = at::Device(deviceType);
 
-  for (auto& output : outputsVec_) {
+  for (auto& output : outputs) {
     if (output.isNone() || (output.isTensor() && !output.toTensor().defined())) {
       output = at::Tensor(c10::C10Tensor(caffe2::empty({0}, device)));
     }
   }
 
-  std::vector<c10::IValue*> outputsVec;
-  outputsVec.reserve(outputsVec_.size());
-  for (auto& output : outputsVec_) {
-    outputsVec.push_back(&output);
+  std::vector<c10::IValue*> outputPtrs;
+  outputPtrs.reserve(outputs.size());
+  for (auto& output : outputs) {
+    outputPtrs.push_back(&output);
   }
 
-  Caffe2Operator(schema, std::move(inputsVec), std::move(outputsVec)).Run();
+  Caffe2Operator(schema, std::move(inputs), std::move(outputPtrs)).Run();
 
   torch::jit::drop(*stack, total_num_arguments);
-  for (auto& output: outputsVec_) {
+  for (auto& output: outputs) {
     torch::jit::push(*stack, std::move(output));
   }
 
@@ -54,8 +52,8 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) {
 inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
   // actual_inputs is the real inputs plus an optional tensor argument for each output.
   // this can be used to pass in a preallocated output tensor.
-  std::vector<c10::Argument> actual_inputs = inputs;
-  actual_inputs.reserve(inputs.size() + outputs.size());
+  std::vector<c10::Argument> actual_inputs = std::move(inputs);
+  actual_inputs.reserve(actual_inputs.size() + outputs.size());
   for (const auto& elem : outputs) {
     AT_ASSERT(elem.type()->isSubtypeOf(DynamicType::get())); // DynamicType means type is tensor
     actual_inputs.push_back(c10::Argument(elem.name(), OptionalType::create(elem.type()), nullopt, IValue()));
