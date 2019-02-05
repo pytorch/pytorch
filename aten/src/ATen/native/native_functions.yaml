@@ -1102,33 +1102,12 @@
 - func: index_copy_(Tensor(a!) self, int dim, IndexTensor index, Tensor source) -> Tensor(a!)
   variants: method
 
-- func: index_copy(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
 - func: index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   matches_jit_signature: True
-  variants: function, method
-
-- func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: index_fill(Tensor self, int64_t dim, IndexTensor index, Scalar source) -> Tensor
-  variants: function, method
-
-- func: scatter(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: scatter_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_fill(Tensor self, Tensor mask, Scalar source) -> Tensor
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor

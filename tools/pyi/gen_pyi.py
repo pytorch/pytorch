@@ -76,13 +76,6 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
-    'index_add',
-    'index_copy',
-    'index_fill',
-    'scatter',
-    'scatter_add',
-    'masked_scatter',
-    'masked_fill',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
