@@ -575,6 +575,8 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
+const char* LEGACY_CONSTRUCTOR =
+    " is a legacy constructor and is not supported in the JIT.";
 
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {
