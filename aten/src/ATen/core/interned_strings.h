@@ -41,6 +41,7 @@ namespace c10 {
   _(prim, Placeholder) /* debug */ \
   _(prim, Print)                   \
   _(prim, PythonOp)                \
+  _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
@@ -52,6 +53,8 @@ namespace c10 {
   _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
+  _(prim, DictConstruct)           \
+  _(prim, DictIndex)               \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \

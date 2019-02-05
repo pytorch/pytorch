@@ -34,6 +34,7 @@ test/data/gpu_tensors.pt
 test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
 test/data/linear.pt
+dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/

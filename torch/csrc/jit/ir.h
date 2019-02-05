@@ -139,6 +139,7 @@ template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using topo_position_t = int64_t;
+using ValueSet = std::unordered_set<const Value*>;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -1049,6 +1050,12 @@ struct Graph {
       const TypePtr& elem_type,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value* v, size_t size);
+  TORCH_API Node* createDict(
+      const TypePtr& key_type,
+      const TypePtr& value_type,
+      at::ArrayRef<Value*> keys,
+      at::ArrayRef<Value*> values);
+  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   Node* createPythonOp(
@@ -1245,6 +1252,10 @@ struct PythonOp : public Node {
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);

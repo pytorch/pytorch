@@ -326,13 +326,15 @@ struct C10_API TensorOptions {
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
-    Backend backend;
-    if (device().type() == Device::Type::CPU) {
-      backend = (layout() == kStrided) ? Backend::CPU : Backend::SparseCPU;
-    } else {
-      backend = (layout() == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
+    Backend backend = deviceTypeToBackend(device().type());
+    switch (layout()) {
+      case kStrided:
+        return backend;
+      case kSparse:
+        return toSparse(backend);
+      default:
+        return backend;
     }
-    return backend;
   }
 
  private:
@@ -507,6 +509,8 @@ inline TensorTypeId computeTensorTypeId(TensorOptions options) {
           return IDEEPTensorId();
         case DeviceType::HIP:
           return HIPTensorId();
+        case DeviceType::MSNPU:
+          return MSNPUTensorId();
         default:
           AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
       }
@@ -543,6 +547,8 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::IDEEP;
   } else if (tid == HIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == MSNPUTensorId()) {
+    return DeviceType::MSNPU;
   } else if (tid == SparseCPUTensorId()) {
     return DeviceType::CPU;
   } else if (tid == SparseCUDATensorId()) {

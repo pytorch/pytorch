@@ -17,7 +17,7 @@ Operator createOperatorFromCaffe2(const std::string& name) {
       const auto input_size = fn.arguments().size();
       const auto output_size = fn.returns().size();
       std::vector<c10::IValue> inputs;
-      for (auto i = 0; i < input_size; ++i) {
+      for (size_t i = 0; i < input_size; ++i) {
         auto input = pop(stack);
         // Tensors come in as variables but need to be unwrapped
         if (input.isTensor()) {
@@ -29,7 +29,7 @@ Operator createOperatorFromCaffe2(const std::string& name) {
       // We use a temporary stack for arguments passed into RunOperator
       std::list<c10::IValue> outputs_real;
       std::vector<c10::IValue*> outputs;
-      for (auto i = 0; i < output_size; ++i) {
+      for (size_t i = 0; i < output_size; ++i) {
         if (TensorType::get() == fn.returns()[i].type()) {
           caffe2::Tensor tensor(caffe2::CPU);
           auto at_tensor = at::Tensor(c10::C10Tensor(std::move(tensor)));

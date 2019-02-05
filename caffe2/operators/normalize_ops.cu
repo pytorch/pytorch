@@ -105,7 +105,7 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto canonical_axis =
       X.canonical_axis_index(OperatorBase::GetSingleArgument<int>("axis", -1));
   int N = X.dim32(canonical_axis);
-  int M = X.size() / N;
+  int M = X.numel() / N;
   const int SF = X.size_from_dim(canonical_axis + 1);
   NormalizeGradientKernel<<<
       min(M, CAFFE_MAXIMUM_NUM_BLOCKS),

@@ -268,7 +268,6 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  c10::optional<at::ScalarType> scalar_type;
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
     graph->inputs()[i]->setType(TensorType::create(
