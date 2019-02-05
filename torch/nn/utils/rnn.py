@@ -351,6 +351,3 @@ def pack_sequence(sequences, enforce_sorted=True):
 
 def get_packed_sequence(data, batch_sizes, sorted_indices, unsorted_indices):
     return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)
-
-def flat_weights_hack(module):
-    return module._flat_weights()

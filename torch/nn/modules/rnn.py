@@ -85,12 +85,10 @@ class RNNBase(Module):
 
                 for name, param in zip(param_names, layer_params):
                     setattr(self, name, param)
-                self._all_weights.append(tuple(param_names))
+                self._all_weights.append(param_names)
 
-        self._all_weights_as_params = self._get_all_weights()
+        self._flattened_parameters = self._get_all_weights()
 
-        # print(all_weights)
-        # self._all_weights = tuple(all_weights)
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -192,10 +190,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flat_weights(), self.bias, self.num_layers,
+            result = _impl(input, hx, self._flattened_parameters, self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flat_weights(), self.bias,
+            result = _impl(input, batch_sizes, hx, self._flattened_parameters, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -237,50 +235,17 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-    # # @weak_script_method
-    # def _flat_weights(self):
-    #     # type: () -> List[Tensor]
-    #     # A flat list of all parameters
-    #     ret = []
-    #     # Get all parameters in a nested list (List[List[Tensor]])
-    #     all_weights = self.get_all_weights()
-    #     # Flatten list to List[Tensor]
-    #     for i in range(len(all_weights)):
-    #         layer_params = all_weights[i]
-    #         for j in range(len(layer_params)):
-    #             ret.append(layer_params[j])
-    #     return ret
-    #
-    # @property
-    # def all_weights(self):
-    #     # Not used in JIT
-    #     return self.get_all_weights()
-    #
-    # # @weak_script_method
-    # def get_all_weights(self):
-    #     # type: () -> List[List[Tensor]]
-    #     all_weights = [['weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0']]
-    #     ret = []
-    #     for i in range(len(all_weights)):
-    #         weights = all_weights[i]
-    #         weight_list = []
-    #         for j in range(len(weights)):
-    #             weight_list.append(self._parameters.get(weights[j]))
-    #         ret.append(weight_list)
-    #     return ret
-
-
     def _get_all_weights(self):
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
-
-    # @property
+    @property
     def _flat_weights(self):
         return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
         return self._get_all_weights()
+
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an
@@ -560,10 +525,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._all_weights_as_params, self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._flattened_parameters, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._all_weights_as_params, self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._flattened_parameters, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]

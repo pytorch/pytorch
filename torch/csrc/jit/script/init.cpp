@@ -230,71 +230,8 @@ struct VISIBILITY_HIDDEN ParameterListValue : public SugaredValue {
   }
 
  private:
-  // std::shared_ptr<Module> module_;
   std::shared_ptr<Module> module_;
 };
-//
-// struct VISIBILITY_HIDDEN ParameterListGet : public SugaredValue {
-//   ParameterListGet(std::shared_ptr<Module> module)
-//       : module_(module) {}
-//
-//   std::string kind() const override {
-//     return "parameter list values";
-//   }
-//
-//   // self._parameters.values()
-//   std::shared_ptr<SugaredValue> call(
-//       const SourceRange& loc,
-//       Method& m,
-//       at::ArrayRef<NamedValue> inputs_,
-//       at::ArrayRef<NamedValue> attributes,
-//       size_t n_binders) override {
-//       std::cout << "Im cattin\n";
-//
-//       // return nullptr;
-//       // auto param = module_->get_parameters()["nice"];
-//       auto value = m.get_or_add_parameter(module_->get_parameters()["nice"].slot());
-//       return toSimple(m.graph()->create(aten::get_parameter, inputs_)->output()); //value);
-//     // std::vector<Value*> params;
-//     // const auto& param_list = module_.get_parameters().items();
-//     // for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-//     //   if (!(*it)->is_buffer) {
-//     //     params.push_back(m.get_or_add_parameter((*it)->slot()));
-//     //   }
-//     // }
-//     // auto list = m.graph()->createList(DynamicType::get(), params);
-//     // m.graph()->insertNode(list);
-//     // return toSimple(list->output());
-//   }
-//
-//  private:
-//   // std::shared_ptr<Module> module_;
-//   std::shared_ptr<Module> module_;
-// };
-//
-// struct VISIBILITY_HIDDEN ParameterDict : public SugaredValue {
-//   ParameterDict(std::shared_ptr<Module> module) : module_(module) {}
-//   // ParameterDict(std::shared_ptr<Module> module) : module_(std::move(module)) {}
-//
-//   std::string kind() const override {
-//     return "parameter list";
-//   }
-//
-//   std::shared_ptr<SugaredValue> attr(
-//       const SourceRange& loc,
-//       Method& m,
-//       const std::string& field) override {
-//     if (field == "get") {
-//       // only allow self._parameters.values() to be resolved
-//       return std::make_shared<ParameterListGet>(module_);
-//     }
-//
-//     return SugaredValue::attr(loc, m, field);
-//   }
-//
-//  private:
-//    std::shared_ptr<Module> module_;
-// };
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -348,15 +285,11 @@ struct ModuleValue : public SugaredValue {
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
         if (py::isinstance<py::list>(attr)) {
-        // if (py::isinstance<py::list>(attr, py::module::import("torch.jit").attr("OrderedParameterDict"))) {
+          // TODO: make sure it's a list of parameters
           return std::make_shared<ParameterListValue>(module);
         }
         return toSugaredValue(attr, m, loc, true);
-      }
-      // else if (py::isinstance<py::list>(attr, py::module::import("torch.jit").attr("OrderedParameterDict"))) {
-      //   return std::make_shared<ParameterDict>(module);
-      // }
-       else {
+      } else {
         throw ErrorReport(loc)
             << "attribute '" << field << "' of type '" << typeString(attr)
             << "' is not usable in a script method (did you forget to add it __constants__?)";
@@ -528,9 +461,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
-    } else {
-      // throw ErrorReport()
-      //     << "Value was not a constant\n" << loc;
     }
   }
 
@@ -586,10 +516,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!overloads.is_none()) {
     return std::make_shared<OverloadedFunctionValue>(std::move(overloads));
   }
-  // py::object params = py::module::import("torch.jit").attr("_try_get_parameters")(obj);
-  // if (!params.is_none()) {
-  //   return std::make_shared<ParameterListValues>(m.owner());
-  // }
   return std::make_shared<PythonValue>(obj);
 }
 

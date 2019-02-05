@@ -91,7 +91,6 @@ namespace c10 {
   _(aten, device)                  \
   _(aten, len)                     \
   _(aten, wait)                    \
-  _(aten, get_parameter)           \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
