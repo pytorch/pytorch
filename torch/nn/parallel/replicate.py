@@ -9,17 +9,19 @@ from torch.cuda._utils import _get_device_index
 # 2. weak python modules (nn.Module annotated by @weak_module)
 # 3. ScriptModule
 #
-# currently a module cannot be replicated properly if the descendant of
+# currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
 def _replicatable_module(module, memo=None):
 
     def legal_submodule(m):
-        return isinstance(m, torch.jit.ScritModule) \
-            or torch.jit._is_weak_type(type(m))
+        #weak modules are ScriptModule as well.
+        return isinstance(m, torch.jit.ScriptModule)
 
     # module.modules() contains module itself as the first element
     def descendant_modules(module):
-        return next(module.modules())
+        gen = module.modules()
+        next(gen)
+        return gen
 
     if not torch.jit._enabled:
         return True
@@ -44,24 +46,24 @@ def _replicatable_module(module, memo=None):
 def _build_param_dict(modules, module_copies, module_indices):
     param_dict = {}
     for module in modules:
-        if not isinstance(m, torch.jit.ScriptModule):
+        if not isinstance(module, torch.jit.ScriptModule):
             continue
         replica = module_copies[module_indices[module]]
         for name, param in module.named_parameters(recurse=False):
             param_dict[param] = (replica, name)
-        for name, buffer in module.named_buffer(recurse=False):
+        for name, buffer in module.named_buffers(recurse=False):
             param_dict[buffer] = (replica, name)
     return param_dict
 
 
 def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    params_map = _build_param_dict(modules, module_copies, module_indices)
+    param_dict = _build_param_dict(modules, module_copies, module_indices)
     for i, module in enumerate(modules):
         if not isinstance(module, torch.jit.ScriptModule):
             continue
-        replica = module_copies[j][i]
+        replica = module_copies[i]
         for method_name in module._method_names():
-            method = module._get_method(name)
+            method = module._get_method(method_name)
             param_list = []
             for param in method.params():
                 param_list.append(param_dict[param])
@@ -104,6 +106,7 @@ def replicate(network, devices, detach=False):
                 keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
                 for key in keys:
                     replica.__dict__[key] = module.__dict__[key]
+                replica.__class__ = module.__class__
             else:
                 replica = module.__new__(type(module))
                 replica.__dict__ = module.__dict__.copy()
@@ -148,6 +151,5 @@ def replicate(network, devices, detach=False):
 
     for j in range(num_replicas):
         _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
-
 
     return [module_copies[j][0] for j in range(num_replicas)]
