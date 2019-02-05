@@ -50,7 +50,7 @@ inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
 /**
  * Return product of all dimensions starting from k
  */
-inline int64_t size_from_dim_(int k, IntList dims) {
+inline int64_t size_from_dim_(int k, IntArrayRef dims) {
   int64_t r = 1;
   for (size_t i = k; i < dims.size(); ++i) {
     r *= dims[i];
@@ -59,7 +59,7 @@ inline int64_t size_from_dim_(int k, IntList dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline int64_t size_to_dim_(int k, IntList dims) {
+inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   AT_ASSERT((unsigned)k <= dims.size());
   int64_t r = 1;
   for (int i = 0; i < k; ++i) {
@@ -69,7 +69,7 @@ inline int64_t size_to_dim_(int k, IntList dims) {
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
-inline int64_t size_between_dim_(int k, int l, IntList dims) {
+inline int64_t size_between_dim_(int k, int l, IntArrayRef dims) {
   AT_ASSERT((unsigned)l < dims.size());
   int64_t r = 1;
   if (k < l) {
@@ -277,13 +277,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  virtual IntList sizes() const;
+  virtual IntArrayRef sizes() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
    */
-  virtual IntList strides() const;
+  virtual IntArrayRef strides() const;
 
   /**
    * Return the number of dimensions of this tensor.  Note that 0-dimension
@@ -722,7 +722,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_contiguous(IntList new_size) {
+  void set_sizes_contiguous(IntArrayRef new_size) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto old_dim = sizes_.size();
@@ -747,7 +747,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_and_strides(IntList new_size, IntList new_stride) {
+  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_CHECK(
@@ -1281,23 +1281,23 @@ private:
   }
 
   bool SetDims() {
-    return SetDims(IntList{});
+    return SetDims(IntArrayRef{});
   }
 
   bool SetDims(const int64_t d0) {
-    return SetDims(IntList{d0});
+    return SetDims(IntArrayRef{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    return SetDims(IntList{d0, d1});
+    return SetDims(IntArrayRef{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    return SetDims(IntList{d0, d1, d2});
+    return SetDims(IntArrayRef{d0, d1, d2});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    return SetDims(IntList{d0, d1, d2, d3});
+    return SetDims(IntArrayRef{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
