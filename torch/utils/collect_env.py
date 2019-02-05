@@ -52,7 +52,7 @@ def run(command):
 def run_and_read_all(run_lambda, command):
     """Runs command using run_lambda; reads and returns entire output if rc is 0"""
     rc, out, _ = run_lambda(command)
-    if rc is not 0:
+    if rc != 0:
         return None
     return out
 
@@ -60,7 +60,7 @@ def run_and_read_all(run_lambda, command):
 def run_and_parse_first_match(run_lambda, command, regex):
     """Runs command using run_lambda, returns the first regex match if it exists"""
     rc, out, _ = run_lambda(command)
-    if rc is not 0:
+    if rc != 0:
         return None
     match = re.search(regex, out)
     if match is None:
@@ -98,7 +98,7 @@ def get_gpu_info(run_lambda):
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
-    if rc is not 0:
+    if rc != 0:
         return None
     # Anonymize GPUs by removing their UUID
     return re.sub(uuid_regex, '', out)
@@ -165,7 +165,7 @@ def check_release_file(run_lambda):
 def get_os(run_lambda):
     platform = get_platform()
 
-    if platform is 'win32' or platform is 'cygwin':
+    if platform == 'win32' or platform == 'cygwin':
         return get_windows_version(run_lambda)
 
     if platform == 'darwin':
@@ -208,7 +208,7 @@ def get_pip_packages(run_lambda):
     out3 = run_with_pip('pip3')
 
     num_pips = len([x for x in [out2, out3] if x is not None])
-    if num_pips is 0:
+    if num_pips == 0:
         return 'pip', out2
 
     if num_pips == 1:

@@ -8,8 +8,8 @@ const std::vector<std::string> functions = {
     R"(
         def mul(self, other):
             def backward(grad_output):
-                grad_self = (grad_output * other).sum_to_size(self.size())
-                grad_other = (grad_output * self).sum_to_size(other.size())
+                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
+                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
                 return grad_self, grad_other
             return self * other, backward
 

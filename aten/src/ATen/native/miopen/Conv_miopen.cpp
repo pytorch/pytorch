@@ -224,6 +224,7 @@ static void convolution_shape_check(
 // parameters
 struct ConvolutionParams
 {
+  miopenHandle_t handle;
   miopenDataType_t dataType;
   int input_size[2 + max_dim];
   int input_stride[2 + max_dim];
@@ -242,7 +243,7 @@ struct ConvolutionParams
 static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 void setConvolutionParams(
-    ConvolutionParams* params,
+    ConvolutionParams* params, miopenHandle_t handle,
     const at::Tensor& input, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool deterministic) {
@@ -250,6 +251,7 @@ void setConvolutionParams(
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
   params->dataType = dataType;
+  params->handle = handle;
   // ASSERT(weight.dim() == input.dim())
   for (int i = 0; i != input.dim(); ++i) {
     params->input_size[i] = (int) input.size(i);
@@ -604,7 +606,7 @@ void raw_miopen_convolution_forward_out(
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(weight);
   args.odesc.set(output);
@@ -721,7 +723,7 @@ void raw_miopen_convolution_backward_input_out(
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
   args.wdesc.set(weight);
   args.odesc.set(grad_output);
@@ -847,7 +849,7 @@ void raw_miopen_convolution_backward_weight_out(
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(grad_weight);
   args.odesc.set(grad_output);

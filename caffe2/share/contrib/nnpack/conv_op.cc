@@ -147,8 +147,10 @@ NNPACKConvOp::getActivationType() const {
 bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   /* Global variable with a unique ID of the pre-transformed kernel blob */
   volatile static uint32_t precomputed_transform_id = 0;
+
   auto& X = Input(0);
   auto& filter = Input(1);
+  auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "");
@@ -158,8 +160,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
-  auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
-  Tensor* Y = Output(0, sizes, at::dtype<float>());
+  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
 
   const float* biasData = NULL;

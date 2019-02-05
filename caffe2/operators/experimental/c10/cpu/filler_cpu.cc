@@ -76,8 +76,8 @@ void constant_fill_op_cpu_impl(
     ArrayRef<int64_t> shape,
     ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
-    int dtype,
-    c10::IValue value) {
+    int64_t dtype,
+    c10::Scalar value) {
   Tensor output{C10Tensor(output_)};
   CPUContext context;
 
@@ -102,12 +102,6 @@ void constant_fill_op_cpu_impl(
           value.toInt(),
           output.template mutable_data<int64_t>(),
           static_cast<CPUContext*>(&context));
-    } else if (dtype == caffe2::TensorProto_DataType_BOOL) {
-      caffe2::math::Set<bool, CPUContext>(
-          output.numel(),
-          value.toBool(),
-          output.template mutable_data<bool>(),
-          static_cast<CPUContext*>(&context));
     } else {
       throw std::logic_error(
           "Unimplemented data type for ConstantFill: " +
@@ -122,8 +116,8 @@ void uniform_fill_op_cpu_impl(
     ArrayRef<int64_t> shape,
     ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
-    float min,
-    float max) {
+    double min,
+    double max) {
   Tensor output{C10Tensor(output_)};
   CPUContext context;
 
@@ -154,22 +148,22 @@ void uniform_fill_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::ConstantFill)
-    .kernel<&caffe2::constant_fill_op_cpu_impl>()
-    .dispatchKey(c10::DeviceTypeId::CPU);
+    .kernel<decltype(caffe2::constant_fill_op_cpu_impl), &caffe2::constant_fill_op_cpu_impl>()
+    .dispatchKey(CPUTensorId());
 
 C10_REGISTER_KERNEL(caffe2::ops::UniformFill)
-    .kernel<&caffe2::uniform_fill_op_cpu_impl>()
-    .dispatchKey(c10::DeviceTypeId::CPU);
+    .kernel<decltype(caffe2::uniform_fill_op_cpu_impl), &caffe2::uniform_fill_op_cpu_impl>()
+    .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<float>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(c10::DeviceTypeId::CPU);
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<int>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>>()
-    .dispatchKey(c10::DeviceTypeId::CPU);
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorIntFill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill<int64_t>)
-    .kernel<&caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>>()
-    .dispatchKey(c10::DeviceTypeId::CPU);
+C10_REGISTER_KERNEL(caffe2::ops::GivenTensorInt64Fill)
+    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

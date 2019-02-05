@@ -18,4 +18,7 @@ namespace caffe2 {
   using iattr = ideep::descriptor_group::attr_t;                               \
   using ibn_flag = ideep::batch_normalization_flag;
 
+const int CONV_ALGORITHM_AUTO = 0;
+const int CONV_ALGORITHM_WINOGRAD = 1;
+
 } // namespace caffe2

@@ -23,7 +23,7 @@ class TestPooling(hu.HypothesisTestCase):
            kernel=st.integers(3, 5),
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool",
                                    "MaxPool2D", "AveragePool2D"]),
@@ -84,7 +84,7 @@ class TestPooling(hu.HypothesisTestCase):
            kernel=st.integers(1, 5),
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool",
                                     "MaxPool1D", "AveragePool1D"]),
@@ -116,7 +116,7 @@ class TestPooling(hu.HypothesisTestCase):
            kernel=st.integers(1, 6),
            size=st.integers(3, 5),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool",
                                     "MaxPool3D", "AveragePool3D"]),
@@ -154,7 +154,7 @@ class TestPooling(hu.HypothesisTestCase):
     @given(kernel=st.integers(3, 6),
            size=st.integers(3, 5),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool",
                                     "MaxPool3D", "AveragePool3D"]),
@@ -190,7 +190,7 @@ class TestPooling(hu.HypothesisTestCase):
            kernel=st.integers(1, 5),
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            **hu.gcs_gpu_only)
     def test_pooling_with_index(self, stride, pad, kernel, size,
                                 input_channels, batch_size, gc, dc):
@@ -214,7 +214,7 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
 
     @given(sz=st.integers(1, 20),
-           batch_size=st.integers(1, 4),
+           batch_size=st.integers(0, 4),
            engine=st.sampled_from(["", "CUDNN"]),
            op_type=st.sampled_from(["AveragePool", "AveragePool2D"]),
            **hu.gcs)
@@ -238,7 +238,7 @@ class TestPooling(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(sz=st.integers(1, 20),
-           batch_size=st.integers(1, 4),
+           batch_size=st.integers(0, 4),
            engine=st.sampled_from(["", "CUDNN"]),
            op_type=st.sampled_from(["MaxPool", "MaxPool2D"]),
            **hu.gcs)
@@ -272,7 +272,7 @@ class TestPooling(hu.HypothesisTestCase):
            kernel=st.integers(1, 5),
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool",
                                    "MaxPool2D", "AveragePool2D"]),
@@ -306,7 +306,7 @@ class TestPooling(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
            engine=st.sampled_from(["", "CUDNN"]),

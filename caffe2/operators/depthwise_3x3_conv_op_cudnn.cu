@@ -288,8 +288,9 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
   bool RunOnDeviceWithOrderNCHW() override {
     const Tensor& X = Input(0);
     auto& filter = Input(1);
+    Tensor* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
 
     CAFFE_ENFORCE_EQ(M, X.dim32(1));
@@ -299,8 +300,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE_EQ(this->kernel_w(), 3);
     CAFFE_ENFORCE_EQ(this->kernel_h(), 3);
     CAFFE_ENFORCE_EQ(this->stride_h(), this->stride_w());
-    auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, filter.dim32(0));
-    Tensor* Y = Output(0, sizes, at::dtype<float>());
+    ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, filter.dim32(0));
     DepthwiseArgs args;
     args.batch = X.dim32(0);
     args.in_rows = X.dim32(2);
@@ -342,7 +342,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
           Y->dim32(2),
           Y->dim32(3)));
       auto& bias = Input(2);
-      CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+      CAFFE_ENFORCE_EQ(bias.dim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),
@@ -394,7 +394,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
 
     const vector<int> input_dims = this->GetDims(X);
     ConvPoolOpBase<CUDAContext>::ComputePads(input_dims);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
     CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
     CAFFE_ENFORCE(M % group_ == 0);
@@ -455,7 +455,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
           M,
           dY.dim32(2),
           dY.dim32(3)));
-
+      
       auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<float>());
       CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
           cudnn_wrapper_.inline_cudnn_handle(),
