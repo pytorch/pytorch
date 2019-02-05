@@ -590,6 +590,10 @@ binary_checkout: &binary_checkout
       git reset --hard "$CIRCLE_SHA1"
       git checkout -q -B "$CIRCLE_BRANCH"
       git reset --hard "$CIRCLE_SHA1"
+    elif [[ -n "$CIRCLE_SHA1" ]]; then
+      # "smoke" binary build on master on PR merges
+      git reset --hard "$CIRCLE_SHA1"
+      git checkout -q -B master
     fi
     git submodule update --init --recursive --quiet
     echo "Using Pytorch from "
@@ -599,6 +603,8 @@ binary_checkout: &binary_checkout
     # Clone the Builder master repo
     git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
     pushd "$BUILDER_ROOT"
+    git fetch origin
+    git reset origin/master --hard
     echo "Using builder from "
     git --no-pager log --max-count 1
     popd
