@@ -9,7 +9,7 @@ using namespace at;
 namespace torch { namespace utils {
 
 static PyObject* recursive_to_list(
-    char* data, IntList sizes, IntList strides, int64_t dim,
+    char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
     ScalarType scalarType, int64_t elementSize)
 {
   int64_t ndim = sizes.size();

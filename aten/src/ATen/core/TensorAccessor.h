@@ -23,7 +23,7 @@ struct RestrictPtrTraits {
 
 // TensorAccessorBase and TensorAccessor are used for both CPU and CUDA tensors.
 // For CUDA tensors it is used in device code (only). This means that we restrict ourselves
-// to functions and types available there (e.g. IntList isn't).
+// to functions and types available there (e.g. IntArrayRef isn't).
 
 // The PtrTraits argument is only relevant to cuda to support `__restrict__` pointers.
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
@@ -36,11 +36,11 @@ public:
       const index_t* sizes_,
       const index_t* strides_)
       : data_(data_), sizes_(sizes_), strides_(strides_) {}
-  C10_HOST IntList sizes() const {
-    return IntList(sizes_,N);
+  C10_HOST IntArrayRef sizes() const {
+    return IntArrayRef(sizes_,N);
   }
-  C10_HOST IntList strides() const {
-    return IntList(strides_,N);
+  C10_HOST IntArrayRef strides() const {
+    return IntArrayRef(strides_,N);
   }
   C10_HOST_DEVICE index_t stride(index_t i) const {
     return strides_[i];

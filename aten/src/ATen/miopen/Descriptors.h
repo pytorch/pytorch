@@ -89,7 +89,7 @@ public:
   }
 
   void set(const at::Tensor &t, size_t pad = 0);
-  void set(miopenDataType_t dataType, IntList sizes, IntList strides, size_t pad = 0);
+  void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 

@@ -20,7 +20,7 @@ struct Variable;
 using at::Context;
 using at::Device;
 using at::Generator;
-using at::IntList;
+using at::IntArrayRef;
 using at::Scalar;
 using at::ScalarType;
 using at::SparseTensorRef;

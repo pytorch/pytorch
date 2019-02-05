@@ -307,7 +307,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
-static IntList slicePrefix1sSize(IntList sizes) {
+static IntArrayRef slicePrefix1sSize(IntArrayRef sizes) {
   size_t first_non1_src = sizes.size();
   for (size_t i = 0; i < sizes.size(); ++i) {
     if (sizes[i] != 1) {
@@ -321,7 +321,7 @@ static IntList slicePrefix1sSize(IntList sizes) {
 
 static void copy_to(Variable dst, const Variable& src) {
   Tensor b_src;
-  IntList sliced_src_sizes = slicePrefix1sSize(src.sizes());
+  IntArrayRef sliced_src_sizes = slicePrefix1sSize(src.sizes());
   std::tie(b_src) = expand_inplace(dst, src.view(sliced_src_sizes), "setitem");
   dst.copy_(b_src);
 }
@@ -365,7 +365,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   }
 
-  IntList slicedValueSizes = slicePrefix1sSize(value.sizes());
+  IntArrayRef slicedValueSizes = slicePrefix1sSize(value.sizes());
   torch::autograd::Variable valuesSliced;
   if (!value.sizes().equals(slicedValueSizes)) {
     valuesSliced = value.view(slicedValueSizes);

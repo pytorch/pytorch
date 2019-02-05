@@ -60,7 +60,7 @@ static void replication_pad1d_out_batch(
 void replication_pad1d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -185,7 +185,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -323,7 +323,7 @@ static void replication_pad2d_out_batch(
 
 void replication_pad2d_out_cpu_template(Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -466,7 +466,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -666,7 +666,7 @@ static void replication_pad3d_out_batch(
 void replication_pad3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -823,7 +823,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -908,7 +908,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 Tensor& replication_pad1d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad1d_out_cpu_template(
       output, input, paddingSize);
@@ -917,7 +917,7 @@ Tensor& replication_pad1d_out_cpu(
 
 Tensor replication_pad1d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad1d_out_cpu_template(
@@ -929,7 +929,7 @@ Tensor& replication_pad1d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   gradInput.resize_as_(input);
   replication_pad1d_backward_out_cpu_template(
@@ -940,7 +940,7 @@ Tensor& replication_pad1d_backward_out_cpu(
 Tensor replication_pad1d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad1d_backward_out_cpu_template(
@@ -951,7 +951,7 @@ Tensor replication_pad1d_backward_cpu(
 Tensor& replication_pad2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_out_cpu_template(
       output, input, paddingSize);
@@ -960,7 +960,7 @@ Tensor& replication_pad2d_out_cpu(
 
 Tensor replication_pad2d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad2d_out_cpu_template(
@@ -972,7 +972,7 @@ Tensor& replication_pad2d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -982,7 +982,7 @@ Tensor& replication_pad2d_backward_out_cpu(
 Tensor replication_pad2d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad2d_backward_out_cpu_template(
@@ -993,7 +993,7 @@ Tensor replication_pad2d_backward_cpu(
 Tensor& replication_pad3d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_out_cpu_template(
       output, input, paddingSize);
@@ -1002,7 +1002,7 @@ Tensor& replication_pad3d_out_cpu(
 
 Tensor replication_pad3d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad3d_out_cpu_template(
@@ -1014,7 +1014,7 @@ Tensor& replication_pad3d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -1024,7 +1024,7 @@ Tensor& replication_pad3d_backward_out_cpu(
 Tensor replication_pad3d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad3d_backward_out_cpu_template(

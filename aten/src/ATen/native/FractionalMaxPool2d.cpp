@@ -126,8 +126,8 @@ static void fractional_max_pool2d_out_frame(
 void fractional_max_pool2d_out_cpu_template(
   const at::Tensor& input_,
   at::Tensor& output,
-  IntList output_size,
-  IntList pool_size,
+  IntArrayRef output_size,
+  IntArrayRef pool_size,
   at::Tensor& indices,
   const at::Tensor& randomSamples) {
 
@@ -256,8 +256,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   const at::Tensor& input,
   const at::Tensor& gradOutput_,
   at::Tensor& gradInput,
-  IntList output_size,
-  IntList pool_size /* unused */,
+  IntArrayRef output_size,
+  IntArrayRef pool_size /* unused */,
   const at::Tensor& indices) {
 
   int numBatch = 1;
@@ -318,8 +318,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
   at::Tensor& output,
   at::Tensor& indices,
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& randomSamples)
 {
   fractional_max_pool2d_out_cpu_template(
@@ -334,8 +334,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
 
 std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& randomSamples)
 {
   Tensor output = at::empty({0}, input.options());
@@ -354,8 +354,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu(
   at::Tensor& gradInput,
   const at::Tensor& gradOutput_,
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& indices)
 {
   gradInput.resize_as_(input);
@@ -372,8 +372,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu(
 Tensor fractional_max_pool2d_backward_cpu(
   const at::Tensor& gradOutput_,
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& indices)
 {
   Tensor gradInput = at::empty({0}, input.options());

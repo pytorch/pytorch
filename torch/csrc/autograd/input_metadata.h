@@ -12,7 +12,7 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::Type& type, at::IntList shape, const int64_t device)
+  InputMetadata(const at::Type& type, at::IntArrayRef shape, const int64_t device)
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
@@ -27,7 +27,7 @@ struct InputMetadata {
     return *type_;
   }
 
-  at::IntList shape() const {
+  at::IntArrayRef shape() const {
     return shape_;
   }
 

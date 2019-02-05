@@ -17,7 +17,7 @@ void THTensor_free(THTensor *self)
   c10::raw::intrusive_ptr::decref(self);
 }
 
-void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
+void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
   if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
   }
@@ -61,7 +61,7 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
   THTensor_resizeNd(self, nDimension, size, stride);
 }
 
-void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
+void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
   if (stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
@@ -76,10 +76,10 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  at::IntList sizes(size, nDimension);
-  at::optional<at::IntList> strides;
+  at::IntArrayRef sizes(size, nDimension);
+  at::optional<at::IntArrayRef> strides;
   if (stride) {
-    strides = at::IntList(stride, nDimension);
+    strides = at::IntArrayRef(stride, nDimension);
   }
   at::native::resize_impl_cpu_(self, sizes, strides);
 }
@@ -91,9 +91,9 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
 //    where each chunk of newshape has matching ``numel'', i.e., number of subspaces,
 //    as the corresponding chunk of oldshape.
 c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntList oldshape,
-    at::IntList oldstride,
-    at::IntList newshape) {
+    at::IntArrayRef oldshape,
+    at::IntArrayRef oldstride,
+    at::IntArrayRef newshape) {
   if (oldshape.empty()) {
     return std::vector<int64_t>(newshape.size(), 1);
   }

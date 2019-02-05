@@ -21,7 +21,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"int64_t", ParameterType::INT64},
   {"double", ParameterType::DOUBLE},
   {"TensorList", ParameterType::TENSOR_LIST},
-  {"IntList", ParameterType::INT_LIST},
+  {"IntArrayRef", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
@@ -136,7 +136,7 @@ bool FunctionParameter::check(PyObject* obj) {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
       }
-      // if a size is specified (e.g. IntList[2]) we also allow passing a single int
+      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
@@ -182,11 +182,11 @@ static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
 }
 
 /*
-Parse default value of IntList declared at native_functions.yaml
+Parse default value of IntArrayRef declared at native_functions.yaml
 
 There are two kinds of default values:
-1. IntList[2] x=1 (where size=2, value={1,1}
-2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
+1. IntArrayRef[2] x=1 (where size=2, value={1,1}
+2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
 */
 static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
   size_t n = s.size();
@@ -201,7 +201,7 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   // case 2. s is a list of dims (e.g., s={1,2})
 
   // since already checked left brace '{' above, here only checks right brace '}'
-  AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
+  AT_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
   std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'
@@ -432,8 +432,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
-  // if there is a single positional IntList argument, i.e. expand(..), view(...),
-  // allow a var-args style IntList, so expand(5,3) behaves as expand((5,3))
+  // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
+  // allow a var-args style IntArrayRef, so expand(5,3) behaves as expand((5,3))
   if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
     allow_varargs_intlist = true;
   }
@@ -451,7 +451,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
-      // extra positional args given after single positional IntList arg
+      // extra positional args given after single positional IntArrayRef arg
       if (param.keyword_only) {
         if (raise_exception) {
           extra_args(*this, nargs);

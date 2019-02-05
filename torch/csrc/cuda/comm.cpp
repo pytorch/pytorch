@@ -46,7 +46,7 @@ struct unique_type_checker {
   bool unique = true;
 };
 
-std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
+std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
   auto & type = tensor.type();
   if (type.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
@@ -70,7 +70,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
-    IntList loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    IntArrayRef loop_devices = type.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
       _device_guard.set_index(device);
       tensors.push_back(gpu_type.copy(tensor, true));
@@ -109,7 +109,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 //
 // Similarly for reduce_add_coalesced, when the output are newly created
 // Variables.
-tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
+tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
@@ -172,7 +172,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
 
 std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
-    at::IntList devices,
+    at::IntArrayRef devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
@@ -234,7 +234,7 @@ at::Tensor gather(
       AT_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
-          tensor.sizes(), ", but expected ", at::IntList(expected_size));
+          tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
   }

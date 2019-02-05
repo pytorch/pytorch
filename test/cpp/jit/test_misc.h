@@ -978,7 +978,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
+autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
@@ -989,7 +989,7 @@ int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
 }
 
-bool isEqual(at::IntList lhs, at::IntList rhs) {
+bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
   return lhs.size() == rhs.size() &&
       std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }

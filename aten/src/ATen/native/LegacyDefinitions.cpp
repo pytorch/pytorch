@@ -14,7 +14,7 @@ Tensor & set_(Tensor& self, Storage source) {
   return at::legacy::th::_th_set_(self, source);
 }
 
-Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntList size, IntList stride) {
+Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   return at::legacy::th::_th_set_(self, source, storage_offset, size, stride);
 }
 
@@ -42,7 +42,7 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
   return at::legacy::th::_th_masked_scatter_(self, mask, source);
 }
 
-Tensor view(const Tensor& self, IntList size) {
+Tensor view(const Tensor& self, IntArrayRef size) {
   return at::legacy::th::_th_view(self, size);
 }
 

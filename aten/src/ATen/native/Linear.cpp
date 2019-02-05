@@ -26,7 +26,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum
-static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
+static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
   AT_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
@@ -360,8 +360,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
 // the computation is unrolled in the unroll_dim dimension
 // its main purpose is to unify the computations in bilinear and bilinear_backward
 Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-		  IntList expand1_, IntList expand2_, IntList expand3_,
-		  IntList sumdim_, int64_t unroll_dim) {
+		  IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
+		  IntArrayRef sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
   AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
   auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
@@ -459,7 +459,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 
 // implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
 // in the two dimension lists
-Tensor tensordot(const Tensor& input1, const Tensor& input2, IntList dims1, IntList dims2) {
+Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   AT_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;

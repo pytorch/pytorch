@@ -185,38 +185,38 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, generator, options);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, Tensor result) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, high, size);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, generator, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, low, high, size);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, options);
@@ -226,10 +226,10 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;

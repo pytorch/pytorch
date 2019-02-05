@@ -88,7 +88,7 @@ ARGUMENT_MAP = {
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
     'int64_t': 'int64_t ${arg} = readAttribute<int64_t>("${arg}");',
-    'IntList': 'auto ${arg} = readIntList("${arg}");',
+    'IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
     'std::array<bool, 2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
     'std::array<bool, 3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
 }

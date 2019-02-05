@@ -110,7 +110,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntList size, const TensorOptions& options) {
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
 

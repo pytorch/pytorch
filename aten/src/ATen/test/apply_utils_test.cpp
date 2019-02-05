@@ -23,7 +23,7 @@ void fill_tensor(int64_t scalar, Tensor& t_) {
 // write the same type as we read (using a0, ..., aX-1) and we once write to
 // double (using a4 as a target). We also exercise on a zero_dim and empty
 // tensor.
-void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
+void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
   auto zero_dim = at::empty({}, type);
   zero_dim.fill_(2);
   zero_dim.exp_();

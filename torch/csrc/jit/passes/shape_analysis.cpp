@@ -78,7 +78,7 @@ class ShapePropagator {
     }
   }
 
-  int64_t wrapDim(int64_t dim, at::IntList sizes) {
+  int64_t wrapDim(int64_t dim, at::IntArrayRef sizes) {
     if (dim < 0) {
       dim += sizes.size();
     }
@@ -1410,7 +1410,7 @@ class ShapePropagator {
       node->output()->setType(CompleteTensorType::create(
           lhs_type->scalarType(),
           lhs_type->device(),
-          at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
+          at::IntArrayRef{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
       return true;
     } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
       auto tp = tensor_types.at(0);
@@ -1569,7 +1569,7 @@ class ShapePropagator {
       SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
       std::vector<int64_t> dim_vec = {
           (int64_t)tensor_types.at(0)->sizes().size()};
-      at::IntList dims(dim_vec);
+      at::IntArrayRef dims(dim_vec);
       node->output()->setType(
           CompleteTensorType::create(at::kLong, at::kCPU, dims));
       return true;

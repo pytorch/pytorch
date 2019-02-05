@@ -539,7 +539,7 @@ RegisterOperators reg({
             pop(stack, input, shape);
             shape = shape.contiguous();
             AT_ASSERT(shape.ndimension() == 1);
-            at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+            at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
             push(stack, input.reshape(shape_list));
             return 0;
           };
@@ -549,7 +549,7 @@ RegisterOperators reg({
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
-            at::IntList sizes = t.sizes();
+            at::IntArrayRef sizes = t.sizes();
             auto sizes_tensor = torch::empty(
                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
@@ -1258,7 +1258,7 @@ RegisterOperators reg2({
             " el) -> " decl_type "[](a!)",                               \
             listSetItem<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_IMMUTABLE_LIST_OPS("int", IntList),
+      CREATE_IMMUTABLE_LIST_OPS("int", IntArrayRef),
       CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
       CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
       CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
@@ -1275,7 +1275,7 @@ RegisterOperators reg2({
             "[]",                                                                     \
             listSlice<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_LIST_OPS("int", IntList),
+      CREATE_LIST_OPS("int", IntArrayRef),
       CREATE_LIST_OPS("float", DoubleList),
       CREATE_LIST_OPS("Tensor", TensorList),
       CREATE_LIST_OPS("t", GenericList),

@@ -15,7 +15,7 @@ namespace torch { namespace autograd { namespace generated {
 
 using at::Scalar;
 using at::Tensor;
-using at::IntList;
+using at::IntArrayRef;
 using at::Type;
 using at::TensorGeometry;
 using at::ScalarType;

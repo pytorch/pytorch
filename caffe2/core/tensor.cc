@@ -117,7 +117,7 @@ void TensorVectorResize(
   }
 }
 
-Tensor empty(at::IntList dims, at::TensorOptions options) {
+Tensor empty(at::IntArrayRef dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device());
   tensor.raw_mutable_data(options.dtype());
@@ -126,7 +126,7 @@ Tensor empty(at::IntList dims, at::TensorOptions options) {
 
 void ReinitializeTensor(
     Tensor* tensor,
-    at::IntList dims,
+    at::IntArrayRef dims,
     at::TensorOptions options) {
   CAFFE_ENFORCE(options.device_opt() != c10::nullopt);
   if (*tensor) {

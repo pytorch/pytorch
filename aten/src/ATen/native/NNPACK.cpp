@@ -10,7 +10,7 @@ at::Tensor _nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    IntList padding) {
+    IntArrayRef padding) {
   throw std::runtime_error(
       "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
@@ -19,16 +19,16 @@ at::Tensor _nnpack_spatial_convolution_backward_input(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
-    IntList padding) {
+    IntArrayRef padding) {
   throw std::runtime_error(
       "nnpack_spatial_convolution_backward_input: ATen not compiled with NNPACK support");
 }
 
 at::Tensor _nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
-    at::IntList weight_size,
+    at::IntArrayRef weight_size,
     const at::Tensor& gradOutput,
-    IntList padding) {
+    IntArrayRef padding) {
   throw std::runtime_error(
       "nnpack_spatial_convolution_backward_weight: ATen not compiled with NNPACK support");
 }
@@ -38,7 +38,7 @@ _nnpack_spatial_convolution_backward(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
-    IntList padding,
+    IntArrayRef padding,
     std::array<bool, 3> output_mask) {
   throw std::runtime_error(
       "_nnpack_spatial_convolution_backward: ATen not compiled with NNPACK support");
@@ -145,9 +145,9 @@ constexpr int weight_width_dim = 3;
 constexpr int max_dim = 3;
 
 std::vector<int64_t> conv_output_size(
-    IntList input_size,
-    IntList weight_size,
-    IntList padding) {
+    IntArrayRef input_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding) {
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[output_batch_size_dim] = input_size[input_batch_size_dim];
@@ -163,7 +163,7 @@ Tensor _nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    IntList padding) {
+    IntArrayRef padding) {
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), padding),
       input.options());
@@ -325,7 +325,7 @@ Tensor _nnpack_spatial_convolution_backward_input(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
-    IntList padding) {
+    IntArrayRef padding) {
   at::Tensor gradInput = at::empty(input.sizes(), input.options());
 
   // Our input and gradInput Tensors must be in the form N,C,H,W
@@ -453,9 +453,9 @@ Tensor _nnpack_spatial_convolution_backward_input(
 
 Tensor _nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
-    IntList weight_size,
+    IntArrayRef weight_size,
     const at::Tensor& gradOutput,
-    IntList padding) {
+    IntArrayRef padding) {
   at::Tensor gradWeight = at::empty(weight_size, input.options());
 
   // Our input and gradInput Tensors must be in the form N,C,H,W
@@ -574,7 +574,7 @@ std::tuple<Tensor, Tensor, Tensor> _nnpack_spatial_convolution_backward(
     const at::Tensor& input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    IntList padding,
+    IntArrayRef padding,
     std::array<bool, 3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {

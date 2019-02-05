@@ -133,8 +133,8 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   linearSolveCheckInputs(arg1, arg2);
 
   // broadcast the batch dimensions of arg1 and arg2.
-  IntList arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
-  IntList arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
+  IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
+  IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
   std::vector<int64_t> expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes);
 
   std::vector<int64_t> arg1_expand_size({expand_batch_portion});

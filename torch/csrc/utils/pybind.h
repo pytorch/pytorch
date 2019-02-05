@@ -60,9 +60,9 @@ public:
   }
 };
 
-template<> struct type_caster<at::IntList> {
+template<> struct type_caster<at::IntArrayRef> {
 public:
-  PYBIND11_TYPE_CASTER(at::IntList, _("at::IntList"));
+  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
 
   bool load(handle src, bool) {
     PyObject *source = src.ptr();
@@ -86,7 +86,7 @@ public:
     }
     return false;
   }
-  static handle cast(at::IntList src, return_value_policy /* policy */, handle /* parent */) {
+  static handle cast(at::IntArrayRef src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPUtils_packInt64Array(src.size(), src.data()));
   }
 private:

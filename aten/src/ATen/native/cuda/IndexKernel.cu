@@ -19,7 +19,7 @@ static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& it
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIterator& iter, IntList index_size, IntList index_stride, const func_t& f) {
+void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
@@ -67,20 +67,20 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 
 template <typename scalar_t>
-void index_kernel_impl(TensorIterator& iter, IntList index_size, IntList index_stride) {
+void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
   });
 }
 
 template <typename scalar_t>
-void index_put_kernel_impl(TensorIterator& iter, IntList index_size, IntList index_stride) {
+void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
   });
 }
 
-static void index_kernel(TensorIterator& iter, IntList index_size, IntList index_stride) {
+static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "index", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
@@ -88,7 +88,7 @@ static void index_kernel(TensorIterator& iter, IntList index_size, IntList index
 }
 
 
-static void index_put_kernel(TensorIterator& iter, IntList index_size, IntList index_stride, bool accumulate) {
+static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
   AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;

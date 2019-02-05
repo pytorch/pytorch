@@ -207,7 +207,7 @@ namespace {
   void adaptive_avg_pool2d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     TensorArg input_arg{ input, "input", 1 },
               output_arg{ output, "output", 2 };
@@ -386,7 +386,7 @@ namespace {
   Tensor& adaptive_avg_pool2d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);
@@ -395,7 +395,7 @@ namespace {
 
   Tensor adaptive_avg_pool2d_cuda(
     at::Tensor const& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     auto output = at::empty({0}, input.options());
     adaptive_avg_pool2d_out_cuda_template(

@@ -39,7 +39,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   size_t elementSizeInBytes() const override;
   TypeID ID() const override;
 
-  Tensor empty(IntList size, const TensorOptions & options) const override {
+  Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
     // Delegate to the appropriate cpu tensor factory
     const DeviceGuard device_guard(options.device());
     return at::native::empty_cpu(/* actuals */ size, options);

@@ -19,8 +19,8 @@
 
 namespace c10d {
 
-// Turns at::IntList into "(1, 2, 3, 4)".
-inline std::string toString(at::IntList l) {
+// Turns at::IntArrayRef into "(1, 2, 3, 4)".
+inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
   for (size_t i = 0; i < l.size(); i++) {
@@ -47,7 +47,7 @@ inline void assertSameType(
 }
 
 inline void assertSameSizes(
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (!tensors[i].sizes().equals(sizes)) {
@@ -99,7 +99,7 @@ inline void assertTypeMatch(
 
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].sizes() != sizes) {
@@ -180,7 +180,7 @@ inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,
     const at::Type& type,
-    const at::IntList& sizes) {
+    const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);

@@ -38,11 +38,11 @@ struct ConvParams {
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
   out << "ConvParams {"
-      << "  stride = " << IntList{params.stride}
-      << "  padding = " << IntList{params.padding}
-      << "  dilation = " << IntList{params.dilation}
+      << "  stride = " << IntArrayRef{params.stride}
+      << "  padding = " << IntArrayRef{params.padding}
+      << "  dilation = " << IntArrayRef{params.dilation}
       << "  transposed = " << params.transposed
-      << "  output_padding = " << IntList{params.output_padding}
+      << "  output_padding = " << IntArrayRef{params.output_padding}
       << "  groups = " << params.groups
       << "  benchmark = " << params.benchmark
       << "  deterministic = " << params.deterministic
@@ -245,50 +245,50 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {0}, groups);
 }
 
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0, 0}}, groups);
 }
 
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor convolution(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
@@ -296,7 +296,7 @@ at::Tensor convolution(
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
-  IntList list_param, const char *param_name, int64_t expected_dim) {
+  IntArrayRef list_param, const char *param_name, int64_t expected_dim) {
   if (list_param.size() == 1) {
     return std::vector<int64_t>(expected_dim, list_param[0]);
   } else if ((int64_t) list_param.size() != expected_dim) {
@@ -312,8 +312,8 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
 
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
-    IntList stride_, IntList padding_, IntList dilation_,
-    bool transposed_, IntList output_padding_, int64_t groups_,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
   auto input = input_r.contiguous();
@@ -430,8 +430,8 @@ at::Tensor _convolution(
 // natively implement groups (e.g., not CuDNN).
 at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding) {
 
   ConvParams params;
   params.stride = stride.vec();
@@ -503,8 +503,8 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
 std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
-    IntList stride_, IntList padding_, IntList dilation_,
-    bool transposed_, IntList output_padding_, int64_t groups_,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled,
     std::array<bool, 3> output_mask) {
 

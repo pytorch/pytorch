@@ -28,7 +28,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
 
 static int MIOPEN_DIM_MAX = 4;
 
-void TensorDescriptor::set(miopenDataType_t datatype, IntList t_sizes, IntList t_strides, size_t pad) {
+void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X

@@ -144,7 +144,7 @@ def process_function(func):
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
             release_variables.append('{}_.clear();'.format(name))
             unpack.append('auto {} = unpack_list({}_);'.format(name, name))
-        elif arg['type'] == 'IntList':
+        elif arg['type'] == 'IntArrayRef':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
         elif arg['type'] == 'int64_t':
             saved_variables.append('{} {} = 0;'.format(arg['type'], name))

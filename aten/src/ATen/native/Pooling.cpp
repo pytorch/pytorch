@@ -11,14 +11,14 @@ namespace at { namespace native {
 static void check1d(
     const char* function_name,
     const char* argument_name,
-    IntList x) {
+    IntArrayRef x) {
   AT_CHECK(
       x.size() == 1,
       function_name, "() argument '", argument_name,
       "' should contain one int (got ", x.size(), ")");
 }
 
-Tensor adaptive_avg_pool1d(const Tensor & self, IntList output_size) {
+Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
   checkDim("adaptive_avg_pool1d", TensorArg(self, "self", 1), 3);
   check1d("adaptive_avg_pool1d", "output_size", output_size);
 
@@ -29,7 +29,7 @@ Tensor adaptive_avg_pool1d(const Tensor & self, IntList output_size) {
   return output.squeeze(2);
 }
 
-std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntList output_size) {
+std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef output_size) {
   checkDim("adaptive_max_pool1d", TensorArg(self, "self", 1), 3);
   check1d("adaptive_max_pool1d", "output_size", output_size);
 
@@ -43,10 +43,10 @@ std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntList outpu
 
 std::tuple<Tensor, Tensor> max_pool1d_with_indices(
     const Tensor& self,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
-    IntList dilation,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
     bool ceil_mode) {
   if (stride.empty()) {
     stride = kernel_size;
@@ -71,9 +71,9 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
 
 Tensor avg_pool1d(
     const Tensor& self,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad) {
   if (stride.empty()) {
@@ -97,10 +97,10 @@ Tensor avg_pool1d(
 
 Tensor max_pool1d(
     const Tensor& self,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
-    IntList dilation,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
     bool ceil_mode) {
   auto output_and_indices = at::max_pool1d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
@@ -109,10 +109,10 @@ Tensor max_pool1d(
 
 Tensor max_pool2d(
     const Tensor& self,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
-    IntList dilation,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
     bool ceil_mode) {
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
@@ -121,10 +121,10 @@ Tensor max_pool2d(
 
 Tensor max_pool3d(
     const Tensor& self,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
-    IntList dilation,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
     bool ceil_mode) {
   auto output_and_indices = at::max_pool3d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);

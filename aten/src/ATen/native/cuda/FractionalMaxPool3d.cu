@@ -146,8 +146,8 @@ void fractional_max_pool3d_out_cuda_template(
   Tensor& output,
   Tensor& indices,
   const Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const Tensor& randomSamples) {
     int64_t planeDim = 0;
     int64_t dimt = 1;
@@ -253,8 +253,8 @@ void fractional_max_pool3d_backward_out_cuda_template(
   Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
-  IntList pool_size /* unused */,
-  IntList output_size,
+  IntArrayRef pool_size /* unused */,
+  IntArrayRef output_size,
   const Tensor& indices) {
     int64_t dimt = 1;
     int64_t dimh = 2;
@@ -343,8 +343,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cuda(
    at::Tensor& output,
    at::Tensor& indices,
    const at::Tensor& input,
-   IntList pool_size,
-   IntList output_size,
+   IntArrayRef pool_size,
+   IntArrayRef output_size,
    const at::Tensor& randomSamples) {
    fractional_max_pool3d_out_cuda_template(
      output,
@@ -359,8 +359,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cuda(
 
 std::tuple<Tensor, Tensor> fractional_max_pool3d_cuda(
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& randomSamples) {
     Tensor output = at::empty({0}, input.options());
     Tensor indices = at::empty({0}, input.options().dtype(kLong));
@@ -379,8 +379,8 @@ Tensor& fractional_max_pool3d_backward_out_cuda(
   at::Tensor& gradInput,
   const at::Tensor& gradOutput_,
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& indices) {
     fractional_max_pool3d_backward_out_cuda_template(
       gradInput,
@@ -396,8 +396,8 @@ Tensor& fractional_max_pool3d_backward_out_cuda(
 Tensor fractional_max_pool3d_backward_cuda(
   const at::Tensor& gradOutput,
   const at::Tensor& input,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const at::Tensor& indices) {
     Tensor gradInput = at::empty({0}, input.options());
     fractional_max_pool3d_backward_out_cuda_template(

@@ -193,7 +193,7 @@ private:
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>(name));
     return OperatorBase::GetSingleArgument<T>(name, 0);
   }
-  std::vector<int64_t> readIntList(const std::string & name) {
+  std::vector<int64_t> readIntArrayRef(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
     return OperatorBase::GetRepeatedArgument<int64_t>(name, {});
   }

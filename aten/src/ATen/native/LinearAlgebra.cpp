@@ -428,10 +428,10 @@ Tensor matmul(
     // we track m1 vs m2 separately even though they must match for nicer error messages
     int64_t n = dim_tensor1 > 1 ? tensor1.size(-2) : 1;
     int64_t m1 = tensor1.size(-1);
-    IntList batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
+    IntArrayRef batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
     int64_t m2 = dim_tensor2 > 1 ? tensor2.size(-2) : 1;
     int64_t p = tensor2.size(-1);
-    IntList batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
+    IntArrayRef batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
 
     // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
     std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
@@ -525,7 +525,7 @@ Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
-Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   AT_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -540,7 +540,7 @@ Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
 Tensor &frobenius_norm_out(
     Tensor& result,
     const Tensor& self,
-    IntList dim,
+    IntArrayRef dim,
     bool keepdim) {
   AT_CHECK(
       dim.size() <= 2,

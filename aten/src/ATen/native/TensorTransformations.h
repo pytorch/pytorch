@@ -9,7 +9,7 @@
 namespace at {
 namespace native {
 
-static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntList dims) {
+static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
   // check if number of axis in dim is valid
   AT_CHECK(flip_dims_size > 0 && flip_dims_size <= total_dims,
     "flip dims size out of range, got flip dims size=", flip_dims_size);
@@ -33,7 +33,7 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
     ", but unique flip dims size=", flip_dims_v.size());
 }
 
-static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dims) {
+static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   AT_CHECK(shifts.size() > 0, "`shifts` required");
   if (dims.size() == 0 && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());

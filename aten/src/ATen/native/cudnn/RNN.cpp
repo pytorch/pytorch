@@ -32,7 +32,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
@@ -44,7 +44,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntList batch_sizes,
+    bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
@@ -169,7 +169,7 @@ namespace {
 
   // TensorDescriptor list
 
-  std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntList batch_sizes) {
+  std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntArrayRef batch_sizes) {
     std::vector<TensorDescriptor> descriptors(batch_sizes.size());
     size_t i = 0;
     // To be mutated in the loop
@@ -253,10 +253,10 @@ namespace {
   //    input.size() = mini_batch x seq_length x input_size
   //
   struct TensorDescriptorListParams {
-    IntList batch_sizes;
+    IntArrayRef batch_sizes;
     int64_t seq_length;
     int64_t mini_batch;
-    // NB: this is not input.size(), which is an IntList; instead, this
+    // NB: this is not input.size(), which is an IntArrayRef; instead, this
     // size of the inner-most dimension.  In NL applications, this is usually
     // the size of the embedding.  You can also think of this as the size
     // of the "channel" dimension (at risk of confusing vision researchers :)
@@ -268,7 +268,7 @@ namespace {
       return batch_sizes.size() != 0;
     }
 
-    void set(IntList input_sizes, IntList batch_sizes_, bool batch_first) {
+    void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first) {
       batch_sizes = batch_sizes_;
       if (is_input_packed()) {
         seq_length = batch_sizes.size();
@@ -666,7 +666,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
 
@@ -736,7 +736,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
 
   AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
-           "Expected cell size ", IntList{hidden_size}, ", got ", cx.sizes());
+           "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
 
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
@@ -808,7 +808,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& grad_cy,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve,
     std::array<bool, 3> output_mask
     ) {
@@ -861,18 +861,18 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
            "cudnn RNN backward can only be called in training mode");
 
   AT_CHECK(input.sizes().equals(input_size),
-           "Expected input size ", IntList{input_size}, ", got ", input.sizes());
+           "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
   AT_CHECK(output.sizes().equals(output_size),
-           "Expected output size ", IntList{output_size}, ", got ", output.sizes());
+           "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
 
   AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
-           "Expected hidden size ", IntList{hidden_size}, ", got ", hx.sizes());
+           "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
   AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
-           "Expected cell size ", IntList{hidden_size}, ", got ", cx.sizes());
+           "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
   AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
-           "Expected d_hidden size ", IntList{hidden_size}, ", got ", dhy.sizes());
+           "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
   AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
-           "Expected d_cell size ", IntList{hidden_size}, ", got ", dcy.sizes());
+           "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
   AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
            "Gradients aren't CUDA tensors");
@@ -931,7 +931,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     const Tensor& output_r,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve
     ) {
 
@@ -965,9 +965,9 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
            "cudnn RNN backward can only be called in training mode");
 
   AT_CHECK(input.sizes().equals(input_size),
-           "Expected input size ", IntList{input_size}, ", got ", input.sizes());
+           "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
   AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
-           "Expected hidden size ", IntList{hidden_size}, ", got ", hx.sizes());
+           "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
 
   // TODO: the above were the only checks in rnn.py, but it doesn't seem
   // like these checks are enough
@@ -1040,7 +1040,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntList batch_sizes,
+    bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
@@ -1220,7 +1220,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  IntList batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+  IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
