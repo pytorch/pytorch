@@ -1102,10 +1102,7 @@
 - func: index_copy_(Tensor(a!) self, int dim, IndexTensor index, Tensor source) -> Tensor(a!)
   variants: method
 
-- func: index_copy(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor
+- func: index_copy(Tensor self, int dim, IndexTensor index, Tensor source) -> Tensorr
   matches_jit_signature: True
   variants: function, method
 
@@ -1113,22 +1110,8 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: index_fill(Tensor self, int64_t dim, IndexTensor index, Scalar source) -> Tensor
-  variants: function, method
-
-- func: scatter(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: scatter_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_fill(Tensor self, Tensor mask, Scalar source) -> Tensor
+- func: index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -3051,13 +3034,25 @@
   matches_jit_signature: True
   variants: method
 
+- func: masked_fill(Tensor self, Tensor mask, Scalar value) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
 
+- func: masked_fill(Tensor self, Tensor mask, Tensor value) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+
+- func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   matches_jit_signature: True
@@ -3072,25 +3067,49 @@
   matches_jit_signature: True
   variants: method
 
+- func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+
+- func: index_fill(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
 
+- func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+
+- func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
 
+- func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+
+- func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   matches_jit_signature: True
