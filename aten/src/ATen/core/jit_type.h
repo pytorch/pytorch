@@ -644,7 +644,7 @@ struct CAFFE2_API TupleType : public Type {
   bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const TypePtr a, const TypePtr b) {
       return *a == *b;
-    }) && names_ == dynamic_cast<const TupleType &>(rhs).names_;
+    }) && names_ == rhs.expect<TupleType>()->names_;
     // `compare` guarantees that rhs is always a TupleType, so the
     // dynamic_cast above always success.
   }
