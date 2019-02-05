@@ -12,7 +12,6 @@ from .. import _VF
 from ..._jit_internal import weak_module, weak_script_method, weak_script
 
 _rnn_impls = {
-    'LSTM': _VF.lstm,
     'GRU': _VF.gru,
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
@@ -27,7 +26,7 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional']
+                     'batch_first', 'dropout', 'bidirectional', '_all_weights_as_params']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
@@ -86,8 +85,12 @@ class RNNBase(Module):
 
                 for name, param in zip(param_names, layer_params):
                     setattr(self, name, param)
-                self._all_weights.append(param_names)
+                self._all_weights.append(tuple(param_names))
 
+        self._all_weights_as_params = self._get_all_weights()
+
+        # print(all_weights)
+        # self._all_weights = tuple(all_weights)
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -105,7 +108,7 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        all_weights = self._flat_weights
+        all_weights = self._flat_weights()
         unique_data_ptrs = set(p.data_ptr() for p in all_weights)
         if len(unique_data_ptrs) != len(all_weights):
             return
@@ -158,21 +161,12 @@ class RNNBase(Module):
             if tuple(hx.size()) != expected_hidden_size:
                 raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
-        if self.mode == 'LSTM':
-            check_hidden_size(hidden[0], expected_hidden_size,
-                              'Expected hidden[0] size {}, got {}')
-            check_hidden_size(hidden[1], expected_hidden_size,
-                              'Expected hidden[1] size {}, got {}')
-        else:
-            check_hidden_size(hidden, expected_hidden_size)
+        check_hidden_size(hidden, expected_hidden_size)
 
     def permute_hidden(self, hx, permutation):
         if permutation is None:
             return hx
-        if self.mode == 'LSTM':
-            return tuple(apply_permutation(state, permutation) for state in hx)
-        else:
-            return apply_permutation(hx, permutation)
+        return apply_permutation(hx, permutation)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
@@ -190,8 +184,6 @@ class RNNBase(Module):
             hx = input.new_zeros(self.num_layers * num_directions,
                                  max_batch_size, self.hidden_size,
                                  requires_grad=False)
-            if self.mode == 'LSTM':
-                hx = (hx, hx)
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
@@ -200,13 +192,13 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _impl(input, hx, self._flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _impl(input, batch_sizes, hx, self._flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
-        hidden = result[1:] if self.mode == 'LSTM' else result[1]
+        hidden = result[1]
 
         if is_packed:
             output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
@@ -245,14 +237,50 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-    @property
+    # # @weak_script_method
+    # def _flat_weights(self):
+    #     # type: () -> List[Tensor]
+    #     # A flat list of all parameters
+    #     ret = []
+    #     # Get all parameters in a nested list (List[List[Tensor]])
+    #     all_weights = self.get_all_weights()
+    #     # Flatten list to List[Tensor]
+    #     for i in range(len(all_weights)):
+    #         layer_params = all_weights[i]
+    #         for j in range(len(layer_params)):
+    #             ret.append(layer_params[j])
+    #     return ret
+    #
+    # @property
+    # def all_weights(self):
+    #     # Not used in JIT
+    #     return self.get_all_weights()
+    #
+    # # @weak_script_method
+    # def get_all_weights(self):
+    #     # type: () -> List[List[Tensor]]
+    #     all_weights = [['weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0']]
+    #     ret = []
+    #     for i in range(len(all_weights)):
+    #         weights = all_weights[i]
+    #         weight_list = []
+    #         for j in range(len(weights)):
+    #             weight_list.append(self._parameters.get(weights[j]))
+    #         ret.append(weight_list)
+    #     return ret
+
+
+    def _get_all_weights(self):
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
+
+
+    # @property
     def _flat_weights(self):
         return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
-
+        return self._get_all_weights()
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an
@@ -471,10 +499,10 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
-        torch._jit_internal.overload(type(self), 'forward', (self.forward_tensor, self.forward_packed))
 
     @weak_script_method
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
@@ -485,8 +513,7 @@ class LSTM(RNNBase):
     @weak_script_method
     def check_forward_args(self, input, hidden, batch_sizes):
         # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
-        is_input_packed = batch_sizes is not None
-        expected_input_dim = 2 if is_input_packed else 3
+        expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
                 'input must have {} dimensions, got {}'.format(
@@ -496,8 +523,8 @@ class LSTM(RNNBase):
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
                     self.input_size, input.size(-1)))
 
-        if is_input_packed:
-            mini_batch = int(torch.jit._unwrap_optional(batch_sizes)[0])
+        if batch_sizes is not None:
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
 
@@ -515,7 +542,6 @@ class LSTM(RNNBase):
         # type: (Tuple[Tensor, Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         if permutation is None:
             return hx
-        permutation = torch.jit._unwrap_optional(permutation)
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     @weak_script_method
@@ -530,15 +556,14 @@ class LSTM(RNNBase):
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
-            hx = self.permute_hidden(torch.jit._unwrap_optional(hx), sorted_indices)
+            hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._parameters.values(), self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._all_weights_as_params, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
-            result = _VF.lstm(input, batch_sizes, hx, self._parameters.values(), self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._all_weights_as_params, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
@@ -567,6 +592,12 @@ class LSTM(RNNBase):
 
         output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
 
 
 class GRU(RNNBase):

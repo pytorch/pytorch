@@ -2557,7 +2557,8 @@ struct to_ir {
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples";
+             "tensors, and tuples, but got type '"
+          << gatherable->type()->str() << "'";
     }
   }
 };

@@ -9682,8 +9682,8 @@ a")
                 # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
                 return self.x(input)
 
-        eager_out = self.runAndSaveRNG(lambda input: torch.nn.LSTM(5, 5)(input)[0], (input,))
-        script_out = self.runAndSaveRNG(lambda input: S()(input)[0], (input,))
+        eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))
+        script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))
 
         # jit returns a regular tuple instead of a PackedSequence namedtuple,
         # so compare the elements directly
