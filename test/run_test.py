@@ -337,6 +337,11 @@ def get_executable_command(options):
         executable = [sys.executable]
     if options.pytest:
         executable += ['-m', 'pytest', '--durations=10']
+        # Enable doctest
+        executable += [
+            '--xdoctest-style=freeform',
+            '--xdoctest-global-exec="from torch import nn\nimport torch.nn.functional as F\nimport torch"',
+            '--xdoctest-options=+IGNORE_WHITESPACE']
     return executable
 
 
