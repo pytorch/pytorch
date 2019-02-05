@@ -38,7 +38,7 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 
 using DimMask = TensorIterator::DimMask;
 
-static DimMask make_dim_mask(IntList dims, int ndim) {
+static DimMask make_dim_mask(IntArrayRef dims, int ndim) {
   auto mask = DimMask();
   if (dims.empty()) {
     mask.flip();
@@ -87,7 +87,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 }
 
 static std::unique_ptr<TensorIterator> make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntList dim,
+    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
@@ -114,7 +114,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
-static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
+static inline int64_t n_dim_size(const Tensor& self, IntArrayRef dim) {
   int64_t numel = 1;
   for (auto d : dim) {
     numel *= self.size(d);
@@ -202,7 +202,7 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
-static Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim,
+static Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
@@ -214,7 +214,7 @@ static Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim,
   return result;
 }
 
-static Tensor sum(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+static Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
   native::sum_out(result, self, dim, keepdim, dtype);
   return result;
@@ -228,7 +228,7 @@ Tensor sum(const Tensor &self) {
   return at::native::sum(self, {}, false, c10::nullopt);
 }
 
-static Tensor& prod_out(Tensor& result, const Tensor& self, IntList dim,
+static Tensor& prod_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
@@ -240,7 +240,7 @@ static Tensor& prod_out(Tensor& result, const Tensor& self, IntList dim,
   return result;
 }
 
-static Tensor prod(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+static Tensor prod(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
   native::prod_out(result, self, dim, keepdim, dtype);
   return result;
@@ -254,7 +254,7 @@ Tensor prod(const Tensor &self) {
   return at::native::prod(self, {}, false, c10::nullopt);
 }
 
-static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
+static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
   AT_CHECK(
@@ -293,19 +293,19 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
 
 // DIM REDUCE #################################################################
 
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::mean_out(
       result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::native::mean_out(result, self, dim, keepdim, c10::nullopt);
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntArrayRef dim, ScalarType dtype) {
   return at::native::mean_out(result, self, dim, false, dtype);
 }
 
-static inline Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+static inline Tensor mean(const Tensor &self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
   return at::native::mean_out(result, self, dim, keepdim, dtype);
 }
@@ -322,16 +322,16 @@ Tensor mean(const Tensor &self) {
   return at::native::mean(self, c10::nullopt);
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::sum_out(
       result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::native::sum_out(result, self, dim, keepdim, c10::nullopt);
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
+Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, ScalarType dtype) {
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
@@ -348,27 +348,27 @@ Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dty
   return at::native::prod_out(result, self, dim, false, dtype);
 }
 
-Tensor mean(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor mean(const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::mean(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
-Tensor mean(const Tensor& self, IntList dim, bool keepdim) {
+Tensor mean(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::native::mean(self, dim, keepdim, c10::nullopt);
 }
 
-Tensor mean(const Tensor& self, IntList dim, ScalarType dtype) {
+Tensor mean(const Tensor& self, IntArrayRef dim, ScalarType dtype) {
   return at::native::mean(self, dim, false, dtype);
 }
 
-Tensor sum(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::sum(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
-Tensor sum(const Tensor& self, IntList dim, bool keepdim) {
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::native::sum(self, dim, keepdim, c10::nullopt);
 }
 
-Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
+Tensor sum(const Tensor& self, IntArrayRef dim, ScalarType dtype) {
   return at::native::sum(self, dim, false, dtype);
 }
 
@@ -384,7 +384,7 @@ Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
   return at::native::prod(self, dim, false, dtype);
 }
 
-static Tensor squeeze_multiple(const Tensor& self, IntList dims) {
+static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   int ndims = self.sizes().size();
   auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
   Tensor result = self;
@@ -396,7 +396,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntList dims) {
   return result;
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntList dims, bool keepdim) {
+Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dims, true);
@@ -411,13 +411,13 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntList dims, bool kee
   return result;
 }
 
-Tensor logsumexp(const Tensor &self, IntList dims, bool keepdim) {
+Tensor logsumexp(const Tensor &self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
 }
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
-                               IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
+                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0);
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
@@ -452,21 +452,21 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim) {
+Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
-static Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim,
+static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   Tensor result;
   return at::native::norm_out(result, self, p, dim, keepdim, opt_dtype);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
@@ -474,7 +474,7 @@ Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
   return at::native::norm(self, p, {}, false, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim) {
+Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
 }
 
@@ -571,7 +571,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
-Tensor min_values(const Tensor& self, IntList dims, bool keepdim) {
+Tensor min_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
   if (dims.size() == 1) {
     return std::get<0>(self.min(dims[0], keepdim));
   } else {
@@ -584,7 +584,7 @@ Tensor min_values(const Tensor& self, IntList dims, bool keepdim) {
   }
 }
 
-Tensor max_values(const Tensor& self, IntList dims, bool keepdim) {
+Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
   if (dims.size() == 1) {
     return std::get<0>(self.max(dims[0], keepdim));
   } else {
@@ -597,7 +597,7 @@ Tensor max_values(const Tensor& self, IntList dims, bool keepdim) {
   }
 }
 
-static Tensor &std_var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
@@ -619,12 +619,12 @@ Tensor var(const Tensor& self, bool unbiased) {
   return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_var(self, unbiased);
 }
 
-Tensor var(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
+Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &var_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
+Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
@@ -636,12 +636,12 @@ Tensor std(const Tensor& self, bool unbiased) {
   return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_std(self, unbiased);
 }
 
-Tensor std(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
+Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &std_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
+Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 

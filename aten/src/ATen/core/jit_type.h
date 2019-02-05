@@ -384,21 +384,21 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
   }
 
   // overloaded create variadic template argument as it could not distinguish initializer list
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
   }
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
   }
 
   const std::vector<int64_t>& sizes() const { return sizes_; }
   const std::vector<int64_t>& strides() const { return strides_; }
 
-  TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
+  TypePtr withSizesStrides(at::IntArrayRef sizes, at::IntArrayRef strides) const {
     return CompleteTensorType::create(scalar_type_, device_, sizes, strides);
   }
 
-  TypePtr withSizes(at::IntList sizes) const {
+  TypePtr withSizes(at::IntArrayRef sizes) const {
     return withSizesStrides(sizes, CompleteTensorType::contiguousStridesOf(sizes));
   }
 
@@ -457,14 +457,14 @@ private:
     : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
     : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
     std::vector<int64_t> strides(sizes.size());
     if(sizes.empty()) // zero-dim case
       return strides;

@@ -141,8 +141,8 @@ void fractional_max_pool3d_out_cpu_template(
   Tensor& output,
   Tensor& indices,
   const Tensor& input_,
-  IntList pool_size,
-  IntList output_size,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
   const Tensor& randomSamples) {
 
   int64_t outputT = output_size[0];
@@ -284,8 +284,8 @@ void fractional_max_pool3d_backward_out_cpu_template(
   const Tensor& input,
   const Tensor& gradOutput_,
   Tensor& gradInput,
-  IntList output_size,
-  IntList pool_size /* unused */,
+  IntArrayRef output_size,
+  IntArrayRef pool_size /* unused */,
   const Tensor& indices) {
 
   int64_t outputT = output_size[0];
@@ -351,8 +351,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cpu(
  at::Tensor& output,
  at::Tensor& indices,
  const at::Tensor& input,
- IntList pool_size,
- IntList output_size,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
  const at::Tensor& randomSamples) {
  fractional_max_pool3d_out_cpu_template(
    output,
@@ -366,8 +366,8 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cpu(
 
 std::tuple<Tensor, Tensor> fractional_max_pool3d_cpu(
  const at::Tensor& input,
- IntList pool_size,
- IntList output_size,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
  const at::Tensor& randomSamples) {
  Tensor output = at::empty(output_size, input.options());
  Tensor indices = at::empty(output_size, at::kLong);
@@ -385,8 +385,8 @@ Tensor& fractional_max_pool3d_backward_out_cpu(
  at::Tensor& gradInput,
  const at::Tensor& gradOutput_,
  const at::Tensor& input,
- IntList pool_size,
- IntList output_size,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
  const at::Tensor& indices) {
  fractional_max_pool3d_backward_out_cpu_template(
    input,
@@ -401,8 +401,8 @@ Tensor& fractional_max_pool3d_backward_out_cpu(
 Tensor fractional_max_pool3d_backward_cpu(
  const at::Tensor& gradOutput_,
  const at::Tensor& input,
- IntList pool_size,
- IntList output_size,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
  const at::Tensor& indices) {
  Tensor gradInput = at::empty({0}, input.options());
  fractional_max_pool3d_backward_out_cpu_template(
