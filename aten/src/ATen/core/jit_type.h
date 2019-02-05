@@ -526,9 +526,9 @@ struct DictType : public Type {
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
-            "Cannot create dict for key type ",
+            "Cannot create dict for key type '",
             key->str(),
-            ", only int, float, and string keys are supported");
+            "', only int, float, and string keys are supported");
     }
   }
 
