@@ -157,17 +157,17 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
   auto* Ydata = Y->template mutable_data<float>();
 
   const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.dim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C_shared = (W.numel() == 1);
 
   if (!C_shared) {
-    CAFFE_ENFORCE_EQ(C, W.size());
+    CAFFE_ENFORCE_EQ(C, W.numel());
   }
   if (C_shared) {
     PReluKernel<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context_.cuda_stream()>>>(X.size(), Xdata, Wdata, Ydata);
+        context_.cuda_stream()>>>(X.numel(), Xdata, Wdata, Ydata);
     return true;
   }
   // non-shared case.
@@ -175,9 +175,9 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
     case StorageOrder::NCHW: {
       const auto N = X.dim(0);
       const auto dim = X.size_from_dim(2);
-      CHECK(N * C * dim == X.size());
+      CHECK(N * C * dim == X.numel());
       PReluKernelNCHW<<<
-          CAFFE_GET_BLOCKS(X.size()),
+          CAFFE_GET_BLOCKS(X.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(N, C, dim, Xdata, Wdata, Ydata);
@@ -186,10 +186,10 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
     }
     case StorageOrder::NHWC: {
       PReluKernelNHWC<<<
-          CAFFE_GET_BLOCKS(X.size()),
+          CAFFE_GET_BLOCKS(X.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
-          context_.cuda_stream()>>>(X.size(), C, Xdata, Wdata, Ydata);
+          context_.cuda_stream()>>>(X.numel(), C, Xdata, Wdata, Ydata);
 
       break;
     }
@@ -208,12 +208,12 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
 
-  DCHECK_EQ(dY.size(), Y.size());
+  DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
   const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.dim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C_shared = (W.numel() == 1);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
@@ -228,12 +228,12 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
         1,
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context_.cuda_stream()>>>(X.size(), Xdata, dYdata, dWdata);
+        context_.cuda_stream()>>>(X.numel(), Xdata, dYdata, dWdata);
     PReluGradientKernel<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
-        context_.cuda_stream()>>>(X.size(), Xdata, Wdata, dYdata, dXdata);
+        context_.cuda_stream()>>>(X.numel(), Xdata, Wdata, dYdata, dXdata);
 
     return true;
   }
@@ -245,9 +245,9 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
           C,
           CAFFE_CUDA_NUM_THREADS,
           0,
-          context_.cuda_stream()>>>(C, N, X.size(), Xdata, dYdata, dWdata);
+          context_.cuda_stream()>>>(C, N, X.numel(), Xdata, dYdata, dWdata);
       PReluGradientKernelNCHW<<<
-          CAFFE_GET_BLOCKS(X.size()),
+          CAFFE_GET_BLOCKS(X.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(N, C, dim, Xdata, Wdata, dYdata, dXdata);
@@ -259,12 +259,12 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
           C,
           CAFFE_CUDA_NUM_THREADS,
           0,
-          context_.cuda_stream()>>>(C, N, X.size(), Xdata, dYdata, dWdata);
+          context_.cuda_stream()>>>(C, N, X.numel(), Xdata, dYdata, dWdata);
       PReluGradientKernelNHWC<<<
-          CAFFE_GET_BLOCKS(Y.size()),
+          CAFFE_GET_BLOCKS(Y.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
-          context_.cuda_stream()>>>(X.size(), C, Xdata, Wdata, dYdata, dXdata);
+          context_.cuda_stream()>>>(X.numel(), C, Xdata, Wdata, dYdata, dXdata);
 
       break;
     }

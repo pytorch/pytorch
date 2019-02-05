@@ -73,7 +73,7 @@ __global__ void NearestNeighborGradientKernel(
 template <>
 bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
-  
+
 
   const auto inputDims = X.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
@@ -82,7 +82,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.dim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -92,7 +92,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   int output_height = input_height * height_scale_;
   auto* Y = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
 
-  const auto size = Y->size();
+  const auto size = Y->numel();
   NearestNeighborKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
@@ -116,7 +116,7 @@ template <>
 bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-  
+
 
   const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
@@ -127,7 +127,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.dim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -135,9 +135,9 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   }
   auto* dX = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
   math::Set<float, CUDAContext>(
-      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
-  const auto size = dY.size();
+  const auto size = dY.numel();
   NearestNeighborGradientKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,

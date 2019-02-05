@@ -163,7 +163,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   const auto& X = Input(0); // Input tensor
    // RoIs
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
 

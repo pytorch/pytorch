@@ -22,7 +22,7 @@ void OneHotOp<CUDAContext>::DoOneHotOp(
     const Tensor& indices,
     Tensor* output) {
   float* output_ptr = output->template mutable_data<float>();
-  math::Set<float, CUDAContext>(output->size(), 0., output_ptr, &context_);
+  math::Set<float, CUDAContext>(output->numel(), 0., output_ptr, &context_);
   OneHotOpKernel<<<
       CAFFE_GET_BLOCKS(batch_size),
       CAFFE_CUDA_NUM_THREADS,
