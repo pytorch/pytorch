@@ -1099,10 +1099,11 @@
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
-- func: index_copy_(Tensor(a!) self, int dim, IndexTensor index, Tensor source) -> Tensor(a!)
+- func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+  matches_jit_signature: True
   variants: method
 
-- func: index_copy(Tensor self, int dim, IndexTensor index, Tensor source) -> Tensor
+- func: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
