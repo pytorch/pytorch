@@ -8,17 +8,11 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math/reduce.cuh"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T, int kBlockDimX, int kBlockDimY>
-using BlockReduce2D = cub::
-    BlockReduce<T, kBlockDimX, cub::BLOCK_REDUCE_WARP_REDUCTIONS, kBlockDimY>;
 
 template <typename T>
 __global__ void ComputeFusedParamCUDAKernel(
@@ -316,7 +310,7 @@ __global__ void ComputeScaleGradientAndFusedParamsNHWCCUDAKernel<float>(
 template <typename T>
 __global__ void ComputeXGradientNCHWCUDAKernel(
     const int C,
-    const int K,
+    const int M,
     const int HxW,
     const T* dY,
     const T* X,
@@ -328,7 +322,7 @@ __global__ void ComputeXGradientNCHWCUDAKernel(
 template <>
 __global__ void ComputeXGradientNCHWCUDAKernel<float>(
     const int C,
-    const int K,
+    const int M,
     const int HxW,
     const float* dY,
     const float* X,
@@ -336,9 +330,9 @@ __global__ void ComputeXGradientNCHWCUDAKernel<float>(
     const float* beta,
     const float* gamma,
     float* dX) {
-  const int nc = blockIdx.x / K;
+  const int nc = blockIdx.x / M;
   const int c = nc % C;
-  const int x = blockIdx.x % K * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  const int x = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (x < HxW) {
     const int index = nc * HxW + x;
 #if __CUDA_ARCH__ >= 350
@@ -399,9 +393,9 @@ void SpatialBNOp<CUDAContext>::ComputeFusedParam(
     const T* var,
     T* alpha,
     T* beta) {
-  const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+  const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
   ComputeFusedParamCUDAKernel<T>
-      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C, static_cast<T>(epsilon_), scale, bias, mean, var, alpha, beta);
 }
 
@@ -415,10 +409,10 @@ void SpatialBNOp<CUDAContext>::ComputeBatchMoments(
     const T* batch_var_sum,
     T* mean,
     T* var) {
-  const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+  const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
   const T scale = T(1) / static_cast<T>(num_batches_ * N * HxW);
   ComputeBatchMomentsCUDAKernel<T>
-      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C, scale, batch_mean_sum, batch_var_sum, mean, var);
 }
 
@@ -435,9 +429,9 @@ void SpatialBNOp<CUDAContext>::ComputeRunningMomentsAndFusedParam(
     T* rstd,
     T* alpha,
     T* beta) {
-  const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+  const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
   ComputeRunningMomentsAndFusedParamCUDAKernel<T>
-      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C,
           static_cast<T>(momentum_),
           static_cast<T>(epsilon_),
@@ -469,11 +463,11 @@ void SpatialBNGradientOp<CUDAContext>::
         T* alpha,
         T* beta,
         T* gamma) {
-  const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+  const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
   const T batch_scale = T(1) / static_cast<T>(num_batches_);
   const T mean_scale = T(1) / static_cast<T>(N * HxW);
   ComputeMultiBatchScaleBiasGradientsAndFusedParamsCUDAKernel<T>
-      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C,
           batch_scale,
           mean_scale,
@@ -507,71 +501,25 @@ void SpatialBNGradientOp<CUDAContext>::ComputeScaleBiasGradientsAndFusedParams(
     T* gamma,
     T* scratch) {
   if (order_ == StorageOrder::NCHW) {
-    if (HxW >= 128) {
-      ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel<T, 1, 128>
-          <<<C, dim3(1, 128), 0, context_.cuda_stream()>>>(
-              N,
-              C,
-              HxW,
-              dY,
-              X,
-              scale,
-              mean,
-              rstd,
-              dscale,
-              dbias,
-              alpha,
-              beta,
-              gamma);
-    } else if (HxW >= 64) {
-      ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel<T, 2, 64>
-          <<<C, dim3(2, 64), 0, context_.cuda_stream()>>>(
-              N,
-              C,
-              HxW,
-              dY,
-              X,
-              scale,
-              mean,
-              rstd,
-              dscale,
-              dbias,
-              alpha,
-              beta,
-              gamma);
-    } else if (HxW >= 32) {
-      ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel<T, 4, 32>
-          <<<C, dim3(4, 32), 0, context_.cuda_stream()>>>(
-              N,
-              C,
-              HxW,
-              dY,
-              X,
-              scale,
-              mean,
-              rstd,
-              dscale,
-              dbias,
-              alpha,
-              beta,
-              gamma);
-    } else {
-      ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel<T, 8, 16>
-          <<<C, dim3(8, 16), 0, context_.cuda_stream()>>>(
-              N,
-              C,
-              HxW,
-              dY,
-              X,
-              scale,
-              mean,
-              rstd,
-              dscale,
-              dbias,
-              alpha,
-              beta,
-              gamma);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        HxW,
+        ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel,
+        T,
+        C,
+        context_.cuda_stream(),
+        N,
+        C,
+        HxW,
+        dY,
+        X,
+        scale,
+        mean,
+        rstd,
+        dscale,
+        dbias,
+        alpha,
+        beta,
+        gamma);
   } else {
     ReinitializeTensor(&ones_, N * HxW, at::dtype<T>().device(CUDA));
     math::Set<T, CUDAContext>(
@@ -602,9 +550,9 @@ void SpatialBNGradientOp<CUDAContext>::ComputeScaleBiasGradientsAndFusedParams(
         0.0f,
         dbias,
         &context_);
-    const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+    const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
     ComputeScaleGradientAndFusedParamsNHWCCUDAKernel<T>
-        <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             C,
             T(1) / static_cast<T>(N * HxW),
             dscale,
@@ -632,15 +580,17 @@ void SpatialBNGradientOp<CUDAContext>::ComputeXGradient(
     const T* gamma,
     T* dX) {
   if (order_ == StorageOrder::NCHW) {
-    const int K = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
+    const int M = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
     ComputeXGradientNCHWCUDAKernel<T>
-        <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-            C, K, HxW, dY, X, alpha, beta, gamma, dX);
+        <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+            C, M, HxW, dY, X, alpha, beta, gamma, dX);
   } else {
-    const int K = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
+    const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
     ComputeXGradientNHWCCUDAKernel<T>
-        <<<dim3(N * HxW, K), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-            C, HxW, dY, X, alpha, beta, gamma, dX);
+        <<<dim3(N * HxW, M),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(C, HxW, dY, X, alpha, beta, gamma, dX);
   }
 }
 

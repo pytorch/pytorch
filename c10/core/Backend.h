@@ -20,7 +20,7 @@ namespace c10 {
  * would make sense in your use case.  If it doesn't make sense, maybe
  * you want DeviceType.
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, Undefined, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, Undefined, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -49,6 +49,8 @@ static inline Backend toDense(Backend b) {
       return Backend::CUDA;
     case Backend::HIP:
       return Backend::HIP;
+    case Backend::MSNPU:
+      return Backend::MSNPU;
     case Backend::SparseCPU:
       return Backend::CPU;
     case Backend::SparseCUDA:
@@ -67,6 +69,8 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::CUDA;
   } else if (t == HIPTensorId()) {
     return Backend::HIP;
+  } else if (t == MSNPUTensorId()) {
+    return Backend::MSNPU;
   } else if (t == SparseCPUTensorId()) {
     return Backend::SparseCPU;
   } else if (t == SparseCUDATensorId()) {
@@ -88,6 +92,8 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return CUDATensorId();
     case Backend::HIP:
       return HIPTensorId();
+    case Backend::MSNPU:
+      return MSNPUTensorId();
     case Backend::SparseCPU:
       return SparseCPUTensorId();
     case Backend::SparseCUDA:
@@ -109,6 +115,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::HIP:
       return DeviceType::HIP;
+    case Backend::MSNPU:
+      return DeviceType::MSNPU;
     case Backend::SparseCPU:
       return DeviceType::CPU;
     case Backend::SparseCUDA:
@@ -130,6 +138,8 @@ static inline Backend deviceTypeToBackend(DeviceType d) {
       return Backend::CUDA;
     case DeviceType::HIP:
       return Backend::HIP;
+    case DeviceType::MSNPU:
+      return Backend::MSNPU;
     default:
       AT_ERROR("Unknown device type ", d);
   }
@@ -149,6 +159,8 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::SparseCPU;
     case Backend::SparseHIP:
       return Backend::SparseCPU;
+    case Backend::MSNPU:
+      return Backend::CPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -161,6 +173,7 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
+    case Backend::MSNPU:
       return Backend::CUDA;
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
@@ -178,6 +191,7 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
+    case Backend::MSNPU:
       return Backend::HIP;
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
@@ -193,6 +207,7 @@ static inline Backend backendToHIP(Backend b) {
 constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
+constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 
 static inline const char* toString(Backend b) {
   switch (b) {
@@ -202,6 +217,8 @@ static inline const char* toString(Backend b) {
       return "CUDA";
     case Backend::HIP:
       return "HIP";
+    case Backend::MSNPU:
+      return "MSNPU";
     case Backend::SparseCPU:
       return "SparseCPU";
     case Backend::SparseCUDA:

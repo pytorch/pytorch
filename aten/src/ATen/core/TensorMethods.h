@@ -376,7 +376,7 @@ inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return type().log_softmax(*this, dim);
 }
-inline Tensor Tensor::logsumexp(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::logsumexp(IntList dim, bool keepdim) const {
     return type().logsumexp(*this, dim, keepdim);
 }
 inline Tensor Tensor::matmul(const Tensor & other) const {
@@ -388,7 +388,7 @@ inline Tensor Tensor::matrix_power(int64_t n) const {
 inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
     return type().max(*this, dim, keepdim);
 }
-inline Tensor Tensor::max_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::max_values(IntList dim, bool keepdim) const {
     return type().max_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(ScalarType dtype) const {
@@ -412,7 +412,7 @@ inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
     return type().min(*this, dim, keepdim);
 }
-inline Tensor Tensor::min_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::min_values(IntList dim, bool keepdim) const {
     return type().min_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mm(const Tensor & mat2) const {

@@ -282,10 +282,10 @@ struct TORCH_API RegisterOperators {
 
   /// Requires declaration of the FunctionSchema with
   /// REGISTER_FUNCTION_SCHEMA_OPERATOR(name, ...)
-  static RegisterOperators&& Caffe2Operator(const std::string& name) {
+  static RegisterOperators Caffe2Operator(const std::string& name) {
     auto r = RegisterOperators();
     registerOperator(createOperatorFromCaffe2(name));
-    return std::move(r);
+    return r;
   }
 
   /// Creates a new operator from a name and implementation function (function

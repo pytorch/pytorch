@@ -149,6 +149,38 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
   AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
 
+// This attempts to recover the type from an IValue, including nested Generic
+// Lists. It only examines the first element of each generic container,
+// and if a generic container is empty returns typevar as the base element.
+// XXX: only used for better error messages, should not be used elsewhere
+TypePtr attemptToRecoverType(const IValue& input_ivalue) {
+  if (input_ivalue.isGenericList()) {
+    auto& ivalue_list = input_ivalue.toGenericListRef();
+    if (ivalue_list.size() == 0) {
+      return ListType::create(VarType::create("t"));
+    }
+    return ListType::create(attemptToRecoverType(ivalue_list[0]));
+  }
+  return incompleteInferTypeFrom(input_ivalue);
+}
+
+// Checks if input_ivalue is a subvalue of type.
+bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (ivalue.isGenericList()) {
+    auto list_type = type->cast<ListType>();
+    if (!list_type) {
+      return false;
+    }
+    auto& ivalue_list = ivalue.toGenericListRef();
+    auto element_type = list_type->getElementType();
+    return std::all_of(ivalue_list.begin(), ivalue_list.end(), [&](const IValue& list_elem) {
+      return isSubvalueOf(list_elem, element_type);
+    });
+  }
+  return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
+}
+
+
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
   if (t1->isSubtypeOf(t2)) {

@@ -806,8 +806,11 @@ class TestSparse(TestCase):
 
     @skipIfRocm
     def test_sparse_addmm(self):
-        def test_shape(m, n, p, nnz):
-            D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
+        def test_shape(m, n, p, nnz, broadcast):
+            if broadcast:
+                D1 = torch.randn((), device=self.device).requires_grad_(True)
+            else:
+                D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
             D2 = torch.randn(m, p, device=self.device).requires_grad_(True)
             S = self._gen_sparse(2, nnz, [n, m])[0]
             S_dense = S.to_dense().requires_grad_(True)
@@ -818,7 +821,8 @@ class TestSparse(TestCase):
                 return torch.sparse.addmm(D1, S, D2)
             gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
-        test_shape(7, 8, 9, 20)
+        test_shape(7, 8, 9, 20, False)
+        test_shape(7, 8, 9, 20, True)
 
     @skipIfRocm
     def test_sparse_mm(self):
