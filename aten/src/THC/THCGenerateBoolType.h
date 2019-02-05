@@ -2,7 +2,6 @@
 #error "You must define THC_GENERIC_FILE before including THCGenerateBoolType.h"
 #endif
 
-
 #define scalar_t bool
 #define accreal bool
 #define Real Bool
@@ -23,3 +22,5 @@
 #ifndef THCGenerateBoolType
 #undef THC_GENERIC_FILE
 #endif
+
+#undef THC_GENERIC_FILE

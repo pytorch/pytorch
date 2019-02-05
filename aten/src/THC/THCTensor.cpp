@@ -7,7 +7,7 @@
 #include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateAllTypes.h>
 
-#include <THC/generic/THCTensor.cu>
+#include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBoolType.h>
 
 #include <THC/THCTensorInfo.cuh>
