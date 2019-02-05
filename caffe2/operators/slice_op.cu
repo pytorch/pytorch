@@ -64,14 +64,14 @@ bool SliceImplGpu(
   CAFFE_ENFORCE_EQ(starts.dim(), 1);
   CAFFE_ENFORCE_EQ(ends.dim(), 1);
   CAFFE_ENFORCE_GE(data.dim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
   std::vector<int> starts_idx(data.dim());
   std::vector<int> ends_idx(data.dim());
   std::vector<int> dst_sizes(data.dim());
 
   for (int i = 0; i < data.dim(); ++i) {
-    if (i >= starts.size()) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.size(i);
       continue;
@@ -104,7 +104,7 @@ bool SliceImplGpu(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
@@ -202,7 +202,7 @@ bool SliceImplGpu(
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
-        gdata->size(),
+        gdata->numel(),
         0.0f,
         (float*)gdata->raw_mutable_data(go->meta()),
         context);
