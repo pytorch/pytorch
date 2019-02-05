@@ -10,8 +10,10 @@ class detect_anomaly(object):
     backward function.
     - Any backward computation that generate "nan" value will raise an error.
 
-    Example:
+    CommandLine:
+        xdoctest -m torch.autograd.anomaly_mode detect_anomaly
 
+    Example:
         >>> import torch
         >>> from torch import autograd
         >>> class MyFunc(autograd.Function):
@@ -21,7 +23,7 @@ class detect_anomaly(object):
         ...     @staticmethod
         ...     def backward(ctx, gO):
         ...         # Error during the backward pass
-        ...         raise RuntimeError("Some error in backward")
+        ...         raise RuntimeError("Expected error in backward")
         ...         return gO.clone()
         >>> def run_fn(a):
         ...     out = MyFunc.apply(a)
@@ -38,11 +40,14 @@ class detect_anomaly(object):
           File "/your/pytorch/install/torch/autograd/function.py", line 76, in apply
             return self._forward_cls.backward(self, *args)
           File "<stdin>", line 8, in backward
-        RuntimeError: Some error in backward
-        >>> with autograd.detect_anomaly():
-        ...     inp = torch.rand(10, 10, requires_grad=True)
-        ...     out = run_fn(inp)
-        ...     out.backward()
+        RuntimeError: Expected error in backward
+        >>> import warnings
+        >>> with warnings.catch_warnings():
+        ...     warnings.filterwarnings('ignore')
+        ...     with autograd.detect_anomaly():
+        ...         inp = torch.rand(10, 10, requires_grad=True)
+        ...         out = run_fn(inp)
+        ...         out.backward()
         Traceback of forward call that caused the error:
           File "tmp.py", line 53, in <module>
             out = run_fn(inp)
@@ -57,8 +62,7 @@ class detect_anomaly(object):
           File "/your/pytorch/install/torch/autograd/function.py", line 76, in apply
             return self._forward_cls.backward(self, *args)
           File "<stdin>", line 8, in backward
-        RuntimeError: Some error in backward
-
+        RuntimeError: Expected error in backward
     """
 
     def __init__(self):
