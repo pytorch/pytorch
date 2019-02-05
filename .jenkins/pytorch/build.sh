@@ -131,7 +131,7 @@ else
 fi
 
 # Uninstall typing, as it is a build-time only dependency
-pip uninstall typing
+pip uninstall -y typing
 
 assert_git_not_dirty
 
