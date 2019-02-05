@@ -134,6 +134,7 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
+<<<<<<< HEAD
 if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
@@ -148,6 +149,8 @@ if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   build_args+=("USE_TENSORRT=ON")
 fi
 
+=======
+>>>>>>> merging tests
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("USE_CUDA=ON")
   build_args+=("USE_NNPACK=OFF")
@@ -172,6 +175,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   build_args+=("USE_LMDB=ON")
+
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
@@ -269,6 +273,6 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+"$PIP" install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats

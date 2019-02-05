@@ -181,7 +181,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
             with open(grad_path, 'rb') as f:
                 loaded_grad = f.read()
             grad_proto = parse_proto(loaded_grad)
-            self.assertTrue(grad_proto == grad_ops[i])
+            self.assertEqual(grad_proto, grad_ops[i])
 
         shutil.rmtree(temp_dir)
 

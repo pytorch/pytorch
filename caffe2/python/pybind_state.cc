@@ -943,6 +943,14 @@ void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
+  m.attr("use_leveldb") = py::bool_(
+#ifdef CAFFE2_USE_LEVELDB
+      true
+#else // CAFFE2_USE_LEVELDB
+      false
+#endif // CAFFE2_USE_LEVELDB
+      );
+
   // The old mkl backend has been removed permanently, but we
   // keep this Python attribute for BC
   m.attr("has_mkldnn") = py::bool_(false);
@@ -953,6 +961,14 @@ void addGlobalMethods(py::module& m) {
 #else // CAFFE2_USE_MKLDNN
       false
 #endif // CAFFE2_USE_MKLDNN
+      );
+
+  m.attr("use_opencv") = py::bool_(
+#ifdef CAFFE2_USE_OPENCV
+      true
+#else // CAFFE2_USE_OPENCV
+      false
+#endif // CAFFE2_USE_OPENCV
       );
 
   m.attr("use_trt") = py::bool_(

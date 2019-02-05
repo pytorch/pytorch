@@ -234,7 +234,13 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            dockertag="${dockertag}-cmake"
+          fi
+          if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+            dockertag="${dockertag}-tensorrt"
+          fi
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
           docker commit "$id" ${COMMIT_DOCKER_IMAGE}
           docker push ${COMMIT_DOCKER_IMAGE}
         fi
@@ -250,7 +256,13 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       no_output_timeout: "90m"
       command: |
         set -e
-        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+        if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+          dockertag="${dockertag}-cmake"
+        fi
+        if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+          dockertag="${dockertag}-tensorrt"
+        fi
+        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
@@ -288,13 +300,6 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         # Reinitialize submodules
         git submodule sync && git submodule update -q --init --recursive
 
-        # conda must be added to the path for Anaconda builds (this location must be
-        # the same as that in install_anaconda.sh used to build the docker image)
-        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-          export PATH=/opt/conda/bin:$PATH
-          sudo chown -R jenkins:jenkins '/opt/conda'
-        fi
-
         # Build
         ./.jenkins/caffe2/build.sh
 
@@ -317,10 +322,12 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
           if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
-            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
-          else
-            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            dockertag="${dockertag}-cmake"
           fi
+          if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+            dockertag="${dockertag}-tensorrt"
+          fi
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
           docker commit "$id" ${COMMIT_DOCKER_IMAGE}
           docker push ${COMMIT_DOCKER_IMAGE}
         fi
@@ -336,43 +343,22 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        # TODO: merge this into Caffe2 test.sh
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
-
         export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
-
-        # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
-        sudo ln /dev/null /dev/raw1394
-
-        # conda must be added to the path for Anaconda builds (this location must be
-        # the same as that in install_anaconda.sh used to build the docker image)
-        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-          export PATH=/opt/conda/bin:$PATH
-        fi
-
-        # Upgrade SSL module to avoid old SSL warnings
-        pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
-
-        pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-
-        # Build
         ./.jenkins/caffe2/test.sh
-
-        # Remove benign core dumps.
-        # These are tests for signal handling (including SIGABRT).
-        rm -f ./crash/core.fatal_signal_as.*
-        rm -f ./crash/core.logging_test.*
         # =================== The above code will be executed inside Docker container ===================
         EOL
         chmod +x /home/circleci/project/ci_test_script.sh
 
         if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
-        else
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          dockertag="${dockertag}-cmake"
         fi
+        if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+          dockertag="${dockertag}-tensorrt"
+        fi
+        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
@@ -420,17 +406,6 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           pip -q install numpy
 
-          # Install Anaconda if we need to
-          if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
-            rm -rf ${TMPDIR}/anaconda
-            curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
-            chmod +x ${TMPDIR}/conda.sh
-            /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
-            rm -f ${TMPDIR}/conda.sh
-            export PATH="${TMPDIR}/anaconda/bin:${PATH}"
-            source ${TMPDIR}/anaconda/bin/activate
-          fi
-
           # Install sccache
           sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
           sudo chmod +x /usr/local/bin/sccache
@@ -455,9 +430,6 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           # Build
           if [ "${BUILD_IOS:-0}" -eq 1 ]; then
             unbuffer scripts/build_ios.sh 2>&1 | ts
-          elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
-            # All conda build logic should be in scripts/build_anaconda.sh
-            unbuffer scripts/build_anaconda.sh 2>&1 | ts
           else
             unbuffer scripts/build_local.sh 2>&1 | ts
           fi
@@ -748,7 +720,6 @@ binary_linux_test: &binary_linux_test
           git checkout -q -B "$CIRCLE_BRANCH"
           git reset --hard "$CIRCLE_SHA1"
         fi
-        git submodule update --init --recursive
         popd
 
         # Clone the Builder master repo
@@ -1166,14 +1137,14 @@ jobs:
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+  pytorch_linux_xenial_cuda9_cudnn7_tensorrt_py2_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:285"
       PYTHON_VERSION: "2.7"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+  pytorch_linux_xenial_cuda9_cudnn7_tensorrt_py2_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:285"
@@ -1214,6 +1185,15 @@ jobs:
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
+  caffe2_py3_cuda9_2_cudnn7_ubuntu16_04_test:
+    environment:
+      JOB_BASE_NAME: caffe2-cuda9-0-cudnn7-ubuntu16-04-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:285"
+      CUDA_VERSION: "9.2"
+      BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
+    resource_class: gpu.medium
+    <<: *caffe2_linux_test_defaults
+
   pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
@@ -1238,7 +1218,13 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            dockertag="${dockertag}-cmake"
+          fi
+          if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+            dockertag="${dockertag}-tensorrt"
+          fi
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1269,7 +1255,17 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+            echo "Skipping doc push..."
+            exit 0
+          fi
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            dockertag="${dockertag}-cmake"
+          fi
+          if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+            dockertag="${dockertag}-tensorrt"
+          fi
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}${dockertag}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -2917,155 +2913,158 @@ workflows:
   version: 2
   build:
     jobs:
-      # Pytorch linux builds
-      - pytorch_linux_trusty_py2_7_9_build
-      - pytorch_linux_trusty_py2_7_9_test:
-          requires:
-            - pytorch_linux_trusty_py2_7_9_build
-      - pytorch_linux_trusty_py2_7_build
-      - pytorch_linux_trusty_py2_7_test:
-          requires:
-            - pytorch_linux_trusty_py2_7_build
-      - pytorch_linux_trusty_py3_5_build
-      - pytorch_linux_trusty_py3_5_test:
-          requires:
-            - pytorch_linux_trusty_py3_5_build
-      - pytorch_linux_trusty_py3_6_gcc4_8_build
-      - pytorch_linux_trusty_py3_6_gcc4_8_test:
-          requires:
-            - pytorch_linux_trusty_py3_6_gcc4_8_build
-      - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_linux_trusty_py3_6_gcc5_4_test:
-          requires:
-            - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_linux_trusty_py3_6_gcc7_build
-      - pytorch_linux_trusty_py3_6_gcc7_test:
-          requires:
-            - pytorch_linux_trusty_py3_6_gcc7_build
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
-          filters:
-            branches:
-              only:
-                - master
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
-          filters:
-            branches:
-              only:
-                - master
-          requires:
-            - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_linux_trusty_pynightly_build
-      - pytorch_linux_trusty_pynightly_test:
-          requires:
-            - pytorch_linux_trusty_pynightly_build
-      - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_short_perf_test_gpu:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_doc_push:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+
+#      # Pytorch linux builds
+#      - pytorch_linux_trusty_py2_7_9_build
+#      - pytorch_linux_trusty_py2_7_9_test:
+#          requires:
+#            - pytorch_linux_trusty_py2_7_9_build
+#      - pytorch_linux_trusty_py2_7_build
+#      - pytorch_linux_trusty_py2_7_test:
+#          requires:
+#            - pytorch_linux_trusty_py2_7_build
+#      - pytorch_linux_trusty_py3_5_build
+#      - pytorch_linux_trusty_py3_5_test:
+#          requires:
+#            - pytorch_linux_trusty_py3_5_build
+#      - pytorch_linux_trusty_py3_6_gcc4_8_build
+#      - pytorch_linux_trusty_py3_6_gcc4_8_test:
+#          requires:
+#            - pytorch_linux_trusty_py3_6_gcc4_8_build
+#      - pytorch_linux_trusty_py3_6_gcc5_4_build
+#      - pytorch_linux_trusty_py3_6_gcc5_4_test:
+#          requires:
+#            - pytorch_linux_trusty_py3_6_gcc5_4_build
+#      - pytorch_linux_trusty_py3_6_gcc7_build
+#      - pytorch_linux_trusty_py3_6_gcc7_test:
+#          requires:
+#            - pytorch_linux_trusty_py3_6_gcc7_build
+#      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+#          filters:
+#            branches:
+#              only:
+#                - master
+#      - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
+#          filters:
+#            branches:
+#              only:
+#                - master
+#          requires:
+#            - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
+#      - pytorch_linux_trusty_pynightly_build
+#      - pytorch_linux_trusty_pynightly_test:
+#          requires:
+#            - pytorch_linux_trusty_pynightly_build
+#      - pytorch_linux_xenial_py3_clang5_asan_build
+#      - pytorch_linux_xenial_py3_clang5_asan_test:
+#          requires:
+#            - pytorch_linux_xenial_py3_clang5_asan_build
+#      - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_linux_xenial_cuda8_cudnn7_py3_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_short_perf_test_gpu:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#      - pytorch_doc_push:
+#          requires:
+#            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+#
+#
+#      - pytorch_linux_xenial_cuda9_cudnn7_tensorrt_py2_build
+#      - pytorch_linux_xenial_cuda9_cudnn7_tensorrt_py2_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda9_cudnn7_tensorrt_py2_build
+#
+#
+#      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+#      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+
+#      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+#          requires:
+#            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+#      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
+#
+#      # Pytorch MacOS builds
+#      - pytorch_macos_10_13_py3_build
+#      - pytorch_macos_10_13_py3_test:
+#          requires:
+#            - pytorch_macos_10_13_py3_build
+#      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+#
+#      # Caffe2 builds
+#      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
+#      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
+#          requires:
+#            - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
+#      - caffe2_py2_mkl_ubuntu16_04_build
+#      - caffe2_py2_mkl_ubuntu16_04_test:
+#          requires:
+#            - caffe2_py2_mkl_ubuntu16_04_build
+#      - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+#      - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
+#          requires:
+#            - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+#      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+#      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
+#          requires:
+#            - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+#      - caffe2_py2_clang3_8_ubuntu16_04_build
+#      - caffe2_py2_clang3_9_ubuntu16_04_build
+#      - caffe2_py2_clang7_ubuntu16_04_build
+#      - caffe2_py2_android_ubuntu16_04_build
+#      - caffe2_py2_cuda9_0_cudnn7_centos7_build
+#      - caffe2_py2_cuda9_0_cudnn7_centos7_test:
+#          requires:
+#            - caffe2_py2_cuda9_0_cudnn7_centos7_build
+#
+#      # Caffe2 MacOS builds
+#      - caffe2_py2_ios_macos10_13_build
+#      - caffe2_py2_system_macos10_13_build
+#
+#      # Binary builds (subset, to smoke test that they'll work)
+#      - binary_linux_manywheel_2.7mu_cpu_build
+#      - binary_linux_manywheel_2.7mu_cpu_test:
+#          requires:
+#              - binary_linux_manywheel_2.7mu_cpu_build
+#      - binary_linux_conda_3.7_cu100_build
+#      - binary_linux_conda_3.7_cu100_test:
+#          requires:
+#              - binary_linux_conda_3.7_cu100_build
+#      - binary_macos_conda_3.5_cpu_build
+
+      # This is a very very special test. This is the first step towards
+      # running all Caffe2 test jobs on top of Pytorch build jobs, which is a
+      # step closer to unification and allows us to axe a lot of redundant
+      # builds. So this test depends on a Pytorch build, runs on a Pytorch
+      # docker image, and SKIPS all tests that are not enabled in Pytorch yet.
+      # What does this mean? For example, USE_OPENCV and USE_LEVELDB are ON by
+      # default for Caffe2 builds, but not for Pytorch builds; thus the Caffe2
+      # tests that assume OpenCV or LevelDB support fail on top of the Pytorch
+      # build jobs. The correct thing to do is to create new Pytorch build jobs
+      # for OpenCV, LevelDB, etc., but this is quite a lot of work since it
+      # requires 1) add the extra jobs to this config file 2) allow skipping of
+      # tests if the features aren't there anyways (so we can have one config
+      # per single feature) 3) eventual installing of dependencies in the
+      # Pytorch docker images. This job doesn't do that yet; it just skips on
+      # all the tests that require features it doesn't have.
+      - caffe2_py3_cuda9_2_cudnn7_ubuntu16_04_test:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
 
-      # Pytorch MacOS builds
-      - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test:
-          requires:
-            - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
-
-      # Caffe2 builds
-      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_test:
-          requires:
-            - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
-          requires:
-            - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_clang3_8_ubuntu16_04_build
-      - caffe2_py2_clang3_9_ubuntu16_04_build
-      - caffe2_py2_clang7_ubuntu16_04_build
-      - caffe2_py2_android_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_test:
-          requires:
-            - caffe2_py2_cuda9_0_cudnn7_centos7_build
-
-      # Caffe2 MacOS builds
-      - caffe2_py2_ios_macos10_13_build
-      - caffe2_py2_system_macos10_13_build
-
-      # Binary builds (subset, to smoke test that they'll work)
-      - binary_linux_manywheel_2.7mu_cpu_build
-      - binary_linux_manywheel_3.7m_cu100_build
-      - binary_linux_conda_2.7_cpu_build
-      - binary_linux_conda_3.6_cu90_build
-      - binary_linux_libtorch_2.7m_cu80_build
-      - binary_macos_wheel_3.6_cpu_build
-      - binary_macos_conda_2.7_cpu_build
-      - binary_macos_libtorch_2.7_cpu_build
-
-      - binary_linux_manywheel_2.7mu_cpu_test:
-          requires:
-            - binary_linux_manywheel_2.7mu_cpu_build
-      - binary_linux_manywheel_3.7m_cu100_test:
-          requires:
-            - binary_linux_manywheel_3.7m_cu100_build
-      - binary_linux_conda_2.7_cpu_test:
-          requires:
-            - binary_linux_conda_2.7_cpu_build
-      - binary_linux_conda_3.6_cu90_test:
-          requires:
-            - binary_linux_conda_3.6_cu90_build
 
 ##############################################################################
 # Daily smoke test trigger

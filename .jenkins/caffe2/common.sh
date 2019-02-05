@@ -6,10 +6,18 @@ TEST_DIR="$ROOT_DIR/caffe2_tests"
 gtest_reports_dir="${TEST_DIR}/cpp"
 pytest_reports_dir="${TEST_DIR}/python"
 
-# Figure out which Python to use
+# Figure out which Python to use. All Pytorch dockers have conda, so in these
+# cases always default to using conda
 PYTHON="$(which python)"
-if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+PIP="$(which pip)"
+if [[ "$PYTHON" != *conda* && "$BUILD_ENVIRONMENT" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
+  set +e
+  PIP=$(which "pip${BASH_REMATCH[1]:0:1}")
+  set -e
+  if [[ ! -e "$PIP" ]]; then
+    PIP="$(which pip)"
+  fi
 fi
 
 # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only

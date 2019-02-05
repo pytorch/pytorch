@@ -45,6 +45,9 @@
 #   NO_NNPACK
 #     disables NNPACK build
 #
+#   NO_NUMA
+#     disables use of NUMA
+#
 #   NO_QNNPACK
 #     disables QNNPACK build (quantized 8-bit operators)
 #
@@ -62,16 +65,33 @@
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
-#     enables use of OpenCV for additional operators
+#     enables use of OpenCV for additional Caffe2 operators
+#
+#   BLAS
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     then the build will fail if the requested BLAS is not found, otherwise
+#     the BLAS will be chosen based on what is found on your system.
+#
+#   USE_FBGEMM
+#     Enables use of FBGEMM
 #
 #   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
+#     enables use of ffmpeg for additional Caffe2 operators
 #
 #   USE_LEVELDB
-#     enables use of LevelDB for storage
+#     enables use of LevelDB for Caffe2 storage
 #
 #   USE_LMDB
-#     enables use of LMDB for storage
+#     enables use of LMDB for Caffe2 storage
+#
+#   USE_REDIS
+#     enables use of Redis for Caffe2 storage
+#
+#   USE_TENSORRT
+#     enables use of TensorRT with NvInfer
+#
+#   USE_ZSTD
+#     Enables use of ZSTD, if the libraries are found
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -90,20 +110,6 @@
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
-#
-#   BLAS
-#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
-#     then the build will fail if the requested BLAS is not found, otherwise
-#     the BLAS will be chosen based on what is found on your system.
-#
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
-#   USE_REDIS
-#     Whether to use Redis for distributed workflows (Linux only)
-#
-#   USE_ZSTD
-#     Enables use of ZSTD, if the libraries are found
 #
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)

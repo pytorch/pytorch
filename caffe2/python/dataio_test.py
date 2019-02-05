@@ -356,6 +356,7 @@ class TestDBFileReader(TestCase):
 
         return ws.blobs[str(dst_ds.content().label())].fetch()
 
+    @unittest.skipIf(not workspace.C.use_leveldb, "No LevelDB support")
     def test_cached_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
@@ -363,7 +364,9 @@ class TestDBFileReader(TestCase):
 
         # Read data for the first time.
         cached_reader1 = CachedReader(
-            self._build_source_reader(ws, 100), db_path,
+            self._build_source_reader(ws, 100),
+            db_path=db_path,
+            db_type='LevelDB',
         )
         build_cache_step = cached_reader1.build_cache_step()
         session.run(build_cache_step)
@@ -373,7 +376,9 @@ class TestDBFileReader(TestCase):
 
         # Read data from cache.
         cached_reader2 = CachedReader(
-            self._build_source_reader(ws, 200), db_path,
+            self._build_source_reader(ws, 200),
+            db_path=db_path,
+            db_type='LevelDB',
         )
         build_cache_step = cached_reader2.build_cache_step()
         session.run(build_cache_step)
@@ -385,7 +390,9 @@ class TestDBFileReader(TestCase):
 
         # We removed cache so we expect to receive data from original reader.
         cached_reader3 = CachedReader(
-            self._build_source_reader(ws, 300), db_path,
+            self._build_source_reader(ws, 300),
+            db_path=db_path,
+            db_type='LevelDB',
         )
         build_cache_step = cached_reader3.build_cache_step()
         session.run(build_cache_step)
@@ -395,6 +402,7 @@ class TestDBFileReader(TestCase):
 
         self._delete_path(db_path)
 
+    @unittest.skipIf(not workspace.C.use_leveldb, "No LevelDB support")
     def test_db_file_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)

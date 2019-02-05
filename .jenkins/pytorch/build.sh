@@ -111,6 +111,21 @@ if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *tensorrt* ]]; then
+  # removing http:// duplicate in favor of nvidia-ml.list
+  # which is https:// version of the same repo
+  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
+  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+  sudo apt-get -qq update
+  sudo apt-get install libnvinfer5 libnvinfer-dev
+  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+
+ export USE_TENSORRT=ON
+fi
+
+
 if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
