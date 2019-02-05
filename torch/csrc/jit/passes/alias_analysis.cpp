@@ -10,8 +10,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
-      type->kind() == TypeKind::DictType ||
-      type->kind() == TypeKind::VarType ||
+      type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -68,16 +67,6 @@ bool AliasDb::hasWriters(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasWritersBefore(const Node* n) const {
-  if (hasWildcard(n)) {
-    return true;
-  }
-  const auto writers = getWriters(n);
-  return std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
-    return isBeforeSameGraph(writer, n);
-  });
-}
-
 bool AliasDb::hasWrites(Node* n) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
@@ -112,51 +101,63 @@ bool AliasDb::writesToInputAlias(Node* n) const {
         graph_->inputs().cend(),
         [&](const Value* graphInput) {
           return shouldAnnotate(graphInput) &&
-              aliasTracker_->pointsTo(graphInput, v);
+              aliasTracker_->mayAlias(graphInput, v);
         });
   });
 }
 
-std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
-  std::unordered_set<Node*> writers;
-
-  for (const auto input : n->inputs()) {
-    for (auto writer : aliasTracker_->getWrites(input)) {
-      writers.insert(writer);
-    }
-  }
-
-  for (const auto output : n->outputs()) {
-    for (auto writer : aliasTracker_->getWrites(output)) {
-      writers.insert(writer);
-    }
-  }
-
-  return writers;
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
+  return aliasTracker_->mayAlias(a, b);
 }
 
-std::unordered_set<const Value*> AliasDb::getAliases(const Value* v) const {
-  std::unordered_set<const Value*> ret;
-  if (!aliasTracker_->contains(v)) {
-    return ret;
-  }
-
-  return aliasTracker_->getAliases(v);
-}
-
-std::unordered_set<const Value*> AliasDb::getWrites(Node* n) const {
-  std::unordered_set<const Value*> writes;
+void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
-      writes.insert(input);
+      ret.insert(input);
     }
   }
   for (const auto output : n->outputs()) {
     if (writesTo(n, output)) {
-      writes.insert(output);
+      ret.insert(output);
     }
   }
+
+  if (recurseBlocks) {
+    for (auto block : n->blocks()) {
+      for (auto node : block->nodes()) {
+        getWritesImpl(node, ret, recurseBlocks);
+      }
+    }
+  }
+}
+
+ValueSet AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+  ValueSet writes;
+  getWritesImpl(n, writes, recurseBlocks);
   return writes;
+}
+
+void AliasDb::getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
+  for (const auto input : n->inputs()) {
+    ret.insert(input);
+  }
+  for (const auto output : n->outputs()) {
+    ret.insert(output);
+  }
+
+  if (recurseBlocks) {
+    for (auto block : n->blocks()) {
+      for (auto node : block->nodes()) {
+        getReadsImpl(node, ret, recurseBlocks);
+      }
+    }
+  }
+}
+
+ValueSet AliasDb::getReads(Node* n, bool recurseBlocks) const {
+  ValueSet reads;
+  getReadsImpl(n, reads, recurseBlocks);
+  return reads;
 }
 
 void AliasDb::dump() const {
@@ -565,39 +566,44 @@ class AliasDb::WorkingSet {
   void add(Node* n) {
     nodes_.push_back(n);
     for (const auto user : getUsersSameBlock(n)) {
-      users_[user]++;
+      users_.insert(user);
     }
 
-    for (const auto& writer : getWritersSameBlock(n)) {
-      writers_[writer]++;
+    for (const auto& write : aliasDb_.getWrites(n, /*recurseBlocks=*/true)) {
+      writes_.insert(write);
+    }
+    for (const auto& read : aliasDb_.getReads(n, /*recurseBlocks=*/true)) {
+      reads_.insert(read);
     }
     if (aliasDb_.hasWildcard(n)) {
       numWildcards_++;
-    }
-    if (aliasDb_.hasWrites(n)) {
-      numWriterNodes_++;
     }
   }
 
   void eraseMover() {
     auto mover = nodes_.front();
     for (const auto user : getUsersSameBlock(mover)) {
-      // If this user node only uses the mover, we can remove it
-      if (users_[user] == 1) {
-        users_.erase(user);
+      const auto it = users_.find(user);
+      if (it != users_.end()) {
+        users_.erase(it);
       }
     }
 
-    for (const auto& writer : getWritersSameBlock(mover)) {
-      if (writers_[writer] == 1) {
-        writers_.erase(writer);
+    for (const auto& write :
+         aliasDb_.getWrites(mover, /*recurseBlocks=*/true)) {
+      const auto it = writes_.find(write);
+      if (it != writes_.end()) {
+        writes_.erase(it);
+      }
+    }
+    for (const auto& read : aliasDb_.getReads(mover, /*recurseBlocks=*/true)) {
+      const auto it = reads_.find(read);
+      if (it != reads_.end()) {
+        reads_.erase(it);
       }
     }
     if (aliasDb_.hasWildcard(mover)) {
       numWildcards_--;
-    }
-    if (aliasDb_.hasWrites(mover)) {
-      numWriterNodes_--;
     }
     nodes_.pop_front();
   }
@@ -632,21 +638,23 @@ class AliasDb::WorkingSet {
     }
 
     // If `n` has a wildcard, the working set can't write to anything.
-    if (aliasDb_.hasWildcard(n) && numWriterNodes_ > 0) {
+    if (aliasDb_.hasWildcard(n) && writes_.size() > 0) {
       return true;
     }
 
     // 2. Handle regular mutable dependencies
-    // Check that this node does not write to anything used by the working set
-    if (writers_.count(n) != 0) {
+    // Check that `n` does not write to anything used by the working set
+    const auto nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    if (aliasDb_.aliasTracker_->mayAlias(nWrites, reads_)) {
       return true;
     }
 
-    // Check that the working set does not write to anything used by this node
-    const auto writersToNode = getWritersSameBlock(n);
-    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
-      return writersToNode.count(node) != 0;
-    });
+    // Check that the working set doesn't write to anything that `n` uses.
+    const auto nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    if (aliasDb_.aliasTracker_->mayAlias(writes_, nReads)) {
+      return true;
+    }
+    return false;
   }
 
   // Does the working set produce any values consumed by `n`?
@@ -679,16 +687,6 @@ class AliasDb::WorkingSet {
     return users;
   }
 
-  std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
-    std::unordered_set<Node*> writers;
-    for (const auto writer : aliasDb_.getWriters(n)) {
-      if (auto sameBlock = findSameBlock(writer, n)) {
-        writers.insert(sameBlock);
-      }
-    }
-    return writers;
-  }
-
   // Traverse `target`'s blockchain upward until we find a node that shares a
   // block with `n`.
   //
@@ -716,10 +714,11 @@ class AliasDb::WorkingSet {
   const AliasDb& aliasDb_;
   std::list<Node*> nodes_;
   // users => # of working set nodes it uses
-  std::unordered_map<Node*, size_t> users_;
-  std::unordered_map<Node*, size_t> writers_;
+  std::unordered_multiset<Node*> users_;
+  // Values written to by the working set => number of nodes writing to value
+  std::unordered_multiset<const Value*> writes_;
+  std::unordered_multiset<const Value*> reads_;
   size_t numWildcards_ = 0;
-  size_t numWriterNodes_ = 0;
 };
 
 // Try to move `toMove` before/after `movePoint` while preserving value
