@@ -474,6 +474,7 @@ void THRefcountedMapAllocator::close() {
 
   THMapInfo *info = (THMapInfo*)(data);
   if (--info->refcount == 0) {
+
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(filename_.c_str()) == -1) {
       AT_ERROR("could not unlink the shared memory file ", filename_);
