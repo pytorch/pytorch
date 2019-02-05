@@ -15,9 +15,10 @@ class LogNormal(TransformedDistribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = LogNormal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
-        tensor([ 0.1046])
+        tensor([4.6692])
 
     Args:
         loc (float or Tensor): mean of log of distribution

@@ -16,7 +16,7 @@ class no_grad(object):
 
     Example::
 
-        >>> x = torch.tensor([1], requires_grad=True)
+        >>> x = torch.tensor([1.0], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
@@ -102,7 +102,7 @@ class set_grad_enabled(object):
 
     Example::
 
-        >>> x = torch.tensor([1], requires_grad=True)
+        >>> x = torch.tensor([1.0], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
         ...   y = x * 2

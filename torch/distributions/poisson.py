@@ -17,9 +17,10 @@ class Poisson(ExponentialFamily):
 
     Example::
 
-        >>> m = Poisson(torch.tensor([4]))
+        >>> torch.manual_seed(0)
+        >>> m = Poisson(torch.tensor([4.]))
         >>> m.sample()
-        tensor([ 3.])
+        tensor([7.])
 
     Args:
         rate (Number, Tensor): the rate parameter

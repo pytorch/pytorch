@@ -1,4 +1,3 @@
-import torch
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 
@@ -10,9 +9,10 @@ class Chi2(Gamma):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Chi2(torch.tensor([1.0]))
         >>> m.sample()  # Chi2 distributed with shape df=1
-        tensor([ 0.1046])
+        tensor([0.0016])
 
     Args:
         df (float or Tensor): shape parameter of the distribution

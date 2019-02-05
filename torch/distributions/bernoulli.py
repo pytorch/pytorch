@@ -17,9 +17,10 @@ class Bernoulli(ExponentialFamily):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Bernoulli(torch.tensor([0.3]))
         >>> m.sample()  # 30% chance 1; 70% chance 0
-        tensor([ 0.])
+        tensor([0.])
 
     Args:
         probs (Number, Tensor): the probability of sampling `1`

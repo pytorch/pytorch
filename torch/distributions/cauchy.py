@@ -16,9 +16,10 @@ class Cauchy(Distribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Cauchy(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Cauchy distribution with loc=0 and scale=1
-        tensor([ 2.3214])
+        tensor([10.5977])
 
     Args:
         loc (float or Tensor): mode or median of the distribution.

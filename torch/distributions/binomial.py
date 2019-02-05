@@ -13,14 +13,16 @@ class Binomial(Distribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Binomial(100, torch.tensor([0 , .2, .8, 1]))
-        >>> x = m.sample()
-        tensor([   0.,   22.,   71.,  100.])
+        >>> m.sample()
+        tensor([  0.,  22.,  83., 100.])
 
+        >>> torch.manual_seed(0)
         >>> m = Binomial(torch.tensor([[5.], [10.]]), torch.tensor([0.5, 0.8]))
-        >>> x = m.sample()
-        tensor([[ 4.,  5.],
-                [ 7.,  6.]])
+        >>> m.sample()
+        tensor([[4., 5.],
+                [5., 8.]])
 
     Args:
         total_count (int or Tensor): number of Bernoulli trials

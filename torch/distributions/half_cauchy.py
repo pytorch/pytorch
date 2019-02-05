@@ -1,6 +1,5 @@
 import math
 
-import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
@@ -17,9 +16,10 @@ class HalfCauchy(TransformedDistribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = HalfCauchy(torch.tensor([1.0]))
         >>> m.sample()  # half-cauchy distributed with scale=1
-        tensor([ 2.3214])
+        tensor([10.5977])
 
     Args:
         scale (float or Tensor): scale of the full Cauchy distribution

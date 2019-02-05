@@ -1,5 +1,4 @@
 import math
-from numbers import Number
 
 import torch
 from torch._six import inf, nan
@@ -15,9 +14,10 @@ class StudentT(Distribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
-        tensor([ 0.1046])
+        tensor([2.2854])
 
     Args:
         df (float or Tensor): degrees of freedom

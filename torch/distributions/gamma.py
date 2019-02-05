@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 def _standard_gamma(concentration):
@@ -16,9 +16,10 @@ class Gamma(ExponentialFamily):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Gamma(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
-        tensor([ 0.1046])
+        tensor([2.8824])
 
     Args:
         concentration (float or Tensor): shape parameter of the distribution

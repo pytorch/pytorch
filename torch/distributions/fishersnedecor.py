@@ -1,6 +1,5 @@
 from numbers import Number
 import torch
-import math
 from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -14,9 +13,10 @@ class FisherSnedecor(Distribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
-        tensor([ 0.2453])
+        tensor([0.0133])
 
     Args:
         df1 (float or Tensor): degrees of freedom parameter 1

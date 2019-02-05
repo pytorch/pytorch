@@ -99,10 +99,11 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = RelaxedBernoulli(torch.tensor([2.2]),
-                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
+        >>>                      torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
-        tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
+        tensor([0.2679, 0.4786, 0.1907, 0.7743])
 
     Args:
         temperature (Tensor): relaxation temperature

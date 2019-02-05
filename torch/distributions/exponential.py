@@ -12,9 +12,10 @@ class Exponential(ExponentialFamily):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Exponential(torch.tensor([1.0]))
         >>> m.sample()  # Exponential distributed with rate=1
-        tensor([ 0.1046])
+        tensor([3.5083])
 
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution

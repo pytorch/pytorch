@@ -18,7 +18,6 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .half_normal import HalfNormal
 from .laplace import Laplace
-from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis, _batch_vector_diag)
 from .multivariate_normal import (MultivariateNormal, _batch_diag, _batch_mahalanobis,

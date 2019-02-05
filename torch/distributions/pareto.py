@@ -1,4 +1,3 @@
-import torch
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -12,9 +11,10 @@ class Pareto(TransformedDistribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Pareto(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Pareto distribution with scale=1 and alpha=1
-        tensor([ 1.5623])
+        tensor([33.3923])
 
     Args:
         scale (float or Tensor): Scale parameter of the distribution

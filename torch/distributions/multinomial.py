@@ -26,12 +26,14 @@ class Multinomial(Distribution):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> m = Multinomial(100, torch.tensor([ 1., 1., 1., 1.]))
-        >>> x = m.sample()  # equal probability of 0, 1, 2, 3
-        tensor([ 21.,  24.,  30.,  25.])
+        >>> m.sample()  # equal probability of 0, 1, 2, 3
+        tensor([23., 23., 29., 25.])
 
+        >>> torch.manual_seed(0)
         >>> Multinomial(probs=torch.tensor([1., 1., 1., 1.])).log_prob(x)
-        tensor([-4.1338])
+        tensor(-7.6766)
 
     Args:
         total_count (int): number of trials

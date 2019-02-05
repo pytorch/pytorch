@@ -13,6 +13,8 @@ class Independent(Distribution):
     the same shape as a Multivariate Normal distribution (so they are
     interchangeable), you can::
 
+        >>> from torch.distributions import MultivariateNormal, Normal
+        >>> torch.manual_seed(0)
         >>> loc = torch.zeros(3)
         >>> scale = torch.ones(3)
         >>> mvn = MultivariateNormal(loc, scale_tril=torch.diag(scale))

@@ -1,11 +1,9 @@
-from numbers import Number
-
 import torch
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, clamp_probs
+from torch.distributions.utils import clamp_probs
 
 
 def _dirichlet_sample_nograd(concentration):
