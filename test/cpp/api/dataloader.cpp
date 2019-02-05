@@ -2,7 +2,6 @@
 
 #include <torch/data.h>
 #include <torch/data/detail/sequencers.h>
-
 #include <torch/serialize.h>
 #include <torch/types.h>
 
@@ -98,7 +97,7 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
 
   auto initialization_function =
       [&](size_t preloader_count, size_t batch_size, size_t cache_size) {
-        std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+        std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
             std::make_shared<samplers::DistributedSequentialSampler>(
                 data_reader.chunk_count());
 
@@ -110,7 +109,7 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
                 samplers::SequentialSampler>>(
                 data_reader,
                 sampler,
-                chunk_selector,
+                chunk_sampler,
                 datasets::ChunkDatasetOptions(
                     batch_size, preloader_count, cache_size));
       };
@@ -942,7 +941,7 @@ TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
   }
 }
 
-TEST(DataTest, SequentialChunkSelectorMultiReplicaSingleThread) {
+TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
   size_t sample_count = 10;
   size_t num_replicas = 3;
 
@@ -951,21 +950,21 @@ TEST(DataTest, SequentialChunkSelectorMultiReplicaSingleThread) {
                            std::vector<size_t>& output,
                            size_t batch_size) {
     std::vector<std::unique_ptr<samplers::DistributedSequentialSampler>>
-        selectors;
+        samplers;
 
     for (size_t i = 0; i < num_replicas; ++i) {
-      selectors.emplace_back(
+      samplers.emplace_back(
           torch::make_unique<samplers::DistributedSequentialSampler>(
               sample_count, num_replicas, i, allow_duplicates));
     }
     // local_sample_count does not depend on the rank. So only checking one.
-    ASSERT_EQ((*selectors[0]).local_sample_count(), local_sample_count);
+    ASSERT_EQ((*samplers[0]).local_sample_count(), local_sample_count);
 
     std::vector<size_t> res;
     for (size_t i = 0; i < num_replicas; ++i) {
-      (*selectors[i]).reset();
+      (*samplers[i]).reset();
       torch::optional<std::vector<size_t>> idx;
-      while ((idx = (*selectors[i]).next(batch_size)).has_value()) {
+      while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
         res.insert(std::end(res), std::begin(*idx), std::end(*idx));
       }
       ASSERT_EQ(res.size(), local_sample_count * (i + 1));
@@ -1626,7 +1625,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
   for (auto prefetch_count : prefetch_counts) {
     for (auto batch_size : batch_sizes) {
       for (auto dataloader_worker_count : dataloader_worker_counts) {
-        std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+        std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
             std::make_shared<samplers::DistributedSequentialSampler>(
                 data_reader.chunk_count());
 
@@ -1638,7 +1637,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
                 samplers::SequentialSampler>>(
                 data_reader,
                 sampler,
-                chunk_selector,
+                chunk_sampler,
                 datasets::ChunkDatasetOptions(batch_size, prefetch_count));
 
         auto data_loader = torch::data::make_data_loader(
@@ -1682,7 +1681,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
 
   DummyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
-  std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+  std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
       std::make_shared<samplers::DistributedSequentialSampler>(
           data_reader.chunk_count());
 
@@ -1693,7 +1692,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
           samplers::SequentialSampler>>(
           data_reader,
           sampler,
-          chunk_selector,
+          chunk_sampler,
           datasets::ChunkDatasetOptions(batch_size, prefetch_count));
 
   auto data_loader = torch::data::make_data_loader(
@@ -1728,7 +1727,7 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
   const size_t batch_size = 5;
   DummyEmptyChunkDataReader data_reader;
   samplers::SequentialSampler sampler(0);
-  std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+  std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
       std::make_shared<samplers::DistributedSequentialSampler>(
           data_reader.chunk_count());
 
@@ -1740,7 +1739,7 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
           samplers::SequentialSampler>>(
           data_reader,
           sampler,
-          chunk_selector,
+          chunk_sampler,
           datasets::ChunkDatasetOptions(batch_size, prefetch_count));
 
   auto data_loader = torch::data::make_data_loader(
@@ -1775,7 +1774,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
   samplers::SequentialSampler sampler(0);
 
   for (auto batch_size : batch_sizes) {
-    std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+    std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
         std::make_shared<samplers::DistributedSequentialSampler>(
             data_reader.chunk_count());
 
@@ -1787,7 +1786,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
             samplers::SequentialSampler>>(
             data_reader,
             sampler,
-            chunk_selector,
+            chunk_sampler,
             datasets::ChunkDatasetOptions(batch_size, 1 /* one prefetch */));
 
     auto data_loader = torch::data::make_data_loader(
@@ -1812,7 +1811,7 @@ TEST(DataLoaderTest, ChunkDataSetEnumerationWithMultipleEpochs) {
   samplers::SequentialSampler sampler(0);
   size_t batch_size = 17;
 
-  std::shared_ptr<samplers::DistributedSampler> chunk_selector =
+  std::shared_ptr<samplers::DistributedSampler> chunk_sampler =
       std::make_shared<samplers::DistributedSequentialSampler>(
           data_reader.chunk_count());
 
@@ -1823,14 +1822,14 @@ TEST(DataLoaderTest, ChunkDataSetEnumerationWithMultipleEpochs) {
           samplers::SequentialSampler>>(
           data_reader,
           sampler,
-          chunk_selector,
+          chunk_sampler,
           datasets::ChunkDatasetOptions(batch_size, 1 /* one prefetch */));
 
   auto data_loader = torch::data::make_data_loader(
       dataset, DataLoaderOptions(batch_size).workers(0));
 
   for (size_t epoch = 0; epoch < 3; ++epoch)
-    chunk_selector->set_epoch(
+    chunk_sampler->set_epoch(
         epoch); // setting epoch number for this enumeration.
   {
     for (auto iterator = data_loader->begin(); iterator != data_loader->end();

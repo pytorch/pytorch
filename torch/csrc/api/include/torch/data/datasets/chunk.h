@@ -321,7 +321,7 @@ class ChunkDataset final : public StatefulDataset<
         chunk_sampler_(std::move(chunk_sampler)),
         options_(std::move(options)),
         quit_worker_(false) {
-    AT_CHECK(chunk_sampler_ != nullptr, "ChunkSelector cannot be a null.");
+    AT_CHECK(chunk_sampler_ != nullptr, "Chunk sampler cannot be a null.");
   }
 
   virtual ~ChunkDataset() {
@@ -357,11 +357,11 @@ class ChunkDataset final : public StatefulDataset<
 
     chunk_reader_.reset();
 
-    // reset the chunk selector.
+    // reset the chunk sampler.
     chunk_sampler_->reset(nullopt);
 
     // In distributed training, local chunk count could be different to total
-    // chunks availble. Chunk selector holds the truth.
+    // chunks availble. Chunk sampler holds the truth.
     size_t chunks_to_load = chunk_sampler_->local_sample_count();
 
     // Throw out any existing cached batch in the buffer and re-creates a new
