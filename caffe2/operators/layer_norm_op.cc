@@ -181,8 +181,17 @@ to the end.)
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
-} // namespace caffe2
+DEFINE_FUNCTION_SCHEMA_OPERATOR(
+    LayerNorm,
+    (std::vector<c10::Argument>{c10::Argument("input_0"),
+                                c10::Argument("axis", IntType::get()),
+                                c10::Argument("epsilon", FloatType::get())}),
+    (std::vector<c10::Argument>{c10::Argument("output_0"),
+                                c10::Argument("output_1"),
+                                c10::Argument("output_2")}),
+    LayerNormOp<CPUContext>);
 
+} // namespace caffe2
 
 // Register layer norm with c10
 namespace {
