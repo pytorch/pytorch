@@ -14,7 +14,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <iostream>
 
 namespace c10 {
 namespace cuda {
@@ -269,7 +268,6 @@ struct THCCachingAllocator
 
   void free(void* ptr)
   {
-    // std::cout << "Free CUDA block " << ptr << "\n";
     std::lock_guard<std::mutex> lock(mutex);
     if (!ptr) {
       return;
