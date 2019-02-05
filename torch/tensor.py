@@ -307,6 +307,41 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
+    def index_add(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
+        """
+        return self.clone().index_add_(dim, index, tensor)
+
+    def index_copy(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
+        """
+        return self.clone().index_copy_(dim, index, tensor)
+
+    def index_fill(self, dim, index, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
+        """
+        return self.clone().index_fill_(dim, index, value)
+
+    def scatter(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
+        """
+        return self.clone().scatter_(dim, index, source)
+
+    def scatter_add(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+        """
+        return self.clone().scatter_add_(dim, index, source)
+
+    def masked_scatter(self, mask, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+        """
+        return self.clone().masked_scatter_(mask, tensor)
+
+    def masked_fill(self, mask, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+        """
+        return self.clone().masked_fill_(mask, value)
+
     def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 

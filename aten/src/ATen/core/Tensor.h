@@ -389,15 +389,8 @@ class CAFFE2_API Tensor {
   Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
-  Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor index_fill(int64_t dim, const Tensor & index, Scalar source) const;
-  Tensor scatter(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor masked_scatter(const Tensor & mask, const Tensor & source) const;
-  Tensor masked_fill(const Tensor & mask, Scalar source) const;
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
