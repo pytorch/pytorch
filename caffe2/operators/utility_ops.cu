@@ -66,7 +66,7 @@ template <>
 bool NanCheckOp<CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  const size_t N = X.size();
+  const size_t N = X.numel();
   const float* data_ptr = X.data<float>();
 
   ReinitializeTensor(&scratch_, {1}, at::dtype<bool>().device(CUDA));
@@ -116,7 +116,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
       if (j == 0) {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
-        for (size_t i = 0; i < cpu_X.size(); ++i) {
+        for (size_t i = 0; i < cpu_X.numel(); ++i) {
           if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
@@ -147,7 +147,7 @@ ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
 template <>
 bool MaxOp<float, CUDAContext>::Compute() {
   float* output_data = Output(0)->template mutable_data<float>();
-  const int N = Input(0).size();
+  const int N = Input(0).numel();
 
   // Run pairwise-maxes
   for (int i = 1; i < InputSize(); ++i) {
@@ -178,7 +178,7 @@ ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
 template <>
 bool MinOp<float, CUDAContext>::Compute() {
   float* output_data = Output(0)->template mutable_data<float>();
-  const int N = Input(0).size();
+  const int N = Input(0).numel();
 
   // Run pairwise-mines
   for (int i = 1; i < InputSize(); ++i) {
@@ -220,11 +220,11 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
 
     auto* grad_input = Output(i, input.sizes(), at::dtype<float>());
     MaxMinGradKernel<<<
-        CAFFE_GET_BLOCKS(input.size()),
+        CAFFE_GET_BLOCKS(input.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        input.size(),
+        input.numel(),
         output.data<float>(),
         input.data<float>(),
         grad_output.data<float>(),
@@ -281,13 +281,13 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   auto* output = Output(0);
 
   CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
-  CAFFE_ENFORCE_GT(X0.size(), 0);
+  CAFFE_ENFORCE_GT(X0.numel(), 0);
   CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
-  CAFFE_ENFORCE_EQ(weight0.size(), 1);
+  CAFFE_ENFORCE_EQ(weight0.numel(), 1);
 
-  int64_t M = X0.size();
+  int64_t M = X0.numel();
   int64_t N = X0.dim(0);
-  int64_t K = indices.size();
+  int64_t K = indices.numel();
   int64_t block_size = M / N;
 
   float* data = output->template mutable_data<float>();
@@ -394,7 +394,7 @@ bool RangeOp<CUDAContext>::DoRunOnDevice(
     const T& start,
     const T& step,
     Tensor* output) {
-  int N = output->size();
+  int N = output->numel();
   RangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
