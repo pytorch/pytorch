@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -208,7 +208,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    if (aliasDb_.hasWritersBefore(node)) {
+    if (aliasDb_.hasWriters(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
@@ -904,9 +904,6 @@ class ShapePropagator {
         {
             "aten::argmax(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
 
@@ -957,10 +954,13 @@ class ShapePropagator {
     //   - has a bool keepdim argument
     static const register_formula_for multidim_reduce_ops{
         {
+            "aten::logsumexp(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::norm(Tensor self, Scalar? p, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
+            "aten::max_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::min_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
