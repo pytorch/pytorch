@@ -166,9 +166,9 @@ struct SchemaParser {
       auto key_type = parseType().first;
       L.expect(',');
       auto value_type = parseType().first;
+      alias_info = parseAliasAnnotation();
       L.expect(']');
       value = DictType::create(key_type, value_type);
-      // TODO: alias_info
     } else {
       auto value_alias = parseBaseType();
       value = value_alias.first;
