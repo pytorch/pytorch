@@ -25,6 +25,8 @@ private:
 };
 }
 
+OpRegistrationListener::~OpRegistrationListener() {}
+
 Dispatcher::Dispatcher()
 : operators_()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
