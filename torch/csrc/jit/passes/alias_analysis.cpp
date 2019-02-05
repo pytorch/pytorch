@@ -10,8 +10,7 @@ bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
-      type->kind() == TypeKind::DictType ||
-      type->kind() == TypeKind::VarType ||
+      type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -107,16 +106,11 @@ bool AliasDb::writesToInputAlias(Node* n) const {
   });
 }
 
-bool AliasDb::mayAlias(
-    const std::unordered_set<const Value*>& a,
-    const std::unordered_set<const Value*>& b) const {
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return aliasTracker_->mayAlias(a, b);
 }
 
-void AliasDb::getWritesImpl(
-    Node* n,
-    std::unordered_set<const Value*>& ret,
-    bool recurseBlocks) const {
+void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
       ret.insert(input);
@@ -137,17 +131,13 @@ void AliasDb::getWritesImpl(
   }
 }
 
-std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
-    const {
-  std::unordered_set<const Value*> writes;
+ValueSet AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+  ValueSet writes;
   getWritesImpl(n, writes, recurseBlocks);
   return writes;
 }
 
-void AliasDb::getReadsImpl(
-    Node* n,
-    std::unordered_set<const Value*>& ret,
-    bool recurseBlocks) const {
+void AliasDb::getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   for (const auto input : n->inputs()) {
     ret.insert(input);
   }
@@ -164,9 +154,8 @@ void AliasDb::getReadsImpl(
   }
 }
 
-std::unordered_set<const Value*> AliasDb::getReads(Node* n, bool recurseBlocks)
-    const {
-  std::unordered_set<const Value*> reads;
+ValueSet AliasDb::getReads(Node* n, bool recurseBlocks) const {
+  ValueSet reads;
   getReadsImpl(n, reads, recurseBlocks);
   return reads;
 }

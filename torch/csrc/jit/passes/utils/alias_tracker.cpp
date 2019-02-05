@@ -54,7 +54,7 @@ bool AliasTracker::writesTo(Node* n, const Value* v) const {
   }
 
   // Otherwise, check if `v` may alias any of written-to values in `n`
-  const auto vSet = std::unordered_set<const Value*>{v};
+  const auto vSet = ValueSet{v};
   return mayAlias(vSet, writeIndex_.at(n));
 }
 

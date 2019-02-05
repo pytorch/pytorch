@@ -139,12 +139,12 @@ class AliasTracker {
   // Index to look up whatever element corresponds to that value.
   std::unordered_map<const Value*, Element*> map_;
   // All values that may point to a wildcard value.
-  std::unordered_set<const Value*> wildcards_;
+  ValueSet wildcards_;
   // All nodes that write to a wildcard
   std::unordered_set<Node*> wildcardWriters_;
   size_t numWrites_ = 0;
 
-  std::unordered_map<Node*, std::unordered_set<const Value*>> writeIndex_;
+  std::unordered_map<Node*, ValueSet> writeIndex_;
   mutable std::unordered_set<const Element*> writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;

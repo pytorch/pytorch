@@ -25,6 +25,7 @@ namespace jit {
  * we're not sure what this value may alias. To be conservative, we consider
  * the wildcard alias set as potentially aliasing any value.
  */
+
 class AliasDb {
  public:
   TORCH_API explicit AliasDb(std::shared_ptr<Graph> graph);
@@ -44,15 +45,11 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  std::unordered_set<const Value*> getWrites(
-      Node* n,
-      bool recurseBlocks = false) const;
+  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
-  bool mayAlias(
-      const std::unordered_set<const Value*>& a,
-      const std::unordered_set<const Value*>& b) const;
+  bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   bool hasWriters(const Node* n) const;
@@ -83,20 +80,13 @@ class AliasDb {
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
-  void getWritesImpl(
-      Node* n,
-      std::unordered_set<const Value*>& ret,
-      bool recurseBlocks = false) const;
+  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
 
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  std::unordered_set<const Value*> getReads(Node* n, bool recurseBlocks = false)
-      const;
+  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
 
-  void getReadsImpl(
-      Node* n,
-      std::unordered_set<const Value*>& ret,
-      bool recurseBlocks = false) const;
+  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Does `n` write to any alias sets?
   bool hasWrites(Node* n) const;
 
