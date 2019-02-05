@@ -51,10 +51,10 @@ TEST_P(ChooseQuantizationTest, L2MinimizationTest) {
 
   LOG(INFO) << "L2 error minimizing quantization takes " << dt << " sec.";
   if (preserve_sparsity) {
-    EXPECT_FLOAT_EQ(qparam.scale, 0.055523049);
+    EXPECT_FLOAT_EQ(qparam.scale, 0.055694781);
     EXPECT_EQ(qparam.zero_point, 128);
-    EXPECT_FLOAT_EQ(qparam.Min(), -7.10695);
-    EXPECT_FLOAT_EQ(qparam.Max(), 7.0514274);
+    EXPECT_FLOAT_EQ(qparam.Min(), -7.128932);
+    EXPECT_FLOAT_EQ(qparam.Max(), 7.0732374);
   } else {
     EXPECT_FLOAT_EQ(qparam.scale, 0.053343643);
     EXPECT_EQ(qparam.zero_point, 136);
