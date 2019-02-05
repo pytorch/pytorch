@@ -109,10 +109,11 @@ def sum(input, dim=None, dtype=None):
                size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
 
         >>> # when sum over only part of sparse_dims, return a SparseTensor
+        >>> torch.sparse.sum(S, dim=[1, 2])
         tensor(indices=tensor([[3, 4]]),
-               values=tensor([[ 2.6768, -3.5699],
-                              [-1.0658,  3.6312]]),
-               size=(5, 2), nnz=2, layout=torch.sparse_coo)
+               values=tensor([[ 1.5922, -0.7873, -1.6980],
+                              [-0.4189,  1.1346,  1.8497]]),
+               size=(5, 3), nnz=2, layout=torch.sparse_coo)
 
         >>> # when sum over all sparse dim, return a dense Tensor
         >>> # with summed dims squeezed

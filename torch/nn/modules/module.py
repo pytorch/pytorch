@@ -822,9 +822,11 @@ class Module(object):
 
         Example::
 
+            >>> self = nn.Linear(1, 2)
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
+            torch.Size([2])
 
         """
         gen = self._named_members(
