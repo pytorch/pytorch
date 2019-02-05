@@ -169,9 +169,9 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
     auto& bounds_input = Input(BOUNDS);
     auto& slopes_input = Input(SLOPES);
     auto& intercepts_input = Input(INTERCEPTS);
-    num_bounds = bounds_input.size();
-    num_slopes = slopes_input.size();
-    num_intercepts = intercepts_input.size();
+    num_bounds = bounds_input.numel();
+    num_slopes = slopes_input.numel();
+    num_intercepts = intercepts_input.numel();
     InferNumFunctionsPerGroup(
         num_bounds,
         num_slopes,
@@ -206,7 +206,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   setUpTensors(num_func_per_group, num_group, M);
 
   PieceWiseLinearTransformGeneralKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
@@ -242,7 +242,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
 
   if (M == 1) {
     PieceWiseLinearTransformBinaryKernel1<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
@@ -258,7 +258,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   } else {
     // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
-        CAFFE_GET_BLOCKS(X.size() / 2),
+        CAFFE_GET_BLOCKS(X.numel() / 2),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(

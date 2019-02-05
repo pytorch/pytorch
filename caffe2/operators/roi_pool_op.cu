@@ -130,7 +130,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
   auto* A = is_test_ ? nullptr : Output(1); // argmaxes
 
   // Handle empty rois
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
     // mutable_data calls are needed to allocate the tensors
     Y->template mutable_data<float>();
@@ -145,7 +145,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
   if (!is_test_) {
     A->Resize(Y->sizes());
   }
-  int output_size = Y->size();
+  int output_size = Y->numel();
   int* argmax_data = is_test_ ? nullptr : A->template mutable_data<int>();
   ROIPoolForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -179,14 +179,14 @@ bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
                                          // "forward" op (aka "gradInput")
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     ROIPoolBackward<float>
-        <<<CAFFE_GET_BLOCKS(dY.size()),
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
-            dY.size(),
+            dY.numel(),
             dY.data<float>(),
             A.data<int>(),
             R.dim32(0),
