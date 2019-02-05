@@ -13,7 +13,7 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   collect();
   if (shared_blocks_.size() > 0) {
     AT_ERROR(
-        "Producer process process has been terminated before all shared CUDA tensors released.");
+        "Producer process has been terminated before all shared CUDA tensors released.");
   }
 }
 
@@ -40,7 +40,7 @@ void CudaIPCSentDataLimbo::add(CudaIPCSentData* shared_block) {
 CudaIPCSentData::CudaIPCSentData(at::DataPtr shared_storage_ptr)
     : shared_storage_ptr_(std::move(shared_storage_ptr)) {}
 
-void CUDA_ShareDeleteRC(void* ptr) {
+void CudaIPCSentDataDelete(void* ptr) {
   auto rc = (CudaIPCSentData*)ptr;
   if (rc->get() > 0) {
     CudaIPCSentDataLimbo.add(rc);

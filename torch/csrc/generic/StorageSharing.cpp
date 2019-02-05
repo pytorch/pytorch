@@ -250,7 +250,7 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
 
     auto ptr = new CudaIPCSentData(std::move(sptr));
     at::DataPtr new_data_ptr = at::DataPtr(
-        storage->data(), ptr, CUDA_ShareDeleteRC, at::DeviceType::CPU);
+        storage->data(), ptr, CudaIPCSentDataDelete, at::DeviceType::CPU);
     auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
     std::swap(ptr->original_ptr_, old_data_ptr);
 

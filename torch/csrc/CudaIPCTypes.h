@@ -23,4 +23,4 @@ private:
   std::vector<CudaIPCSentData*> shared_blocks_;
 };
 
-void CUDA_ShareDeleteRC(void* ptr);
+void CudaIPCSentDataDelete(void* ptr);
