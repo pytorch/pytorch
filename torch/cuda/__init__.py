@@ -611,6 +611,8 @@ class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
 class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
+class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
+    pass
 
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
@@ -620,6 +622,7 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
+torch._storage_classes.add(BoolStorage)
 
 from . import sparse
 from . import profiler
