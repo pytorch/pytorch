@@ -310,7 +310,7 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensorr Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
+inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
     return type().index_copy(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {

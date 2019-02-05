@@ -389,7 +389,7 @@ class CAFFE2_API Tensor {
   Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntArrayRef signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensorr index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
+  Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor inverse() const;
