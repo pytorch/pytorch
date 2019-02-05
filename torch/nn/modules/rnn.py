@@ -26,7 +26,7 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional', '_all_weights_as_params']
+                     'batch_first', 'dropout', 'bidirectional', '_flat_parameters']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
@@ -87,7 +87,7 @@ class RNNBase(Module):
                     setattr(self, name, param)
                 self._all_weights.append(param_names)
 
-        self._flattened_parameters = self._get_all_weights()
+        self._flat_parameters = self._flat_weights
 
         self.flatten_parameters()
         self.reset_parameters()
@@ -106,7 +106,7 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        all_weights = self._flat_weights()
+        all_weights = self._flat_weights
         unique_data_ptrs = set(p.data_ptr() for p in all_weights)
         if len(unique_data_ptrs) != len(all_weights):
             return
@@ -190,10 +190,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flattened_parameters, self.bias, self.num_layers,
+            result = _impl(input, hx, self._flat_parameters, self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flattened_parameters, self.bias,
+            result = _impl(input, batch_sizes, hx, self._flat_parameters, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -235,16 +235,13 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
 
-    def _get_all_weights(self):
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
-
     @property
     def _flat_weights(self):
         return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
-        return self._get_all_weights()
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
 
 class RNN(RNNBase):
@@ -525,10 +522,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._flattened_parameters, self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._flat_parameters, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._flattened_parameters, self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._flat_parameters, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]

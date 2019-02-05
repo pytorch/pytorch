@@ -208,6 +208,8 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 };
 
+
+// A list of all the parameters on a module
 struct VISIBILITY_HIDDEN ParameterListValue : public SugaredValue {
   ParameterListValue(std::shared_ptr<Module> module)
       : module_(module) {}
@@ -286,7 +288,16 @@ struct ModuleValue : public SugaredValue {
           py_module.attr("_constants_set").contains(field.c_str())) {
         if (py::isinstance<py::list>(attr)) {
           // TODO: make sure it's a list of parameters
-          return std::make_shared<ParameterListValue>(module);
+          bool is_parameter_list = true;
+          for (auto item : attr) {
+            if (!py::isinstance(item, py::module::import("torch").attr("Tensor"))) {
+              is_parameter_list = false;
+              break;
+            }
+          }
+          if (is_parameter_list) {
+            return std::make_shared<ParameterListValue>(module);
+          }
         }
         return toSugaredValue(attr, m, loc, true);
       } else {
