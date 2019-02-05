@@ -118,7 +118,7 @@ void qpad_zero(const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
             X.dim32(2) + args.pad_l + args.pad_r,
             X.dim32(3));
   auto* Ydata = Y->mutable_data<uint8_t>();
-  ::memset(Ydata, Y->nbytes(), 0);
+  ::memset(Ydata, 0, Y->nbytes());
   const auto C = Y->dim32(3);
   const auto XrowSize = X.dim32(3) * X.dim32(2);
   const auto YrowSize = Y->dim32(3) * Y->dim32(2);

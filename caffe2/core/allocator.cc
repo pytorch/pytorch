@@ -10,7 +10,7 @@ C10_DEFINE_bool(
 
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
-    true,
+    false,
     "If set, do memory zerofilling when allocating on CPU");
 
 C10_DEFINE_bool(
