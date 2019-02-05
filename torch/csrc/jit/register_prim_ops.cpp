@@ -1258,7 +1258,7 @@ RegisterOperators reg2({
             " el) -> " decl_type "[](a!)",                               \
             listSetItem<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_IMMUTABLE_LIST_OPS("int", IntArrayRef),
+      CREATE_IMMUTABLE_LIST_OPS("int", IntList),
       CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
       CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
       CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
@@ -1275,7 +1275,7 @@ RegisterOperators reg2({
             "[]",                                                                     \
             listSlice<Shared<c_type>, c_type::ElemType>)
 
-      CREATE_LIST_OPS("int", IntArrayRef),
+      CREATE_LIST_OPS("int", IntList),
       CREATE_LIST_OPS("float", DoubleList),
       CREATE_LIST_OPS("Tensor", TensorList),
       CREATE_LIST_OPS("t", GenericList),

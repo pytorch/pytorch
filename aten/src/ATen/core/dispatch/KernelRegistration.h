@@ -71,7 +71,7 @@ namespace detail {
 // ivalue_to_arg_type<T>: Take an IValue that is an argument to a kernel and
 // cast it to the type that should be passed to the kernel function.
 // Examples: If the IValue contains a plain type like an int, return that.
-//           If the IValue contains an IntArrayRef, return it as ArrayRef<int>.
+//           If the IValue contains an IntList, return it as ArrayRef<int>.
 template<class T>
 struct ivalue_to_arg_type {
   static T call(const IValue& v) {
