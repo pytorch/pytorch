@@ -112,7 +112,7 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
   auto* mask = Output(1);
 
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
-  int output_size = Y->size();
+  int output_size = Y->numel();
   mask->Resize(output_size);
 
   MaxPoolForward<T>
@@ -166,11 +166,11 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
   ConvPoolOpBase<CUDAContext>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
 
   MaxPoolBackward<T><<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       dY.data<T>(),
       mask.data<int>(),
       X.dim32(0),
