@@ -134,9 +134,10 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    def check_forward_args(self, input, hidden, batch_sizes):
-        is_input_packed = batch_sizes is not None
-        expected_input_dim = 2 if is_input_packed else 3
+    @weak_script_method
+    def check_input(self, input, batch_sizes):
+        # type: (Tensor, Optional[Tensor]) -> None
+        expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
                 'input must have {} dimensions, got {}'.format(
@@ -146,20 +147,29 @@ class RNNBase(Module):
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
                     self.input_size, input.size(-1)))
 
-        if is_input_packed:
+    @weak_script_method
+    def get_expected_hidden_size(self, input, batch_sizes):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
+        if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
-
         num_directions = 2 if self.bidirectional else 1
         expected_hidden_size = (self.num_layers * num_directions,
                                 mini_batch, self.hidden_size)
+        return expected_hidden_size
 
-        def check_hidden_size(hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-            if tuple(hx.size()) != expected_hidden_size:
-                raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+    @weak_script_method
+    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+        # type: (Tensor, Tuple[int, int, int], str) -> None
+        if hx.size() != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
-        check_hidden_size(hidden, expected_hidden_size)
+    def check_forward_args(self, input, hidden, batch_sizes):
+        self.check_input(input, batch_sizes)
+        self.expected_hidden_size = self.self.get_expected_hidden_size(input, batch_sizes)
+
+        self.check_hidden_size(hidden, expected_hidden_size)
 
     def permute_hidden(self, hx, permutation):
         if permutation is None:
@@ -467,32 +477,10 @@ class LSTM(RNNBase):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
     @weak_script_method
-    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-        # type: (Tensor, Tuple[int, int, int], str) -> None
-        if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
-
-    @weak_script_method
     def check_forward_args(self, input, hidden, batch_sizes):
         # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
-        expected_input_dim = 2 if batch_sizes is not None else 3
-        if input.dim() != expected_input_dim:
-            raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
-        if self.input_size != input.size(-1):
-            raise RuntimeError(
-                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    self.input_size, input.size(-1)))
-
-        if batch_sizes is not None:
-            mini_batch = int(batch_sizes[0])
-        else:
-            mini_batch = input.size(0) if self.batch_first else input.size(1)
-
-        num_directions = 2 if self.bidirectional else 1
-        expected_hidden_size = (self.num_layers * num_directions,
-                                mini_batch, self.hidden_size)
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
         self.check_hidden_size(hidden[0], expected_hidden_size,
                                'Expected hidden[0] size {}, got {}')
