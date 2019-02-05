@@ -6,3 +6,4 @@
 #include <torch/data/samplers/sequential.h>
 #include <torch/data/samplers/serialize.h>
 #include <torch/data/samplers/stream.h>
+#include <torch/data/samplers/distributed.h>
