@@ -87,7 +87,7 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
 
   auto* output = Output(0, data.sizes(), at::dtype<float>());
   auto* out_data = output->template mutable_data<float>();
-  math::Set<float, CUDAContext>(output->size(), 0, out_data, &context_);
+  math::Set<float, CUDAContext>(output->numel(), 0, out_data, &context_);
 
   const auto* grad_data = grad.template data<float>();
   const TInd* idxs = indices.template data<TInd>();
@@ -96,7 +96,7 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
   const int outer_dims_product = grad.size_to_dim(axis);
   const int block_size = data.size_from_dim(axis + 1);
 
-  const int N = indices.size();
+  const int N = indices.numel();
   const auto data_batch_size = data.size_from_dim(axis);
   const auto gathered_batch_size = N * block_size;
   const int src_indexing_axis_dim = data.dim(axis);
