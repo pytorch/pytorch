@@ -118,7 +118,7 @@ void ThreadPool::main_loop(std::size_t index) {
 }
 
 // constexpr initialization guaranteed to be before any static initialization
-std::atomic<int> num_threads{0};
+std::atomic<int> num_threads{1};
 void setNumThreads(size_t v) {
   if(-1  == num_threads.exchange(v)) {
    throw std::runtime_error("Error: cannot set num threads after pool has started");
