@@ -269,7 +269,7 @@ class TestOperators(TestCase):
         self.assertONNX(nn.MaxPool2d(3, stride=2, ceil_mode=True), x)
 
     def test_maxpool2_ceil_pad_overflow(self):
-        x = torch.randn(1,1,6,6)
+        x = torch.randn(1, 1, 6, 6)
         self.assertONNX(nn.MaxPool2d(3, stride=6, ceil_mode=True), x)
 
     def test_maxpool3_ceil(self):
@@ -277,29 +277,29 @@ class TestOperators(TestCase):
         self.assertONNX(nn.MaxPool3d(3, stride=2, ceil_mode=True), x)
 
     def test_avg_pool1d(self):
-        x = torch.randn(1,1,7)
+        x = torch.randn(1, 1, 7)
         self.assertONNX(nn.AvgPool1d(3, stride=2), x)
-    
+
     def test_avg_pool2d(self):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2), x)
-        
+
     def test_avg_pool3d(self):
         x = torch.randn(20, 16, 50, 44, 31)
         self.assertONNX(nn.AvgPool3d(3, stride=2), x)
-    
+
     def test_avg_pool1d_ceil(self):
-        x = torch.randn(1,1,7)
+        x = torch.randn(1, 1, 7)
         self.assertONNX(nn.AvgPool1d(3, stride=2, ceil_mode=True), x)
 
     def test_avg_pool2d_ceil(self):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2, ceil_mode=True), x)
-    
+
     def test_avg_pool2d_ceil_pad_overflow(self):
-        x = torch.randn(1,1,6,6)
+        x = torch.randn(1, 1, 6, 6)
         self.assertONNX(nn.AvgPool2d(3, stride=6, ceil_mode=True), x)
-        
+
     def test_avg_pool3d_ceil(self):
         x = torch.randn(20, 16, 50, 44, 31)
         self.assertONNX(nn.AvgPool3d(3, stride=2, ceil_mode=True), x)
