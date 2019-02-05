@@ -182,7 +182,7 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.dim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -195,7 +195,7 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       {batch_size, num_channels, output_height, output_width},
       at::dtype<float>());
 
-  const auto size = Y->size();
+  const auto size = Y->numel();
   UpsampleBilinearKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
@@ -231,7 +231,7 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.dim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -242,9 +242,9 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       {batch_size, num_channels, output_height, output_width},
       at::dtype<float>());
   math::Set<float, CUDAContext>(
-      dX->size(), 0.0f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
 
-  const auto size = dY.size();
+  const auto size = dY.numel();
   UpsampleBilinearGradientKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,

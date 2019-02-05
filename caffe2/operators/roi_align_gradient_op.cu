@@ -201,15 +201,15 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignBackwardFeature<float>
-        <<<CAFFE_GET_BLOCKS(dY.size()),
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
-            dY.size(),
+            dY.numel(),
             dY.data<float>(),
             R.dim32(0),
             spatial_scale_,
