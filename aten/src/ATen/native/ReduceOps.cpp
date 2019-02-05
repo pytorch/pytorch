@@ -27,6 +27,8 @@ DEFINE_DISPATCH(norm_stub);
 DEFINE_DISPATCH(mean_stub);
 DEFINE_DISPATCH(and_stub);
 DEFINE_DISPATCH(or_stub);
+DEFINE_DISPATCH(min_values_stub);
+DEFINE_DISPATCH(max_values_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
@@ -382,26 +384,36 @@ Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
   return at::native::prod(self, dim, false, dtype);
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+static Tensor squeeze_multiple(const Tensor& self, IntList dims) {
+  int ndims = self.sizes().size();
+  auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
+  Tensor result = self;
+  for (int i = ndims - 1; i >= 0; --i) {
+    if (dims_to_squeeze[i]) {
+      result = result.squeeze(i);
+    }
+  }
+  return result;
+}
+
+Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntList dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
-    auto maxes = at::max_values(self, dim, true);
-    auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
+    auto maxes = at::max_values(self, dims, true);
+    auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, at::exp(self - maxes), dim, keepdim);
+    at::sum_out(result, at::exp(self - maxes), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dim, keepdim);
+    at::sum_out(result, at::exp(self), dims, keepdim);
     result.log_();
   }
   return result;
 }
 
-Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+Tensor logsumexp(const Tensor &self, IntList dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::logsumexp_out(result, self, dim, keepdim);
+  return at::native::logsumexp_out(result, self, dims, keepdim);
 }
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
@@ -556,6 +568,32 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
     auto iter = make_reduction(
       "any", result, self, dim, keepdim, at::ScalarType::Byte);
     return _any(result, iter);
+  }
+}
+
+Tensor min_values(const Tensor& self, IntList dims, bool keepdim) {
+  if (dims.size() == 1) {
+    return std::get<0>(self.min(dims[0], keepdim));
+  } else {
+    Tensor result = at::empty({0}, self.options());
+    ScalarType dtype = get_dtype(result, self, {}, true);
+    auto iter = make_reduction("min_values", result, self, dims, keepdim, dtype);
+    AT_CHECK(iter->numel() > 0, "min_values on a tensor with no elements is not defined.");
+    min_values_stub(iter->device_type(), *iter);
+    return result;
+  }
+}
+
+Tensor max_values(const Tensor& self, IntList dims, bool keepdim) {
+  if (dims.size() == 1) {
+    return std::get<0>(self.max(dims[0], keepdim));
+  } else {
+    Tensor result = at::empty({0}, self.options());
+    ScalarType dtype = get_dtype(result, self, {}, true);
+    auto iter = make_reduction("max_values", result, self, dims, keepdim, dtype);
+    AT_CHECK(iter->numel() > 0, "max_values on a tensor with no elements is not defined.");
+    max_values_stub(iter->device_type(), *iter);
+    return result;
   }
 }
 
