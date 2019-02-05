@@ -351,13 +351,11 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
           };
         }),
     Operator(
-        "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
-        [](const Node* node) {
-          return [](Stack& stack) {
-            // Intentional noop
-            return 0;
-          };
-        }),
+        "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
+        "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
+        [](Stack& stack) {
+          return 0;
+        })
 
 });
 }
