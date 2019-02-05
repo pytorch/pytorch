@@ -1437,30 +1437,32 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
+        >>> torch.manual_seed(0)
         >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> F.embedding(input, embedding_matrix)
-        tensor([[[ 0.8490,  0.9625,  0.6753],
-                 [ 0.9666,  0.7761,  0.6108],
-                 [ 0.6246,  0.9751,  0.3618],
-                 [ 0.4161,  0.2419,  0.7383]],
+        tensor([[[0.1320, 0.3074, 0.6341],
+                 [0.4901, 0.8964, 0.4556],
+                 [0.0223, 0.1689, 0.2939],
+                 [0.5185, 0.6977, 0.8000]],
 
-                [[ 0.6246,  0.9751,  0.3618],
-                 [ 0.0237,  0.7794,  0.0528],
-                 [ 0.9666,  0.7761,  0.6108],
-                 [ 0.3385,  0.8612,  0.1867]]])
+                [[0.0223, 0.1689, 0.2939],
+                 [0.6323, 0.3489, 0.4017],
+                 [0.4901, 0.8964, 0.4556],
+                 [0.0362, 0.1852, 0.3734]]])
 
         >>> # example with padding_idx
+        >>> torch.manual_seed(0)
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
         >>> input = torch.tensor([[0,2,0,5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
-        tensor([[[ 0.0000,  0.0000,  0.0000],
-                 [ 0.5609,  0.5384,  0.8720],
-                 [ 0.0000,  0.0000,  0.0000],
-                 [ 0.6262,  0.2438,  0.7471]]])
+        tensor([[[0.0000, 0.0000, 0.0000],
+                 [0.4901, 0.8964, 0.4556],
+                 [0.0000, 0.0000, 0.0000],
+                 [0.5185, 0.6977, 0.8000]]])
     """
     if padding_idx is not None:
         if padding_idx > 0:

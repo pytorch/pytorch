@@ -144,10 +144,10 @@ class profile(object):
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     y.backward()
+        >>>     y = x ** 2
+        >>>     y.backward()
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof)  # xdoctest: +IGNORE_WANT
+        >>> print(prof)  # xdoctest: +IGNORE_WANT
         -----------------------------------  ---------------  ---------------
         Name                                        CPU time        CUDA time
         -----------------------------------  ---------------  ---------------

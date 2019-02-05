@@ -128,70 +128,73 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-This function provides a way of computing multilinear expressions (i.e. sums of products) using the
-Einstein summation convention.
+    This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+    Einstein summation convention.
 
-Args:
-    equation (string): The equation is given in terms of lower case letters (indices) to be associated
-           with each dimension of the operands and result. The left hand side lists the operands
-           dimensions, separated by commas. There should be one index letter per tensor dimension.
-           The right hand side follows after `->` and gives the indices for the output.
-           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
-           sorted list of all indices appearing exactly once in the left hand side.
-           The indices not apprearing in the output are summed over after multiplying the operands
-           entries.
-           If an index appears several times for the same operand, a diagonal is taken.
-           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
-           the ellipsis dimensions are at the beginning of the output.
-    operands (list of Tensors): The operands to compute the Einstein sum of.
+    Args:
+        equation (string): The equation is given in terms of lower case letters (indices) to be associated
+               with each dimension of the operands and result. The left hand side lists the operands
+               dimensions, separated by commas. There should be one index letter per tensor dimension.
+               The right hand side follows after `->` and gives the indices for the output.
+               If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+               sorted list of all indices appearing exactly once in the left hand side.
+               The indices not apprearing in the output are summed over after multiplying the operands
+               entries.
+               If an index appears several times for the same operand, a diagonal is taken.
+               Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+               the ellipsis dimensions are at the beginning of the output.
+        operands (list of Tensors): The operands to compute the Einstein sum of.
 
-Examples::
+    Examples::
 
-    >>> x = torch.randn(5)
-    >>> y = torch.randn(4)
-    >>> torch.einsum('i,j->ij', x, y)  # outer product
-    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
-            [ 1.2616,  0.6335,  0.5113, -0.4351],
-            [ 1.4452,  0.7257,  0.5857, -0.4984],
-            [-0.4647, -0.2333, -0.1883,  0.1603],
-            [-1.1130, -0.5588, -0.4510,  0.3838]])
+        >>> torch.manual_seed(0)
+        >>> x = torch.randn(5)
+        >>> y = torch.randn(4)
+        >>> torch.einsum('i,j->ij', x, y)  # outer product
+        tensor([[-2.1552,  0.6216,  1.2914, -1.1084],
+                [ 0.4104, -0.1184, -0.2459,  0.2111],
+                [ 3.0472, -0.8788, -1.8259,  1.5671],
+                [-0.7950,  0.2293,  0.4764, -0.4088],
+                [ 1.5168, -0.4374, -0.9089,  0.7801]])
 
+        >>> torch.manual_seed(0)
+        >>> A = torch.randn(3,5,4)
+        >>> l = torch.randn(2,5)
+        >>> r = torch.randn(2,4)
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
+        tensor([[-3.4482, -1.9134, -2.6599],
+                [ 1.6663,  3.9233, -8.0698]])
 
-    >>> A = torch.randn(3,5,4)
-    >>> l = torch.randn(2,5)
-    >>> r = torch.randn(2,4)
-    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
-    tensor([[-0.3430, -5.2405,  0.4494],
-            [ 0.3311,  5.5201, -3.0356]])
+        >>> torch.manual_seed(0)
+        >>> As = torch.randn(3,2,5)
+        >>> Bs = torch.randn(3,5,4)
+        >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
+        tensor([[[-2.1057, -3.1643,  1.3163,  0.5986],
+                 [ 3.5092, -1.4820,  0.7765, -2.4059]],
 
+                [[-0.7633,  0.6943, -1.3836,  1.7704],
+                 [-0.0825, -0.9307,  1.3861, -0.3519]],
 
-    >>> As = torch.randn(3,2,5)
-    >>> Bs = torch.randn(3,5,4)
-    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
-    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
-             [-1.6706, -0.8097, -0.8025, -2.1183]],
+                [[ 1.9669,  1.0172, -1.7962,  3.3904],
+                 [-0.7053, -2.3535, -0.9909,  0.9077]]])
 
-            [[ 4.2239,  0.3107, -0.5756, -0.2354],
-             [-1.4558, -0.3460,  1.5087, -0.8530]],
+        >>> torch.manual_seed(0)
+        >>> A = torch.randn(3, 3)
+        >>> torch.einsum('ii->i', A) # diagonal
+        tensor([ 1.5410, -1.0845, -0.7193])
 
-            [[ 2.8153,  1.8787, -4.3839, -1.2112],
-             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+        >>> torch.manual_seed(0)
+        >>> A = torch.randn(4, 3, 3)
+        >>> torch.einsum('...ii->...i', A) # batch diagonal
+        tensor([[-1.1258,  0.8487,  0.3223],
+                [-1.2633,  1.2377, -1.6959],
+                [ 0.5667,  0.6408,  0.5627],
+                [ 0.2596, -1.5867, -0.0048]])
 
-    >>> A = torch.randn(3, 3)
-    >>> torch.einsum('ii->i', A) # diagonal
-    tensor([-0.7825,  0.8291, -0.1936])
-
-    >>> A = torch.randn(4, 3, 3)
-    >>> torch.einsum('...ii->...i', A) # batch diagonal
-    tensor([[-1.0864,  0.7292,  0.0569],
-            [-0.9725, -1.0270,  0.6493],
-            [ 0.5832, -1.1716, -1.5084],
-            [ 0.4041, -1.1690,  0.8570]])
-
-    >>> A = torch.randn(2, 3, 4, 5)
-    >>> torch.einsum('...ij->...ji', A).shape # batch permute
-    torch.Size([2, 3, 5, 4])
-"""
+        >>> A = torch.randn(2, 3, 4, 5)
+        >>> torch.einsum('...ij->...ji', A).shape # batch permute
+        torch.Size([2, 3, 5, 4])
+    """
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
@@ -419,22 +422,20 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
         >>> output
         tensor([2, 3, 1])
 
-        >>> # xdoctest: +IGNORE_WHITESPACE
         >>> output, inverse_indices = torch.unique(
         >>>     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([ 0,  2,  1,  2])
+        tensor([0, 2, 1, 2])
 
-        >>> # xdoctest: +IGNORE_WHITESPACE
         >>> output, inverse_indices = torch.unique(
         >>>     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([[ 0,  2],
-                [ 1,  2]])
+        tensor([[0, 2],
+                [1, 2]])
 
     """
     if dim is not None:
@@ -586,19 +587,15 @@ def argsort(input, dim=None, descending=False):
 
     Example::
 
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
-                [ 0.1598,  0.0788, -0.0745, -1.2700],
-                [ 1.2208,  1.0722, -0.7064,  1.2564],
-                [ 0.0669, -0.2318, -0.8229, -0.9280]])
-
-
+        >>> a = torch.Tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+        >>>                   [ 0.8487,  0.6920, -0.3160, -2.1152],
+        >>>                   [ 0.3223, -1.2633,  0.3500,  0.3081],
+        >>>                   [ 0.1198,  1.2377,  1.1168, -0.2473]])
         >>> torch.argsort(a, dim=1)
-        tensor([[2, 0, 3, 1],
+        tensor([[1, 0, 3, 2],
                 [3, 2, 1, 0],
-                [2, 1, 0, 3],
-                [3, 2, 1, 0]])
+                [1, 3, 0, 2],
+                [3, 0, 2, 1]])
     """
     if dim is None:
         return torch.sort(input, -1, descending)[1]
@@ -683,7 +680,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         >>> torch.norm(a, float('inf'))
         tensor(4.)
         >>> torch.norm(b, float('inf'))
-        tensor([4., 3., 4.])
+        tensor(4.)
         >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])

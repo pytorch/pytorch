@@ -342,7 +342,7 @@ class Module(object):
             >>> linear.weight
             Parameter containing:
             tensor([[..., ...],
-                    [..., ...]])
+                    [..., ...]]...)
             >>> linear.to(torch.double)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
@@ -957,11 +957,11 @@ class Module(object):
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
             ...     print(idx, '->', m)
-            0 -> ('', Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             ))
-            1 -> ('0', Linear (2 -> 2))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
 
         """
 

@@ -43,6 +43,7 @@ class DistributedDataParallel(Module):
     of the node where it's running. To use ``DistributedDataParallel`` in
     this way, you can simply construct the model as the following:
 
+        >>> # xdoctest: +SKIP
         >>> torch.distributed.init_process_group(backend="nccl")
         >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices be default
 
@@ -61,6 +62,7 @@ class DistributedDataParallel(Module):
     from 0 to N-1. Therefore, it is your job to ensure that your training script
     operates on a single given GPU by calling:
 
+        >>> # xdoctest: +SKIP
         >>> torch.cuda.set_device(i)
 
     where i is from 0 to N-1. In each process, you should refer the following

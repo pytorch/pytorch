@@ -214,7 +214,7 @@ class UpsamplingBilinear2d(Upsample):
 
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2).float()
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])

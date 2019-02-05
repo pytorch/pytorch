@@ -89,6 +89,7 @@ def sum(input, dim=None, dtype=None):
 
     Example::
 
+        >>> torch.manual_seed(0)
         >>> nnz = 3
         >>> dims = [5, 5, 2, 3]
         >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
@@ -97,25 +98,23 @@ def sum(input, dim=None, dtype=None):
         >>> size = torch.Size(dims)
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
-        tensor(indices=tensor([[2, 0, 3],
-                               [2, 4, 1]]),
-               values=tensor([[[...],
-                               [...],
-                               ...
-                              [[...],
-                               [...],],
-                               ...
-                              [[...],
-                               [...]]]),
+        tensor(indices=tensor([[4, 4, 3],
+                               [0, 3, 4]]),
+               values=tensor([[[-0.3160, -2.1152,  0.4681],
+                               [-0.1577,  1.4437,  0.2660]],
+
+                              [[ 0.1665,  0.8744, -0.1435],
+                               [-0.1116,  0.9318,  1.2590]],
+
+                              [[ 2.0050,  0.0537,  0.6181],
+                               [-0.4128, -0.8411, -2.3160]]]),
                size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
 
         >>> # when sum over only part of sparse_dims, return a SparseTensor
-        >>> torch.sparse.sum(S, [1, 3])
-        tensor(indices=tensor([[0, 2, 3]]),
-               values=tensor([[..., ...],
-                              [..., ...],
-                              [..., ...]]),
-               size=(5, 2), nnz=3, layout=torch.sparse_coo)
+        tensor(indices=tensor([[3, 4]]),
+               values=tensor([[ 2.6768, -3.5699],
+                              [-1.0658,  3.6312]]),
+               size=(5, 2), nnz=2, layout=torch.sparse_coo)
 
         >>> # when sum over all sparse dim, return a dense Tensor
         >>> # with summed dims squeezed
