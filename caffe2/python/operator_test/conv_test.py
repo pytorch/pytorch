@@ -63,7 +63,7 @@ class TestConvolution(serial.SerializedTestCase):
         size=st.integers(1, 8),
         input_channels=st.integers(1, 3),
         output_channels=st.integers(1, 3),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         group=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         engine=st.sampled_from(["", "EIGEN"]),
@@ -159,7 +159,7 @@ class TestConvolution(serial.SerializedTestCase):
         size=st.integers(7, 10),
         input_channels=st.integers(1, 8),
         output_channels=st.integers(1, 8),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         engine=st.sampled_from(["", "EIGEN"]),
         use_bias=st.booleans(),
         **hu.gcs
@@ -235,7 +235,7 @@ class TestConvolution(serial.SerializedTestCase):
         size=st.integers(7, 10),
         input_channels=st.integers(1, 8),
         output_channels=st.integers(1, 8),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         group=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
@@ -430,7 +430,7 @@ class TestConvolution(serial.SerializedTestCase):
     @given(
         input_channels=st.integers(1, 3),
         output_channels=st.integers(1, 2),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         stride=st.integers(1, 3),
         size=st.integers(7, 10),
         kernel=st.integers(1, 2),
@@ -497,7 +497,7 @@ class TestConvolution(serial.SerializedTestCase):
     @given(
         input_channels=st.integers(1, 2),
         output_channels=st.integers(1, 2),
-        batch_size=st.integers(1, 2),
+        batch_size=st.integers(0, 2),
         stride=st.integers(1, 2),
         size=st.integers(4, 5),
         kernel=st.integers(1, 2),
@@ -559,7 +559,7 @@ class TestConvolution(serial.SerializedTestCase):
 
     @given(
         op_type=st.sampled_from(["Conv", "Conv3D"]),
-        batch_size=st.integers(1, 2),
+        batch_size=st.integers(0, 2),
         stride=st.integers(1, 2),
         size=st.integers(3, 5),
         kernel=st.integers(1, 2),
@@ -656,7 +656,7 @@ class TestConvolution(serial.SerializedTestCase):
         size=st.integers(7, 10),
         input_channels=st.integers(1, 8),
         output_channels=st.integers(1, 8),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         use_bias=st.booleans(),
         **hu.gcs
     )
@@ -886,7 +886,7 @@ class TestConvolution(serial.SerializedTestCase):
 
     @serial.given(
         op_type=st.sampled_from(["Conv", "Conv2D"]),
-        N=st.integers(1, 3),
+        N=st.integers(0, 3),
         G=st.integers(1, 3),
         DX=st.integers(1, 3),
         DY=st.integers(1, 3),
@@ -952,6 +952,10 @@ class TestConvolution(serial.SerializedTestCase):
         inputs = [X, filter, bias] if use_bias else [X, filter]
 
         def conv_1x1_nchw_ref(X, filter, bias=None):
+            if N == 0:
+                Y = np.zeros(shape=(N, M, H, W), dtype=np.float32)
+                return [Y]
+
             X = X.reshape(N, G, DX, -1)
             filter = filter.reshape(G, DY, DX)
             Y = np.zeros(shape=(N, G, DY, H * W), dtype=np.float32)
@@ -965,6 +969,10 @@ class TestConvolution(serial.SerializedTestCase):
             return [Y]
 
         def conv_1x1_nhwc_ref(X, filter, bias=None):
+            if N == 0:
+                Y = np.zeros(shape=(N, H, W, M), dtype=np.float32)
+                return [Y]
+
             X = X.reshape(N, -1, G, DX)
             filter = filter.reshape(G, DY, DX)
             Y = np.zeros(shape=(N, H * W, G, DY), dtype=np.float32)

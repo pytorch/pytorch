@@ -296,6 +296,151 @@ void testAliasAnalysis() {
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
   }
+  {
+    // Test moves across inner blocks
+
+    // a = rand(1)
+    // b = rand(1)
+    // if True:
+    //   a.add_(b)
+    // c = a + b
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto b = graph->insert(aten::rand, {constant});
+
+    auto if_ = graph->insertNode(graph->create(prim::If));
+    if_->addInput(constant); // condition value
+    auto trueBlock = if_->addBlock();
+    auto falseBlock = if_->addBlock();
+
+    {
+      // Mutate in true block
+      WithInsertPoint g(trueBlock);
+      auto aMut = graph->insert(aten::add_, {a, b});
+      trueBlock->registerOutput(aMut);
+    }
+
+    falseBlock->registerOutput(a);
+    auto c = graph->insert(aten::add, {a, b});
+
+    graph->lint();
+
+    // we should not be able to move `c` before the if statement, since it
+    // may write to `a`.
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
+  }
+}
+
+void testAliasTracker() {
+  auto graph = std::make_shared<Graph>();
+  const Value* a = graph->addInput();
+  const Value* b = graph->addInput();
+  const Value* c = graph->addInput();
+  const Value* d = graph->addInput();
+  const Value* e = graph->addInput();
+  const Value* f = graph->addInput();
+  const Value* g = graph->addInput();
+  const Value* wc = graph->addInput();
+
+  {
+    // test contains()
+    AliasTracker t;
+    t.makeFreshValue(a);
+    ASSERT_TRUE(t.contains(a));
+    ASSERT_FALSE(t.contains(b));
+  }
+  {
+    // a <- b <- c
+    //      b <- d
+    // a <- e
+    // f <- e
+    // g is by itself
+    // wc is a wildcard value
+    AliasTracker t;
+    t.makeFreshValue(a);
+    t.makeFreshValue(f);
+    t.makeFreshValue(g);
+    t.makePointerTo(b, a);
+    t.makePointerTo(c, b);
+    t.makePointerTo(d, b);
+    t.makePointerTo(e, a);
+    t.makePointerTo(e, f);
+    t.setWildcard(wc);
+
+    /**
+     * Test mayAlias()
+     */
+    // Values should alias themselves
+    ASSERT_TRUE(t.mayAlias(a, a));
+    ASSERT_TRUE(t.mayAlias(g, g));
+
+    // Values that point to the same location should alias
+    ASSERT_TRUE(t.mayAlias(a, b));
+    ASSERT_TRUE(t.mayAlias(a, c));
+    ASSERT_TRUE(t.mayAlias(c, d));
+
+    // e may point to a OR f
+    ASSERT_TRUE(t.mayAlias(e, a));
+    ASSERT_TRUE(t.mayAlias(e, f));
+    // But a and f don't alias
+    ASSERT_FALSE(t.mayAlias(a, f));
+
+    // Wildcards should alias everything
+    ASSERT_TRUE(t.mayAlias(wc, a));
+    ASSERT_TRUE(t.mayAlias(wc, b));
+    ASSERT_TRUE(t.mayAlias(wc, f));
+    ASSERT_TRUE(t.mayAlias(wc, g));
+
+    /**
+     * Test mayAlias() set interface
+     */
+    std::multiset<const Value*> foo{c, c, d};
+    std::multiset<const Value*> bar{e, f};
+    std::unordered_set<const Value*> baz{f, g};
+    std::set<const Value*> containsWildcard{wc};
+    ASSERT_TRUE(t.mayAlias(foo, bar));
+    ASSERT_TRUE(t.mayAlias(bar, baz));
+    ASSERT_FALSE(t.mayAlias(foo, baz));
+    // wildcard stuff aliases everything
+    ASSERT_TRUE(t.mayAlias(containsWildcard, foo));
+    ASSERT_TRUE(t.mayAlias(containsWildcard, bar));
+    ASSERT_TRUE(t.mayAlias(containsWildcard, baz));
+
+    /**
+     * Test writer tracking
+     */
+    auto n1 = graph->appendNode(graph->create(prim::Undefined));
+    auto n2 = graph->appendNode(graph->create(prim::Undefined));
+    auto n3 = graph->appendNode(graph->create(prim::Undefined));
+    t.registerWrite(a, n1);
+    t.registerWrite(f, n2);
+    // We should report those writes accurately
+    ASSERT_TRUE(t.writesTo(n1, a));
+    ASSERT_TRUE(t.writesTo(n2, f));
+    ASSERT_FALSE(t.writesTo(n1, f));
+    ASSERT_FALSE(t.writesTo(n2, a));
+    // We should correctly report writes to aliases as well
+    ASSERT_TRUE(t.writesTo(n1, c));
+
+    // Check hasWriters()
+    ASSERT_TRUE(t.hasWriters(a));
+    // Aliases of written-to values should have writers
+    ASSERT_TRUE(t.hasWriters(b));
+    ASSERT_TRUE(t.hasWriters(d));
+    ASSERT_TRUE(t.hasWriters(e));
+    // Unique values not registered should be unaffected
+    ASSERT_FALSE(t.hasWriters(g));
+
+    // create a write to the wildcard set
+    t.registerWrite(wc, n3);
+    // Now everything may be written to
+    ASSERT_TRUE(t.hasWriters(g));
+    const auto& wildcardWriters = t.getWildcardWriters();
+    ASSERT_EQ(wildcardWriters.size(), 1);
+    ASSERT_EQ(*wildcardWriters.begin(), n3);
+  }
 }
 } // namespace jit
 } // namespace torch

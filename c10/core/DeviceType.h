@@ -21,11 +21,12 @@ enum class DeviceType : int16_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
+  MSNPU = 8, // MSNPU
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 8,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 9,
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 

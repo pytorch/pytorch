@@ -9,20 +9,15 @@
 #include "caffe2/operators/group_norm_op.h"
 
 #include <cub/block/block_reduce.cuh>
+#include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math/reduce.cuh"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T, int kBlockDimX, int kBlockDimY>
-using BlockReduce2D = cub::
-    BlockReduce<T, kBlockDimX, cub::BLOCK_REDUCE_WARP_REDUCTIONS, kBlockDimY>;
 
 template <typename T>
 __global__ void ComputeFusedParamsCUDAKernel(
@@ -54,7 +49,7 @@ __global__ void ComputeFusedParamsCUDAKernel(
 
 template <typename T>
 __global__ void GroupNormForwardNCHWCUDAKernel(
-    const int K,
+    const int M,
     const int HxW,
     const T* X,
     const T* scale,
@@ -63,14 +58,14 @@ __global__ void GroupNormForwardNCHWCUDAKernel(
 
 template <>
 __global__ void GroupNormForwardNCHWCUDAKernel<float>(
-    const int W,
+    const int M,
     const int HxW,
     const float* X,
     const float* scale,
     const float* bias,
     float* Y) {
-  const int nc = blockIdx.x / W;
-  const int hw = blockIdx.x % W * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  const int nc = blockIdx.x / M;
+  const int hw = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (hw < HxW) {
     const int index = nc * HxW + hw;
 #if __CUDA_ARCH__ >= 350
@@ -99,7 +94,8 @@ __global__ void GroupNormForwardNHWCCUDAKernel<float>(
     const float* bias,
     float* Y) {
   const int n = blockIdx.x / HxW;
-  for (int c = threadIdx.x; c < C; c += blockDim.x) {
+  const int c = blockIdx.y * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (c < C) {
     const int index = blockIdx.x * C + c;
     const int nc = n * C + c;
 #if __CUDA_ARCH__ >= 350
@@ -206,7 +202,7 @@ template <typename T>
 __global__ void GroupNormBackwardNCHWCUDAKernel(
     const int G,
     const int K,
-    const int W,
+    const int M,
     const int HxW,
     const T* dY,
     const T* X,
@@ -218,12 +214,12 @@ __global__ void GroupNormBackwardNCHWCUDAKernel(
     T* dX) {
   const int C = G * K;
   const T denom = T(1) / static_cast<T>(K * HxW);
-  const int nc = blockIdx.x / W;
+  const int nc = blockIdx.x / M;
   const int n = nc / C;
   const int c = nc % C;
   const int g = c / K;
   const int ng = n * G + g;
-  const int hw = blockIdx.x % W * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  const int hw = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   const int index = nc * HxW + hw;
   if (hw < HxW) {
 #if __CUDA_ARCH__ >= 350
@@ -261,7 +257,8 @@ __global__ void GroupNormBackwardNHWCCUDAKernel(
   const int g = blockIdx.y;
   const int n = x / HxW;
   const int ng = n * G + g;
-  for (int i = threadIdx.x; i < K; i += blockDim.x) {
+  const int i = blockIdx.z * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (i < K) {
     const int c = g * K + i;
     const int index = x * C + c;
 #if __CUDA_ARCH__ >= 350
@@ -393,10 +390,10 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNCHW(
     const float* scale,
     const float* bias,
     float* Y) {
-  const int W = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
+  const int M = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
   GroupNormForwardNCHWCUDAKernel<float>
-      <<<N * C * W, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-          W, HxW, X, scale, bias, Y);
+      <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          M, HxW, X, scale, bias, Y);
 }
 
 template <>
@@ -408,8 +405,9 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNHWC(
     const float* scale,
     const float* bias,
     float* Y) {
+  const int M = math::DivUp(C, CAFFE_CUDA_NUM_THREADS);
   GroupNormForwardNHWCCUDAKernel<float>
-      <<<N * HxW, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      <<<dim3(N * HxW, M), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C, HxW, X, scale, bias, Y);
 }
 
@@ -440,31 +438,28 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
     // Computes dL/ds and dL/db.
     // dL/ds = Sum(dL/dY * gamma * X)
     // dL/db = Sum(dL/dY * gamma)
-    if (HxW >= 128) {
-      ComputeInternalGradientsNCHWCUDAKernel<float, 1, 128>
-          <<<dim3(N, G), dim3(1, 128), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else if (HxW >= 64) {
-      ComputeInternalGradientsNCHWCUDAKernel<float, 2, 64>
-          <<<dim3(N, G), dim3(2, 64), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else if (HxW >= 32) {
-      ComputeInternalGradientsNCHWCUDAKernel<float, 4, 32>
-          <<<dim3(N, G), dim3(4, 32), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else {
-      ComputeInternalGradientsNCHWCUDAKernel<float, 8, 16>
-          <<<dim3(N, G), dim3(8, 16), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        HxW,
+        ComputeInternalGradientsNCHWCUDAKernel,
+        float,
+        dim3(N, G),
+        context_.cuda_stream(),
+        G,
+        K,
+        HxW,
+        dY_data,
+        X_data,
+        gamma_data,
+        ds_data,
+        db_data);
 
     // Computes dL/dX.
-    const int W = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
+    const int M = math::DivUp(HxW, CAFFE_CUDA_NUM_THREADS);
     GroupNormBackwardNCHWCUDAKernel<float>
-        <<<N * C * W, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+        <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G,
             K,
-            W,
+            M,
             HxW,
             dY_data,
             X_data,
@@ -476,84 +471,45 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
             dX_data);
 
     // Computes dL/dgamma and dL/dbeta.
-    if (HxW >= 128) {
-      GammaBetaBackwardNCHWCUDAKernel<float, 1, 128>
-          <<<C, dim3(1, 128), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else if (HxW >= 64) {
-      GammaBetaBackwardNCHWCUDAKernel<float, 2, 64>
-          <<<C, dim3(2, 64), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else if (HxW >= 32) {
-      GammaBetaBackwardNCHWCUDAKernel<float, 4, 32>
-          <<<C, dim3(4, 32), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else {
-      GammaBetaBackwardNCHWCUDAKernel<float, 8, 16>
-          <<<C, dim3(8, 16), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        HxW,
+        GammaBetaBackwardNCHWCUDAKernel,
+        float,
+        C,
+        context_.cuda_stream(),
+        N,
+        G,
+        K,
+        HxW,
+        dY_data,
+        X_data,
+        mu_data,
+        rsig_data,
+        dgamma_data,
+        dbeta_data);
   } else {
     // Computes dL/ds and dL/db.
     // dL/ds = Sum(dL/dY * gamma * X)
     // dL/db = Sum(dL/dY * gamma)
-    if (K >= 128) {
-      ComputeInternalGradientsNHWCCUDAKernel<float, 1, 128>
-          <<<dim3(N, G), dim3(1, 128), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else if (K >= 64) {
-      ComputeInternalGradientsNHWCCUDAKernel<float, 2, 64>
-          <<<dim3(N, G), dim3(2, 64), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else if (K >= 32) {
-      ComputeInternalGradientsNHWCCUDAKernel<float, 4, 32>
-          <<<dim3(N, G), dim3(4, 32), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    } else {
-      ComputeInternalGradientsNHWCCUDAKernel<float, 8, 16>
-          <<<dim3(N, G), dim3(8, 16), 0, context_.cuda_stream()>>>(
-              G, K, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        K,
+        ComputeInternalGradientsNHWCCUDAKernel,
+        float,
+        dim3(N, G),
+        context_.cuda_stream(),
+        G,
+        K,
+        HxW,
+        dY_data,
+        X_data,
+        gamma_data,
+        ds_data,
+        db_data);
 
     // Computes dL/dX.
+    const int M = math::DivUp(K, CAFFE_CUDA_NUM_THREADS);
     GroupNormBackwardNHWCCUDAKernel<float>
-        <<<dim3(N * HxW, G),
+        <<<dim3(N * HxW, G, M),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
@@ -570,59 +526,22 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
             dX_data);
 
     // Computes dL/dgamma and dL/dbeta.
-    if (HxW >= 128) {
-      GammaBetaBackwardNHWCCUDAKernel<float, 1, 128>
-          <<<C, dim3(1, 128), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else if (HxW >= 64) {
-      GammaBetaBackwardNHWCCUDAKernel<float, 2, 64>
-          <<<C, dim3(2, 64), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else if (HxW >= 32) {
-      GammaBetaBackwardNHWCCUDAKernel<float, 4, 32>
-          <<<C, dim3(4, 32), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    } else {
-      GammaBetaBackwardNHWCCUDAKernel<float, 8, 16>
-          <<<C, dim3(8, 16), 0, context_.cuda_stream()>>>(
-              N,
-              G,
-              K,
-              HxW,
-              dY_data,
-              X_data,
-              mu_data,
-              rsig_data,
-              dgamma_data,
-              dbeta_data);
-    }
+    DISPATCH_REDUCE_KERNEL_BY_2D_BLOCK(
+        HxW,
+        GammaBetaBackwardNHWCCUDAKernel,
+        float,
+        C,
+        context_.cuda_stream(),
+        N,
+        G,
+        K,
+        HxW,
+        dY_data,
+        X_data,
+        mu_data,
+        rsig_data,
+        dgamma_data,
+        dbeta_data);
   }
   return true;
 }

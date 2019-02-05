@@ -69,14 +69,9 @@ def cmake_defines(lst, **kwargs):
 
 
 # Ninja
-# The ninja package is different in Anaconda Cloud and PYPI. The one in Anaconda Cloud
-# doesn't have the python code (ninja_syntax.py) in it, while the one in PYPI does.
-# Since we don't use the python part here, it is also acceptable if we use the executable
-# directly if it is in `PATH`.
-if which('ninja'):
-    USE_NINJA = True
-else:
-    USE_NINJA = False
+# Use ninja if it is on the PATH. Previous version of PyTorch required the
+# ninja python package, but we no longer use it, so we do not have to import it
+USE_NINJA = not check_negative_env_flag('USE_NINJA') and (which('ninja') is not None)
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 install_dir = base_dir + "/torch"
@@ -143,8 +138,8 @@ def run_cmake(version,
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
 
-    cflags = os.getenv('CFLAGS') or ""
-    ldflags = os.getenv('LDFLAGS') or ""
+    cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
+    ldflags = os.getenv('LDFLAGS', "")
     if IS_WINDOWS:
         cflags += " /EHa"
 
@@ -161,12 +156,12 @@ def run_cmake(version,
         CMAKE_BUILD_TYPE=build_type,
         BUILD_TORCH="ON",
         BUILD_PYTHON=build_python,
-        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS") or "ON",
+        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
         BUILD_TEST=build_test,
         INSTALL_TEST=build_test,
         BUILD_CAFFE2_OPS=not check_negative_env_flag('BUILD_CAFFE2_OPS'),
-        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE") or "onnx_torch",
+        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
@@ -242,10 +237,14 @@ def build_caffe2(version,
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
                        cwd=build_dir, env=my_env)
     else:
+        max_jobs = os.getenv('MAX_JOBS', None)
         if USE_NINJA:
-            check_call(['ninja', 'install'], cwd=build_dir, env=my_env)
+            ninja_cmd = ['ninja', 'install']
+            if max_jobs is not None:
+                ninja_cmd += ['-j', max_jobs]
+            check_call(ninja_cmd, cwd=build_dir, env=my_env)
         else:
-            max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+            max_jobs = max_jobs or str(multiprocessing.cpu_count())
             check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
 
     # in cmake, .cu compilation involves generating certain intermediates

@@ -20,8 +20,8 @@ bool CastOp<CUDAContext>::DoRunWithType() {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  DCHECK(input.size() < INT_MAX);
-  int N = input.size();
+  DCHECK(input.numel() < INT_MAX);
+  int N = input.numel();
   if (N == 0) {
     // skip the rest of the computation if input is empty
     return true;
