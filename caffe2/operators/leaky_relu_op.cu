@@ -28,15 +28,15 @@ __global__ void LeakyReluGradientKernel(
 template <>
 bool LeakyReluOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
-  CAFFE_ENFORCE_GT(X.size(), 0);
+  CAFFE_ENFORCE_GT(X.numel(), 0);
 
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   LeakyReluKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), alpha_, X.data<float>(), Y->template mutable_data<float>());
+      X.numel(), alpha_, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -46,13 +46,13 @@ bool LeakyReluGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(1);
 
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
-  CAFFE_ENFORCE_EQ(Y.size(), dY.size());
+  CAFFE_ENFORCE_EQ(Y.numel(), dY.numel());
   LeakyReluGradientKernel<<<
-      CAFFE_GET_BLOCKS(Y.size()),
+      CAFFE_GET_BLOCKS(Y.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      Y.size(),
+      Y.numel(),
       alpha_,
       Y.data<float>(),
       dY.data<float>(),

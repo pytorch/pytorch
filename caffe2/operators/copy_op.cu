@@ -18,7 +18,7 @@ class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;

@@ -104,7 +104,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int input_offset = C / group_ * input_image_size;
   const int output_offset = M / group_ * output_image_size;
   const int offset_offset = offset.numel() / offset.dim32(0);
-  const int filter_offset = filter.size() / group_;
+  const int filter_offset = filter.numel() / group_;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
@@ -115,7 +115,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     auto& bias = Input(BIAS);
     CAFFE_ENFORCE(bias.dim() == 1);
     CAFFE_ENFORCE(bias.dim32(0) == M);
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with
       // one.
@@ -272,8 +272,8 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // image.
   const int input_offset = C / group_ * input_image_size;
   const int output_offset = M / group_ * output_image_size;
-  const int offset_offset = offset.size() / offset.dim32(0);
-  const int filter_offset = filter.size() / group_;
+  const int offset_offset = offset.numel() / offset.dim32(0);
+  const int filter_offset = filter.numel() / group_;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the
   // height and width.
@@ -288,7 +288,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       col_buffer_shape,
       at::dtype<T>().device(Context::GetDeviceType()));
 
-  const int col_buffer_offset = col_buffer_.size() / group_;
+  const int col_buffer_offset = col_buffer_.numel() / group_;
 
   const T* Xdata = X.template data<T>();
   const T* filter_data = filter.template data<T>();
@@ -299,13 +299,13 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* doffset_data = doffset->template mutable_data<T>();
 
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
     
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       ReinitializeTensor(
           &bias_multiplier_,
@@ -318,7 +318,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           &context_);
     }
     dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
 
   T* dXdata = nullptr;
@@ -326,7 +326,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     
     auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dXdata = dX->template mutable_data<T>();
-    math::Set<T, Context>(dX->size(), 0, dXdata, &context_);
+    math::Set<T, Context>(dX->numel(), 0, dXdata, &context_);
   }
 
   for (int image_id = 0; image_id < N; ++image_id) {

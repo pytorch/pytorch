@@ -26,10 +26,10 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
+  CAFFE_ENFORCE_EQ(lengths.numel(), data.dim(0));
 
   lengths_host_.CopyFrom(lengths); // sync copy
-  auto lengths_size = lengths_host_.size();
+  auto lengths_size = lengths_host_.numel();
   auto* lengths_data = lengths_host_.data<int32_t>();
 
   int32_t total_length = 0;

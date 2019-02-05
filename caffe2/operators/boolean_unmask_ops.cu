@@ -52,7 +52,7 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
       : Operator<CUDAContext>(def, ws) {}
 
   bool RunOnDevice() override {
-    int maskSize = Input(0).size();
+    int maskSize = Input(0).numel();
     int numMasks = InputSize() / 2;
     const auto& meta = Input(1).meta();
 
@@ -71,13 +71,13 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
     for (int i = 0; i < numMasks; ++i) {
       auto& mask = Input(i * 2);
       CAFFE_ENFORCE_EQ(mask.dim(), 1);
-      CAFFE_ENFORCE_EQ(mask.size(), maskSize);
+      CAFFE_ENFORCE_EQ(mask.numel(), maskSize);
       hostMasksData[i] = const_cast<bool*>(mask.data<bool>());
 
       const auto& value = Input(i * 2 + 1);
       CAFFE_ENFORCE_EQ(value.dim(), 1);
       hostValuesData[i] = (char*)value.raw_data();
-      hostValueSizesData[i] = value.size();
+      hostValueSizesData[i] = value.numel();
     }
     masks_.CopyFrom(hostMasks_);
     values_.CopyFrom(hostValues_);
