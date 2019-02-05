@@ -45,7 +45,7 @@ void CudaIPCSentDataDelete(void* ptr) {
   if (rc->get() > 0) {
     CudaIPCSentDataLimbo.add(rc);
   } else {
-    delete (CudaIPCSentData*)ptr;
+    delete rc;
   }
   CudaIPCSentDataLimbo.collect();
 }

@@ -246,11 +246,10 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
     std::string ref_counter_handle = THPStorage_(__newHandle)();
     at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
         ref_counter_handle.c_str(), flags, sizeof(int64_t), nullptr);
-    *(int64_t*)(sptr.get()) += 1;
-
+    *(int64_t*)(sptr.get()) = 1; // We create new sptr per each shared cuda
     auto ptr = new CudaIPCSentData(std::move(sptr));
     at::DataPtr new_data_ptr = at::DataPtr(
-        storage->data(), ptr, CudaIPCSentDataDelete, at::DeviceType::CPU);
+        storage->data(), ptr, CudaIPCSentDataDelete, storage->device());
     auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
     std::swap(ptr->original_ptr_, old_data_ptr);
 

@@ -1,5 +1,5 @@
 #pragma once
-#include <TH/TH.h>
+#include <c10/core/Allocator.h>
 
 struct CudaIPCReceivedData {
   CudaIPCReceivedData(std::shared_ptr<void> shared_ptr);
