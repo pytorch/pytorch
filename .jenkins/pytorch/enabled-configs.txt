@@ -50,3 +50,5 @@ pytorch-ppc64le-cuda9.1-cudnn7-py3-build
 pytorch-ppc64le-cuda9.1-cudnn7-py3-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
+pytorch-xla-linux-trusty-py3.6-gcc5.4-build
+pytorch-xla-linux-trusty-py3.6-gcc5.4-test

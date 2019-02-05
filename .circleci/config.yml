@@ -2942,16 +2942,8 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc7_build
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
-          filters:
-            branches:
-              only:
-                - master
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
-          filters:
-            branches:
-              only:
-                - master
           requires:
             - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_pynightly_build
