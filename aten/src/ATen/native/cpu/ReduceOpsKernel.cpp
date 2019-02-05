@@ -148,6 +148,24 @@ static void or_kernel_impl(TensorIterator& iter) {
     /*ident=*/false);
 }
 
+static void min_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "min_values", [&iter] {
+    binary_kernel_reduce_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
+  });
+}
+
+static void max_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "min_values", [&iter] {
+    binary_kernel_reduce_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
+  });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
@@ -157,5 +175,7 @@ REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
 
 }}  // namespace at::native

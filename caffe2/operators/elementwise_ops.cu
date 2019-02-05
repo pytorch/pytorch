@@ -121,7 +121,7 @@ void device_reduce<at::Half>(
 #else
   auto buffer_size = 1;
 
-  if (buffer->size() != buffer_size) {
+  if (buffer->numel() != buffer_size) {
     buffer->Resize(buffer_size);
 
     math::Set<at::Half, CUDAContext>(

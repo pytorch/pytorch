@@ -310,32 +310,11 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().index_copy(*this, dim, index, source);
-}
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
     return type().index_put(*this, indices, values, accumulate);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
     return type().index_put_(*this, indices, values, accumulate);
-}
-inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().index_add(*this, dim, index, source);
-}
-inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar source) const {
-    return type().index_fill(*this, dim, index, source);
-}
-inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().scatter(*this, dim, index, source);
-}
-inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().scatter_add(*this, dim, index, source);
-}
-inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
-    return type().masked_scatter(*this, mask, source);
-}
-inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar source) const {
-    return type().masked_fill(*this, mask, source);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -397,7 +376,7 @@ inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return type().log_softmax(*this, dim);
 }
-inline Tensor Tensor::logsumexp(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::logsumexp(IntList dim, bool keepdim) const {
     return type().logsumexp(*this, dim, keepdim);
 }
 inline Tensor Tensor::matmul(const Tensor & other) const {
@@ -409,7 +388,7 @@ inline Tensor Tensor::matrix_power(int64_t n) const {
 inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
     return type().max(*this, dim, keepdim);
 }
-inline Tensor Tensor::max_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::max_values(IntList dim, bool keepdim) const {
     return type().max_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(ScalarType dtype) const {
@@ -433,7 +412,7 @@ inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
     return type().min(*this, dim, keepdim);
 }
-inline Tensor Tensor::min_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::min_values(IntList dim, bool keepdim) const {
     return type().min_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mm(const Tensor & mat2) const {

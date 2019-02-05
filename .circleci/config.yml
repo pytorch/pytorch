@@ -154,7 +154,7 @@ setup_ci_environment: &setup_ci_environment
       nvidia-smi
     fi
 
-    if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+    if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
       echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
       echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
       echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
@@ -167,7 +167,7 @@ setup_ci_environment: &setup_ci_environment
       export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
       echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
-      if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
         # This IAM user allows write access to S3 bucket for sccache & bazels3cache
         echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
@@ -229,7 +229,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-        export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+        export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
         # Push intermediate Docker image for next phase to use
@@ -259,9 +259,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         if [ -n "${MULTI_GPU}" ]; then
-          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         else
-          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         fi
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -502,8 +502,8 @@ binary_populate_env: &binary_populate_env
     touch "$envfile"
     chmod +x "$envfile"
 
-    # Parse the JOB_BASE_NAME to package type, python, and cuda
-    configs=($JOB_BASE_NAME)
+    # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
+    configs=($BUILD_ENVIRONMENT)
     export PACKAGE_TYPE="${configs[0]}"
     export DESIRED_PYTHON="${configs[1]}"
     export DESIRED_CUDA="${configs[2]}"
@@ -1005,118 +1005,118 @@ version: 2
 jobs:
   pytorch_linux_trusty_py2_7_9_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7.9-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_9_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7.9-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py2_7_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py2.7-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py2.7-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_5_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.5-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_5_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.5-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc4.8-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc4.8-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc5.4-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc5.4-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
     environment:
-      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
+      BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
     <<: *pytorch_linux_build_defaults
 
   pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
     environment:
-      JOB_BASE_NAME: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
+      BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc7_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc7_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_pynightly_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-pynightly-build
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:285"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_pynightly_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-pynightly-test
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:285"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-build
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:285"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:285"
       PYTHON_VERSION: "3.6"
     resource_class: large
@@ -1124,15 +1124,14 @@ jobs:
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
+      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3-build"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1141,7 +1140,7 @@ jobs:
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1151,7 +1150,7 @@ jobs:
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1160,7 +1159,7 @@ jobs:
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1169,14 +1168,14 @@ jobs:
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-build
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:285"
       PYTHON_VERSION: "2.7"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:285"
       PYTHON_VERSION: "2.7"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1185,14 +1184,14 @@ jobs:
 
   pytorch_linux_xenial_cuda9_cudnn7_py3_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-build
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1201,14 +1200,14 @@ jobs:
 
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:285"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1217,14 +1216,14 @@ jobs:
 
   pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:285"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_short_perf_test_gpu:
     environment:
-      JOB_BASE_NAME: pytorch-short-perf-test-gpu
+      BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -1250,12 +1249,12 @@ jobs:
           echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
-          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   pytorch_doc_push:
     environment:
-      JOB_BASE_NAME: pytorch-doc-push
+      BUILD_ENVIRONMENT: pytorch-doc-push
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:285"
     resource_class: large
     machine:
@@ -1279,9 +1278,9 @@ jobs:
 
           if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
             # Do a dry_run of the docs build. This will build the docs but not push them.
-            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
-            export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -1295,8 +1294,7 @@ jobs:
       - run:
           name: Build
           environment:
-            JOB_BASE_NAME: pytorch-macos-10.13-py3-build
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -1340,8 +1338,7 @@ jobs:
       - run:
           name: Test
           environment:
-            JOB_BASE_NAME: pytorch-macos-10.13-py3-test
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
           no_output_timeout: "1h"
           command: |
             set -e
@@ -1363,8 +1360,7 @@ jobs:
       - run:
           name: Build
           environment:
-            JOB_BASE_NAME: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -1401,172 +1397,151 @@ jobs:
 
   caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build"
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
       USE_CUDA_DOCKER_RUNTIME: "1"
-      BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
   caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:238"
       USE_CUDA_DOCKER_RUNTIME: "1"
-      BUILD_ENVIRONMENT: "cmake-cuda9.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-build
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-build"
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:238"
       USE_CUDA_DOCKER_RUNTIME: "1"
-      BUILD_ENVIRONMENT: "py2-cuda9.1-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-test"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_mkl_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-mkl-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-mkl-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-mkl-ubuntu16.04-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_mkl_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-mkl-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-mkl-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-mkl-ubuntu16.04-test"
     resource_class: large
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_gcc4_8_ubuntu14_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-gcc4.8-ubuntu14.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:238"
-      BUILD_ENVIRONMENT: "py2-gcc4.8-ubuntu14.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-gcc4.8-ubuntu14.04-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_gcc4_8_ubuntu14_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-gcc4.8-ubuntu14.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:238"
-      BUILD_ENVIRONMENT: "py2-gcc4.8-ubuntu14.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-gcc4.8-ubuntu14.04-test"
     resource_class: large
     <<: *caffe2_linux_test_defaults
 
   caffe2_onnx_py2_gcc5_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-onnx-py2-gcc5-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "onnx-py2-gcc5-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-onnx-py2-gcc5-ubuntu16.04-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_onnx_py2_gcc5_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-onnx-py2-gcc5-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "onnx-py2-gcc5-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-onnx-py2-gcc5-ubuntu16.04-test"
     resource_class: large
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
       USE_CUDA_DOCKER_RUNTIME: "1"
-      BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda8.0-cudnn7-ubuntu16.04-test"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_gcc4_9_ubuntu14_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-gcc4.9-ubuntu14.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.9-ubuntu14.04:238"
-      BUILD_ENVIRONMENT: "py2-gcc4.9-ubuntu14.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-gcc4.9-ubuntu14.04-build"
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_clang3_8_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-clang3.8-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-clang3.8-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-clang3.8-ubuntu16.04-build"
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_clang3_9_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-clang3.9-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-clang3.9-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-clang3.9-ubuntu16.04-build"
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_clang7_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-clang7-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-clang7-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-clang7-ubuntu16.04-build"
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_android_ubuntu16_04_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-android-ubuntu16.04-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:238"
-      BUILD_ENVIRONMENT: "py2-android-ubuntu16.04"
+      BUILD_ENVIRONMENT: "caffe2-py2-android-ubuntu16.04-build"
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda9_0_cudnn7_centos7_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-centos7-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:238"
-      BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-centos7"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.0-cudnn7-centos7-build"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda9_0_cudnn7_centos7_test:
     environment:
-      JOB_BASE_NAME: caffe2-py2-cuda9.0-cudnn7-centos7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:238"
       USE_CUDA_DOCKER_RUNTIME: "1"
-      BUILD_ENVIRONMENT: "py2-cuda9.0-cudnn7-centos7"
+      BUILD_ENVIRONMENT: "caffe2-py2-cuda9.0-cudnn7-centos7-test"
     resource_class: gpu.medium
     <<: *caffe2_linux_test_defaults
 
   caffe2_py2_ios_macos10_13_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-ios-macos10.13-build
+      BUILD_ENVIRONMENT: caffe2-py2-ios-macos10.13-build
       BUILD_IOS: "1"
       PYTHON_INSTALLATION: "system"
       PYTHON_VERSION: "2"
@@ -1574,7 +1549,7 @@ jobs:
 
   caffe2_py2_system_macos10_13_build:
     environment:
-      JOB_BASE_NAME: caffe2-py2-system-macos10.13-build
+      BUILD_ENVIRONMENT: caffe2-py2-system-macos10.13-build
       PYTHON_INSTALLATION: "system"
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
@@ -1599,334 +1574,334 @@ jobs:
           retry pip install awscli==1.6
           "$BUILDER_ROOT/cron/update_s3_htmls.sh"
 
-      
+
 
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
   binary_linux_manywheel_2.7m_cpu_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7mu_cpu_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.5m_cpu_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.6m_cpu_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.7m_cpu_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7m_cu80_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7mu_cu80_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.5m_cu80_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.6m_cu80_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.7m_cu80_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7m_cu90_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7mu_cu90_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.5m_cu90_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.6m_cu90_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.7m_cu90_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7m_cu100_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7mu_cu100_build:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.5m_cu100_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.6m_cu100_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.7m_cu100_build:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_conda_2.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.5_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.6_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_2.7_cu80_build:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu80"
+      BUILD_ENVIRONMENT: "conda 2.7 cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.5_cu80_build:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu80"
+      BUILD_ENVIRONMENT: "conda 3.5 cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.6_cu80_build:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu80"
+      BUILD_ENVIRONMENT: "conda 3.6 cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.7_cu80_build:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu80"
+      BUILD_ENVIRONMENT: "conda 3.7 cu80"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_2.7_cu90_build:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu90"
+      BUILD_ENVIRONMENT: "conda 2.7 cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.5_cu90_build:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu90"
+      BUILD_ENVIRONMENT: "conda 3.5 cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.6_cu90_build:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu90"
+      BUILD_ENVIRONMENT: "conda 3.6 cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.7_cu90_build:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu90"
+      BUILD_ENVIRONMENT: "conda 3.7 cu90"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_2.7_cu100_build:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu100"
+      BUILD_ENVIRONMENT: "conda 2.7 cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.5_cu100_build:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu100"
+      BUILD_ENVIRONMENT: "conda 3.5 cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.6_cu100_build:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu100"
+      BUILD_ENVIRONMENT: "conda 3.6 cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_conda_3.7_cu100_build:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu100"
+      BUILD_ENVIRONMENT: "conda 3.7 cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_build:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu80_build:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu90_build:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu100_build:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_macos_wheel_2.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "wheel 2.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.5_cpu_build:
     environment:
-      JOB_BASE_NAME: "wheel 3.5 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.6_cpu_build:
     environment:
-      JOB_BASE_NAME: "wheel 3.6 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *binary_mac_build
 
   binary_macos_wheel_3.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "wheel 3.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_2.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.5_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.6_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *binary_mac_build
 
   binary_macos_libtorch_2.7_cpu_build:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7 cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_build
 
   # Binary build tests
@@ -1935,37 +1910,37 @@ jobs:
   #############################################################################
   binary_linux_manywheel_2.7m_cpu_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
   binary_linux_manywheel_2.7mu_cpu_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.5m_cpu_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.6m_cpu_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.7m_cpu_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
   binary_linux_manywheel_2.7m_cu80_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     resource_class: gpu.medium
@@ -1973,7 +1948,7 @@ jobs:
 
   binary_linux_manywheel_2.7mu_cu80_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     resource_class: gpu.medium
@@ -1981,7 +1956,7 @@ jobs:
 
   binary_linux_manywheel_3.5m_cu80_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     resource_class: gpu.medium
@@ -1989,7 +1964,7 @@ jobs:
 
   binary_linux_manywheel_3.6m_cu80_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     resource_class: gpu.medium
@@ -1997,7 +1972,7 @@ jobs:
 
   binary_linux_manywheel_3.7m_cu80_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     resource_class: gpu.medium
@@ -2005,7 +1980,7 @@ jobs:
 
   binary_linux_manywheel_2.7m_cu90_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     resource_class: gpu.medium
@@ -2013,7 +1988,7 @@ jobs:
 
   binary_linux_manywheel_2.7mu_cu90_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     resource_class: gpu.medium
@@ -2021,7 +1996,7 @@ jobs:
 
   binary_linux_manywheel_3.5m_cu90_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     resource_class: gpu.medium
@@ -2029,7 +2004,7 @@ jobs:
 
   binary_linux_manywheel_3.6m_cu90_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     resource_class: gpu.medium
@@ -2037,7 +2012,7 @@ jobs:
 
   binary_linux_manywheel_3.7m_cu90_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
     resource_class: gpu.medium
@@ -2045,7 +2020,7 @@ jobs:
 
   binary_linux_manywheel_2.7m_cu100_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     resource_class: gpu.medium
@@ -2053,7 +2028,7 @@ jobs:
 
   binary_linux_manywheel_2.7mu_cu100_test:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     resource_class: gpu.medium
@@ -2061,7 +2036,7 @@ jobs:
 
   binary_linux_manywheel_3.5m_cu100_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     resource_class: gpu.medium
@@ -2069,7 +2044,7 @@ jobs:
 
   binary_linux_manywheel_3.6m_cu100_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     resource_class: gpu.medium
@@ -2077,7 +2052,7 @@ jobs:
 
   binary_linux_manywheel_3.7m_cu100_test:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     resource_class: gpu.medium
@@ -2085,31 +2060,31 @@ jobs:
 
   binary_linux_conda_2.7_cpu_test:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
   binary_linux_conda_3.5_cpu_test:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
   binary_linux_conda_3.6_cpu_test:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
   binary_linux_conda_3.7_cpu_test:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
   binary_linux_conda_2.7_cu80_test:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu80"
+      BUILD_ENVIRONMENT: "conda 2.7 cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2117,7 +2092,7 @@ jobs:
 
   binary_linux_conda_3.5_cu80_test:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu80"
+      BUILD_ENVIRONMENT: "conda 3.5 cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2125,7 +2100,7 @@ jobs:
 
   binary_linux_conda_3.6_cu80_test:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu80"
+      BUILD_ENVIRONMENT: "conda 3.6 cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2133,7 +2108,7 @@ jobs:
 
   binary_linux_conda_3.7_cu80_test:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu80"
+      BUILD_ENVIRONMENT: "conda 3.7 cu80"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2141,7 +2116,7 @@ jobs:
 
   binary_linux_conda_2.7_cu90_test:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu90"
+      BUILD_ENVIRONMENT: "conda 2.7 cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2149,7 +2124,7 @@ jobs:
 
   binary_linux_conda_3.5_cu90_test:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu90"
+      BUILD_ENVIRONMENT: "conda 3.5 cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2157,7 +2132,7 @@ jobs:
 
   binary_linux_conda_3.6_cu90_test:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu90"
+      BUILD_ENVIRONMENT: "conda 3.6 cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2165,7 +2140,7 @@ jobs:
 
   binary_linux_conda_3.7_cu90_test:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu90"
+      BUILD_ENVIRONMENT: "conda 3.7 cu90"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2173,7 +2148,7 @@ jobs:
 
   binary_linux_conda_2.7_cu100_test:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu100"
+      BUILD_ENVIRONMENT: "conda 2.7 cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2181,7 +2156,7 @@ jobs:
 
   binary_linux_conda_3.5_cu100_test:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu100"
+      BUILD_ENVIRONMENT: "conda 3.5 cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2189,7 +2164,7 @@ jobs:
 
   binary_linux_conda_3.6_cu100_test:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu100"
+      BUILD_ENVIRONMENT: "conda 3.6 cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2197,7 +2172,7 @@ jobs:
 
   binary_linux_conda_3.7_cu100_test:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu100"
+      BUILD_ENVIRONMENT: "conda 3.7 cu100"
       USE_CUDA_DOCKER_RUNTIME: "1"
       DOCKER_IMAGE: "soumith/conda-cuda"
     resource_class: gpu.medium
@@ -2206,25 +2181,25 @@ jobs:
 # There is currently no testing for libtorch TODO
 #  binary_linux_libtorch_2.7m_cpu_test:
 #    environment:
-#      JOB_BASE_NAME: "libtorch 2.7m cpu"
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 #
 #  binary_linux_libtorch_2.7m_cu80_test:
 #    environment:
-#      JOB_BASE_NAME: "libtorch 2.7m cu80"
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 #
 #  binary_linux_libtorch_2.7m_cu90_test:
 #    environment:
-#      JOB_BASE_NAME: "libtorch 2.7m cu90"
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 #
 #  binary_linux_libtorch_2.7m_cu100_test:
 #    environment:
-#      JOB_BASE_NAME: "libtorch 2.7m cu100"
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 
@@ -2232,247 +2207,247 @@ jobs:
   #############################################################################
   binary_linux_manywheel_2.7m_cpu_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7mu_cpu_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.5m_cpu_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.6m_cpu_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.7m_cpu_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7m_cu80_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7mu_cu80_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.5m_cu80_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.6m_cu80_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.7m_cu80_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7m_cu90_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7mu_cu90_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.5m_cu90_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.6m_cu90_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.7m_cu90_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7m_cu100_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_2.7mu_cu100_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.5m_cu100_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.6m_cu100_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100"
     <<: *binary_linux_upload
 
   binary_linux_manywheel_3.7m_cu100_upload:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.5_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.6_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cu80_upload:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu80"
+      BUILD_ENVIRONMENT: "conda 2.7 cu80"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.5_cu80_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu80"
+      BUILD_ENVIRONMENT: "conda 3.5 cu80"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.6_cu80_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu80"
+      BUILD_ENVIRONMENT: "conda 3.6 cu80"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.7_cu80_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu80"
+      BUILD_ENVIRONMENT: "conda 3.7 cu80"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cu90_upload:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu90"
+      BUILD_ENVIRONMENT: "conda 2.7 cu90"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.5_cu90_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu90"
+      BUILD_ENVIRONMENT: "conda 3.5 cu90"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.6_cu90_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu90"
+      BUILD_ENVIRONMENT: "conda 3.6 cu90"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.7_cu90_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu90"
+      BUILD_ENVIRONMENT: "conda 3.7 cu90"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cu100_upload:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu100"
+      BUILD_ENVIRONMENT: "conda 2.7 cu100"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.5_cu100_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu100"
+      BUILD_ENVIRONMENT: "conda 3.5 cu100"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.6_cu100_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu100"
+      BUILD_ENVIRONMENT: "conda 3.6 cu100"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.7_cu100_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu100"
+      BUILD_ENVIRONMENT: "conda 3.7 cu100"
     <<: *binary_linux_upload
 
   binary_linux_libtorch_2.7m_cpu_upload:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
     <<: *binary_linux_upload
 
   binary_linux_libtorch_2.7m_cu80_upload:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
     <<: *binary_linux_upload
 
   binary_linux_libtorch_2.7m_cu90_upload:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
     <<: *binary_linux_upload
 
   binary_linux_libtorch_2.7m_cu100_upload:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
     <<: *binary_linux_upload
 
   binary_macos_wheel_2.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "wheel 2.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.5_cpu_upload:
     environment:
-      JOB_BASE_NAME: "wheel 3.5 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.6_cpu_upload:
     environment:
-      JOB_BASE_NAME: "wheel 3.6 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *binary_mac_upload
 
   binary_macos_wheel_3.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "wheel 3.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_2.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.5_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.6_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *binary_mac_upload
 
   binary_macos_libtorch_2.7_cpu_upload:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7 cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_upload
 
 
@@ -2481,37 +2456,37 @@ jobs:
 ##############################################################################
   smoke_linux_manywheel_2.7m_cpu:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_2.7mu_cpu:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cpu"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.5m_cpu:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.6m_cpu:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.7m_cpu:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cpu"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_2.7m_cu80:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2519,7 +2494,7 @@ jobs:
 
   smoke_linux_manywheel_2.7mu_cu80:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu80"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2527,7 +2502,7 @@ jobs:
 
   smoke_linux_manywheel_3.5m_cu80:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2535,7 +2510,7 @@ jobs:
 
   smoke_linux_manywheel_3.6m_cu80:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2543,7 +2518,7 @@ jobs:
 
   smoke_linux_manywheel_3.7m_cu80:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu80"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2551,7 +2526,7 @@ jobs:
 
   smoke_linux_manywheel_2.7m_cu90:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2559,7 +2534,7 @@ jobs:
 
   smoke_linux_manywheel_2.7mu_cu90:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu90"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2567,7 +2542,7 @@ jobs:
 
   smoke_linux_manywheel_3.5m_cu90:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2575,7 +2550,7 @@ jobs:
 
   smoke_linux_manywheel_3.6m_cu90:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2583,7 +2558,7 @@ jobs:
 
   smoke_linux_manywheel_3.7m_cu90:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu90"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2591,7 +2566,7 @@ jobs:
 
   smoke_linux_manywheel_2.7m_cu100:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2599,7 +2574,7 @@ jobs:
 
   smoke_linux_manywheel_2.7mu_cu100:
     environment:
-      JOB_BASE_NAME: "manywheel 2.7mu cu100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2607,7 +2582,7 @@ jobs:
 
   smoke_linux_manywheel_3.5m_cu100:
     environment:
-      JOB_BASE_NAME: "manywheel 3.5m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2615,7 +2590,7 @@ jobs:
 
   smoke_linux_manywheel_3.6m_cu100:
     environment:
-      JOB_BASE_NAME: "manywheel 3.6m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2623,7 +2598,7 @@ jobs:
 
   smoke_linux_manywheel_3.7m_cu100:
     environment:
-      JOB_BASE_NAME: "manywheel 3.7m cu100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2631,31 +2606,31 @@ jobs:
 
   smoke_linux_conda_2.7_cpu:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
   smoke_linux_conda_3.5_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
   smoke_linux_conda_3.6_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
   smoke_linux_conda_3.7_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
   smoke_linux_conda_2.7_cu80:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu80"
+      BUILD_ENVIRONMENT: "conda 2.7 cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2663,7 +2638,7 @@ jobs:
 
   smoke_linux_conda_3.5_cu80:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu80"
+      BUILD_ENVIRONMENT: "conda 3.5 cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2671,7 +2646,7 @@ jobs:
 
   smoke_linux_conda_3.6_cu80:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu80"
+      BUILD_ENVIRONMENT: "conda 3.6 cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2679,7 +2654,7 @@ jobs:
 
   smoke_linux_conda_3.7_cu80:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu80"
+      BUILD_ENVIRONMENT: "conda 3.7 cu80"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2687,7 +2662,7 @@ jobs:
 
   smoke_linux_conda_2.7_cu90:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu90"
+      BUILD_ENVIRONMENT: "conda 2.7 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2695,7 +2670,7 @@ jobs:
 
   smoke_linux_conda_3.5_cu90:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu90"
+      BUILD_ENVIRONMENT: "conda 3.5 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2703,7 +2678,7 @@ jobs:
 
   smoke_linux_conda_3.6_cu90:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu90"
+      BUILD_ENVIRONMENT: "conda 3.6 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2711,7 +2686,7 @@ jobs:
 
   smoke_linux_conda_3.7_cu90:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu90"
+      BUILD_ENVIRONMENT: "conda 3.7 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2719,7 +2694,7 @@ jobs:
 
   smoke_linux_conda_2.7_cu100:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cu100"
+      BUILD_ENVIRONMENT: "conda 2.7 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2727,7 +2702,7 @@ jobs:
 
   smoke_linux_conda_3.5_cu100:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cu100"
+      BUILD_ENVIRONMENT: "conda 3.5 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2735,7 +2710,7 @@ jobs:
 
   smoke_linux_conda_3.6_cu100:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cu100"
+      BUILD_ENVIRONMENT: "conda 3.6 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2743,7 +2718,7 @@ jobs:
 
   smoke_linux_conda_3.7_cu100:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cu100"
+      BUILD_ENVIRONMENT: "conda 3.7 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2751,35 +2726,35 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cpu_shared-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_shared-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_static-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_static-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cu80_shared-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2788,7 +2763,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu80_shared-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2797,7 +2772,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu80_static-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2806,7 +2781,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu80_static-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu80"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2815,7 +2790,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu90_shared-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2824,7 +2799,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu90_shared-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2833,7 +2808,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu90_static-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2842,7 +2817,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu90_static-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu90"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2851,7 +2826,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu100_shared-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2860,7 +2835,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu100_shared-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2869,7 +2844,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu100_static-with-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2878,7 +2853,7 @@ jobs:
 
   smoke_linux_libtorch_2.7m_cu100_static-without-deps:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cu100"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2887,47 +2862,47 @@ jobs:
 
   smoke_macos_wheel_2.7_cpu:
     environment:
-      JOB_BASE_NAME: "wheel 2.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_wheel_3.5_cpu:
     environment:
-      JOB_BASE_NAME: "wheel 3.5 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_wheel_3.6_cpu:
     environment:
-      JOB_BASE_NAME: "wheel 3.6 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_wheel_3.7_cpu:
     environment:
-      JOB_BASE_NAME: "wheel 3.7 cpu"
+      BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_conda_2.7_cpu:
     environment:
-      JOB_BASE_NAME: "conda 2.7 cpu"
+      BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_conda_3.5_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.5 cpu"
+      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_conda_3.6_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.6 cpu"
+      BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_conda_3.7_cpu:
     environment:
-      JOB_BASE_NAME: "conda 3.7 cpu"
+      BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *smoke_mac_test
 
   smoke_macos_libtorch_2.7_cpu:
     environment:
-      JOB_BASE_NAME: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
     <<: *smoke_mac_test
 
 
