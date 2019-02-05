@@ -81,6 +81,8 @@ if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
   rm ~/sccache_error.log || true
+  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+  # https://github.com/pytorch/pytorch/pull/16645
   SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
