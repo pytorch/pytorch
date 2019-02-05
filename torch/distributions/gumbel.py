@@ -16,10 +16,9 @@ class Gumbel(TransformedDistribution):
 
     Examples::
 
-        >>> torch.manual_seed(0)
         >>> m = Gumbel(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # sample from Gumbel distribution with loc=1, scale=2
-        tensor([1.7115])
+        tensor([...])
 
     Args:
         loc (float or Tensor): Location parameter of the distribution

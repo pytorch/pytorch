@@ -41,7 +41,7 @@ class Dirichlet(ExponentialFamily):
 
         >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
         >>> m.sample()  # Dirichlet distributed with concentrarion concentration
-        tensor([ 0.1046,  0.8954])
+        tensor([..., ...])
 
     Args:
         concentration (Tensor): concentration parameter of the distribution

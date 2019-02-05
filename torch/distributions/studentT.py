@@ -14,10 +14,9 @@ class StudentT(Distribution):
 
     Example::
 
-        >>> torch.manual_seed(0)
         >>> m = StudentT(torch.tensor([2.0]))
         >>> m.sample()  # Student's t-distributed with degrees of freedom=2
-        tensor([2.2854])
+        tensor([...])
 
     Args:
         df (float or Tensor): degrees of freedom

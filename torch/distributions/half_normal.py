@@ -1,6 +1,5 @@
 import math
 
-import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
@@ -19,7 +18,7 @@ class HalfNormal(TransformedDistribution):
 
         >>> m = HalfNormal(torch.tensor([1.0]))
         >>> m.sample()  # half-normal distributed with scale=1
-        tensor([ 0.1046])
+        tensor([...])
 
     Args:
         scale (float or Tensor): scale of the full Normal distribution

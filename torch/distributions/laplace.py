@@ -11,10 +11,9 @@ class Laplace(Distribution):
 
     Example::
 
-        >>> torch.manual_seed(0)
         >>> m = Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # Laplace distributed with loc=0, scale=1
-        tensor([-0.0075])
+        tensor([...])
 
     Args:
         loc (float or Tensor): mean of the distribution

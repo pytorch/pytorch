@@ -63,15 +63,14 @@ class LowRankMultivariateNormal(Distribution):
     Example:
         >>> # FIXME! The original doctest didnt run, not sure how it should be
         >>> # fixed. The current version runs something but it may not be right.
-        >>> torch.manual_seed(0)
         >>> B = 2
         >>> loc = torch.zeros(2)[None, :].expand(B, -1)
         >>> cov_factor = torch.FloatTensor([1, 0])[None, :].expand(B, -1)
         >>> cov_diag = torch.FloatTensor([1, 1])[None, :].expand(B, -1)
         >>> m = LowRankMultivariateNormal(loc, cov_factor, cov_diag)
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
-        tensor([[ 0.4565,  0.1424],
-                [-1.7754, -1.3408]])
+        tensor([[..., ...],
+                [..., ...])
 
         OldDoctest:
             m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
