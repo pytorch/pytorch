@@ -509,7 +509,15 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar
   return self.clone().index_fill_(dim, index, source);
 }
 
+Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_fill_(dim, index, source);
+}
+
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().scatter_(dim, index, source);
+}
+
+Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   return self.clone().scatter_(dim, index, source);
 }
 
@@ -524,6 +532,12 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_fill_(mask, source);
+}
+
+Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
   return _self.clone().masked_fill_(mask, source);
