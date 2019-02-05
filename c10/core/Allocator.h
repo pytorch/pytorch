@@ -16,7 +16,7 @@ namespace c10 {
 // nullptr DataPtrs can still have a nontrivial device; this allows
 // us to treat zero-size allocations uniformly with non-zero allocations.
 //
-class DataPtr {
+class C10_API DataPtr {
  private:
   c10::detail::UniqueVoidPtr ptr_;
   Device device_;
@@ -181,10 +181,6 @@ struct C10_API InefficientStdFunctionContext {
       Device device);
 };
 
-} // namespace c10
-
-namespace caffe2 {
-
 /** Set the allocator for DeviceType `t`. The passed in allocator pointer is
  *  expected to have static lifetime; this function does NOT take ownership
  *  of the raw pointer. (The reason for this is to prevent existing pointers
@@ -209,4 +205,4 @@ struct AllocatorRegisterer {
   static AllocatorRegisterer<t> g_allocator_##d(f); \
   }
 
-} // namespace caffe2
+} // namespace c10

@@ -107,34 +107,27 @@ int GetCurrentNUMANode() {
 
 #else // C10_ENABLE_NUMA
 
+// Because logging affects performance of tensor allocation benchmark, we'll remove VLOGs
+
 bool IsNUMAEnabled() {
   return false;
 }
 
 void NUMABind(int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
 }
 
 int GetNUMANode(const void* ptr) {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 
 int GetNumNUMANodes() {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 
 void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
 }
 
 int GetCurrentNUMANode() {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 
