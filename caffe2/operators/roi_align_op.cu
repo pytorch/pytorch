@@ -161,7 +161,7 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
   assert(sampling_ratio_ >= 0);
 
   auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
-  int output_size = Y->size();
+  int output_size = Y->numel();
   RoIAlignForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
          CAFFE_CUDA_NUM_THREADS,

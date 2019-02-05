@@ -290,7 +290,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     auto& filter = Input(1);
     Tensor* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
 
     CAFFE_ENFORCE_EQ(M, X.dim32(1));
@@ -342,7 +342,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
           Y->dim32(2),
           Y->dim32(3)));
       auto& bias = Input(2);
-      CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+      CAFFE_ENFORCE_EQ(bias.dim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),
@@ -394,7 +394,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
 
     const vector<int> input_dims = this->GetDims(X);
     ConvPoolOpBase<CUDAContext>::ComputePads(input_dims);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
     CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
     CAFFE_ENFORCE(M % group_ == 0);
