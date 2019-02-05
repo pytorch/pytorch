@@ -37,8 +37,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   explicit OperatorBase(
       const c10::FunctionSchema&,
-      const std::vector<c10::IValue>&,
-      const std::vector<c10::IValue*>&);
+      std::vector<c10::IValue>,
+      std::vector<c10::IValue*>);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -86,12 +86,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         *operator_def_, name);
   }
   template <typename T>
+  inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
+    return value.template to<vector<T>>();
+  }
+
+  template <typename T>
   inline vector<T> GetRepeatedArgument(
       const string& name,
       const vector<T>& default_value = {}) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = getFunctionSchema().argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = ivalue_inputs_[index.value()];
+    return GetVectorFromIValueList<T>(value);
   }
 
   // Get the inputs and outputs as specific types.
@@ -190,6 +201,16 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
     return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
+  }
+
+  void SetOutputTensor(int idx, Tensor tensor) {
+    // also update the tensor in the hack
+    if (!isLegacyOperator()) {
+      output_tensors_[idx] = tensor.UnsafeSharedInstance();
+    }
+
+    // update the tensor in the workspace
+    BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
   inline Tensor*
@@ -553,6 +574,38 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
+template <>
+inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toIntListRef();
+  vector<int> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toDoubleListRef();
+  vector<float> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
+    const c10::IValue& value) const {
+  CAFFE_THROW("Cannot extract vector<string> from ivalue.");
+  vector<string> out;
+  return out;
+}
+
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
 // This is a workaround for CUDA9.2 and GCC7
@@ -593,8 +646,8 @@ class Operator : public OperatorBase {
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
-      const std::vector<c10::IValue>& inputs,
-      const std::vector<c10::IValue*>& outputs)
+      std::vector<c10::IValue> inputs,
+      std::vector<c10::IValue*> outputs)
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
@@ -1144,8 +1197,8 @@ C10_DECLARE_REGISTRY(
     FunctionSchemaOperatorRegistry,
     OperatorBase,
     const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
+    std::vector<c10::IValue>,
+    std::vector<c10::IValue*>);
 
 struct FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
@@ -1154,6 +1207,9 @@ struct FunctionSchemaStorageBase {
 };
 
 C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
+
+// Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
+// as they wrap it all in a Meyer's singleton accessible from Torch.
 
 #define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
@@ -1164,6 +1220,21 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
+
+#define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  void CAFFE2_MEYERS_OP_REGISTRATION_##name() {                      \
+    REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl);  \
+  }                                                                  \
+  static CAFFE2_STRUCT_OP_REGISTRATION_##name                        \
+      CAFFE2_STRUCT_OP_REGISTRATION_DEFN_##name;
+
+#define DECLARE_FUNCTION_SCHEMA_OPERATOR(name)             \
+  CAFFE2_API void CAFFE2_MEYERS_OP_REGISTRATION_##name();  \
+  struct CAFFE2_API CAFFE2_STRUCT_OP_REGISTRATION_##name { \
+    CAFFE2_STRUCT_OP_REGISTRATION_##name() {               \
+      CAFFE2_MEYERS_OP_REGISTRATION_##name();              \
+    }                                                      \
+  };
 
 #define GET_FUNCTION_SCHEMA(name) \
   FunctionSchemaRegistry()->Create(name)->getSchema()
@@ -1229,8 +1300,8 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
 // instantiate and run the operator.
 CAFFE2_API void RunOperator(
     c10::Symbol name,
-    std::vector<c10::IValue>& inputs,
-    std::vector<c10::IValue*>& outputs);
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs);
 
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,

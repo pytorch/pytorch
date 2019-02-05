@@ -593,14 +593,16 @@ Tensor _sparse_addmm(
   Scalar beta,
   Scalar alpha
 ) {
-  return at::s_native_addmm(t, sparse, dense, beta, alpha);
+  Tensor b_t;
+  std::tie(b_t) = expand_size(t, {sparse.size(0), dense.size(1)}, "addmm");
+  return at::s_native_addmm(b_t, sparse, dense, beta, alpha);
 }
 
 Tensor _sparse_mm(
   const SparseTensor& sparse,
   const Tensor& dense
 ) {
-  Tensor t = at::empty({sparse.size(0), dense.size(1)}, dense.options());
+  Tensor t = at::zeros({}, dense.options());
   return at::_sparse_addmm(t, sparse, dense, 0, 1);
 }
 

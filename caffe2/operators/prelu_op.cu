@@ -156,7 +156,7 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
   const auto* Wdata = W.data<float>();
   auto* Ydata = Y->template mutable_data<float>();
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.dim() - 1);
   const auto C_shared = (W.size() == 1);
 
   if (!C_shared) {
@@ -212,7 +212,7 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.dim() - 1);
   const auto C_shared = (W.size() == 1);
 
   const float* Ydata = Y.data<float>();

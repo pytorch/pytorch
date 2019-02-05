@@ -447,7 +447,10 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
       break;
     }
   }
-  auto grads_tensors = fmap(grads, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes));});
+  auto grads_tensors = fmap(grads, [&](const Variable& v) {
+    return (
+        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+  });
   return at::stack(grads_tensors, dim);
 }
 
@@ -1942,8 +1945,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   // everything else, but not now)
   auto mu = unsqueeze_dim1(training ? save_mean.to(input.type().scalarType()) : running_mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_invstd.to(input.type().scalarType())
-					            : running_var.add(Scalar(eps)).pow(-0.5), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
+      training ? save_invstd.to(input.type().scalarType())
+               : running_var.add(Scalar(eps)).pow(-0.5),
+      input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 

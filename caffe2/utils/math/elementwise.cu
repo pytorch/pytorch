@@ -23,8 +23,8 @@ __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
 template <typename T>
 __global__ void AffineChannelNCHWCUDAKernel(
     const int C,
+    const int M,
     const int HxW,
-    const int K,
     const T* X,
     const T* scale,
     const T* bias,
@@ -33,15 +33,15 @@ __global__ void AffineChannelNCHWCUDAKernel(
 template <>
 __global__ void AffineChannelNCHWCUDAKernel<float>(
     const int C,
+    const int M,
     const int HxW,
-    const int K,
     const float* X,
     const float* scale,
     const float* bias,
     float* Y) {
-  const int nc = blockIdx.x / K;
+  const int nc = blockIdx.x / M;
   const int c = nc % C;
-  const int w = blockIdx.x % K * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  const int w = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (w < HxW) {
     const int index = nc * HxW + w;
 #if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
@@ -180,10 +180,10 @@ CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
       const T* bias,                                                         \
       T* Y,                                                                  \
       CUDAContext* context) {                                                \
-    const int K = DivUp(HxW, CAFFE_CUDA_NUM_THREADS);                        \
+    const int M = DivUp(HxW, CAFFE_CUDA_NUM_THREADS);                        \
     AffineChannelNCHWCUDAKernel<T>                                           \
-        <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(  \
-            C, HxW, K, X, scale, bias, Y);                                   \
+        <<<N * C * M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(  \
+            C, M, HxW, X, scale, bias, Y);                                   \
   }                                                                          \
   template <>                                                                \
   CAFFE2_CUDA_EXPORT void AffineChannel<T, CUDAContext, StorageOrder::NHWC>( \
@@ -195,9 +195,9 @@ CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
       const T* bias,                                                         \
       T* Y,                                                                  \
       CUDAContext* context) {                                                \
-    const int K = DivUp(C, CAFFE_CUDA_NUM_THREADS);                          \
+    const int M = DivUp(C, CAFFE_CUDA_NUM_THREADS);                          \
     AffineChannelNHWCCUDAKernel<T>                                           \
-        <<<dim3(N* HxW, K),                                                  \
+        <<<dim3(N* HxW, M),                                                  \
            CAFFE_CUDA_NUM_THREADS,                                           \
            0,                                                                \
            context->cuda_stream()>>>(C, X, scale, bias, Y);                  \

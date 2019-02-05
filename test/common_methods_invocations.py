@@ -744,7 +744,7 @@ def method_tests():
         ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
         ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
         ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
-        # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
+        ('masked_fill', (M,), (torch.ByteTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
         ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
         ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
         ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), torch.tensor(10)),
@@ -752,6 +752,8 @@ def method_tests():
         ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10),
          'scalar_broadcast_rhs'),
         ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
+        ('masked_scatter', (M,), (torch.ByteTensor(M, M).bernoulli_(), (M, M)),
+         'broadcast_lhs'),
         ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
          'broadcast_rhs'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),

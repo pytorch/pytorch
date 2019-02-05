@@ -179,7 +179,7 @@ template<>
 bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -212,7 +212,7 @@ template<>
 bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -246,7 +246,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -285,7 +285,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);

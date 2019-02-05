@@ -431,7 +431,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -451,7 +451,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -551,7 +551,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -571,7 +571,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -672,7 +672,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -691,7 +691,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -802,9 +802,9 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     auto& indicesInput = Input(INDICES);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
-    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
@@ -947,7 +947,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
       return true;
     }
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t slize_sz = data.size_from_dim(1);
 
     ReinitializeTensor(&K_tensor_, {1}, at::dtype<SIndex>().device(CUDA));
@@ -1295,10 +1295,10 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1374,10 +1374,10 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1454,11 +1454,11 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     auto& lengthsInput = Input(2);
     auto& indicesInput = Input(3);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1592,9 +1592,9 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto& dataInput = Input(3);
     auto& dataOutput = Input(0); // based on CPU version
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
@@ -1687,11 +1687,11 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto& dataInput = Input(3);
     auto& indicesInput = Input(4);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();

@@ -29,14 +29,6 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-# Get the correct Python executable
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
-
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
@@ -74,7 +66,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
   COMMAND
-  ${PYCMD} tools/setup_helpers/generate_code.py
+  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -171,6 +163,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/utils/alias_tracker.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -321,13 +314,13 @@ endif()
 
 target_link_libraries(torch caffe2_library)
 
-find_package(OpenMP)
+find_package(OpenMP QUIET)
 if(OPENMP_FOUND)
-  if (VERBOSE)
-    message(STATUS "Compiling with OpenMP")
-  endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+  message(STATUS "pytorch is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
 
 if (NOT NO_API)
@@ -702,7 +695,7 @@ if (BUILD_PYTHON)
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
     COMMAND
-    ${PYCMD} -mtools.pyi.gen_pyi
+    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"

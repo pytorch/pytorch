@@ -297,11 +297,11 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
   total_weight_ptr_.Resize(1);
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
+    if (T.dim() == canonical_axis) {
       CAFFE_ENFORCE_EQ(T.size(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
@@ -412,8 +412,8 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
 
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(T.dim(), 3);
   CAFFE_ENFORCE_EQ(T.dim32(0), N);
 
   int H = X.dim32(2);
@@ -519,11 +519,11 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
+    if (T.dim() == canonical_axis) {
       CAFFE_ENFORCE_EQ(T.size(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
@@ -634,8 +634,8 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
 
   ReinitializeTensor(&total_weight_ptr_, {1}, at::dtype<float>().device(CUDA));
   // Spatial mode, compute softmax for each x, y location
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(T.dim(), 3);
 
   int H = X.dim32(2);
   int W = X.dim32(3);

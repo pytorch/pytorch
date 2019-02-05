@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 
+import errno
 import hashlib
 import os
 import re
@@ -55,8 +56,17 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
     if model_dir is None:
         torch_home = os.path.expanduser(os.getenv('TORCH_HOME', '~/.torch'))
         model_dir = os.getenv('TORCH_MODEL_ZOO', os.path.join(torch_home, 'models'))
-    if not os.path.exists(model_dir):
+
+    try:
         os.makedirs(model_dir)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            # Directory already exists, ignore.
+            pass
+        else:
+            # Unexpected OSError, re-raise.
+            raise
+
     parts = urlparse(url)
     filename = os.path.basename(parts.path)
     cached_file = os.path.join(model_dir, filename)

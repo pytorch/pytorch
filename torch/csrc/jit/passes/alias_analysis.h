@@ -2,10 +2,10 @@
 
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/utils/alias_tracker.h>
 
 namespace torch {
 namespace jit {
-class AliasTracker;
 
 /**
  * Alias analysis pass.

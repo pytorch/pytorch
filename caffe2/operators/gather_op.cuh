@@ -55,9 +55,9 @@ static bool gather_impl_cuda(
     axis = data.dim() + axis;
   }
   CAFFE_ENFORCE_GE(
-      data.ndim(), axis + 1, "DATA should be at least [axis+1]-D");
+      data.dim(), axis + 1, "DATA should be at least [axis+1]-D");
   CAFFE_ENFORCE_GE(axis, 0, "Axis should be non-negative");
-  CAFFE_ENFORCE_LT(axis, data.ndim(), "Axis out of range");
+  CAFFE_ENFORCE_LT(axis, data.dim(), "Axis out of range");
 
   // New shape:
   //  [data dims before axis] + [indices dims] + [data dims after axis]

@@ -81,7 +81,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
             input_height = X.dim32(2), input_width = X.dim32(3);
   if (InputSize() == 2) {
     const auto& scales = Input(1);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
     CAFFE_ENFORCE_EQ(scales.size(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
@@ -126,7 +126,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   int output_width = X.dim32(3);
   if (InputSize() == 3) {
     const auto& scales = Input(2);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
     CAFFE_ENFORCE_EQ(scales.size(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);

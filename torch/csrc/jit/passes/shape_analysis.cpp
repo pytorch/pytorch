@@ -874,7 +874,7 @@ class ShapePropagator {
 
     static const auto multidim_reduce_with_postprocess =
         [](Node* node,
-           size_t num_reduced_dim,
+           int64_t num_reduced_dim,
            bool upcast_integer) -> type_vec_t {
       auto maybe_keepdim = node->get<bool>(attr::keepdim);
       if (!maybe_keepdim)

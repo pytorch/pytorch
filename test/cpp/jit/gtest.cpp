@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/tests.h>
+#include <test/cpp/jit/test_alias_analysis.h>
+#include <test/cpp/jit/test_misc.h>
 
 using namespace torch;
 using namespace torch::jit;
@@ -20,9 +21,11 @@ JIT_TEST(CustomOperators)
 JIT_TEST(Differentiate)
 JIT_TEST(DifferentiateWithRequiresGrad)
 JIT_TEST(DynamicDAG)
+JIT_TEST(EvalModeForLoadedModule)
 JIT_TEST(FromQualString)
 JIT_TEST(InternedStrings)
 JIT_TEST(IValue)
+JIT_TEST(Proto)
 JIT_TEST(RegisterFusionCachesKernel)
 JIT_TEST(SchemaParser)
 JIT_TEST(TopologicalIndex)

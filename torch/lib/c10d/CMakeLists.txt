@@ -103,7 +103,7 @@ target_include_directories(c10d PUBLIC
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
+# For torch/csrc/utils/hash.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
 if(USE_C10D_NCCL)

@@ -157,11 +157,11 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (
         node->matches(
-            "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
       auto uses = node->output()->uses();
       for (Use u : uses) {
         if (u.user->matches(
-                "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+                "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
       }

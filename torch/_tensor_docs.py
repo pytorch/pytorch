@@ -2771,6 +2771,18 @@ Example::
     >>> z.size()
     torch.Size([2, 8])
 
+    >>> a = torch.randn(1, 2, 3, 4)
+    >>> a.size()
+    torch.Size([1, 2, 3, 4])
+    >>> b = a.transpose(1, 2)  # Swaps 2nd and 3rd dimension
+    >>> b.size()
+    torch.Size([1, 3, 2, 4])
+    >>> c = a.view(1, 3, 2, 4)  # Does not change tensor layout in memory
+    >>> c.size()
+    torch.Size([1, 3, 2, 4])
+    >>> torch.equal(b, c)
+    False
+
 """)
 
 add_docstr_all('view_as',
@@ -2948,6 +2960,55 @@ add_docstr_all('pinverse',
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
+""")
+
+add_docstr_all('index_add',
+               r"""
+index_add(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_add_`
+""")
+
+add_docstr_all('index_copy',
+               r"""
+index_copy(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_copy_`
+""")
+
+add_docstr_all('index_fill',
+               r"""
+index_fill(dim, index, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_fill_`
+""")
+
+add_docstr_all('scatter',
+               r"""
+scatter(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_`
+""")
+
+add_docstr_all('scatter_add',
+               r"""
+scatter_add(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
+
+add_docstr_all('masked_scatter',
+               r"""
+masked_scatter(mask, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+""")
+
+add_docstr_all('masked_fill',
+               r"""
+masked_fill(mask, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
 add_docstr_all('grad',
