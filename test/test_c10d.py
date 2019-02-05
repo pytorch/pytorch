@@ -532,7 +532,7 @@ class TimeoutTest(TestCase):
                 t.join(5)
 
                 self.assertEqual(1, len(c2p))
-                # waiting time should be ~200ms, use 1s to rule out false alarm
+                # waiting time should be 1s, use 3s to rule out false alarm
                 self.assertGreater(3, c2p[0])
 
 
