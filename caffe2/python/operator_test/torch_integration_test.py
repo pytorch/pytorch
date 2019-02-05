@@ -9,6 +9,7 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from scipy import interpolate
 
 def generate_rois(roi_counts, im_dims):
     assert len(roi_counts) == len(im_dims)
@@ -250,3 +251,61 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(torch.tensor(scores_ref), a)
         torch.testing.assert_allclose(torch.tensor(boxes_ref), b)
         torch.testing.assert_allclose(torch.tensor(classes_ref), c)
+
+
+    def test_heatmap_max_keypoint(self):
+        NUM_TEST_ROI = 14
+        NUM_KEYPOINTS = 19
+        HEATMAP_SIZE = 56
+        np.random.seed(0)
+
+        # initial coordinates and interpolate HEATMAP_SIZE from it
+        HEATMAP_SMALL_SIZE = 4
+        bboxes_in = 500 * np.random.rand(NUM_TEST_ROI, 4).astype(np.float32)
+        # only bbox with smaller first coordiantes
+        for i in range(NUM_TEST_ROI):
+            if bboxes_in[i][0] > bboxes_in[i][2]:
+                tmp = bboxes_in[i][2]
+                bboxes_in[i][2] = bboxes_in[i][0]
+                bboxes_in[i][0] = tmp
+            if bboxes_in[i][1] > bboxes_in[i][3]:
+                tmp = bboxes_in[i][3]
+                bboxes_in[i][3] = bboxes_in[i][1]
+                bboxes_in[i][1] = tmp
+
+        # initial randomized coordiantes for heatmaps and expand it with interpolation
+        init = np.random.rand(
+            NUM_TEST_ROI,
+            NUM_KEYPOINTS,
+            HEATMAP_SMALL_SIZE,
+            HEATMAP_SMALL_SIZE).astype(np.float32)
+        heatmaps_in = np.zeros((NUM_TEST_ROI, NUM_KEYPOINTS,
+            HEATMAP_SIZE, HEATMAP_SIZE)).astype(np.float32)
+        for roi in range(NUM_TEST_ROI):
+            for keyp in range(NUM_KEYPOINTS):
+                f = interpolate.interp2d(
+                    np.arange(0, 1, 1.0 / HEATMAP_SMALL_SIZE),
+                    np.arange(0, 1, 1.0 / HEATMAP_SMALL_SIZE),
+                    init[roi][keyp],
+                    kind='cubic')
+                heatmaps_in[roi][keyp] = f(
+                    np.arange(0, 1, 1.0 / HEATMAP_SIZE),
+                    np.arange(0, 1, 1.0 / HEATMAP_SIZE))
+        def heatmap_max_keypoint_ref():
+            ref_op = core.CreateOperator(
+                    'HeatmapMaxKeypoint',
+                    ['heatmaps_in', 'bboxes_in'],
+                    ['keypoints_out'],
+                    should_output_softmax = True,
+                    )
+            workspace.FeedBlob("heatmaps_in", heatmaps_in)
+            workspace.FeedBlob("bboxes_in", bboxes_in)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("keypoints_out")
+
+        keypoints_ref = heatmap_max_keypoint_ref()
+
+        keypoints_torch = torch.ops._caffe2.HeatmapMaxKeypoint(
+                torch.tensor(heatmaps_in), torch.tensor(bboxes_in),
+                True)
+        torch.testing.assert_allclose(torch.tensor(keypoints_ref), keypoints_torch)
