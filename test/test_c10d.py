@@ -534,8 +534,11 @@ class TimeoutTest(TestCase):
             self.assertGreater(3, c2p[0])
 
     @retry_on_address_already_in_use_error
-    @skip_if_not_nccl
     def test_default_store_timeout_nccl(self):
+        # TODO remove this hack
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
         self._test_default_store_timeout('nccl')
 
     @retry_on_address_already_in_use_error
