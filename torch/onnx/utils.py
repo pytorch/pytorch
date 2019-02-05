@@ -570,6 +570,12 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
 
+        elif ns in _custom_ops_symbolic_fn:
+            # TODO: do checks
+            symbolic_fn = _custom_ops_symbolic_fn[ns][op_name]
+            attrs = {k: n[k] for k in n.attributeNames()}
+            return symbolic_fn(g, *inputs, **attrs)
+
         else:
             warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
                           "please report a bug".format(ns, op_name))
@@ -633,8 +639,19 @@ def _node_getitem(self, k):
     sel = self.kindOf(k)
     return getattr(self, sel)(k)
 
+def register_custom_op_symbolic(symbolic_name, symbolic_fn):
+    # TODO: do checks
+    ns, op_name = symbolic_name.split('::')
+    if not ns in _custom_ops_symbolic_fn:
+        _custom_ops_symbolic_fn[ns] = {}
+    _custom_ops_symbolic_fn[ns][op_name] = symbolic_fn
+
+    print(_custom_ops_symbolic_fn)
+
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at
 torch._C.Graph.constant = _graph_constant
 torch._C.Node.__getitem__ = _node_getitem
+
+_custom_ops_symbolic_fn = {}
