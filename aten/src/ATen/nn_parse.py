@@ -152,6 +152,13 @@ def get_thnn_args(thnn_function, params, inplace):
         param = params_by_name[name]
         if param['type'] == 'IntList' and 'size' in param:
             name = name + '_'
+        # NB: We calculate the dimension based on the name of
+        # the argument, not its positional order.  This means
+        # that we may reorder arguments to get them in
+        # the right place; e.g., if a THNN implementation
+        # has arguments in the order kernelW, kernelH, we
+        # will generate a caller that is kernel[1], kernel[0]
+        # to order them in the correct way.
         index = DIMENSION_OFFSET[suffix]
         if index < 0:
             index += param['size']

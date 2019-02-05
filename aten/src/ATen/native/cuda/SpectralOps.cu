@@ -308,8 +308,9 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   }
 
   // cuFFT requires input and output data pointers to complex type aligned.
-  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
+  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
+  // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
   auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {

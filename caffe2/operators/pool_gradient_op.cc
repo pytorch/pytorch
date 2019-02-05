@@ -618,6 +618,48 @@ void RunMaxPoolGradient3D(
 } // namespace
 
 template <>
+template <>
+bool AveragePoolFunctor<CPUContext>::
+    GlobalPoolingBackward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* dY,
+        const float* /* X */,
+        const float* /* Y */,
+        float* dX,
+        CPUContext* /* context */) const {
+  const int NxC = N * C;
+  EigenArrayMap<float> dX_arr(dX, HxW, NxC);
+  const float scale = 1.0f / static_cast<float>(HxW);
+  for (int i = 0; i < NxC; ++i) {
+    dX_arr.col(i).setConstant(dY[i] * scale);
+  }
+  return true;
+}
+
+template <>
+template <>
+bool AveragePoolFunctor<CPUContext>::
+    GlobalPoolingBackward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* dY,
+        const float* /* X */,
+        const float* /* Y */,
+        float* dX,
+        CPUContext* /* context */) const {
+  ConstEigenArrayMap<float> dY_arr(dY, C, N);
+  const float scale = 1.0f / static_cast<float>(HxW);
+  for (int i = 0; i < N; ++i) {
+    EigenArrayMap<float>(dX + i * HxW * C, C, HxW).colwise() =
+        dY_arr.col(i) * scale;
+  }
+  return true;
+}
+
+template <>
 template <typename T, StorageOrder kOrder>
 bool AveragePoolFunctor<CPUContext>::Backward(
     const int N,
@@ -697,6 +739,52 @@ bool AveragePoolFunctor<CPUContext>::Backward(
       return false;
     }
   }
+}
+
+template <>
+template <>
+bool MaxPoolFunctor<CPUContext>::
+    GlobalPoolingBackward<float, StorageOrder::NCHW>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* dY,
+        const float* X,
+        const float* Y,
+        float* dX,
+        CPUContext* /* context */) const {
+  const int NxC = N * C;
+  ConstEigenArrayMap<float> X_arr(X, HxW, NxC);
+  EigenArrayMap<float> dX_arr(dX, HxW, NxC);
+  for (int i = 0; i < NxC; ++i) {
+    dX_arr.col(i) = (X_arr.col(i) == Y[i]).template cast<float>() * dY[i];
+  }
+  return true;
+}
+
+template <>
+template <>
+bool MaxPoolFunctor<CPUContext>::
+    GlobalPoolingBackward<float, StorageOrder::NHWC>(
+        const int N,
+        const int C,
+        const int HxW,
+        const float* dY,
+        const float* X,
+        const float* Y,
+        float* dX,
+        CPUContext* /* context */) const {
+  ConstEigenArrayMap<float> Y_arr(Y, C, N);
+  ConstEigenArrayMap<float> dY_arr(dY, C, N);
+  for (int i = 0; i < N; ++i) {
+    ConstEigenArrayMap<float> X_arr(X + i * HxW * C, C, HxW);
+    EigenArrayMap<float> dX_arr(dX + i * HxW * C, C, HxW);
+    for (int j = 0; j < HxW; ++j) {
+      dX_arr.col(j) =
+          (X_arr.col(j) == Y_arr.col(i)).template cast<float>() * dY_arr.col(i);
+    }
+  }
+  return true;
 }
 
 template <>

@@ -215,7 +215,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
 
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -227,7 +227,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -414,7 +414,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
 
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -426,7 +426,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -619,7 +619,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   auto& rois_gpu = rois_blob->Get<TensorCUDA>();
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{26, 6}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{26, 6}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-3);
@@ -631,7 +631,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.size(0));
   EXPECT_NEAR(

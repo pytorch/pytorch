@@ -438,7 +438,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
@@ -558,7 +558,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
@@ -679,7 +679,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     auto* output = Output(0, shape, at::dtype<T>());
 
@@ -812,7 +812,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
@@ -939,7 +939,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 
     if (segment_ids.size() == 0 || data.size() == 0) {
       // Special handling for empty input
-      auto dims = data.dims().vec();
+      auto dims = data.sizes().vec();
       if (dims.size() > 0) {
         dims[0] = 0;
       }
@@ -950,7 +950,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     int64_t slize_sz = data.size_from_dim(1);
 
-    K_tensor_.Resize(1);
+    ReinitializeTensor(&K_tensor_, {1}, at::dtype<SIndex>().device(CUDA));
     // Get maximum segment id so we can size the output.
     // This must be done synchronously with host.
     if (segment_ids.size() > 4096) {
@@ -966,7 +966,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           context_.cuda_stream());
 
       // the second call do the real computation.
-      buffer_tensor_.Resize(tmp_storage_bytes);
+      ReinitializeTensor(&buffer_tensor_, {static_cast<int64_t>(tmp_storage_bytes)}, at::dtype<char>().device(CUDA));
       cub::DeviceReduce::Max(
           static_cast<void*>(buffer_tensor_.mutable_data<char>()),
           tmp_storage_bytes,
@@ -987,7 +987,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
         sizeof(SIndex), K_tensor_.template data<SIndex>(), &K);
     context_.FinishDeviceComputation();
 
-    auto dims = data.dims().vec();
+    auto dims = data.sizes().vec();
     dims[0] = K + 1;
     auto* output = Output(0, dims, at::dtype<T>());
 
@@ -1009,7 +1009,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           nullptr);
     } else {
       // For mean, we need to compute scaling factors
-      scaling_factors_.Resize(K + 1);
+      ReinitializeTensor(&scaling_factors_, {K + 1}, at::dtype<int>().device(CUDA));
       math::Set<int, CUDAContext>(
           scaling_factors_.size(),
           int(0),
@@ -1041,9 +1041,9 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor buffer_tensor_{CUDA};
-  Tensor K_tensor_{CUDA};
-  Tensor scaling_factors_{CUDA}; // for mean
+  Tensor buffer_tensor_;
+  Tensor K_tensor_;
+  Tensor scaling_factors_; // for mean
 };
 
 template <typename SIndex>
@@ -1090,7 +1090,7 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     int M = input.dim32(0);
     int N = input.size_from_dim(1);
     auto* output = Output(0);
-    auto dims = input.dims().vec();
+    auto dims = input.sizes().vec();
     SIndex K = 0;
     context_.CopyBytesToCPU(
         sizeof(SIndex),
@@ -1189,8 +1189,8 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     const auto& I = Input(3);
-    auto* dX = Output(0);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
     const int M = X.dim32(0);
     const int N = X.size_from_dim(1);
@@ -1202,7 +1202,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     K += 1;
 
     if (segment_len_.size() != K) {
-      segment_len_.Resize(K);
+      ReinitializeTensor(&segment_len_, {K}, at::dtype<SIndex>().device(CUDA));
     }
 
     math::Set<SIndex, CUDAContext>(
@@ -1236,7 +1236,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
   }
 
  private:
-  Tensor segment_len_{CUDA}; // for mean
+  Tensor segment_len_; // for mean
 };
 
 REGISTER_CUDA_OPERATOR_STR(
@@ -1301,7 +1301,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims().vec();
+    auto shape = segmentGradsInput.sizes().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
@@ -1380,7 +1380,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims().vec();
+    auto shape = segmentGradsInput.sizes().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
@@ -1461,7 +1461,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims().vec();
+    auto shape = segmentGradsInput.sizes().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
@@ -1609,7 +1609,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto* prefix_sum_length_data =
         inclusive_scan_length_buffer_.template data<int>();
 
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
 
     const T* in_data = segmentGradsInput.template data<T>();
@@ -1687,7 +1687,6 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto& dataInput = Input(3);
     auto& indicesInput = Input(4);
 
-    auto* weightGradsOutput = Output(1);
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
 
@@ -1695,11 +1694,11 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims().vec();
+    auto shape = segmentGradsInput.sizes().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
-    weightGradsOutput->ResizeLike(indicesInput);
+    auto* weightGradsOutput = Output(1, indicesInput.sizes(), at::dtype<T>());
     T* out_data_grads = dataGradsOutput->template mutable_data<T>();
     T* out_weight_grads = weightGradsOutput->template mutable_data<T>();
 

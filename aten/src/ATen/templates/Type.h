@@ -2,7 +2,7 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <c10/core/Allocator.h>
-#include <ATen/core/Deprecated.h>
+#include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>

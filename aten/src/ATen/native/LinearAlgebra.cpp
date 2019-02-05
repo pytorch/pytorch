@@ -532,7 +532,7 @@ Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm(self, 2, dim[0], keepdim);
+    return at::norm(self, 2, dim, keepdim, self.type().scalarType());
   }
   return at::sqrt(at::sum(self * self, dim, keepdim));
 }
@@ -548,7 +548,7 @@ Tensor &frobenius_norm_out(
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm_out(result, self, 2, dim[0], keepdim);
+    return at::norm_out(result, self, 2, dim, keepdim, self.type().scalarType());
   }
   return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
 }

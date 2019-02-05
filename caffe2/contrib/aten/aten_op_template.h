@@ -59,7 +59,7 @@ private:
   }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
-    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
+    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.sizes());
   }
 
   at::Tensor peek(size_t i, size_t N) {

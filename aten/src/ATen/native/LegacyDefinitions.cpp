@@ -615,11 +615,11 @@ Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
   return at::legacy::th::_th_lerp(self, end, weight);
 }
 
-Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
 
-Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _histc_cpu(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc(self, bins, min, max);
 }
 
@@ -703,14 +703,6 @@ std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const 
 
 std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
-}
-
-Tensor all(const Tensor & self) {
-  return at::legacy::th::_th_all(self);
-}
-
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
 }
 
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

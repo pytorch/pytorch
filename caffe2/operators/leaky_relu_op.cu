@@ -29,8 +29,8 @@ template <>
 bool LeakyReluOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
   CAFFE_ENFORCE_GT(X.size(), 0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   LeakyReluKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -44,8 +44,8 @@ template <>
 bool LeakyReluGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& Y = Input(0);
   const auto& dY = Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(Y);
+
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   CAFFE_ENFORCE_EQ(Y.size(), dY.size());
   LeakyReluGradientKernel<<<
       CAFFE_GET_BLOCKS(Y.size()),

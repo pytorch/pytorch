@@ -40,6 +40,16 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(*Y);
     return functor_.template Forward<T, StorageOrder::NCHW>(
@@ -63,6 +73,16 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(*Y);
     return functor_.template Forward<T, StorageOrder::NHWC>(
@@ -101,7 +121,19 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
-    ConvPoolOpBase<CPUContext>::ComputePads(X_HW_dims);
+    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    const T* dY_data = dY.template data<T>();
+    const T* X_data = X.template data<T>();
+    const T* Y_data = Y.template data<T>();
+    T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingBackward<T, StorageOrder::NCHW>(
+          N, C, HxW, dY_data, X_data, Y_data, dX_data, &context_);
+    }
     return functor_.template Backward<T, StorageOrder::NCHW>(
         N,
         C,
@@ -111,10 +143,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
         dilation_,
         stride_,
         pads_,
-        dY.template data<T>(),
-        X.template data<T>(),
-        Y.template data<T>(),
-        dX->template mutable_data<T>(),
+        dY_data,
+        X_data,
+        Y_data,
+        dX_data,
         &context_);
   }
 
@@ -128,7 +160,19 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
-    ConvPoolOpBase<CPUContext>::ComputePads(X_HW_dims);
+    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    const T* dY_data = dY.template data<T>();
+    const T* X_data = X.template data<T>();
+    const T* Y_data = Y.template data<T>();
+    T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingBackward<T, StorageOrder::NHWC>(
+          N, C, HxW, dY_data, X_data, Y_data, dX_data, &context_);
+    }
     return functor_.template Backward<T, StorageOrder::NHWC>(
         N,
         C,
@@ -138,10 +182,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
         dilation_,
         stride_,
         pads_,
-        dY.template data<T>(),
-        X.template data<T>(),
-        Y.template data<T>(),
-        dX->template mutable_data<T>(),
+        dY_data,
+        X_data,
+        Y_data,
+        dX_data,
         &context_);
   }
 
@@ -156,6 +200,15 @@ struct AveragePoolFunctor {
             op.template GetSingleArgument<bool>("count_include_pad", false)) {}
 
   template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
   bool Forward(
       int N,
       int C,
@@ -167,6 +220,17 @@ struct AveragePoolFunctor {
       const std::vector<int>& pads,
       const T* X,
       T* Y,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingBackward(
+      int N,
+      int C,
+      int HxW,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
       Context* context) const;
 
   template <typename T, StorageOrder kOrder>
@@ -186,11 +250,21 @@ struct AveragePoolFunctor {
       Context* context) const;
 
   const bool count_include_pad;
+  Tensor ones{Context::GetDeviceType()};
 };
 
 template <class Context>
 struct MaxPoolFunctor {
   explicit MaxPoolFunctor(const OperatorBase& /* op */) {}
+
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
 
   template <typename T, StorageOrder kOrder>
   bool Forward(
@@ -204,6 +278,17 @@ struct MaxPoolFunctor {
       const std::vector<int>& pads,
       const T* X,
       T* Y,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingBackward(
+      int N,
+      int C,
+      int HxW,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
       Context* context) const;
 
   template <typename T, StorageOrder kOrder>

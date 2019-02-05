@@ -161,9 +161,6 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
   const int W = X.ndim() > 3 ? X.dim32(3) : 1;
   const int D = X.ndim() > 4 ? X.dim32(4) : 1;
 
-  
-  
-
   const auto Xarr = X.data<float>();
   const auto dYarr = dY.data<float>();
   const auto meanArr = mean.data<float>();
@@ -177,8 +174,10 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
   const auto numBlocksPerChannel = CAFFE_GET_BLOCKS(valsPerChannel);
   const auto numBlocksTotal = numBlocksPerChannel * N * C;
 
-  dBiasScratch_.Resize(numBlocksTotal);
-  dScaleScratch_.Resize(numBlocksTotal);
+  ReinitializeTensor(
+      &dBiasScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(
+      &dScaleScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
 
   ChannelBackpropStatsBlockKernel<CAFFE_CUDA_NUM_THREADS>
       <<<numBlocksTotal, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(

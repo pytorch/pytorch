@@ -25,6 +25,8 @@ set -ex
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
+export IS_PYTORCH_CI=1
+
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
 # note: printf is used instead of echo to avoid backslash
@@ -60,6 +62,20 @@ trap_add() {
 declare -f -t trap_add
 
 trap_add cleanup EXIT
+
+function assert_git_not_dirty() {
+    # TODO: we should add an option to `build_amd.py` that reverts the repo to
+    #       an unmodified state.
+    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$JOB_BASE_NAME" != *xla* ]]) ; then
+        git_status=$(git status --porcelain)
+        if [[ $git_status ]]; then
+            echo "Build left local git repository checkout dirty"
+            echo "git status --porcelain:"
+            echo "${git_status}"
+            exit 1
+        fi
+    fi
+}
 
 if which sccache > /dev/null; then
   # Save sccache logs to file
@@ -113,7 +129,8 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0
@@ -122,7 +139,7 @@ fi
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn6-py2* ]] || \
+  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn7-py2* ]] || \
      [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"

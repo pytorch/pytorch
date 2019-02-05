@@ -461,6 +461,8 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                   const Tensor& running_mean, const Tensor& running_var,
                                                   bool train, double momentum, double eps) {
+  checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+
   return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm", [&] {
       if (!train) {
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);

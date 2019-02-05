@@ -154,17 +154,16 @@ bool ChannelStatsOp<CUDAContext>::RunOnDevice() {
   const int W = X.ndim() > 3 ? X.dim32(3) : 1;
   const int D = X.ndim() > 4 ? X.dim32(4) : 1;
 
-  
-  
-
   const auto X_arr = X.data<float>();
   const auto valsPerChannel = H * W * D;
 
   const auto numBlocksPerChannel = CAFFE_GET_BLOCKS(valsPerChannel);
   const auto numBlocksTotal = numBlocksPerChannel * N * C;
 
-  sumScratch_.Resize(numBlocksTotal);
-  sumsqScratch_.Resize(numBlocksTotal);
+  ReinitializeTensor(
+      &sumScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(
+      &sumsqScratch_, {numBlocksTotal}, at::dtype<float>().device(CUDA));
 
   auto sum = Output(SUM, {C}, at::dtype<float>());
   auto sumsq = Output(SUMSQ, {C}, at::dtype<float>());

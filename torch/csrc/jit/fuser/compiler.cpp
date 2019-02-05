@@ -1,25 +1,18 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <ATen/core/jit_type.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/type.h>
-#include "torch/csrc/jit/fuser/interface.h"
-
-#if USE_CUDA_FUSER
-#include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
-#endif // USE_CUDA_FUSER
-
-#if USE_CPU_FUSER
-#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
-#endif // USE_CUDA_FUSER
 
 #include <atomic>
 #include <iostream>
@@ -34,6 +27,31 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+std::mutex fusion_backends_lock_;
+static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
+getFusionBackends() {
+  static std::unordered_map<at::Device::Type, FusedKernelConstructor>
+      fusion_backends;
+  return fusion_backends;
+}
+
+void registerFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  getFusionBackends()[backend_type] = std::move(ctor);
+}
+
+bool hasFusionBackend(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().count(backend_type);
+}
+
+const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  return getFusionBackends().at(backend_type);
+}
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
@@ -66,8 +84,12 @@ static const Node* usedInFusedChunk(const Value* input) {
 }
 
 static void setInputChunkDescriptors(KernelSpec& spec) {
-  spec.inputChunks().reserve((spec.graph())->inputs().size());
-  for (const Value* input : (spec.graph())->inputs()) {
+  // We only have as many chunk descriptors as tensor inputs,
+  // furthermore we know that the tensor inputs are in the
+  // beginning of the fusion group's inputs.
+  spec.inputChunks().reserve(spec.nTensorInputs());
+  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+    const Value* input = spec.graph()->inputs()[i];
     if (const Node* chunk = usedInFusedChunk(input)) {
       spec.inputChunks().emplace_back(
           chunk->i(attr::chunks), chunk->i(attr::dim));
@@ -86,7 +108,16 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     const Value* val = queue.back();
     queue.pop_back();
     const Node* producer = val->node();
-    if (producer->kind() == prim::Param) {
+    // Here we assume that only tensor inputs are used in
+    // the computation of the outputs.
+    // This is currently true, as the only inputs will be
+    // sizes (for _grad_sum_to_size as the derivative
+    // of broadcasts), which will only be used after
+    // the fusion kernel, and Tensors.
+    // This needs to be revisited when you start allowing
+    // other things e.g. nonconstant scalars.
+    if (producer->kind() == prim::Param &&
+        val->type()->isSubtypeOf(DynamicType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -126,6 +157,71 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
+// This function moves _grad_sum_to_size nodes along the computation graph
+// of the fusion group to the outputs and then records the shape inputs
+// in order for summation to be applied after the kernel.
+// Note that the correctness relies on the invariant that
+// _grad_sum_to_size is only applied to gradient nodes created by autodiff.
+// This is important because it ensures that in the mul and div nodes only
+// one argument (in the case of div the numerator) has a summed value.
+// If two arguments to mul had one, we would be in trouble, but thanks
+// to the chain rule, we're OK.
+// Note that this means that one kernel output may lead to several fusion
+// group outputs when several outputs had the same calculation except
+// for the final _grad_sum_to_size. This is also the reason why
+// we need to deduplicate kernel outputs at the end of this function.
+void processGradSumToSize(KernelSpec& spec) {
+  auto graph = spec.graph();
+
+  std::vector<int64_t> outputGradSumToSizes(graph->outputs().size(), -1);
+
+  // these are expressions that might occur during autotdiff operating
+  // on the gradient (matmul would likely be, too but we don't fuse it)
+  // note that for mul, we know (from the chain rule) that only one
+  // factor will be stemming from a calculation involving gradients so
+  // we know that we can move _grad_sum_to_size across it
+  // Scan the graph. We will delete nodes. We want later (in the graph)
+  // _grad_sum_to_size nodes to have priority over earlier ones. Thus
+  // we scan backwards.
+  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend(); it++) {
+    auto* node = *it;
+    if (node->kind() != aten::_grad_sum_to_size) {
+      continue;
+    }
+    bool success = trackSingleGradSumToSizeToOutputs(
+        node->output(), &outputGradSumToSizes);
+    AT_ASSERT(success); // check that we didn't hit anything unknown
+
+    // remove the GradSumToSize node, a new node outside the fusion graph
+    // will be inserted below
+    node->output()->replaceAllUsesWith(node->inputs()[0]);
+    it.destroyCurrent();
+  }
+
+  // By removing the _grad_sum_to_size notes, we might end up with
+  // duplicate outputs, e.g. when having the autodiff backwards of
+  // x + y + z of something with x, y, z, those will have different
+  // _grad_sum_to_sizes but of the same kernel output.
+
+  // for each fusion group output, record the corresponding kernel
+  // output and possibly a _grad_sum_to_size for that output
+  auto& outputMapAndSizes = spec.outputMapAndSizes();
+  AT_ASSERT(outputMapAndSizes.empty());
+  std::unordered_map<const Value*, int64_t> reduced_output_indices;
+  int64_t newo = 0;
+  for (auto osize : outputGradSumToSizes) {
+    auto it = reduced_output_indices.find(graph->outputs()[newo]);
+    if (it == reduced_output_indices.end()) {
+      reduced_output_indices.emplace(graph->outputs()[newo], newo);
+      outputMapAndSizes.emplace_back(newo, osize);
+      newo++;
+    } else {
+      graph->eraseOutput(newo);
+      outputMapAndSizes.emplace_back(it->second, osize);
+    }
+  }
+}
+
 // Performs "upfront" compilation where storage is known but shapes are not.
 // Currently identifies how to expand all tensors so that all intermediate
 // tensors are the same shape, simplifying code generation.
@@ -138,6 +234,7 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
 static void upfrontCompilation(KernelSpec& spec) {
   setInputBroadcastGroups(spec);
   setInputChunkDescriptors(spec);
+  processGradSumToSize(spec);
 }
 
 int64_t registerFusion(const Node* fusion_group) {
@@ -156,7 +253,7 @@ int64_t registerFusion(const Node* fusion_group) {
   // be a valid spec (must have had upfrontCompilation run on it).
   const auto key = store(graph);
   const auto maybe_retrieved_spec = retrieve(key);
-  JIT_ASSERT(maybe_retrieved_spec);
+  AT_ASSERT(maybe_retrieved_spec);
   upfrontCompilation(**maybe_retrieved_spec);
 
   return key;
@@ -171,7 +268,6 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  c10::optional<at::ScalarType> scalar_type;
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
     graph->inputs()[i]->setType(TensorType::create(
@@ -188,6 +284,9 @@ std::shared_ptr<FusedKernel> compileKernel(
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
+      if (!p->type()->isSubtypeOf(DynamicType::get())) {
+        continue;
+      }
       if (const Node* chunk = usedInFusedChunk(p)) {
         int64_t dim = chunk->i(attr::dim);
         int64_t chunks = chunk->i(attr::chunks);
@@ -232,38 +331,19 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
-  std::string code = generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
-  std::shared_ptr<FusedKernel> fused_kernel;
-  if (use_cuda) {
-#if USE_CUDA_FUSER
-    fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
-        device.index(),
-        name,
-        code,
-        input_desc,
-        output_desc,
-        chunk_desc,
-        concat_desc,
-        spec.hasRandom());
-#else
-    throw std::runtime_error("CUDA Fusion is not supported on this build.");
-#endif // USE_CUDA_FUSER
-  } else {
-#if USE_CPU_FUSER
-    fused_kernel = std::make_shared<cpu::FusedKernelCPU>(
-        name,
-        code,
-        input_desc,
-        output_desc,
-        chunk_desc,
-        concat_desc,
-        spec.hasRandom());
-#else
-    throw std::runtime_error("CPU Fusion is not supported on this build.");
-#endif // USE_CPU_FUSER
-  }
-
-  return fused_kernel;
+  std::string code =
+      generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
+  const FusedKernelConstructor& kernel_ctor =
+      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
+  return kernel_ctor(
+      device.index(),
+      name,
+      code,
+      input_desc,
+      output_desc,
+      chunk_desc,
+      concat_desc,
+      spec.hasRandom());
 }
 
 } // namespace fuser

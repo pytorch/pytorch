@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/pybind.h>
@@ -66,6 +67,55 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   } else {
     return out << THPUtils_unpackString(py::str(pyobj).ptr());
   }
+}
+
+std::vector<Node*> findAllNodes(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse = true) {
+  std::vector<Node*> ret;
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        ret.push_back(n);
+      }
+      if (recurse) {
+        auto nodes = findAllNodes(n->blocks(), kind, recurse);
+        ret.insert(ret.end(), nodes.begin(), nodes.end());
+      }
+    }
+  }
+  return ret;
+}
+
+std::vector<Node*> findAllNodes(Block* block, Symbol kind, bool recurse = true) {
+  std::vector<Block*> blocks = {block};
+  return findAllNodes(blocks, kind, recurse);
+}
+
+Node* findNode(
+    c10::ArrayRef<torch::jit::Block*> blocks,
+    Symbol kind,
+    bool recurse = true) {
+  for (Block* block : blocks) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == kind) {
+        return n;
+      }
+      if (recurse) {
+        auto node = findNode(n->blocks(), kind, recurse);
+        if (node != nullptr) {
+          return node;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+  std::vector<Block*> blocks = {block};
+  return findNode(blocks, kind, recurse);
 }
 
 // execute a Python function, used for Ops we can't optimize but that we want to
@@ -150,6 +200,12 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
+          "dump_alias_db",
+          [](std::shared_ptr<Graph> g) {
+            AliasDb db(g);
+            db.dump();
+          })
+      .def(
           "propagate_shapes",
           [](std::shared_ptr<Graph> g,
              std::vector<at::Tensor> inputs,
@@ -231,6 +287,17 @@ void initPythonIRBindings(PyObject* module_) {
           [](Graph& g) {
             return py::make_iterator(g.nodes().begin(), g.nodes().end());
           })
+      .def(
+          "findNode",
+          [](Graph& g, const std::string& kind, bool recurse) {
+            return findNode(g.block(), Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
+      .def(
+          "findAllNodes",
+          [](Graph& g, const std::string& kind, bool recurse) {
+            return findAllNodes(
+                g.block(), Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
@@ -308,14 +375,25 @@ void initPythonIRBindings(PyObject* module_) {
             return node;
           })
       .VS(copyMetadata)
-      .VS(isTensor);
-
+      .VS(isTensor)
+      .def("toIValue", [](Value& n) { return toIValue(&n); });
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
       .def("nodes", [](Block& b) {
         return py::make_iterator(b.nodes().begin(), b.nodes().end());
-      });
+      })
+      .def(
+          "findNode",
+          [](Block& b, const std::string& kind, bool recurse) {
+            return findNode(&b, Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
+      .def(
+          "findAllNodes",
+          [](Block& b, const std::string& kind, bool recurse) {
+            return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true);
+
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
@@ -340,6 +418,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
           "inputs",
           [](Node& n) {
@@ -350,6 +429,19 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n) {
             return py::make_iterator(n.outputs().begin(), n.outputs().end());
           })
+      .def("outputsAt", [](Node& n, size_t i) { return n.outputs().at(i); })
+      .def(
+          "findNode",
+          [](Node& n, const std::string& kind, bool recurse) {
+            return findNode(n.blocks(), Symbol::fromQualString(kind), recurse);
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
+      .def(
+          "findAllNodes",
+          [](Node& n, const std::string& kind, bool recurse) {
+            return findAllNodes(
+                n.blocks(), Symbol::fromQualString(kind), recurse);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
+      .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)
       .NS(replaceInput)
@@ -374,12 +466,12 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .NS(addBlock)
 
-#define AS(name) def(#name, &Attributes<Node>::name)
+#define AS(name) def(#name, &Node::name)
       // methods from Attributes
       .AS(copyAttributes)
       .AS(hasAttributes)
 #undef AS
-#define AS(name) def(#name, &Attributes<Node>::name##S)
+#define AS(name) def(#name, &Node::name##S)
       // The default method names take Symbol, but the string conversion for
       // Symbol you to qualify with attr::. This is not very user friendly
       // for attributes, so expose the string variants instead.
@@ -491,6 +583,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
+      .def("dim", [](const Type& t) { return t.expect<TensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -541,8 +634,7 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
-      .def(
-          py::init([](TypePtr a) { return ListType::create(a); }))
+      .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);

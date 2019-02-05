@@ -593,6 +593,7 @@ std::unique_ptr<TensorIterator> TensorIterator::split(int dim) {
   auto copy_size = shape_[dim] / 2;
   auto this_size = shape_[dim] - copy_size;
   copy->narrow(dim, 0, copy_size);
+  copy->final_output_ &= !overlaps;
   this->narrow(dim, copy_size, this_size);
   this->accumulate_ |= overlaps;
 

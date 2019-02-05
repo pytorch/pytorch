@@ -1,16 +1,16 @@
 #include <torch/csrc/jit/autodiff.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-#include <torch/csrc/utils/functional.h>
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/symbolic_script.h"
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <memory>
@@ -91,7 +91,7 @@ bool isDifferentiable(Node* n) {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
-      "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+      "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
       "aten::log_softmax(Tensor self, int dim) -> Tensor",
       "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
@@ -235,13 +235,13 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable sumToSizeOf(SymbolicVariable v, Symbol input_name) {
+  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name) {
     Value* size;
     {
       WithInsertPoint insert_guard{node};
       size = SymbolicVariable(node->namedInput(input_name)).size();
     }
-    return v.sumToSize(size);
+    return v.gradSumToSize(size);
   };
 
   std::vector<SymbolicVariable> buildSymbolicGradient(
@@ -266,8 +266,8 @@ class GradientHelper {
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {
-          sumToSizeOf(grads.at(0), attr::self),
-          sumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
+          gradSumToSizeOf(grads.at(0), attr::self),
+          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
           nullptr};
 
     } else if (
@@ -282,8 +282,8 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0), attr::self),
-              sumToSizeOf(
+      return {gradSumToSizeOf(grads.at(0), attr::self),
+              gradSumToSizeOf(
                   -grads.at(0) * node->namedInput(attr::alpha), attr::other),
               nullptr};
 
@@ -294,8 +294,8 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Tensor other) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0) * inputs.at(1), attr::self),
-              sumToSizeOf(grads.at(0) * inputs.at(0), attr::other)};
+      return {gradSumToSizeOf(grads.at(0) * inputs.at(1), attr::self),
+              gradSumToSizeOf(grads.at(0) * inputs.at(0), attr::other)};
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Scalar other) -> Tensor")) {
@@ -303,8 +303,8 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::div(Tensor self, Tensor other) -> Tensor")) {
-      return {sumToSizeOf(grads.at(0) / inputs.at(1), attr::self),
-              sumToSizeOf(
+      return {gradSumToSizeOf(grads.at(0) / inputs.at(1), attr::self),
+              gradSumToSizeOf(
                   -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1)),
                   attr::other)};
 
@@ -315,20 +315,20 @@ class GradientHelper {
     } else if (node->matches(
                    "aten::max(Tensor self, Tensor other) -> Tensor")) {
       return {
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
               attr::self),
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0)),
               attr::other)};
 
     } else if (node->matches(
                    "aten::min(Tensor self, Tensor other) -> Tensor")) {
       return {
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
               attr::self),
-          sumToSizeOf(
+          gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0)),
               attr::other)};
 
@@ -336,9 +336,9 @@ class GradientHelper {
         node->matches(
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
       return {nullptr,
-              sumToSizeOf(
+              gradSumToSizeOf(
                   grads.at(0) * inputs.at(0).type_as(grads.at(0)), attr::self),
-              sumToSizeOf(
+              gradSumToSizeOf(
                   grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0)),
                   attr::other)};
 
@@ -427,7 +427,7 @@ class GradientHelper {
 
     } else if (
         node->matches(
-            "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
       Value* self_size;
       {
         WithInsertPoint insert_guard{node};
@@ -523,7 +523,7 @@ class GradientHelper {
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
       return {
-          sumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
+          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
           grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
           inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
           nullptr,
@@ -613,7 +613,7 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor")) {
-      JIT_ASSERT(grads.size() == 1);
+      AT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::avg_pool2d_backward,
@@ -634,7 +634,7 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)")) {
-      JIT_ASSERT(grads.size() == 2);
+      AT_ASSERT(grads.size() == 2);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::max_pool2d_with_indices_backward,
@@ -673,7 +673,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      AT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0],
               tuple_outputs[1],
               nullptr,
@@ -702,7 +702,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      AT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0],
               tuple_outputs[1],
               tuple_outputs[2],
@@ -735,7 +735,7 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::log_softmax(Tensor self, int dim) -> Tensor")) {
-      JIT_ASSERT(grads.size() == 1);
+      AT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::_log_softmax_backward_data,
@@ -866,7 +866,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
         linearGradientForNode(node, fmap(node->outputs(), get_grad));
     LowerSimpleTuples(reverse_block);
 
-    JIT_ASSERT(grad_inputs.size() == node->inputs().size());
+    AT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad())
         continue;
@@ -938,7 +938,7 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   Block* reverse_block = rev_info.reverse_block;
 
   for (Node* top_node : reverse_block->nodes()) {
-    JIT_ASSERT(
+    AT_ASSERT(
         top_node->kind() == prim::GradOf ||
         top_node->kind() == prim::AutogradAdd ||
         top_node->kind() == prim::Undefined);
@@ -1009,8 +1009,9 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
-  // TODO: we are sometimes emitting expressions like SumToSize(SumToSize(x,
-  // s1), s2), which are equivalent to SumToSize(x, s2), and could save us some
+  // TODO: we are sometimes emitting expressions like
+  // _grad_sum_to_size(_grad_sum_so_size(x, s1), s2), which are equivalent to
+  // _grad_sum_to_size(x, s2), and could save us some
   // captures, but I'm not 100% sure how to optimize this at this stage, since
   // we don't know which GradOf blocks will be stitched together to form the
   // derivative. I guess a smart analysis could implement this, but I didn't
@@ -1035,7 +1036,6 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
 // temporaries).
 static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   auto& graph = *grad_desc.f;
-  auto primal_block = graph.block();
   auto reverse_block = rev_info.reverse_block;
 
   // --------------------------------------------------------------------------
@@ -1151,7 +1151,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(
+  AT_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
       "graph.use_count() == 1, but found %d",

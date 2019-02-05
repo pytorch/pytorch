@@ -103,6 +103,12 @@ class CAFFE2_API OnnxifiTransformer final {
   // backend idx
   int idx_{0};
 
+  // Number of Onnxifi Ops we build so far
+  int onnxifi_op_id_{0};
+
+  // Model id
+  std::string model_id_;
+
   // Backned IDs
   std::vector<onnxBackendID> backend_ids_;
 

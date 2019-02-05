@@ -27,6 +27,37 @@ import itertools
 # - Looking for inplace ops?  They're detected by the trailing underscore, and
 #   transparently dispatched to their non inplace versions in
 #   'run_symbolic_function'.   See Note [Export inplace]
+#
+# ---------------------------------------------------------------------
+# A note on Tensor types
+# ---------------------------------------------------------------------
+#
+# In general, we should avoid depending on the type of Tensor Values contained
+# within the trace graph. However, this is sometimes unavoidable (due to ONNX
+# spec requirements, etc). If you are implementing a symbolic and need Tensor
+# type information, note that there are several levels of Tensor types, defined
+# in aten/src/ATen/core/jit_type.h:
+#
+# DynamicType - This is a Tensor, but we don't know anything about its
+#               properties (e.g. scalar type, # dims, shapes).
+#               Appears as `Tensor` in graph print-outs.
+# UndefinedTensorType <: DynamicType - Denotes an undefined Tensor
+# TensorType <: DynamicType - Denotes a Tensor for which we know the scalar
+#                             type and number of dimensions, but not the concrete
+#                             shapes. For example, appears as 'Float(*, *)' in
+#                             graph print-outs. Useful accessor methods include
+#                             dim() and scalarType()
+# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
+#                                    concrete sizes in addition to the information
+#                                    contained in TensorTyper. This adds a sizes()
+#                                    method which can be used to retrieve the
+#                                    concrete sizes.
+#
+# In general, we should prefer to rely on the least specific information possible.
+# For example, not relying on tensor properties at all is better than relying
+# on the number of dimensions (TensorType) which is better than relying on
+# concrete shapes (CompleteTensorType). Doing so will make the export symbolics
+# more robust to different graphs.
 
 # ---------------------------------------------------------------------
 # Helper functions
@@ -394,7 +425,7 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    axes = list(range(len(self.type().sizes())))
+    axes = list(range(self.type().dim()))
     axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
     return g.op("Transpose", self, perm_i=axes)
 
@@ -528,8 +559,8 @@ def softmax(g, input, dim):
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
     if dim < 0:
-        dim = len(input.type().sizes()) + dim
-    if len(input.type().sizes()) != dim + 1:
+        dim = input.type().dim() + dim
+    if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op('Softmax', input, axis_i=dim)
 
@@ -630,7 +661,7 @@ def adaptive_max_pool2d(g, input, output_size):
 def constant_pad_nd(g, input, padding, value):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "constant"
-    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    paddings = prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
@@ -638,7 +669,7 @@ def constant_pad_nd(g, input, padding, value):
 def reflection_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
-    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    paddings = prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
@@ -646,7 +677,7 @@ def reflection_pad(g, input, padding):
 def replication_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "edge"
-    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    paddings = prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
@@ -747,8 +778,8 @@ def log_softmax(g, input, dim=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
-        dim = len(input.type().sizes()) + dim
-    if len(input.type().sizes()) != dim + 1:
+        dim = input.type().dim() + dim
+    if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op("LogSoftmax", input, axis_i=dim)
 
@@ -760,7 +791,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) == 1:
+    if bias.node().kind() != "prim::Undefined" and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -781,7 +812,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) != 1:
+    if bias.node().kind() != "prim::Undefined" and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -975,6 +1006,8 @@ def exp(g, self):
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
+    if not train:  # in eval mode, dropout is non-op
+        return input
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -1052,6 +1085,21 @@ scalar_name_to_pytorch = {
 }
 
 
+# This indicates each scalar type's corresponding
+# torch type. Related source:
+# https://github.com/pytorch/pytorch/blob/da7468853ae322252270bbb58032668bd21b7457/c10/core/ScalarType.h
+scalar_type_to_pytorch_type = [
+    torch.uint8,    # 0
+    torch.int8,     # 1
+    torch.short,    # 2
+    torch.int,      # 3
+    torch.int64,    # 4
+    torch.half,     # 5
+    torch.float,    # 6
+    torch.double,   # 7
+]
+
+
 def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
@@ -1076,22 +1124,28 @@ scalar_type_to_onnx = [
 @parse_args('v', 'i', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
-    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
+    return g.op("ConstantOfShape", sizes,
+                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device):
-    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=0.0)
+    shape = g.op("Shape", input)
+    return g.op("ConstantOfShape", shape,
+                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
-    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
+    return g.op("ConstantOfShape", sizes,
+                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones_like(g, input, dtype, layout, device):
-    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=1.0)
+    shape = g.op("Shape", input)
+    return g.op("ConstantOfShape", shape,
+                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1101,13 +1155,15 @@ def full(g, sizes, value, dtype, layout, device):
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
-        return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype],
-                    input_as_shape_i=1, value_f=const_value)
+        return g.op("ConstantOfShape", sizes,
+                    value_t=torch.tensor(const_value, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'f', 'i', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device):
-    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=fill_value)
+    shape = g.op("Shape", input)
+    return g.op("ConstantOfShape", shape,
+                value_t=torch.tensor(fill_value, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1429,3 +1485,33 @@ def rrelu(g, input, lower, upper, training, generator):
 def log_sigmoid(g, input):
     p = g.op('Sigmoid', input)
     return g.op('Log', p)
+
+
+@parse_args('v')
+def erf(g, input):
+    return g.op('Erf', input)
+
+
+@parse_args('v', 'i', 'i')
+def flatten(g, input, start_dim, end_dim):
+    dim = input.type().dim()
+    if end_dim < 0 :
+        end_dim = dim + end_dim
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1 and end_dim == dim - 1 :
+        return g.op("Flatten", input, axis_i=start_dim)
+    if start_dim == 0 and end_dim == dim - 2 :
+        return g.op("Flatten", input, axis_i=end_dim + 1)
+    # use Reshape for cases where the output shape is not 2D
+    if input.type().kind() != "CompleteTensorType":
+        return _unimplemented("flatten", "input size not accesible")
+    input_dims = input.type().sizes()
+    output_dims = []
+    for i in range(0, dim):
+        if start_dim < i and end_dim >= i:
+            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
+        else:
+            output_dims.append(input_dims[i])
+    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
+    p = _reshape_from_tensor(g, input, shape)
+    return p

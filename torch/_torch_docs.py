@@ -303,7 +303,7 @@ If :attr:`mat1` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 :attr:`alpha` and :attr:`beta` are scaling factors on matrix-vector product between
-:attr:`mat1` and :attr`mat2` and the added matrix :attr:`mat` respectively.
+:attr:`mat1` and :attr:`mat2` and the added matrix :attr:`mat` respectively.
 
 .. math::
     \text{out} = \beta\ \text{mat} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
@@ -604,7 +604,7 @@ in :attr:`input`.
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
 shape as :attr:`input`.
 
-:attr:`out` can have integral ``dtype``, but :attr`input` must have floating
+:attr:`out` can have integral ``dtype``, but :attr:`input` must have floating
 point ``dtype``.
 
 Args:
@@ -2496,7 +2496,7 @@ the output tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
+    dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     out (Tensor, optional): the output tensor
 
@@ -2649,9 +2649,10 @@ Example::
 
 .. function:: max(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the maximum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-maximum value found (argmax).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the maximum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each maximum value found
+(argmax).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2673,7 +2674,7 @@ Example::
             [ 1.5717, -0.9207,  0.1297, -1.8768],
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
-    (tensor([ 0.8475,  1.1949,  1.5717,  1.0036]), tensor([ 3,  0,  0,  1]))
+    torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
 .. function:: max(input, other, out=None) -> Tensor
 
@@ -3429,7 +3430,7 @@ Args:
 
 add_docstr(torch.ormqr,
            r"""
-ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
+ormqr(a, tau, mat, left=True, transpose=False) -> Tensor
 
 Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
 formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
@@ -3880,7 +3881,7 @@ Constructs a tensor with :attr:`data`.
     ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
     or :func:`torch.Tensor.detach`.
     If you have a NumPy ``ndarray`` and want to avoid a copy, use
-    :func:`torch.from_numpy`.
+    :func:`torch.as_tensor`.
 
 .. warning::
 
@@ -4541,8 +4542,9 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
-`U, S, V = torch.svd(A)` returns the singular value decomposition of a
-real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
+``svd(A)`` returns a namedtuple ``(U, S, V)`` which the singular value
+decomposition of a input real matrix `A` of size `(n x m)` such that
+:math:`A = USV^T`.
 
 `U` is of shape :math:`(n \times n)`.
 
@@ -4637,7 +4639,7 @@ only the upper triangular portion is used by default.
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
-be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+          be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
 
 .. note:: Extra care needs to be taken when backward through outputs. Such
           operation is really only stable when all eigenvalues are distinct.
@@ -6266,4 +6268,48 @@ Example::
     >>>                            [4, 5, 6],
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
+
+
+add_docstr(torch.combinations,
+           r"""
+combinations(tensor, r=2, with_replacement=False) -> seq
+
+Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
+python's `itertools.combinations` when `with_replacement` is set to `False`, and
+`itertools.combinations_with_replacement` when `with_replacement` is set to `True`.
+
+Arguments:
+    tensor (Tensor): 1D vector.
+    r (int, optional): number of elements to combine
+    with_replacement (boolean, optional): whether to allow duplication in combination
+
+Returns:
+    Tensor: A tensor equivalent to converting all the input tensors into lists, do
+    `itertools.combinations` or `itertools.combinations_with_replacement` on these
+    lists, and finally convert the resulting list into tensor.
+
+Example::
+
+    >>> a = [1, 2, 3]
+    >>> list(itertools.combinations(a, r=2))
+    [(1, 2), (1, 3), (2, 3)]
+    >>> list(itertools.combinations(a, r=3))
+    [(1, 2, 3)]
+    >>> list(itertools.combinations_with_replacement(a, r=2))
+    [(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)]
+    >>> tensor_a = torch.tensor(a)
+    >>> torch.combinations(tensor_a)
+    tensor([[1, 2],
+            [1, 3],
+            [2, 3]])
+    >>> torch.combinations(tensor_a, r=3)
+    tensor([[1, 2, 3]])
+    >>> torch.combinations(tensor_a, with_replacement=True)
+    tensor([[1, 1],
+            [1, 2],
+            [1, 3],
+            [2, 2],
+            [2, 3],
+            [3, 3]])
 """)

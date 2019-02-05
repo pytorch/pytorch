@@ -1,21 +1,15 @@
 #include <torch/csrc/jit/fuser/codegen.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/config.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/tensor_info.h>
 #include <torch/csrc/jit/ir.h>
 
-#if USE_CUDA_FUSER
-#include <torch/csrc/jit/fuser/cuda/resource_strings.h>
-#endif
-
-#if USE_CPU_FUSER
 #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
-#endif
+#include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 
 #include <cmath>
 #include <cstdint>
@@ -223,7 +217,7 @@ static std::string encodeRHS(const Node* n) {
     } else if (val.isBool()) {
       return scalarValue(val.toBool());
     } else {
-      JIT_ASSERT(val.isInt());
+      AT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
     }
   }
@@ -314,7 +308,6 @@ std::string generateKernel(
   for (const auto& input : inputs) {
     emitFormal(input.first, input.second);
   }
-  
 
   // Writes output parameters
   for (const auto& output : outputs) {
@@ -324,7 +317,7 @@ std::string generateKernel(
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : inputs) {
+  for (const auto& input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -335,7 +328,7 @@ std::string generateKernel(
     //  Access for other types is common to CUDA and CPU kernels.
     const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       env.s(
           "access",
           format("__half2float(t${formal}.data[t${formal}_offset])", env));
@@ -360,7 +353,7 @@ std::string generateKernel(
     if (n->kind() == prim::ConstantChunk)
       continue;
     if (n->kind() == aten::rand_like) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       has_random = true;
     }
     env.s("node", valueName(n->output()));
@@ -379,7 +372,7 @@ std::string generateKernel(
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       has_half_tensor = true;
     } else {
@@ -387,9 +380,8 @@ std::string generateKernel(
     }
   }
 
-// Includes headers
-// Note: CUDA kernels support halfs and random generation, CPU kernels do not
-#if USE_CUDA_FUSER
+  // Includes headers
+  // Note: CUDA kernels support halfs and random generation, CPU kernels do not
   if (has_half_tensor) {
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
@@ -405,7 +397,6 @@ std::string generateKernel(
     env.s("RandParam", "");
     env.s("RandInit", "");
   }
-#endif // USE_CUDA_FUSER
 
   // Insantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
@@ -414,19 +405,11 @@ std::string generateKernel(
   env.v("argument_loads", argument_loads);
   std::string code_string;
   if (use_cuda) {
-#if USE_CUDA_FUSER
     env.s("type_declarations", cuda::type_declarations_template.format(env));
     code_string = cuda::cuda_compilation_unit_template.format(env);
-#else
-    throw std::runtime_error("CUDA Fusion requested but not supported.");
-#endif // USE_CUDA_FUSER
   } else {
-#if USE_CPU_FUSER
     env.s("type_declarations", cpu::type_declarations_template.format(env));
     code_string = cpu::cpu_compilation_unit_template.format(env);
-#else
-    throw std::runtime_error("CPU Fusion requested but not supported");
-#endif // USE_CPU_FUSER
   }
 
   if (debugFuser()) {

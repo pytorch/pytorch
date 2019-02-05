@@ -24,7 +24,13 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
            "in 'lengths' that is <= 0");
   for(auto i = 0; i < batch_size - 1; i++) {
     if (lengths[batch_size - 1 - i] > lengths[batch_size - 2 - i]) {
-      AT_ERROR("'lengths' array has to be sorted in decreasing order");
+      // NB: enforce_sorted is implemented at a Python level, but the sortedness
+      // check lives here. If enforce_sorted=False then this error should never
+      // get called.
+      AT_ERROR("`lengths` array must be sorted in decreasing order when "
+               "`enforce_sorted` is True. You can pass `enforce_sorted=False` "
+               "to pack_padded_sequence and/or pack_sequence to sidestep this "
+               "requirement if you do not need ONNX exportability.");
     }
   }
 

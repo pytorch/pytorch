@@ -138,6 +138,20 @@
 - name: alias(Tensor self)
   self: grad
 
+# The four items below are necessary because TensorIterator doesn't work on
+# Variables (codegen does not unwrap the input Tensor for all() and any() ).
+- name: any(Tensor self)
+  self: not_implemented("any")
+
+- name: any(Tensor self, int64_t dim, bool keepdim)
+  self: not_implemented("any")
+
+- name: all(Tensor self)
+  self: not_implemented("all")
+
+- name: all(Tensor self, int64_t dim, bool keepdim)
+  self: not_implemented("all")
+
 - name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
@@ -465,7 +479,7 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -561,8 +575,15 @@
 - name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim)
+- name: norm(Tensor self, Scalar? p, IntList dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
+
+- name: norm(Tensor self, Scalar? p, ScalarType dtype)
+  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result).to(self.type().scalarType())
+
+
+- name: norm(Tensor self, Scalar? p, IntList dim, bool keepdim, ScalarType dtype)
+  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result, dim, keepdim).to(self.type().scalarType())
 
 - name: _pdist_forward(Tensor self, double p)
   self: _pdist_backward(grad, self, p, result)
@@ -708,7 +729,8 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grads, self, result0, result1)
+  self: slogdet_backward(grad, self, result0, result1)
+  output_differentiability: [false, true]
 
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: index_select_backward(grad, dim, result1, self.sizes(), true)
@@ -770,7 +792,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
-  self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)
+  self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
@@ -844,7 +866,7 @@
 - name: var(Tensor self, bool unbiased)
   self: var_backward(grad, self, unbiased)
 
-- name: var(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: var(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad, self, dim, unbiased, keepdim)
 
 - name: view(Tensor self, IntList size)
@@ -1046,10 +1068,10 @@
   self: adaptive_avg_pool3d_backward(grad, self)
 
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
-  self: adaptive_max_pool2d_backward(grad, self, indices)
+  self: adaptive_max_pool2d_backward(grad, self, result1)
 
 - name: adaptive_max_pool3d(Tensor self, IntList output_size)
-  self: adaptive_max_pool3d_backward(grad, self, indices)
+  self: adaptive_max_pool3d_backward(grad, self, result1)
 
 - name: avg_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
@@ -1058,13 +1080,16 @@
   self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
 - name: fractional_max_pool2d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
-  self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
+  self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, result1)
+
+- name: fractional_max_pool3d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
+  self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, indices)
 
 - name: max_pool2d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
-  self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+  self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
 
 - name: max_pool3d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
-  self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+  self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
 
 - name: max_unpool2d(Tensor self, Tensor indices, IntList output_size)
   self: max_unpool2d_backward(grad, self, indices, output_size)
@@ -1153,6 +1178,10 @@
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
+  self: zeros_like(self)
+
+- name: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
+  grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
@@ -1341,6 +1370,12 @@
   save_var: not_implemented("cudnn_batch_norm_backward save_var")
   input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
 
+# nnpack
+
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor bias, IntList padding)
+  input: _nnpack_spatial_convolution_backward_input(input, grad, weight, padding)
+  weight: _nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, padding)
+  bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)

@@ -71,7 +71,7 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
   auto& data = Input(DATA);
   auto& indices = Input(INDICES);
   auto& grad = Input(GRAD);
-  auto* output = Output(0);
+  
 
   // ONNX allows negative axis to index from the back, valid range: [-r, r].
   int axis = axis_;
@@ -85,7 +85,7 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
         data.size(acheck), grad.size(acheck), "batch sizes should be the same");
   }
 
-  output->ResizeLike(data);
+  auto* output = Output(0, data.sizes(), at::dtype<float>());
   auto* out_data = output->template mutable_data<float>();
   math::Set<float, CUDAContext>(output->size(), 0, out_data, &context_);
 

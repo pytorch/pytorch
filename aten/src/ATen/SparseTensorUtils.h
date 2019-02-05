@@ -17,7 +17,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");
+  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }

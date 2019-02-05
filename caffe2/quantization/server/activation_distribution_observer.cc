@@ -497,7 +497,7 @@ RegisterQuantizationParamsWithHistogramNetObserver::
     ++nwords_first_line;
   }
 
-  ist = istringstream(first_line);
+  ist.str(first_line);
 
   bool new_format = true;
   int op_index, i, nbins;
@@ -505,7 +505,7 @@ RegisterQuantizationParamsWithHistogramNetObserver::
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
   if (nwords_first_line != nbins + 7) {
-    ist = istringstream(first_line);
+    ist.str(first_line);
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
     if (nwords_first_line == nbins + 6) {
       new_format = false;

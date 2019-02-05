@@ -104,8 +104,10 @@ bool GroupNormGradientOp<T, Context>::RunOnDeviceImpl(
   // dL/ds = Sum(dL/dY * gamma * X)
   // dL/db = Sum(dL/dY * gamma)
   const int C = G * D;
-  ds_.Resize(N, G);
-  db_.Resize(N, G);
+  ReinitializeTensor(
+      &ds_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+  ReinitializeTensor(
+      &db_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
   T* ds_data = ds_.template mutable_data<T>();
   T* db_data = db_.template mutable_data<T>();
   math::Set<T, Context>(N * G, T(0), ds_data, &context_);

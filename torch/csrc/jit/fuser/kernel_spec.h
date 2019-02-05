@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
@@ -10,7 +8,7 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <cstdint>
 #include <memory>
@@ -43,6 +41,32 @@ struct TORCH_API PartitionInfo {
   int64_t dim_;
 };
 
+// This is a helper struct to record the following:
+// for each fusion group output, it records the corresponding
+// kernel output offset (in offset) and the fusion group input
+// to that is to be applied with sumtosize on the output (if any).
+// This mapping is necessar as a single kernel output might be
+// summed to different sizes.
+// These mappings are created during compilation in processGradSumToSize.
+struct TORCH_API OutputMapAndSize {
+  OutputMapAndSize(const int64_t _offset, const int64_t _sizeInput)
+      : offset_{_offset}, sizeInput_{_sizeInput} {};
+
+  int64_t offset() const {
+    return offset_;
+  }
+  int64_t sizeInput() const {
+    return sizeInput_;
+  }
+  bool needsSumToSize() const {
+    return sizeInput_ != -1;
+  }
+
+ private:
+  int64_t offset_;
+  int64_t sizeInput_;
+};
+
 // "Kernel Specification." - Contains device-independent fusion information.
 // Each kernel specification contains a map of instantiated generated functions
 // that implement some or most of its functionality. Multiple generated
@@ -58,24 +82,27 @@ struct TORCH_API KernelSpec {
   // Note: assumes the spec is a single block
   // Note: This is the appropriate place to generalize if you want to add other
   //  passes to upfront compilation that walk the graph.
-  KernelSpec(
-    const int64_t _key, 
-    const std::shared_ptr<Graph>& _graph)
-  : key_{_key},
-    graph_{_graph},
-    code_{_graph},
-    nInputs_{_graph->inputs().size()},
-    inputBroadcastGroups_{},
-    inputChunks_{},
-    has_random_{false},
-    kernels_{} {
-    
+  KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
+      : key_{_key},
+        graph_{_graph},
+        code_{_graph},
+        nInputs_{_graph->inputs().size()},
+        nTensorInputs_{},
+        inputBroadcastGroups_{},
+        inputChunks_{},
+        outputMapAndSizes_{},
+        has_random_{false},
+        kernels_{} {
     for (const auto& n : graph_->nodes()) {
       if (n->kind() == aten::rand_like) {
         has_random_ = true;
         break;
-      } 
+      }
     }
+    nTensorInputs_ = std::count_if(
+        graph_->inputs().begin(), graph_->inputs().end(), [](const Value* v) {
+          return v->type()->isSubtypeOf(DynamicType::get());
+        });
   }
 
   // Getters
@@ -91,6 +118,9 @@ struct TORCH_API KernelSpec {
   int64_t nInputs() const {
     return nInputs_;
   }
+  int64_t nTensorInputs() const {
+    return nTensorInputs_;
+  }
 
   std::vector<std::vector<int64_t>>& inputBroadcastGroups() {
     return inputBroadcastGroups_;
@@ -104,6 +134,10 @@ struct TORCH_API KernelSpec {
   }
   const std::vector<PartitionInfo>& inputChunks() const {
     return inputChunks_;
+  }
+
+  std::vector<OutputMapAndSize>& outputMapAndSizes() {
+    return outputMapAndSizes_;
   }
 
   bool hasRandom() const {
@@ -130,8 +164,14 @@ struct TORCH_API KernelSpec {
   std::shared_ptr<Graph> graph_;
   Code code_;
   uint64_t nInputs_;
+  uint64_t nTensorInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
+  // This will initially be an empty vector. During kernel compilation
+  // in processGradSumToSize it will be filled and will contain one
+  // element per fusion group output (which may be larger than the
+  // number of kernel outputs).
+  std::vector<OutputMapAndSize> outputMapAndSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
@@ -142,5 +182,3 @@ struct TORCH_API KernelSpec {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER

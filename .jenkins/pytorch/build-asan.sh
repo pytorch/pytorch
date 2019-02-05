@@ -19,3 +19,5 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan" \
   NO_CUDA=1 USE_MKLDNN=0 \
   python setup.py install
+
+assert_git_not_dirty

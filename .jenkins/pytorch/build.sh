@@ -46,6 +46,16 @@ cmake --version
 # TODO: Don't run this...
 pip install -q -r requirements.txt || true
 
+# TODO: Don't install this here
+if ! which conda; then
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    pip install -q mkl mkl-devel
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
@@ -86,16 +96,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   exit 0
 fi
 
-# TODO: Don't install this here
-if ! which conda; then
-  pip install -q mkl mkl-devel
-  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
-    export USE_MKLDNN=1
-  else
-    export USE_MKLDNN=0
-  fi
-fi
-
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
@@ -115,35 +115,41 @@ if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
+# Patch required to build xla
+if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+  git clone --recursive https://github.com/pytorch/xla.git
+  patch -p1 < xla/pytorch.patch
+fi
+
 # ppc64le build fails when WERROR=1
 # set only when building other architectures
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   WERROR=1 python setup.py install
-elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+else
   python setup.py install
 fi
 
-
-# Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
+assert_git_not_dirty
 
 # Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
   LC_ALL=C make html
   popd
+  assert_git_not_dirty
 fi
 
 # Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   mkdir -p c10/build
   pushd c10/build
   cmake ..
   make -j
   popd
+  assert_git_not_dirty
 fi
 
 # Test no-Python build
@@ -166,4 +172,54 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
   make VERBOSE=1
   popd
+  assert_git_not_dirty
+fi
+
+# Test XLA build
+if [[ "${JOB_BASE_NAME}" == *xla* ]]; then
+  # TODO: Move this to Dockerfile.
+
+  pip install -q lark-parser
+
+  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
+  sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
+  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+  sudo apt-get -qq update
+
+  # Install clang-7 clang++-7 for xla
+  sudo apt-get -qq install clang-7 clang++-7
+
+  # Bazel dependencies
+  sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
+  # XLA build requires Bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
+  chmod +x bazel-*.sh
+  sudo ./bazel-*.sh
+  BAZEL="$(which bazel)"
+  if [ -z "${BAZEL}" ]; then
+    echo "Unable to find bazel..."
+    exit 1
+  fi
+
+  # Install bazels3cache for cloud cache
+  sudo apt-get -qq install npm
+  npm config set strict-ssl false
+  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  sudo apt-get install -qq nodejs
+  sudo npm install -g bazels3cache
+  BAZELS3CACHE="$(which bazels3cache)"
+  if [ -z "${BAZELS3CACHE}" ]; then
+    echo "Unable to find bazels3cache..."
+    exit 1
+  fi
+
+  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
+  pushd xla
+  export CC=clang-7 CXX=clang++-7
+  # Use cloud cache to build when available.
+  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
+
+  python setup.py install
+  popd
+  assert_git_not_dirty
 fi

@@ -21,6 +21,7 @@ configure_file(
 # and headers you add
 set(C10_CUDA_SRCS
     CUDAStream.cpp
+    CUDACachingAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
 )
@@ -67,3 +68,7 @@ foreach(file ${C10_CUDA_HEADERS})
 endforeach()
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
+
+if (MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
+endif()

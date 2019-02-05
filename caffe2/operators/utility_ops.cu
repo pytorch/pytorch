@@ -69,7 +69,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
   const size_t N = X.size();
   const float* data_ptr = X.data<float>();
 
-  scratch_.Resize(1);
+  ReinitializeTensor(&scratch_, {1}, at::dtype<bool>().device(CUDA));
   math::Set<bool, CUDAContext>(
       1, false, scratch_.mutable_data<bool>(), &context_);
   NanCheckKernel<<<
@@ -217,8 +217,8 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
 
   for (int i = 0; i < OutputSize(); i++) {
     auto& input = Input(i + kInputStartOffset);
-    auto* grad_input = Output(i);
-    grad_input->ResizeLike(input);
+
+    auto* grad_input = Output(i, input.sizes(), at::dtype<float>());
     MaxMinGradKernel<<<
         CAFFE_GET_BLOCKS(input.size()),
         CAFFE_CUDA_NUM_THREADS,
@@ -282,7 +282,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
 
   CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
   CAFFE_ENFORCE_GT(X0.size(), 0);
-  CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
+  CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
   CAFFE_ENFORCE_EQ(weight0.size(), 1);
 
   int64_t M = X0.size();
@@ -296,10 +296,10 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   // consecutively in device memory, copy pointers to a host vector and then
   // copy back into a device array.
   const int64_t B = (InputSize() - 3) / 2;
-  x_data_host_.Resize(B);
-  weights_host_.Resize(B);
-  x_data_device_.Resize(B);
-  weights_device_.Resize(B);
+  ReinitializeTensor(&x_data_host_, {B}, at::dtype<const float*>().device(CPU));
+  ReinitializeTensor(&weights_host_, {B}, at::dtype<const float*>().device(CPU));
+  ReinitializeTensor(&x_data_device_, {B}, at::dtype<const float*>().device(CUDA));
+  ReinitializeTensor(&weights_device_, {B}, at::dtype<const float*>().device(CUDA));
 
   const float** x_data_host = x_data_host_.mutable_data<const float*>();
   const float** weights_host = weights_host_.mutable_data<const float*>();

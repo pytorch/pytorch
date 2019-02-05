@@ -26,11 +26,7 @@
 #cmakedefine BLAS_F2C
 #cmakedefine BLAS_USE_CBLAS_DOT
 
-#ifdef __cplusplus
 # define TH_EXTERNC extern "C"
-#else
-# define TH_EXTERNC extern
-#endif
 
 // Note(jiayq): copied from ATen/core/Macros.h. Because internal build of TH
 // and ATen are not unified yet, we need to duplicate code for now. Long term

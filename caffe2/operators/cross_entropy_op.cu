@@ -62,7 +62,7 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+  
   int N, D;
   if (X.ndim() > 1) {
     N = X.dim32(0);
@@ -76,7 +76,7 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   CAFFE_ENFORCE_EQ(dY.ndim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
   LabelCrossEntropyGradientKernel<<<
@@ -288,8 +288,8 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
+  
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
   auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
@@ -401,8 +401,8 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
+  
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
   auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();

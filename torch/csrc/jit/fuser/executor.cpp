@@ -2,15 +2,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/config.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
 #include <torch/csrc/jit/fuser/tensor_info.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only
@@ -134,7 +133,7 @@ static std::vector<int64_t> computeMapSize(
     const at::Tensor& tensor,
     const PartitionDesc& chunkDesc) {
   std::vector<int64_t> sizes(tensor.sizes().begin(), tensor.sizes().end());
-  JIT_ASSERT(sizes[chunkDesc.dim()] % chunkDesc.nSubTensors() == 0);
+  AT_ASSERT(sizes[chunkDesc.dim()] % chunkDesc.nSubTensors() == 0);
   sizes[chunkDesc.dim()] /= chunkDesc.nSubTensors();
   return sizes;
 }
@@ -154,7 +153,7 @@ static void compressContiguous(
     size_t total_size = sizes[cur];
     cur++;
     while (cont[cur - 1] && cur < ndim) {
-      JIT_ASSERT(strides[cur - 1] == sizes[cur] * strides[cur]);
+      AT_ASSERT(strides[cur - 1] == sizes[cur] * strides[cur]);
       total_size *= sizes[cur];
       cur++;
     }
@@ -164,7 +163,7 @@ static void compressContiguous(
   }
 
   if (ndim > 0)
-    JIT_ASSERT(!cont.back() || strides.back() == 1);
+    AT_ASSERT(!cont.back() || strides.back() == 1);
 }
 
 // Launches the requested fusion on the given device with the given inputs.
@@ -175,7 +174,7 @@ void launchFusion(
     const at::ArrayRef<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
   // Fails if fusion and given inputs disagree
-  JIT_ASSERT(inputs.size() == fusion.inputDesc().size());
+  AT_ASSERT(inputs.size() == fusion.inputDesc().size());
 
   // Computes number of flattened inputs and outputs
   size_t flat_inputs_size = 0;
@@ -189,7 +188,7 @@ void launchFusion(
   // a 32-bit integer.
   // Note: this code assumes that inputs are 32-bit addressable
   // Note: this code assumes that all inputs are of the same size
-  JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
+  AT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
 
   // Computes map_size, numel from the first input
   at::IntList map_size;
@@ -224,7 +223,7 @@ void launchFusion(
                               at::IntList sizes,
                               at::IntList strides) {
     const auto nDim = desc.nDim(); // NOTE: this is the compressed dim
-    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
+    AT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
     ti->data = data_ptr;
     compressContiguous(
@@ -294,18 +293,21 @@ bool runFusion(const int64_t key, Stack& stack) {
 
   // Acquires the FusionSpec
   auto maybe_spec = retrieve(key);
-  JIT_ASSERT(maybe_spec);
+  AT_ASSERT(maybe_spec);
   auto& spec = *(*maybe_spec);
 
   // Acquires inputs from stack
-  auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {
-    return i.toTensor();
-  });
+  auto all_inputs = last(stack, spec.nInputs());
+  std::vector<at::Tensor> inputs;
+  inputs.reserve(spec.nTensorInputs());
+  // we know that tensor inputs are first
+  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+    inputs.emplace_back(all_inputs[i].toTensor());
+  }
 
   // Determines device to dispatch to. If there's a device mismatch in the
   // inputs, we use the fallback (which should give a nice error message).
   at::Device device = inputs.at(0).device();
-  at::ScalarType dtype = inputs[0].type().scalarType();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
     if (t.device() != device) {
       return false;
@@ -334,11 +336,21 @@ bool runFusion(const int64_t key, Stack& stack) {
     spec.cacheKernel(arg_spec, kernel);
   }
   maybe_kernel = spec.findKernel(arg_spec);
-  JIT_ASSERT(maybe_kernel);
+  AT_ASSERT(maybe_kernel);
 
   // Launches fusion
-  std::vector<at::Tensor> outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, outputs);
+  std::vector<at::Tensor> raw_outputs;
+  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
+
+  auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
+    if (omap.needsSumToSize()) {
+      return at::sum_to(
+          raw_outputs[omap.offset()],
+          all_inputs[omap.sizeInput()].toIntList()->elements());
+    } else {
+      return raw_outputs[omap.offset()];
+    }
+  });
 
   // Updates stack
   drop(stack, spec.nInputs());

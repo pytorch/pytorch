@@ -1,7 +1,5 @@
 #include <torch/csrc/cuda/comm.h>
 
-#ifdef USE_CUDA
-
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -17,6 +15,18 @@
 
 #include <cstddef>
 #include <vector>
+
+
+// The following code is used to ensure torch is linked against caffe2_gpu.
+#ifdef _MSC_VER
+namespace {
+#pragma optimize("", off)
+  int warp_size() {
+    return at::cuda::warp_size();
+  }
+#pragma optimize("", on)
+}
+#endif
 
 namespace torch { namespace cuda {
 using namespace at;
@@ -244,5 +254,3 @@ at::Tensor gather(
   return result;
 }
 }} // namespace torch::cuda
-
-#endif

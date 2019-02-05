@@ -310,11 +310,32 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
+inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_copy(*this, dim, index, source);
+}
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
     return type().index_put(*this, indices, values, accumulate);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
     return type().index_put_(*this, indices, values, accumulate);
+}
+inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_add(*this, dim, index, source);
+}
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar source) const {
+    return type().index_fill(*this, dim, index, source);
+}
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().scatter(*this, dim, index, source);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().scatter_add(*this, dim, index, source);
+}
+inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
+    return type().masked_scatter(*this, mask, source);
+}
+inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar source) const {
+    return type().masked_fill(*this, mask, source);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -664,7 +685,7 @@ inline Tensor & Tensor::unsqueeze_(int64_t dim) {
 inline Tensor Tensor::var(bool unbiased) const {
     return type().var(*this, unbiased);
 }
-inline Tensor Tensor::var(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::var(IntList dim, bool unbiased, bool keepdim) const {
     return type().var(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
@@ -673,10 +694,16 @@ inline Tensor Tensor::view_as(const Tensor & other) const {
 inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) const {
     return type().where(condition, *this, other);
 }
+inline Tensor Tensor::norm(c10::optional<Scalar> p, ScalarType dtype) const {
+    return type().norm(*this, p, dtype);
+}
 inline Tensor Tensor::norm(Scalar p) const {
     return type().norm(*this, p);
 }
-inline Tensor Tensor::norm(c10::optional<Scalar> p, int64_t dim, bool keepdim) const {
+inline Tensor Tensor::norm(c10::optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) const {
+    return type().norm(*this, p, dim, keepdim, dtype);
+}
+inline Tensor Tensor::norm(c10::optional<Scalar> p, IntList dim, bool keepdim) const {
     return type().norm(*this, p, dim, keepdim);
 }
 inline Tensor Tensor::clone() const {

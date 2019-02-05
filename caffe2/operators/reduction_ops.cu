@@ -84,8 +84,8 @@ bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
   DCHECK_EQ(dY.size(), 1);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   SumElementsGradientKernel<float>
       <<<CAFFE_GET_BLOCKS(X.size()),
          CAFFE_CUDA_NUM_THREADS,
@@ -104,8 +104,7 @@ bool MaxReductionGradientOp<T, Context, ROWWISE>::RunOnDevice() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
   CAFFE_ENFORCE_EQ(X.ndim(), 3);
 

@@ -199,10 +199,10 @@ bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(

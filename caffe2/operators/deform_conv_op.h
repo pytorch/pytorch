@@ -71,7 +71,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
 
  private:
   Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   // Input: X, o, W, b
@@ -96,8 +96,8 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
   bool RunOnDeviceWithOrderNCHW() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;

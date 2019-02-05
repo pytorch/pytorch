@@ -178,14 +178,14 @@ __global__ void LRNComputeDiffNHWC(const int nthreads, const T* bottom_data,
 template<>
 bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
   if (OutputSize() > 1) {
     scale_ = Output(1);
@@ -211,14 +211,14 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template<>
 bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
   if (OutputSize() > 1) {
     scale_ = Output(1);
@@ -245,7 +245,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
@@ -255,7 +255,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   // long as the sizes check out.
   DCHECK_EQ(X.size(), Y.size());
   DCHECK_EQ(X.size(), dY.size());
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -284,7 +284,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   DCHECK_EQ(X.ndim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
@@ -295,7 +295,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   // long as the sizes check out.
   DCHECK_EQ(X.size(), Y.size());
   DCHECK_EQ(X.size(), dY.size());
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   if (!scale_) {
     scale_ = &local_scale_tensor_;
   }

@@ -6,11 +6,10 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
+import torch._jit_internal as _jit_internal
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
-from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
-    _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING, _boolean_dispatched
+from torch._jit_internal import ignore
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -117,7 +116,9 @@ def load(f, map_location=None):
                 setattr(curr, name, ScriptModule())
             curr = getattr(curr, name)
         return curr
-
+    if isinstance(f, string_classes):
+        if not os.path.exists(f):
+            raise ValueError("The provided filename {} does not exist".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -656,7 +657,7 @@ class CompilationUnit(object):
 
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
-            rcb = createResolutionCallback(_frames_up + 1)
+            rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
         self.module._define(lang, rcb, False)
 
     def __getattr__(self, attr):
@@ -666,18 +667,28 @@ class CompilationUnit(object):
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
         return None
-    return _boolean_dispatched.get(fn)
+    return _jit_internal.boolean_dispatched.get(fn)
+
+
+def _try_get_overloaded_fn(fn):
+    if not hasattr(fn, '__self__') or not isinstance(fn.__self__, ScriptModule):
+        # Only allow overloads for bound methods
+        return None
+    overloads = fn.__self__._overloads.get(fn.__name__, None)
+    if overloads is None:
+        return None
+    return [getattr(fn.__self__, overload) for overload in overloads]
 
 
 def _try_compile_weak_script(fn):
-    entry = _compiled_weak_fns.get(fn)
+    entry = _jit_internal.compiled_weak_fns.get(fn)
     if entry is None:
         return None
-    if entry["status"] == COMPILATION_PENDING:
+    if entry["status"] == _jit_internal.COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
         del entry["rcb"]
-        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-        entry["status"] = COMPILED
+        _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        entry["status"] = _jit_internal.COMPILED
         return compiled_fn
     else:
         return entry["compiled_fn"]
@@ -687,7 +698,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
     if _rcb is None:
-        _rcb = createResolutionCallback(_frames_up + 1)
+        _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     mod = ScriptModule()
     _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
@@ -714,7 +725,7 @@ def script_method(fn, _rcb=None):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     if _rcb is None:
-        _rcb = createResolutionCallback(frames_up=2)
+        _rcb = _jit_internal.createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
     return ScriptMethodStub(_rcb, ast, fn)
 
@@ -725,14 +736,22 @@ def _try_get_weak_module(mod):
     """
     if not isinstance(mod, Module):
         return None
-    return _weak_modules.get(mod)
+    return _jit_internal.weak_modules.get(mod)
+
+
+def _try_get_ignored_op(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return fn in _jit_internal.ignored_fns
 
 
 def _is_weak_type(cls):
     """
     Check if a type has been annotated with `weak_module`
     """
-    return cls in _weak_types
+    return cls in _jit_internal.weak_types
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -941,6 +960,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         original_init = getattr(cls, '__init__', lambda self: None)
         super_constants = getattr(super(cls), '_constants_set', set())
         cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1139,7 +1159,7 @@ if _enabled:
             #
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
-            rcb = createResolutionCallback(frames_up=1)
+            rcb = _jit_internal.createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
 
         def copy(self):
@@ -1188,6 +1208,9 @@ if _enabled:
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
+            # Copy overloads
+            self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
+
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
 
@@ -1218,7 +1241,9 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 else:
-    ScriptModule = torch.nn.Module
+    class ScriptModule(torch.nn.Module):
+        def __init__(self, optimize=True):
+            super(ScriptModule, self).__init__()
 
 
 def _get_weak_stubs(cls):
@@ -1229,8 +1254,8 @@ def _get_weak_stubs(cls):
     stubs = []
     for name in dir(cls):
         func = get_function_from_type(cls, name)
-        if func in _weak_script_methods:
-            entry = _weak_script_methods[func]
+        if func in _jit_internal.weak_script_methods:
+            entry = _jit_internal.weak_script_methods[func]
             stub = script_method(entry["original_method"], entry["rcb"])
             stubs.append(stub)
     return stubs
@@ -1240,21 +1265,21 @@ def _make_strong(mod):
     """
     Converts a weak module into a subclass of ScriptModule
     """
-    if mod in _weak_modules:
-        return _weak_modules[mod]
+    if mod in _jit_internal.weak_modules:
+        return _jit_internal.weak_modules[mod]
 
-    stubs = _weak_types.get(type(mod))["method_stubs"]
+    stubs = _jit_internal.weak_types.get(type(mod))["method_stubs"]
 
     if stubs is None:
-        # Generate stubs and and store on _weak_types in case this type is
+        # Generate stubs and and store on weak_types in case this type is
         # used again
         stubs = _get_weak_stubs(type(mod))
-        _weak_types[type(mod)]["method_stubs"] = stubs
+        _jit_internal.weak_types[type(mod)]["method_stubs"] = stubs
 
     # Create proxy with stubs
     proxy = WeakScriptModuleProxy(mod, stubs)
 
-    _weak_modules[mod] = proxy
+    _jit_internal.weak_modules[mod] = proxy
 
     return proxy
 

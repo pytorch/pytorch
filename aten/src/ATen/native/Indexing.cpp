@@ -497,4 +497,36 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   return at::legacy::th::_th_index_copy_(self, dim, index, source);
 }
 
+Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_copy_(dim, index, source);
+}
+
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_add_(dim, index, source);
+}
+
+Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  return self.clone().index_fill_(dim, index, source);
+}
+
+Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().scatter_(dim, index, source);
+}
+
+Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().scatter_add_(dim, index, source);
+}
+
+Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_scatter_(_mask, source);
+}
+
+Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_fill_(mask, source);
+}
+
 }} // at::native

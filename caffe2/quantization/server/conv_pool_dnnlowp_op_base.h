@@ -5,6 +5,7 @@
 #endif
 
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/op_wrapper.h"
@@ -12,6 +13,8 @@
 #ifdef _OPENMP
 C10_DECLARE_int(caffe2_omp_num_threads);
 #endif
+C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -157,18 +160,34 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     ws_->CreateBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__");
   }
 
-  void RunWithSharedInt32Buffer_(
-      std::function<void(vector<int32_t>* Y_int32)> f) {
-    auto* mutexBlob =
-        ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU_MUTEX__");
-    CAFFE_ENFORCE(mutexBlob, "Must call CreateSharedInt32Buffer() first");
+  void RunWithSharedBuffer_(
+      Tensor* col_buffer,
+      vector<int32_t>* Y_int32,
+      std::function<
+          void(Tensor* col_buffer_shared, vector<int32_t>* Y_int32_shared)> f) {
+    auto f2 = [this, Y_int32, f](Tensor* col_buffer_shared) {
+      if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
+        auto* mutexBlob =
+            ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU_MUTEX__");
+        CAFFE_ENFORCE(mutexBlob, "Must call CreateSharedInt32Buffer() first");
 
-    auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
-    std::lock_guard<std::mutex> g(**mutexPtr);
+        auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
+        std::lock_guard<std::mutex> g(**mutexPtr);
 
-    auto* Y_int32 = ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__")
-                        ->template GetMutable<vector<int32_t>>();
-    f(Y_int32);
+        auto* Y_int32_shared =
+            ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__")
+                ->template GetMutable<vector<int32_t>>();
+        f(col_buffer_shared, Y_int32_shared);
+      } else {
+        f(col_buffer_shared, Y_int32);
+      }
+    };
+
+    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+      runWithSharedBuffer<CPUContext>(this->ws_, f2);
+    } else {
+      f2(col_buffer);
+    }
   }
 
   bool measure_quantization_error_{false};

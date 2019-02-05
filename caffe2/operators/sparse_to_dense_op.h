@@ -43,7 +43,7 @@ class SparseToDenseOp final : public Operator<Context> {
 
     // Awkward way to get the max element to make it work with both CUDA
     // and CPU.
-    max_element_.Resize(1);
+    ReinitializeTensor(&max_element_, {1}, at::dtype<TInd>().device(Context::GetDeviceType()));
     TInd* max_element_ptr = max_element_.template mutable_data<TInd>();
     math::ReduceMax<TInd>(sparse_indices_len, sparse_indices_vec, max_element_ptr,
           &scratch_, &context_);
@@ -115,7 +115,7 @@ class SparseToDenseOp final : public Operator<Context> {
   int output_first_dim_;
   Tensor scratch_{Context::GetDeviceType()};
   Tensor max_element_host_{CPU};
-  Tensor max_element_{Context::GetDeviceType()};
+  Tensor max_element_;
 
   INPUT_TAGS(INDICES, VALUES, DATA_TO_INFER_DIM);
 };

@@ -40,8 +40,8 @@ template <>
 bool StumpFuncOp<float, float, CUDAContext>::RunOnDevice() {
   auto& in = Input(0);
   const float* in_data = in.data<float>();
-  auto* out = Output(0);
-  out->ResizeLike(in);
+
+  auto* out = Output(0, in.sizes(), at::dtype<float>());
   float* out_data = out->template mutable_data<float>();
   StumpFuncKernel<<<CAFFE_GET_BLOCKS(in.size()), CAFFE_CUDA_NUM_THREADS,
     0, context_.cuda_stream()>>>(

@@ -85,8 +85,8 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};
   Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;

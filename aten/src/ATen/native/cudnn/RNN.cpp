@@ -375,7 +375,7 @@ namespace {
       case CUDNN_RNN_TANH:
         return 2;
       default:
-        AT_ERROR("unknown cuDNN RNN mode %d", mode);
+        AT_ERROR("unknown cuDNN RNN mode ", mode);
     }
   }
 

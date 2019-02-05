@@ -184,7 +184,8 @@ If an insert is necessary but max_elements has been reached, fail.
 )DOC")
     .Input(0, "handle", "Pointer to an Index instance.")
     .Input(1, "keys", "Tensor of keys to be looked up.")
-    .Output(0, "indices", "Indices for each of the keys.");
+    .Output(0, "indices", "Indices for each of the keys.")
+    .ScalarType(TensorProto::INT64);
 
 OPERATOR_SCHEMA(IndexFreeze)
     .NumInputs(1)

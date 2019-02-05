@@ -43,7 +43,7 @@ class Int8FCOp final : public Operator<CPUContext> {
     CHECK_EQ(K, W.t.size(1));
     CHECK_EQ(N, B.t.numel());
     const auto M = X.t.numel() / K;
-    Y->t.Resize(M, N);
+    ReinitializeTensor(&Y->t, {M, N}, at::dtype<uint8_t>().device(CPU));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();

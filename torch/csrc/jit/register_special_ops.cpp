@@ -125,7 +125,7 @@ void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::Ar
       data += strides[dim] * elementSize;
     }
   } else {
-    JIT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
+    AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
       storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, obj.toIntListRef());
     } else if (obj.isDoubleList()){
@@ -168,7 +168,7 @@ RegisterOperators reg({
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
 
-          JIT_ASSERT(defaults.size() > list.size());
+          AT_ASSERT(defaults.size() > list.size());
 
           // TODO: allow list of optionals to be filled in with defaults
           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
