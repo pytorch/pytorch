@@ -104,7 +104,7 @@ For example, you might have a tensor of 10000 entires and want to sum together
 all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
 an intermediate result tensor with 4 elements. Then it will execute the function
 "f" you provide and pass the beginning and end index of these chunks, so
-0-24999, 2500-4999, etc. and the combination identity. It will then write out
+0-2499, 2500-4999, etc. and the combination identity. It will then write out
 the result from each of these chunks into the intermediate result tensor. After
 that it'll reduce the partial results from each chunk into a single number using
 the combination function sf and the identity ident. For a total summation this

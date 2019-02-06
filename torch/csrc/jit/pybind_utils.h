@@ -1,16 +1,16 @@
 #pragma once
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/function_schema.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -30,6 +30,9 @@
 namespace torch {
 namespace jit {
 namespace detail {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
@@ -112,6 +115,19 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
+inline IValue createGenericDict(
+    py::handle obj,
+    const TypePtr& key_type,
+    const TypePtr& value_type) {
+  at::ivalue::DictUnorderedMap<IValue, IValue> elems;
+  elems.reserve(py::len(obj));
+  for (auto key : obj) {
+    elems.insert(std::make_pair(
+        toIValue(key, key_type), toIValue(obj[key], value_type)));
+  }
+  return at::ivalue::Dict<IValue, IValue>::create(std::move(elems));
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -187,6 +203,11 @@ inline IValue toIValue(
         default:
           return createGenericList(obj, elem_type);
       }
+    }
+    case TypeKind::DictType: {
+      const auto& dict_type = type->expect<DictType>();
+      return createGenericDict(
+          obj, dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       const auto& elem_type = type->expect<OptionalType>()->getElementType();
@@ -298,6 +319,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     return t;
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDict();
+    const auto& elements = dict->elements();
+    py::dict py_dict;
+    for (auto pair : elements) {
+      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+    }
+    return py_dict;
+
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

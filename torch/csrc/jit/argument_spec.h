@@ -2,8 +2,8 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>
@@ -77,7 +77,7 @@ struct ArgumentSpec {
     for (const auto& i : inputs) {
       addInput(i, offset, with_grad);
     }
-    JIT_ASSERT(offset == num_flat_inputs);
+    AT_ASSERT(offset == num_flat_inputs);
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {
@@ -315,13 +315,13 @@ struct CompleteArgumentInfo {
     // See [valid range], it is always valid to ask for offset for (i + 1)
     return (sizes_strides_offset(i + 1) - sizes_strides_offset(i)) / 2;
   }
-  at::IntList sizes() const {
-    return at::IntList(
+  at::IntArrayRef sizes() const {
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i), ndimension());
   }
-  at::IntList strides() const {
+  at::IntArrayRef strides() const {
     int ndim = ndimension();
-    return at::IntList(
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {

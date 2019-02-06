@@ -37,7 +37,7 @@ git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
-3. Install PyTorch in `build develop` mode:
+3. Install PyTorch in `develop` mode:
 
 A full set of instructions on installing PyTorch from source is here:
 https://github.com/pytorch/pytorch#from-source
@@ -51,7 +51,7 @@ python setup.py install
 with
 
 ```bash
-python setup.py build develop
+python setup.py develop
 ```
 
 This is especially useful if you are only changing Python files.
@@ -62,7 +62,7 @@ Python install.
 Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
 
 For example:
-- Install local PyTorch in `build develop` mode
+- Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
 - modify your Python file `torch/__init__.py`
@@ -73,7 +73,7 @@ For example:
 You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `build develop` mode again.
+and `python setup.py clean`. Then you can install in `develop` mode again.
 
 ## Codebase structure
 
@@ -212,7 +212,7 @@ specific build of PyTorch. To set one up:
 conda create -n pytorch-myfeature
 source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
-python setup.py build develop
+python setup.py develop
 ```
 
 ## C++ Development tips
@@ -254,7 +254,7 @@ variables `DEBUG` and `NO_CUDA`.
 
 For example:
 ```bash
-NO_CUDA=1 DEBUG=1 python setup.py build develop
+NO_CUDA=1 DEBUG=1 python setup.py develop
 ```
 
 Make sure you continue to pass these flags on subsequent builds.

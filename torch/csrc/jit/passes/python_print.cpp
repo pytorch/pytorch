@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
@@ -117,7 +117,7 @@ struct QualifiedName : c10::intrusive_ptr_target {
       }
       out << name_;
     } else {
-      JIT_ASSERT(prefix_);
+      AT_ASSERT(prefix_);
       out << "getattr(";
       prefix_->emit(out);
       out << ", ";
@@ -281,7 +281,7 @@ struct PythonPrintPass {
   // block_point's output.
   Node* scanValue(Node* block_point, Value* v) {
     Node* n = v->node();
-    JIT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
+    AT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
 
     if (n == block_point &&
         canInline(v)) { // the node must be at the expected point of the typical
@@ -336,7 +336,7 @@ struct PythonPrintPass {
         return i;
       }
     }
-    JIT_ASSERT(t.is_variable());
+    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -359,16 +359,17 @@ struct PythonPrintPass {
       buildConstantList(n, constants);
     buildConstantList(b->return_node(), constants);
   }
+
   // get a new name unique across calls to uniqueName() and
   // anything we have used.
-  size_t next_id = 0;
+  std::unordered_map<std::string, size_t> next_id;
 
   std::string genNameImpl(
       const std::string& candidate,
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id++);
+      name = candidate + std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -402,7 +403,7 @@ struct PythonPrintPass {
   // use the uniqueName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "_");
+        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use
@@ -444,7 +445,7 @@ struct PythonPrintPass {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Pretty printer expected 2 lists of same size");
+      AT_ERROR("Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
@@ -462,6 +463,25 @@ struct PythonPrintPass {
     for (auto* value : list) {
       stmt << delimiter;
       stmt << useOf(value);
+      delimiter = ", ";
+    }
+    stmt << end;
+  }
+
+  void printDict(
+      std::ostream& stmt,
+      at::ArrayRef<Value*> key_value_pairs,
+      const char* begin = "{",
+      const char* end = "}") {
+    stmt << begin;
+    auto delimiter = "";
+    for (size_t i = 0; i < key_value_pairs.size(); i += 2) {
+      stmt << delimiter;
+      auto key = key_value_pairs[i];
+      auto value = key_value_pairs[i + 1];
+
+      stmt << useOf(key) << ": " << useOf(value);
+
       delimiter = ", ";
     }
     stmt << end;
@@ -577,6 +597,15 @@ struct PythonPrintPass {
   void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
+    if (node->kind() == prim::PythonOp) {
+      auto value = static_cast<const PythonOp*>(node);
+      if (enforce_importable_ && value->ignore_on_export) {
+          // Op has been marked as ignored, so insert an error in its place
+          indent();
+          out << "ops.prim.IgnoredPythonOp()\n";
+          return;
+      }
+    }
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -610,7 +639,6 @@ struct PythonPrintPass {
         out << useOf(node->input()) << "\n";
         break;
       default:
-
         std::stringstream ss;
         printRHS(ss, node);
 
@@ -685,7 +713,7 @@ struct PythonPrintPass {
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
-              << ". Remove calls to python functions before export.";
+              << ". Remove calls to Python functions before export";
         }
 
         stmt << "^" << value->name();
@@ -776,6 +804,20 @@ struct PythonPrintPass {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
+      case prim::DictConstruct: {
+        auto dict_type = node->output()->type()->expect<DictType>();
+        if (node->inputs().size() == 0 &&
+            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            !dict_type->getValueType()->isSubtypeOf(DynamicType::get())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+        } else {
+          printDict(stmt, node->inputs());
+        }
+      } break;
+      case prim::DictIndex: {
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
+      } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
         auto name = genMethodName("__forked_function");
@@ -825,7 +867,7 @@ struct PythonPrintPass {
             }
           } else {
             // vararg functions like format can have extra arguments
-            JIT_ASSERT(schema.is_vararg());
+            AT_ASSERT(schema.is_vararg());
           }
           stmt << v;
         }
@@ -913,7 +955,7 @@ struct PythonPrintPass {
     }
 
     // have we use all the provided defaults?
-    JIT_ASSERT(defaults_offset == defaults.end());
+    AT_ASSERT(defaults_offset == defaults.end());
 
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {
@@ -965,7 +1007,6 @@ struct PythonPrintPass {
   }
   void printMethod(script::Method& method) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), parameter_names);
     printMethod(method, parameter_names);
@@ -986,7 +1027,6 @@ struct PythonPrintPass {
   }
   void printModule(script::Module& module) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), parameter_names);
     for (auto& method : module.get_methods()) {
@@ -1044,12 +1084,14 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::Constant,
       prim::fork,
       prim::ListConstruct,
+      prim::DictConstruct,
       prim::ListUnpack,
       prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
+      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
@@ -1060,8 +1102,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // to be correctly printed for export (a process that happens before
   // optimization passes run)
   const static std::unordered_set<Symbol> unneeded = {
-      onnx::Reshape, // only used in onnx
-      onnx::Shape, // only used in onnx
+      c10::onnx::Reshape, // only used in onnx
+      c10::onnx::Shape, // only used in onnx
       prim::AnyDefined, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it

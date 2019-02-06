@@ -544,6 +544,11 @@ class ExprBuilder(Builder):
                             [build_expr(ctx, e) for e in expr.elts])
 
     @staticmethod
+    def build_Dict(ctx, expr):
+        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+
+    @staticmethod
     def build_Num(ctx, expr):
         value = str(expr.n)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))

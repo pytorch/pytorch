@@ -204,7 +204,15 @@ class SpatialBNOp : public Operator<Context> {
       const T* mean,
       const T* var,
       T* alpha,
-      T* beta);
+      T* beta) {
+    EigenVectorArrayMap<T> alpha_arr(alpha, C);
+    EigenVectorArrayMap<T> beta_arr(beta, C);
+    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
+        (ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_))
+            .rsqrt();
+    beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
+        alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
+  }
 
   template <typename T>
   void ComputeBatchMoments(
@@ -214,7 +222,14 @@ class SpatialBNOp : public Operator<Context> {
       const T* batch_mean_sum,
       const T* batch_var_sum,
       T* mean,
-      T* var);
+      T* var) {
+    const T scale = T(1) / static_cast<T>(num_batches_ * N * HxW);
+    EigenVectorArrayMap<T> mean_arr(mean, C);
+    EigenVectorArrayMap<T> var_arr(var, C);
+    mean_arr = ConstEigenVectorArrayMap<T>(batch_mean_sum, C) * scale;
+    var_arr = ConstEigenVectorArrayMap<T>(batch_var_sum, C) * scale -
+        mean_arr.square();
+  }
 
   template <typename T>
   void ComputeRunningMomentsAndFusedParam(
@@ -227,7 +242,19 @@ class SpatialBNOp : public Operator<Context> {
       T* running_var,
       T* rstd,
       T* alpha,
-      T* beta);
+      T* beta) {
+    const T a = T(1) - static_cast<T>(momentum_);
+    const T b = static_cast<T>(momentum_);
+    math::Axpby<T, T, Context>(C, a, mean, b, running_mean, &context_);
+    math::Axpby<T, T, Context>(C, a, var, b, running_var, &context_);
+    math::InvStd<T, Context>(C, static_cast<T>(epsilon_), var, rstd, &context_);
+    EigenVectorArrayMap<T> alpha_arr(alpha, C);
+    EigenVectorArrayMap<T> beta_arr(beta, C);
+    alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
+        ConstEigenVectorArrayMap<T>(rstd, C);
+    beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
+        alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
+  }
 
   const bool is_test_;
   double epsilon_;
@@ -296,7 +323,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(rstd.numel(), C);
 
     auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
-    at::IntList dscale_sizes, dbias_sizes;
+    at::IntArrayRef dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
       dscale_sizes = scale.sizes();
       dbias_sizes = scale.sizes();

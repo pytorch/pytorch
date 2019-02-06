@@ -157,7 +157,6 @@ template <typename T>
 bool MIOPENConvTransposeOp<T>::RunOnDevice() {
   auto& X = Input(INPUT);
   auto& Weight = Input(FILTER);
-  auto* Y = Output(0);
 
   // Figure out the output shape
   CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
@@ -166,7 +165,8 @@ bool MIOPENConvTransposeOp<T>::RunOnDevice() {
       "ConvTranspose op with MIOpen engine is supported only for 2D convolutions");
 
   const int C_in = Weight.dim32(1);
-  ConvTransposeUnpoolBase<HIPContext>::SetOutputSize(X, Y, C_in);
+  auto sizes = ConvTransposeUnpoolBase<HIPContext>::GetOutputSize(X, C_in);
+  auto* Y = Output(0, sizes, at::dtype<T>());
 
   int N = X.dim32(0);
   int C = X.dim32(1);

@@ -3,7 +3,6 @@
 // computation library to different compiler options (-mno-avx2 or -mavx2).
 
 #include <immintrin.h>
-#include <cfloat>
 #include <cmath>
 #include <cstdint>
 

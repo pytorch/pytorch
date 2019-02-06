@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/fuser/codegen.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -217,7 +217,7 @@ static std::string encodeRHS(const Node* n) {
     } else if (val.isBool()) {
       return scalarValue(val.toBool());
     } else {
-      JIT_ASSERT(val.isInt());
+      AT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
     }
   }
@@ -317,7 +317,7 @@ std::string generateKernel(
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : inputs) {
+  for (const auto& input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -328,7 +328,7 @@ std::string generateKernel(
     //  Access for other types is common to CUDA and CPU kernels.
     const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       env.s(
           "access",
           format("__half2float(t${formal}.data[t${formal}_offset])", env));
@@ -353,7 +353,7 @@ std::string generateKernel(
     if (n->kind() == prim::ConstantChunk)
       continue;
     if (n->kind() == aten::rand_like) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       has_random = true;
     }
     env.s("node", valueName(n->output()));
@@ -372,7 +372,7 @@ std::string generateKernel(
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       has_half_tensor = true;
     } else {

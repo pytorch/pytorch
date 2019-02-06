@@ -7,7 +7,7 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
 #endif
@@ -235,7 +235,7 @@ static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -256,7 +256,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module)
 
 PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -265,7 +265,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THCCachingAllocator_emptyCache();
+  c10::cuda::CUDACachingAllocator::emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -275,7 +275,7 @@ PyObject * THCPModule_memoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_allocated = THCCachingAllocator_currentMemoryAllocated(device);
+  auto memory_allocated = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -285,7 +285,7 @@ PyObject * THCPModule_maxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_allocated = THCCachingAllocator_maxMemoryAllocated(device);
+  auto max_memory_allocated = c10::cuda::CUDACachingAllocator::maxMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(max_memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -295,7 +295,7 @@ PyObject * THCPModule_resetMaxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryAllocated(device);
+  c10::cuda::CUDACachingAllocator::resetMaxMemoryAllocated(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -305,7 +305,7 @@ PyObject * THCPModule_memoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_cached = THCCachingAllocator_currentMemoryCached(device);
+  auto memory_cached = c10::cuda::CUDACachingAllocator::currentMemoryCached(device);
   return PyLong_FromUnsignedLongLong(memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -315,7 +315,7 @@ PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_cached = THCCachingAllocator_maxMemoryCached(device);
+  auto max_memory_cached = c10::cuda::CUDACachingAllocator::maxMemoryCached(device);
   return PyLong_FromUnsignedLongLong(max_memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -325,7 +325,7 @@ PyObject * THCPModule_resetMaxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryCached(device);
+  c10::cuda::CUDACachingAllocator::resetMaxMemoryCached(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }

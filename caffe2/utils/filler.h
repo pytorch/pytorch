@@ -27,7 +27,7 @@ class TensorFiller {
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
-    tensor->swap(temp_tensor);
+    std::swap(*tensor, temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
 
     // select distribution

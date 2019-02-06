@@ -4,6 +4,8 @@ from torch._six import inf
 from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
+from collections import Iterable
+from torch._utils import annotate
 from itertools import product
 import math
 import warnings
@@ -141,7 +143,6 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
 
 Examples::
 

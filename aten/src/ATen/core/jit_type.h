@@ -5,7 +5,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/Type.h>
 #include <ATen/core/TensorMethods.h>
-
+#include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
 #include <memory>
@@ -21,6 +21,7 @@ _(CompleteTensorType) \
 _(UndefinedTensorType) \
 _(TupleType) \
 _(ListType) \
+_(DictType) \
 _(NumberType) \
 _(FloatType) \
 _(FutureType) \
@@ -232,6 +233,7 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     ss << "Optional[" << getElementType()->python_str() << "]";
     return ss.str();
   }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -308,7 +310,7 @@ struct CAFFE2_API TensorType : public DynamicType {
 
   at::ScalarType scalarType() const { return scalar_type_; }
   at::Device device() const { return device_; }
-  int dim() const { return dim_; }
+  int64_t dim() const { return dim_; }
   bool requires_grad() const override { return requires_grad_; }
 
   TensorTypePtr toScalarType(at::ScalarType type){
@@ -316,7 +318,7 @@ struct CAFFE2_API TensorType : public DynamicType {
     t->scalar_type_ = type;
     return t;
   }
-  TensorTypePtr withDim(int new_dim) {
+  TensorTypePtr withDim(size_t new_dim) {
     auto t = TensorType::create(*this);
     t->dim_ = new_dim;
     return t;
@@ -359,7 +361,7 @@ protected:
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
-  TensorType(at::ScalarType scalar_type, at::Device device, int dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
+  TensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
     : DynamicType(kind)
     , scalar_type_(scalar_type)
     , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
@@ -369,7 +371,7 @@ protected:
   at::ScalarType scalar_type_;
   bool requires_grad_;
   at::Device device_;
-  int dim_;
+  int64_t dim_;
 };
 
 struct CompleteTensorType;
@@ -382,21 +384,21 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
   }
 
   // overloaded create variadic template argument as it could not distinguish initializer list
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
   }
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
   }
 
   const std::vector<int64_t>& sizes() const { return sizes_; }
   const std::vector<int64_t>& strides() const { return strides_; }
 
-  TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
+  TypePtr withSizesStrides(at::IntArrayRef sizes, at::IntArrayRef strides) const {
     return CompleteTensorType::create(scalar_type_, device_, sizes, strides);
   }
 
-  TypePtr withSizes(at::IntList sizes) const {
+  TypePtr withSizes(at::IntArrayRef sizes) const {
     return withSizesStrides(sizes, CompleteTensorType::contiguousStridesOf(sizes));
   }
 
@@ -455,14 +457,14 @@ private:
     : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
     : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
     std::vector<int64_t> strides(sizes.size());
     if(sizes.empty()) // zero-dim case
       return strides;
@@ -508,6 +510,92 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr ofBools();
 private:
  ListType(TypePtr elem) : SingleElementType(elem) {}
+};
+
+struct DictType;
+using DictTypePtr = std::shared_ptr<DictType>;
+struct DictType : public Type {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::DictType;
+
+  static DictTypePtr create(TypePtr key, TypePtr value) {
+    switch (key->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+        return DictTypePtr(new DictType(key, value));
+      default:
+        AT_ERROR(
+            "Cannot create dict for key type '",
+            key->str(),
+            "', only int, float, and string keys are supported");
+    }
+  }
+
+  std::string str() const override {
+    return python_str();
+  }
+
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Dict[" << getKeyType()->python_str() << ", "
+       << getValueType()->python_str() << "]";
+    return ss.str();
+  }
+
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    if (contained_types.size() != 2) {
+      throw std::runtime_error("Expected 2 contained types");
+    }
+    return create(contained_types.at(0), contained_types.at(1));
+  }
+
+  TypePtr getKeyType() const {
+    return types.at(0);
+  }
+
+  TypePtr getValueType() const {
+    return types.at(1);
+  }
+
+  DEFINE_IS_SUBCLASS(DictType);
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (auto dict_rhs = rhs->cast<DictType>()) {
+      return getKeyType()->isSubtypeOf(dict_rhs->getKeyType()) &&
+          getValueType()->isSubtypeOf(dict_rhs->getValueType());
+    }
+    return false;
+  }
+
+  bool hasFreeVariables() const override {
+    return has_free_variables;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return types;
+  }
+
+  bool requires_grad() const override {
+    return getValueType()->requires_grad() || getKeyType()->requires_grad();
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (auto dict_rhs = rhs.cast<DictType>()) {
+      return *getKeyType() == *(dict_rhs->getKeyType()) &&
+          *getValueType() == *(dict_rhs->getValueType());
+    }
+    return false;
+  }
+
+ private:
+  DictType(TypePtr key, TypePtr value)
+      : Type(TypeKind::DictType),
+        types({key, value}),
+        has_free_variables(
+            key->hasFreeVariables() || value->hasFreeVariables()) {}
+  std::vector<TypePtr> types;
+  bool has_free_variables;
 };
 
 struct FutureType;
@@ -895,28 +983,55 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
-template <typename T>
-TypePtr getTypePtr() {
-#define TYPE_STR(Type) #Type, " ",
-  AT_ERROR(
-      "Type ",
-      c10::demangle_type<T>(),
-      " could not be converted to any of the known types { ",
-      C10_FORALL_TYPES(TYPE_STR) "}");
-#undef TYPE_STR
+namespace detail {
+template <typename T> struct getTypePtr_ final {
+  static_assert(guts::false_t<T>::value, "Type could not be converted to any of the known types.");
+};
+
+template<> struct getTypePtr_<at::Tensor> final {
+  static TypePtr call() { return DynamicType::get(); }
+};
+template<> struct getTypePtr_<double> final {
+  static TypePtr call() { return FloatType::get(); }
+};
+template<> struct getTypePtr_<int64_t> final {
+  static TypePtr call() { return IntType::get(); }
+};
+template<> struct getTypePtr_<bool> final {
+  static TypePtr call() { return BoolType::get(); }
+};
+template<> struct getTypePtr_<at::Scalar> final {
+  static TypePtr call() { return NumberType::get(); }
+};
+template<> struct getTypePtr_<std::string> final {
+  static TypePtr call() { return StringType::get(); }
+};
+template<class T> struct getTypePtr_<std::vector<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template<class T> struct getTypePtr_<ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template<class T> struct getTypePtr_<at::optional<T>> final {
+  static TypePtr call() {
+    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+}
+template<class T> inline TypePtr getTypePtr() {
+  return detail::getTypePtr_<T>::call();
 }
 
-template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
-template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
-template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
-template<> inline TypePtr getTypePtr<bool>() { return BoolType::get(); }
-template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
-template<> inline TypePtr getTypePtr<std::string>() { return StringType::get(); }
-template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
-template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
-template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
-
 CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
+CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
+CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {

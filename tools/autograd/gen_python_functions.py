@@ -182,21 +182,41 @@ def should_generate_python_binding(declaration):
     return True
 
 
-def gen_py_variable_methods(out, declarations, template_path):
-    PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
-    PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
-
+def get_py_variable_methods(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as methods on Tensor.
+    """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
                 declaration.get('python_module') != 'nn' and
                 'Tensor' in declaration['method_of'])
 
-    py_variable_methods = group_declarations_by_name(declarations, should_bind)
+    return group_declarations_by_name(declarations, should_bind)
+
+
+def gen_py_variable_methods(out, declarations, template_path):
+    PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
+    PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
+
+    py_variable_methods = get_py_variable_methods(declarations)
 
     env = create_python_bindings(py_variable_methods, True)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
     write(out, 'python_variable_methods_dispatch.h', PY_VARIABLE_DISPATCH_H, env)
+
+
+def get_py_nn_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "nn" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
+
+    return group_declarations_by_name(declarations, should_bind)
 
 
 def gen_py_nn_functions(out, declarations, template_path):
@@ -204,11 +224,7 @@ def gen_py_nn_functions(out, declarations, template_path):
     PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
     PY_NN_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_nn_functions_dispatch.h')
 
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
-
-    py_nn_functions = group_declarations_by_name(declarations, should_bind)
+    py_nn_functions = get_py_nn_functions(declarations)
 
     env = create_python_bindings(py_nn_functions, has_self=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
@@ -216,17 +232,25 @@ def gen_py_nn_functions(out, declarations, template_path):
     write(out, 'python_nn_functions_dispatch.h', PY_NN_DISPATCH_H, env)
 
 
-def gen_py_torch_functions(out, declarations, template_path):
-    PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
-    PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
-
+def get_py_torch_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "torch" module.
+    """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
                 declaration.get('python_module') != 'nn' and
                 'namespace' in declaration['method_of'])
 
-    py_torch_functions = group_declarations_by_name(declarations, should_bind)
+    return group_declarations_by_name(declarations, should_bind)
+
+
+def gen_py_torch_functions(out, declarations, template_path):
+    PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
+    PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
+
+    py_torch_functions = get_py_torch_functions(declarations)
 
     env = create_python_bindings(py_torch_functions, has_self=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
@@ -273,6 +297,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<ScalarType>': 'scalartypeOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
+        'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -280,7 +305,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     }
 
     unpack_with_default_methods = {
-        'IntList': 'setDefaultIntlist',
+        'IntArrayRef': 'setDefaultIntlist',
         'Scalar': 'scalarWithDefault',
         'int64_t': 'toInt64WithDefault',
         'bool': 'setDefaultBool',
@@ -322,13 +347,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             type_args = type_actual_args
 
         if type_args and len(outputs) > 1:
-                raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
+            raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
-            if typename.startswith('IntList['):
-                typename = 'IntList'
+            if typename.startswith('IntArrayRef['):
+                typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 
@@ -337,9 +362,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-                # TODO: Type currently maps to ScalarType, figure out a cleaner solution
-                if typename == 'const Type &':
-                    default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
@@ -560,7 +582,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
-            py_default_dtype = 'self.type()' if is_like_function_with_options else None
+            py_default_dtype = 'self.scalar_type()' if is_like_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -800,7 +822,16 @@ def sort_declarations(grouped_decls):
 
 
 def get_python_signature(declaration, include_out):
-    # Compute the Python function signature for argument parsing
+    # Compute the Python function signature for argument parsing,
+    # as specified in torch/csrc/utils/python_arg_parser.h.  WARNING:
+    # this is NOT the same type signature as specified by PEP 484
+    # as understood by mypy; our format was independently developed
+    # and has some quirks to make it more suitable specifically
+    # for error parsing.
+    #
+    # For a translation to mypy-valid type signatures, see
+    # tools/gen_pyi.py.  If you change any logic here, please
+    # check that file too.
     py_formal_args = []
     output_args = []
     type_args = []

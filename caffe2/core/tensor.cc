@@ -117,7 +117,7 @@ void TensorVectorResize(
   }
 }
 
-Tensor empty(at::IntList dims, at::TensorOptions options) {
+Tensor empty(at::IntArrayRef dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device());
   tensor.raw_mutable_data(options.dtype());
@@ -126,7 +126,7 @@ Tensor empty(at::IntList dims, at::TensorOptions options) {
 
 void ReinitializeTensor(
     Tensor* tensor,
-    at::IntList dims,
+    at::IntArrayRef dims,
     at::TensorOptions options) {
   CAFFE_ENFORCE(options.device_opt() != c10::nullopt);
   if (*tensor) {
@@ -177,6 +177,22 @@ void ReinitializeAndCopyFrom(
       " to: ",
       src.dtype());
   t->CopyFrom(src, async);
+}
+
+void Tensor::enforce_invariants() {
+  if (impl_.get() == nullptr) {
+    throw std::runtime_error("TensorImpl with nullptr is not supported");
+  }
+  CAFFE_ENFORCE(
+      !impl_->is_variable(),
+      "Caffe2 tensor wrapper doesn't support autograd variables");
+  CAFFE_ENFORCE_EQ(
+      impl_->layout(),
+      at::kStrided,
+      "Caffe2 tensor wrapper supports only regular non-sparse tensors");
+  CAFFE_ENFORCE(
+      impl_->is_contiguous(),
+      "Caffe2 tensor wrapper supports only contiguous tensors");
 }
 
 namespace {

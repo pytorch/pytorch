@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -20,6 +20,10 @@
 
 namespace torch {
 namespace jit {
+
+namespace prim {
+using namespace ::c10::prim;
+}
 
 struct propagation_error : std::exception {};
 
@@ -47,7 +51,7 @@ bool isValidReturnForRunning(Value* v) {
 class ShapePropagator {
  public:
   explicit ShapePropagator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(std::move(graph))) {}
+      : aliasDb_(std::move(graph)) {}
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
     for (Node* node : block->nodes()) {
@@ -74,7 +78,7 @@ class ShapePropagator {
     }
   }
 
-  int64_t wrapDim(int64_t dim, at::IntList sizes) {
+  int64_t wrapDim(int64_t dim, at::IntArrayRef sizes) {
     if (dim < 0) {
       dim += sizes.size();
     }
@@ -148,12 +152,12 @@ class ShapePropagator {
       ArrayRef<Value*> lhs,
       ArrayRef<Value*> rhs,
       ArrayRef<Value*> outputs) {
-    JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+    AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
     bool changed = false;
     for (size_t i = 0; i < lhs.size(); ++i) {
       auto old_output_type = outputs[i]->type();
       auto new_type = unifyTypes(lhs[i]->type(), rhs[i]->type());
-      JIT_ASSERT(new_type);
+      AT_ASSERT(new_type);
       outputs[i]->setType(*new_type);
       if (*old_output_type != *outputs[i]->type())
         changed = true;
@@ -204,7 +208,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    if (aliasDb_.hasWritersBefore(node)) {
+    if (aliasDb_.hasWriters(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
@@ -269,7 +273,7 @@ class ShapePropagator {
     // preceded by schema checking.
     op(stack);
 
-    JIT_ASSERT(stack.size() == node->outputs().size());
+    AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
@@ -408,7 +412,7 @@ class ShapePropagator {
       }
       case prim::TupleUnpack: {
         auto tuple_type = node->input()->type()->cast<TupleType>();
-        JIT_ASSERT(
+        AT_ASSERT(
             tuple_type &&
             tuple_type->elements().size() == node->outputs().size());
         auto elems = tuple_type->elements();
@@ -470,7 +474,7 @@ class ShapePropagator {
   }
 
   static c10::optional<size_t> determineListSize(Value* list) {
-    JIT_ASSERT(list->type()->cast<ListType>());
+    AT_ASSERT(list->type()->cast<ListType>());
     if (auto shape = constant_as<std::vector<int64_t>>(list)) {
       return shape->size();
     }
@@ -500,7 +504,7 @@ class ShapePropagator {
       if (tensor_types.size() == 1) {
         return tensor_types[0];
       }
-      JIT_ASSERT(!tensor_types.empty());
+      AT_ASSERT(!tensor_types.empty());
       auto any_type = tensor_types[arg_for_type];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
@@ -870,7 +874,7 @@ class ShapePropagator {
 
     static const auto multidim_reduce_with_postprocess =
         [](Node* node,
-           size_t num_reduced_dim,
+           int64_t num_reduced_dim,
            bool upcast_integer) -> type_vec_t {
       auto maybe_keepdim = node->get<bool>(attr::keepdim);
       if (!maybe_keepdim)
@@ -900,9 +904,6 @@ class ShapePropagator {
         {
             "aten::argmax(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
 
@@ -953,10 +954,13 @@ class ShapePropagator {
     //   - has a bool keepdim argument
     static const register_formula_for multidim_reduce_ops{
         {
+            "aten::logsumexp(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::norm(Tensor self, Scalar? p, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
+            "aten::max_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::min_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
@@ -1108,9 +1112,9 @@ class ShapePropagator {
           return false;
         } else {
           auto outputs = node->outputs();
-          JIT_ASSERT(types.size() == outputs.size());
+          AT_ASSERT(types.size() == outputs.size());
           for (size_t i = 0; i < types.size(); ++i) {
-            JIT_ASSERT(outputs[i]->type()->isSubtypeOf(DynamicType::get()));
+            AT_ASSERT(outputs[i]->type()->isSubtypeOf(DynamicType::get()));
             outputs[i]->setType(types[i]);
           }
           return true;
@@ -1406,7 +1410,7 @@ class ShapePropagator {
       node->output()->setType(CompleteTensorType::create(
           lhs_type->scalarType(),
           lhs_type->device(),
-          at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
+          at::IntArrayRef{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
       return true;
     } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
       auto tp = tensor_types.at(0);
@@ -1561,15 +1565,15 @@ class ShapePropagator {
             input_type->withSizesStrides(sizes, strides));
       }
       return true;
-    } else if (node->kind() == onnx::Shape) {
+    } else if (node->kind() == ::c10::onnx::Shape) {
       SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
       std::vector<int64_t> dim_vec = {
           (int64_t)tensor_types.at(0)->sizes().size()};
-      at::IntList dims(dim_vec);
+      at::IntArrayRef dims(dim_vec);
       node->output()->setType(
           CompleteTensorType::create(at::kLong, at::kCPU, dims));
       return true;
-    } else if (node->kind() == onnx::Reshape) {
+    } else if (node->kind() == ::c10::onnx::Reshape) {
       setUnshapedType(node);
       return true;
     }
@@ -1598,6 +1602,9 @@ void EraseShapeInformation(Block* b) {
     EraseShapeInformation(n->outputs());
     for (Block* sb : n->blocks()) {
       EraseShapeInformation(sb);
+    }
+    if (n->hasAttribute(attr::Subgraph)) {
+      EraseShapeInformation(n->g(attr::Subgraph));
     }
   }
 }
