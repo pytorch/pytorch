@@ -87,8 +87,13 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
             Y->zero_point,
             Y->scale,
             std::numeric_limits<uint8_t>::min(),
