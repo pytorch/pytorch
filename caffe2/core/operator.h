@@ -196,7 +196,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline Tensor
-  XOutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  XOutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
@@ -214,7 +214,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline Tensor*
-  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE_WITH_CALLER(
           options.device_opt() != c10::nullopt,
@@ -667,7 +667,7 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
@@ -724,7 +724,7 @@ class Operator : public OperatorBase {
   /// helpful, as we may be able to fit the output in the same
   /// space that was previously used.
   ///
-  Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor* Output(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
