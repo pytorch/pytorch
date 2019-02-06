@@ -520,21 +520,25 @@ class Module(object):
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
 
-    def __getattr__(self, name):
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
-            if name in _buffers:
-                return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, name))
+    def __getattribute__(self, name):
+        try:
+            # object is used here instead of super() for performance
+            return object.__getattribute__(self, name)
+        except AttributeError:
+            __dict__ = super().__getattribute__('__dict__')
+            if '_parameters' in __dict__:
+                _parameters = __dict__['_parameters']
+                if name in _parameters:
+                    return _parameters[name]
+            if '_buffers' in __dict__:
+                _buffers = __dict__['_buffers']
+                if name in _buffers:
+                    return _buffers[name]
+            if '_modules' in __dict__:
+                modules = __dict__['_modules']
+                if name in modules:
+                    return modules[name]
+            raise
 
     def __setattr__(self, name, value):
         def remove_from(*dicts):

@@ -1124,6 +1124,19 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.add_module('attribute_name', nn.Module())
 
+    def test_property_attribute_error_message(self):
+        class CustomModule(nn.Module):
+            @property
+            def property_a(self):
+                return self.property_b
+
+        # The message should reference property_b, not property_a (issue #13981)
+        self.assertRaisesRegex(
+            AttributeError,
+            "'CustomModule' object has no attribute 'property_b'",
+            lambda: CustomModule().property_a,
+        )
+
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
         l2 = nn.Linear(20, 30)
