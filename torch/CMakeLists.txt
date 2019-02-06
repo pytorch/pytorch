@@ -191,7 +191,7 @@ set(TORCH_SRCS
   )
 
 if (BUILD_CAFFE2_OPS)
-  list(APPEND TORCH_SRC
+  list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp)
 endif()
 
