@@ -50,7 +50,7 @@ TYPE_MAP = {
     # since TensorList is a ArrayRef in arguments but a vector
     # in returns
     'std::vector<Tensor>': 'Tensor[]',
-    'IntList': 'int[]',
+    'IntArrayRef': 'int[]',
     'Layout': 'Layout',
     'Device': 'Device',
     'ScalarType': 'ScalarType',
@@ -81,7 +81,7 @@ def jit_type_of(arg):
 # that type
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
-    'IntList': '{}.toIntList()->elements()',
+    'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
@@ -186,8 +186,8 @@ def is_tensor_arg(arg):
 
 
 def is_sized_intlist_arg(arg):
-    """Returns True for arguments declared as IntList[k], but False for IntList."""
-    return (arg['simple_type'] == 'IntList') and ('size' in arg)
+    """Returns True for arguments declared as IntArrayRef[k], but False for IntArrayRef."""
+    return (arg['simple_type'] == 'IntArrayRef') and ('size' in arg)
 
 
 def base_name(decl):
@@ -334,7 +334,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
             # layout is specified as an int64_t of at::Layout
             {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
-            # device is specified as an IntList of { at::Device::Type, device_id }
+            # device is specified as an IntArrayRef of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
                 'default': '\\"cpu\\"'},
         ]

@@ -262,7 +262,7 @@ struct SymbolicVariable {
   SymbolicVariable sum(int dim, bool keepdim) const {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntList{dim}), insertConstant(keepdim)})[0];
+        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];

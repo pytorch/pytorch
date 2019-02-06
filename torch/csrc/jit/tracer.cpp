@@ -391,11 +391,11 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, options.device());
 }
 
-void addInputs(Node* n, const char* name, at::IntList value) {
+void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
-  std::vector<Value*> info = ArgumentStash::hasIntList(name)
-      ? ArgumentStash::popIntList(name)
-      : ArgumentStash::IntListTrace(value.size());
+  std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)
+      ? ArgumentStash::popIntArrayRef(name)
+      : ArgumentStash::IntArrayRefTrace(value.size());
 
   auto& g = getTracingState()->graph;
   for (size_t i = 0; i < info.size(); ++i) {
@@ -407,7 +407,7 @@ void addInputs(Node* n, const char* name, at::IntList value) {
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
       throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
+          "Type mismatch in setposattr for IntArrayRef. Check that your program "
           "is valid without tracing, and please file a bug report if it is.");
     }
   }
@@ -502,7 +502,7 @@ void ensureUniqueIfOutOfPlaced(
 ////////////////////////////////////////////////////////////////////////////////
 thread_local ArgumentStash ArgumentStash::stash;
 
-void ArgumentStash::stashIntListElem(
+void ArgumentStash::stashIntArrayRefElem(
     const std::string& arg_name,
     size_t size,
     size_t idx,
