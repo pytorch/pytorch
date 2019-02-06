@@ -85,7 +85,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   return std::make_tuple(at::cat(steps), batch_sizes_t);
 }
 
-Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntList input_size, const Tensor& _batch_sizes, bool batch_first) {
+Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
   std::vector<int64_t> input_size_after_t = input_size.vec();
   if (batch_first) {
     AT_CHECK(input_size.size() >= 2);

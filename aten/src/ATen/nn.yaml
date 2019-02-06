@@ -118,25 +118,25 @@
 
 # Pooling
 
-- name: _thnn_adaptive_avg_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_avg_pool3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricAdaptiveAveragePooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_adaptive_max_pool2d(Tensor self, IntList[2] output_size)
+- name: _thnn_adaptive_max_pool2d(Tensor self, IntArrayRef[2] output_size)
   cname: SpatialAdaptiveMaxPooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_adaptive_max_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_max_pool3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricAdaptiveMaxPooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool2d(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
@@ -144,7 +144,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
@@ -152,7 +152,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool2d_with_indices(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
     stride: kernel_size
@@ -160,7 +160,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool3d_with_indices(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size
@@ -168,13 +168,13 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
+- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntArrayRef[2] output_size)
   cname: SpatialMaxUnpooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
+- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntArrayRef[3] output_size, IntArrayRef[3] stride, IntArrayRef[3] padding)
   cname: VolumetricMaxUnpooling
   scalar_check:
     output: 'false'
@@ -182,45 +182,45 @@
 
 # Upsampling
 
-# Note: The upsampling backwards functions also include an IntList input_size
+# Note: The upsampling backwards functions also include an IntArrayRef input_size
 # parameter, which is added by nn_parse.py
 
-- name: _thnn_upsample_linear1d(Tensor self, IntList[1] output_size, bool align_corners)
+- name: _thnn_upsample_linear1d(Tensor self, IntArrayRef[1] output_size, bool align_corners)
   cname: TemporalUpSamplingLinear
   scalar_check:
     self: 'false'
     grad_input: 'false'
 
-- name: _thnn_upsample_bilinear2d(Tensor self, IntList[2] output_size, bool align_corners)
+- name: _thnn_upsample_bilinear2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
   cname: SpatialUpSamplingBilinear
   scalar_check:
     self: 'false'
     grad_input: 'false'
 
-- name: _thnn_upsample_bicubic2d(Tensor self, IntList[2] output_size, bool align_corners)
+- name: _thnn_upsample_bicubic2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
   cname: SpatialUpSamplingBicubic
   scalar_check:
     grad_input: 'false'
 
-- name: _thnn_upsample_trilinear3d(Tensor self, IntList[3] output_size, bool align_corners)
+- name: _thnn_upsample_trilinear3d(Tensor self, IntArrayRef[3] output_size, bool align_corners)
   cname: VolumetricUpSamplingTrilinear
   scalar_check:
     self: 'false'
     grad_input: 'false'
 
-- name: _thnn_upsample_nearest1d(Tensor self, IntList[1] output_size)
+- name: _thnn_upsample_nearest1d(Tensor self, IntArrayRef[1] output_size)
   cname: TemporalUpSamplingNearest
   scalar_check:
     self: 'false'
     grad_input: 'false'
 
-- name: _thnn_upsample_nearest2d(Tensor self, IntList[2] output_size)
+- name: _thnn_upsample_nearest2d(Tensor self, IntArrayRef[2] output_size)
   cname: SpatialUpSamplingNearest
   scalar_check:
     self: 'false'
     grad_input: 'false'
 
-- name: _thnn_upsample_nearest3d(Tensor self, IntList[3] output_size)
+- name: _thnn_upsample_nearest3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricUpSamplingNearest
   scalar_check:
     self: 'false'
@@ -244,43 +244,43 @@
 
 # Convolutions
 
-- name: _thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_transpose2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] output_padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: _thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: _thnn_conv_transpose3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] output_padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
-- name: _thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0)
+- name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: _thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0)
+- name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: _thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_dilated2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 
-- name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+- name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]
 
 # Fold and Unfold
 
-- name: _thnn_col2im(Tensor self, IntList[2] output_size, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride)
+- name: _thnn_col2im(Tensor self, IntArrayRef[2] output_size, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
   cname: Col2Im
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_im2col(Tensor self, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride)
+- name: _thnn_im2col(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
   cname: Im2Col
   scalar_check:
     output: 'false'

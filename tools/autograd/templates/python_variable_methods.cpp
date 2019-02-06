@@ -74,7 +74,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
       return wrap(self_.size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntList maps to both
+    // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
@@ -96,8 +96,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     return wrap(self_.stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntList strides = self_.strides();
-    // we can't do the normal wrapping here because IntList maps to both
+    IntArrayRef strides = self_.strides();
+    // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
