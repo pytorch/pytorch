@@ -107,6 +107,10 @@ elseif(BLAS STREQUAL "MKL")
   endif()
   include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
+    message(STATUS "MKL libraries: ${MKL_LIBRARIES}")
+    message(STATUS "MKL include directory: ${MKL_INCLUDE_DIR}")
+    message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
+    message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
@@ -670,12 +674,45 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  find_package(OpenMP)
+  # OpenMP support?
+  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+
+  # macOS + GCC
+  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
+    IF (DARWIN_VERSION GREATER 9)
+      SET(APPLE_OPENMP_SUCKS 1)
+    ENDIF (DARWIN_VERSION GREATER 9)
+    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
+        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
+      add_compile_options(-Wno-unknown-pragmas)
+      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    ENDIF()
+  ENDIF()
+
+  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+    FIND_PACKAGE(OpenMP QUIET)
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+
+    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  ENDIF()
+
   if(OPENMP_FOUND)
-    message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
+    message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    IF("${OpenMP_CXX_LIBRARIES}" STREQUAL "")
+        message(STATUS "No OpenMP library needs to be linked against")
+    ELSE()
+        message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
+    ENDIF()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
@@ -1095,43 +1132,6 @@ if (NOT BUILD_ATEN_MOBILE)
     STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
     STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
-
-  # OpenMP support?
-  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-
-  # macOS + GCC
-  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
-    IF (DARWIN_VERSION GREATER 9)
-      SET(APPLE_OPENMP_SUCKS 1)
-    ENDIF (DARWIN_VERSION GREATER 9)
-    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
-        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
-      add_compile_options(-Wno-unknown-pragmas)
-      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    ENDIF()
-  ENDIF()
-
-  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
-    FIND_PACKAGE(OpenMP)
-    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  ENDIF()
-
-  IF (OPENMP_FOUND)
-    MESSAGE(STATUS "Compiling with OpenMP support")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  ENDIF()
-
 
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 

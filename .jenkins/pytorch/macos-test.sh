@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
@@ -27,7 +27,7 @@ export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
 # Test PyTorch
 if [ -z "${IN_CIRCLECI}" ]; then
-  if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
     # Eigen gives "explicit specialization of class must precede its first use" error
     # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
     export DEVELOPER_DIR=/Library/Developer/CommandLineTools
@@ -49,6 +49,14 @@ if [ -z "${IN_CIRCLECI}" ]; then
   aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
   7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
+
+# Test that OpenMP is enabled
+pushd test
+if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
+  echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
+  exit 1
+fi
+popd
 
 test_python_all() {
   echo "Ninja version: $(ninja --version)"
@@ -108,14 +116,14 @@ test_custom_script_ops() {
 }
 
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
   test_libtorch
   test_custom_script_ops
 else
-  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_python_all
-  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_libtorch
     test_custom_script_ops
   fi

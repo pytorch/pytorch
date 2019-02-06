@@ -179,8 +179,8 @@ class BinaryElementwiseWithArgsGradientOp<
     const T* C_data = nullptr;
     std::vector<int> A_dims;
     std::vector<int> B_dims;
-    at::IntList dA_sizes;
-    at::IntList dB_sizes;
+    at::IntArrayRef dA_sizes;
+    at::IntArrayRef dB_sizes;
     if (InputSize() == 3) {
       const auto& B = Input(0);
       const auto& C = Input(1);
