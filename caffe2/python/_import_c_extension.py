@@ -36,6 +36,9 @@ with extension_loader.DlopenGuard():
                     'Cannot load caffe2.python. Error: {0}'.format(str(cpu_e)))
                 sys.exit(1)
 
+    # setting this variable to make this module backward compatible.
+    has_gpu_support = has_cuda_support or has_hip_support
+
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.
 atexit.register(on_module_exit)  # noqa
