@@ -117,7 +117,7 @@ public:
   // broadcasting size 1 dimensions.
 
   void set(const at::Tensor &t, size_t pad = 0);
-  void set(cudnnDataType_t dataType, IntList sizes, IntList strides, size_t pad = 0);
+  void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 

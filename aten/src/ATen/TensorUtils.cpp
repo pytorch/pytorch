@@ -47,7 +47,7 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
   }
 }
 
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes) {
+void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
   checkDim(c, t, sizes.size());
   AT_CHECK(
     t->sizes().equals(sizes),
@@ -217,7 +217,7 @@ void * maybe_data_ptr(const TensorArg& tensor) {
 }
 
 // See TensorUtils.h on why this is useful now that we cache is_contiguous.
-bool geometry_is_contiguous(IntList sizes, IntList strides) {
+bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   int64_t dim = sizes.size();
   int64_t expected_stride = 1;
   bool contig_if_nonempty = true;
