@@ -137,7 +137,7 @@ Value* getNestedValueTrace(const IValue& v) {
   if (v.isTensorList()) {
     return state->graph
         ->insertNode(state->graph->createList(
-            DynamicType::get(),
+            TensorType::get(),
             fmap(
                 v.toTensorListRef(),
                 [](const IValue& val) { return getNestedValueTrace(val); })))
@@ -204,7 +204,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
   const std::function<IValue(IValue, TypePtr, Value*)> add_input =
       [&](IValue input, TypePtr type, Value* value) -> IValue {
     value->setType(type);
-    if (type->isSubtypeOf(DynamicType::get())) {
+    if (type->isSubtypeOf(TensorType::get())) {
       auto input_tensor = input.toTensor();
       auto name = Variable(input_tensor).name();
       auto& value_map = state->env_stack.back().value_map;
@@ -379,7 +379,7 @@ void addInputs(
 void addInputs(Node* n, const char* name, at::TensorList value) {
   Graph* g = n->owningGraph();
   Node* list_node = g->insertNode(
-      g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+      g->createList(TensorType::get(), fmap(value, getValueTrace)));
   n->addInput(list_node->output());
 }
 
