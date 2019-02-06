@@ -39,7 +39,6 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TO
 
   Caffe2Operator(schema, std::move(inputs), std::move(outputPtrs)).Run();
 
-  torch::jit::drop(*stack, total_num_arguments);
   for (auto& output: outputs) {
     torch::jit::push(*stack, std::move(output));
   }
