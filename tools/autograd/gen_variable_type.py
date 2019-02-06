@@ -250,6 +250,12 @@ if (tracer_state) {
 }
 """)
 
+RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
+#ifndef NDEBUG
+${statements}
+#endif
+""")
+
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -661,7 +667,7 @@ def emit_body(declaration):
         else:
             return 'as_variable({})'.format(call), []
 
-    def emit_call(env):
+    def enforce_same_tensorimpl_and_storage(env, call):
         pre_call_block = ''
         post_call_block = ''
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
@@ -677,6 +683,11 @@ def emit_body(declaration):
                     pre_call_block += SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
+        return RUN_ONLY_IN_DEBUG_MODE.substitute(statements=pre_call_block) + \
+               call + \
+               RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
+
+    def emit_call(env):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
@@ -702,10 +713,7 @@ def emit_body(declaration):
             call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
-        if pre_call_block:
-            call = '#ifndef NDEBUG' + '\n' + pre_call_block + '#endif' + '\n' + call
-        if post_call_block:
-            call += '\n' + '#ifndef NDEBUG' + '\n' + post_call_block + '#endif' + '\n'
+        call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
     def tie_return_values():
