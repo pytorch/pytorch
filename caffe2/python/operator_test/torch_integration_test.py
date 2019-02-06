@@ -48,34 +48,6 @@ def generate_rois_rotated(roi_counts, im_dims):
     rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
     return rotated_rois
 
-def gen_boxes(count, center):
-    len = 10
-    len_half = len / 2.0
-    ret = np.tile(
-        np.array(
-            [center[0] - len_half, center[1] - len_half,
-            center[0] + len_half, center[1] + len_half]
-        ).astype(np.float32),
-        (count, 1)
-    )
-    return ret
-
-def gen_multiple_boxes(centers, scores, count, num_classes):
-    ret_box = None
-    ret_scores = None
-    for cc, ss in zip(centers, scores):
-        box = gen_boxes(count, cc)
-        ret_box = np.vstack((ret_box, box)) if ret_box is not None else box
-        cur_sc = np.ones((count, 1), dtype=np.float32) * ss
-        ret_scores = np.vstack((ret_scores, cur_sc)) \
-            if ret_scores is not None else cur_sc
-    ret_box = np.tile(ret_box, (1, num_classes))
-    ret_scores = np.tile(ret_scores, (1, num_classes))
-    assert ret_box.shape == (len(centers) * count, 4 * num_classes)
-    assert ret_scores.shape == (len(centers) * count, num_classes)
-    return ret_box, ret_scores
-
-
 class TorchIntegration(hu.HypothesisTestCase):
     @given(
         H=st.integers(min_value=50, max_value=100),
@@ -213,40 +185,3 @@ class TorchIntegration(hu.HypothesisTestCase):
                 -90, 90, clip_angle_thresh)
 
         torch.testing.assert_allclose(box_out, a)
-
-
-    @given(
-            det_per_im=st.integers(1, 3),
-            num_classes=st.integers(2, 10)
-        )
-    def test_box_with_nms_limit(self,
-            det_per_im,
-            num_classes,
-            ):
-
-        in_centers = [(0, 0), (20, 20), (50, 50)]
-        in_scores = [0.7, 0.85, 0.6]
-        boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
-
-        def box_with_nms_limit_ref():
-            ref_op = core.CreateOperator(
-                "BoxWithNMSLimit",
-                ['in_scores', 'in_boxes'],# 'in_batch_splits'],
-                ['scores', 'boxes', 'classes'],# 'batch_splits', 'keeps', 'keeps_size'],
-                score_thresh = 0.5,
-                nms=0.9,
-                detections_per_im=det_per_im,
-            )
-            workspace.FeedBlob("in_scores", scores)
-            workspace.FeedBlob("in_boxes", boxes)
-            workspace.RunOperatorOnce(ref_op)
-            return workspace.FetchBlob("scores"), workspace.FetchBlob("boxes"), workspace.FetchBlob("classes")
-
-        scores_ref, boxes_ref, classes_ref = box_with_nms_limit_ref()
-
-        a, b, c = torch.ops._caffe2.BoxWithNMSLimit(
-                torch.tensor(scores), torch.tensor(boxes),
-                0.5, 0.9, det_per_im, False, "linear", 0.5, 0.1, False)
-        torch.testing.assert_allclose(torch.tensor(scores_ref), a)
-        torch.testing.assert_allclose(torch.tensor(boxes_ref), b)
-        torch.testing.assert_allclose(torch.tensor(classes_ref), c)
