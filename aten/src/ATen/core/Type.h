@@ -44,6 +44,7 @@ struct Generator;
 static inline void noop_deleter(void*) {}
 
 enum class TypeID {
+  CPUBool,
   CPUByte,
   CPUChar,
   CPUDouble,
@@ -52,6 +53,7 @@ enum class TypeID {
   CPULong,
   CPUShort,
   CPUHalf,
+  SparseCPUBool,
   SparseCPUByte,
   SparseCPUChar,
   SparseCPUDouble,
@@ -59,6 +61,7 @@ enum class TypeID {
   SparseCPUInt,
   SparseCPULong,
   SparseCPUShort,
+  CUDABool,
   CUDAByte,
   CUDAChar,
   CUDADouble,
@@ -67,6 +70,7 @@ enum class TypeID {
   CUDALong,
   CUDAShort,
   CUDAHalf,
+  SparseCUDABool,
   SparseCUDAByte,
   SparseCUDAChar,
   SparseCUDADouble,

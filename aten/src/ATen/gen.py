@@ -167,6 +167,7 @@ densities = ['Dense', 'Sparse']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
+    ('Bool', 'bool', 'Bool', 'bool', False),
     ('Byte', 'uint8_t', 'Long', 'uint8_t', False),
     ('Char', 'int8_t', 'Long', 'int8_t', False),
     ('Double', 'double', 'Double', 'double', True),
