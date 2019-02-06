@@ -45,7 +45,7 @@ struct ArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return DimentionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
+    return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
  private:
@@ -157,7 +157,7 @@ struct ArgumentSpec {
       auto& arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return DimentionedTensorType::create(
+      return DimensionedTensorType::create(
           arg.type(),
           ConvertIntToCPUOrCUDA(arg.device()),
           arg.dim(),

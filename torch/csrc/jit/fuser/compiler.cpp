@@ -270,7 +270,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
-    graph->inputs()[i]->setType(DimentionedTensorType::create(
+    graph->inputs()[i]->setType(DimensionedTensorType::create(
         desc.scalar_type,
         device,
         desc.nDim())); // TODO: nDim is bad, as it is collapsed
@@ -311,7 +311,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     if (o->node()->kind() == prim::FusedConcat) {
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
-    auto scalar_type = o->type()->expect<c10::DimentionedTensorType const>()->scalarType();
+    auto scalar_type = o->type()->expect<c10::DimensionedTensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();

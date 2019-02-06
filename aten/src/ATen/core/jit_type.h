@@ -16,7 +16,7 @@ namespace c10 {
 
 #define C10_FORALL_TYPES(_) \
 _(TensorType) \
-_(DimentionedTensorType) \
+_(DimensionedTensorType) \
 _(CompleteTensorType) \
 _(UndefinedTensorType) \
 _(TupleType) \
@@ -299,13 +299,13 @@ protected:
   UndefinedTensorType(): TensorType(TypeKind::UndefinedTensorType) {}
 };
 
-struct DimentionedTensorType;
-using DimentionedTensorTypePtr = std::shared_ptr<DimentionedTensorType>;
+struct DimensionedTensorType;
+using DimensionedTensorTypePtr = std::shared_ptr<DimensionedTensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API DimentionedTensorType : public TensorType {
+struct CAFFE2_API DimensionedTensorType : public TensorType {
   template<typename ... T>
-  static DimentionedTensorTypePtr create( T&& ... all ) {
-    return DimentionedTensorTypePtr(new DimentionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static DimensionedTensorTypePtr create( T&& ... all ) {
+    return DimensionedTensorTypePtr(new DimensionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   at::ScalarType scalarType() const { return scalar_type_; }
@@ -313,38 +313,38 @@ struct CAFFE2_API DimentionedTensorType : public TensorType {
   int64_t dim() const { return dim_; }
   bool requires_grad() const override { return requires_grad_; }
 
-  DimentionedTensorTypePtr toScalarType(at::ScalarType type){
-    auto t = DimentionedTensorType::create(*this);
+  DimensionedTensorTypePtr toScalarType(at::ScalarType type){
+    auto t = DimensionedTensorType::create(*this);
     t->scalar_type_ = type;
     return t;
   }
-  DimentionedTensorTypePtr withDim(size_t new_dim) {
-    auto t = DimentionedTensorType::create(*this);
+  DimensionedTensorTypePtr withDim(size_t new_dim) {
+    auto t = DimensionedTensorType::create(*this);
     t->dim_ = new_dim;
     return t;
   }
-  DimentionedTensorTypePtr withRequiresGrad(bool req) {
-    auto t = DimentionedTensorType::create(*this);
+  DimensionedTensorTypePtr withRequiresGrad(bool req) {
+    auto t = DimensionedTensorType::create(*this);
     t->requires_grad_ = req;
     return t;
   }
 
   bool operator==(const Type& rhs) const override {
-    if (rhs.kind() != TypeKind::DimentionedTensorType)
+    if (rhs.kind() != TypeKind::DimensionedTensorType)
       return false;
-    auto rt = rhs.expect<DimentionedTensorType>();
+    auto rt = rhs.expect<DimensionedTensorType>();
     return scalarType() == rt->scalarType() &&
            device() == rt->device() &&
            dim() == rt->dim();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     return rhs->kind() == TypeKind::TensorType ||
-          (rhs->kind() == TypeKind::DimentionedTensorType && Type::isSubtypeOf(rhs)) ||
+          (rhs->kind() == TypeKind::DimensionedTensorType && Type::isSubtypeOf(rhs)) ||
           TensorType::isSubtypeOf(rhs);
   }
   bool isSubclass(const TypeKind kind) const override {
     return kind == TypeKind::TensorType ||
-        kind == TypeKind::DimentionedTensorType;
+        kind == TypeKind::DimensionedTensorType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -352,16 +352,16 @@ struct CAFFE2_API DimentionedTensorType : public TensorType {
     return "Tensor";
   }
 
-  static const TypeKind Kind = TypeKind::DimentionedTensorType;
+  static const TypeKind Kind = TypeKind::DimensionedTensorType;
 
 protected:
-  DimentionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimentionedTensorType)
-    : DimentionedTensorType(tensor.type().scalarType(),
+  DimensionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimensionedTensorType)
+    : DimensionedTensorType(tensor.type().scalarType(),
                  tensor.device(),
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
-  DimentionedTensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::DimentionedTensorType)
+  DimensionedTensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::DimensionedTensorType)
     : TensorType(kind)
     , scalar_type_(scalar_type)
     , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
@@ -377,7 +377,7 @@ protected:
 struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API CompleteTensorType : public DimentionedTensorType {
+struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
     return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -424,14 +424,14 @@ struct CAFFE2_API CompleteTensorType : public DimentionedTensorType {
            device() == rt->device();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if (rhs->kind() == TypeKind::DimentionedTensorType)
-      return *expect<DimentionedTensorType>() ==  *rhs;
+    if (rhs->kind() == TypeKind::DimensionedTensorType)
+      return *expect<DimensionedTensorType>() ==  *rhs;
     return rhs->kind() == TypeKind::TensorType ||
            TensorType::isSubtypeOf(rhs);
   }
   bool isSubclass(const TypeKind kind) const override {
     return kind == TypeKind::TensorType ||
-           kind == TypeKind::DimentionedTensorType ||
+           kind == TypeKind::DimensionedTensorType ||
            kind == TypeKind::CompleteTensorType;
   }
   std::string str() const override {
@@ -454,13 +454,13 @@ struct CAFFE2_API CompleteTensorType : public DimentionedTensorType {
 
 private:
   CompleteTensorType(const at::Tensor& tensor)
-    : DimentionedTensorType(tensor, TypeKind::CompleteTensorType)
+    : DimensionedTensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
   CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
   CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
-    : DimentionedTensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
+    : DimensionedTensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
@@ -951,7 +951,7 @@ CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (type->kind() == TypeKind::DimentionedTensorType ||
+  if (type->kind() == TypeKind::DimensionedTensorType ||
       type->kind() == TypeKind::CompleteTensorType) {
     return TensorType::get();
   }

@@ -583,7 +583,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
-      .def("dim", [](const Type& t) { return t.expect<DimentionedTensorType>()->dim(); })
+      .def("dim", [](const Type& t) { return t.expect<DimensionedTensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -599,7 +599,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "scalarType",
           [](Type& t) {
-            return toString(t.expect<DimentionedTensorType>()->scalarType());
+            return toString(t.expect<DimensionedTensorType>()->scalarType());
           })
       .def(
           "__eq__",

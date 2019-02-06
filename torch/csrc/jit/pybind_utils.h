@@ -134,7 +134,7 @@ inline IValue toIValue(
     c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType:
-    case TypeKind::DimentionedTensorType:
+    case TypeKind::DimensionedTensorType:
     case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
@@ -197,7 +197,7 @@ inline IValue toIValue(
             std::vector<double> repeated(*N, value);
             return repeated;
           }
-        case TypeKind::DimentionedTensorType:
+        case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
           return py::cast<std::vector<at::Tensor>>(obj);
         default:
