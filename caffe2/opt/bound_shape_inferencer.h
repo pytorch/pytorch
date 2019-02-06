@@ -3,6 +3,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,10 +12,15 @@ namespace caffe2 {
 
 struct CAFFE2_API ShapeInfo {
   enum DimType : int8_t { UNKNOWN = 0, CONSTANT = 1, BATCH = 2, SEQ = 3 };
+  ShapeInfo() {}
+  ShapeInfo(DimType t, TensorShape&& s) : dim_type(t), shape(std::move(s)) {}
+
   // type of the shape according its first dim
   DimType dim_type{DimType::UNKNOWN};
   TensorShape shape;
 };
+
+using ShapeInfoMap = std::unordered_map<std::string, ShapeInfo>;
 
 // This struct stores the max bound size for batch in the general sense. We have
 // the conventioal batch size and the look-up sequence, which is also batch in a
@@ -48,6 +54,20 @@ class CAFFE2_API BoundShapeInferencer {
     return shape_info_;
   }
 
+  /// Print out all the shape info
+  std::string PrintShapeInfo() const {
+    std::stringstream ss;
+    for (const auto& kv : shape_info_) {
+      const auto& s = kv.second;
+      ss << s.shape.name() << ": dim_type: " << s.dim_type << ", dims: [";
+      for (const auto d : s.shape.dims()) {
+        ss << d << ", ";
+      }
+      ss << "], dtype: " << s.shape.data_type() << "\n";
+    }
+    return ss.str();
+  }
+
  private:
   TensorShape& CheckAndSetTensorShapeAndType(
       const std::string& name,
@@ -57,6 +77,7 @@ class CAFFE2_API BoundShapeInferencer {
 
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);
+  void InferConcat(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
