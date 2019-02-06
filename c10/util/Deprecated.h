@@ -4,7 +4,7 @@
 
 #if defined(_MSC_VER)
 // [[deprecated]] doesn't work on Windows, so try declspec first
-# define C10_DEPRECATED __declspec(deprecated)
+# define C10_DEPRECATED
 #elif (defined(__cplusplus) && __cplusplus > 201402L) || defined(__CUDACC__) || defined(__HIPCC__)
 // NB: We preferentially use [[deprecated]] for nvcc because
 // nvcc doesn't understand __attribute__((deprecated)) syntax
