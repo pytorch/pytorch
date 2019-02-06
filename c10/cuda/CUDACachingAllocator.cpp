@@ -514,7 +514,7 @@ struct THCCachingAllocator
 
 THCCachingAllocator caching_allocator;
 
-void raw_delete(void* ptr) {
+static void CudaCachingDeleter(void* ptr) {
   caching_allocator.free(ptr);
 }
 
@@ -529,10 +529,10 @@ struct CudaCachingAllocator : public Allocator {
     if (size != 0) {
       caching_allocator.malloc(&r, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
+    return {r, r, &CudaCachingDeleter, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    return &raw_delete;
+    return &CudaCachingDeleter;
   }
 };
 
@@ -647,7 +647,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
       dev,
       [handle, curr_device](void *ptr) {
         cuda::CUDAGuard device_guard(curr_device);
-        std::lock_guard<std::mutex> lock(IpcMutex);
+        std::lock_guard<std::mutex> deleter_lock(IpcMutex);
         C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;

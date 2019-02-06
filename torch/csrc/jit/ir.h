@@ -1,48 +1,34 @@
 #pragma once
 
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/generic_if.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
-#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
-#include <algorithm>
-#include <atomic>
-#include <cstdint>
 #include <functional>
 #include <iostream>
-#include <memory>
 #include <unordered_set>
 #include <vector>
 
 namespace torch {
-namespace autograd {
-
-struct Function;
-
-}
-} // namespace torch
-
-namespace torch {
 namespace jit {
 
-using ::c10::Symbol;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::Symbol;
 
 using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
@@ -74,6 +60,8 @@ using ::c10::TypePtr;
 using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
+
+using ::c10::fmap;
 
 namespace prim {
 using namespace ::c10::prim;
@@ -118,8 +106,6 @@ struct Use {
   }
 };
 
-class AliasDb;
-
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // A while back, we wrote some code manipulating uses that looked like this:
@@ -153,6 +139,7 @@ template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using topo_position_t = int64_t;
+using ValueSet = std::unordered_set<const Value*>;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -192,8 +179,9 @@ struct Value {
   }
   TORCH_API Value* setUniqueName(const std::string& name);
   std::string uniqueName() const {
-    if (hasUniqueName())
+    if (hasUniqueName()) {
       return unique_name_;
+    }
     return std::to_string(unique());
   }
   TORCH_API std::string uniqueNameBase() const;
@@ -356,8 +344,9 @@ struct Node {
   }
   bool hasUses() const {
     for (auto o : outputs()) {
-      if (!o->uses().empty())
+      if (!o->uses().empty()) {
         return true;
+      }
     }
     return false;
   }
@@ -393,8 +382,9 @@ struct Node {
 
   template <typename T>
   c10::optional<T> get(Symbol name) const {
-    if (auto v = get(name))
+    if (auto v = get(name)) {
       return v->template to<T>();
+    }
     return c10::nullopt;
   }
 
@@ -589,8 +579,9 @@ struct Node {
   // TODO: Make this const correct
   template <typename T>
   T* cast() {
-    if (T::Kind == kind())
+    if (T::Kind == kind()) {
       return static_cast<T*>(this);
+    }
     return nullptr;
   }
   template <typename T>
@@ -610,8 +601,9 @@ struct Node {
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
   const FunctionSchema& schema() const {
-    if (!schema_)
+    if (!schema_) {
       findSchema();
+    }
     return *schema_;
   }
   const FunctionSchema* maybeSchema() const;
@@ -628,7 +620,7 @@ struct Node {
   // Methods for accessing attributes
   void copyAttributes(const Node& rhs) {
     values_.clear();
-    for (auto& i : rhs.values_) {
+    for (const AVPtr& i : rhs.values_) {
       values_.push_back(i->clone());
     }
   }
@@ -663,24 +655,26 @@ struct Node {
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
-    for (auto& a : values_)
+    for (const AVPtr& a : values_) {
       names.push_back(a->name);
+    }
     return names;
   }
   std::vector<const char*> attributeNamesS() const {
     std::vector<const char*> names;
-    for (auto& a : values_)
+    for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
+    }
     return names;
   }
 
-#define CREATE_ACCESSOR(Kind, method)                              \
+#define CREATE_ACCESSOR(Kind, method)                           \
   Node* method##_(Symbol name, Kind##Attr::ConstructorType v) { \
-    return setAttr<Kind##Attr>(                                        \
-        name, std::forward<Kind##Attr::ConstructorType>(v));       \
-  }                                                                \
-  const Kind##Attr::ValueType& method(Symbol name) const {         \
-    return getAttr<Kind##Attr>(name);                                  \
+    return setAttr<Kind##Attr>(                                 \
+        name, std::forward<Kind##Attr::ConstructorType>(v));    \
+  }                                                             \
+  const Kind##Attr::ValueType& method(Symbol name) const {      \
+    return getAttr<Kind##Attr>(name);                           \
   }
 
   CREATE_ACCESSOR(Float, f)
@@ -703,14 +697,15 @@ struct Node {
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
     AT_ASSERT(!v.defined() || !v.is_variable());
-    return setAttr<TensorAttr>(name, std::forward<TensorAttr::ConstructorType>(v));
+    return setAttr<TensorAttr>(
+        name, std::forward<TensorAttr::ConstructorType>(v));
   }
   const TensorAttr::ValueType& t(Symbol name) const {
     return getAttr<TensorAttr>(name);
   }
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
-    for (auto& t : v) {
+    for (const at::Tensor& t : v) {
       AT_ASSERT(!t.defined() || !t.is_variable());
     }
     return setAttr<TensorsAttr>(
@@ -762,7 +757,8 @@ struct Node {
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
-  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required) const {
+  std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required)
+      const {
     AT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
@@ -820,8 +816,10 @@ struct Node {
 struct Block {
   friend struct Node;
   friend struct Graph;
+
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
   TORCH_API Block(Graph* graph_, Node* node_);
+
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -853,6 +851,19 @@ struct Block {
   const Node* param_node() const {
     return input_;
   }
+  Graph* owningGraph() {
+    return graph_;
+  }
+  const Graph* owningGraph() const {
+    return graph_;
+  }
+  Node* owningNode() {
+    return owning_node_;
+  }
+  const Node* owningNode() const {
+    return owning_node_;
+  }
+
   Value* addInput(std::string name = "") {
     Value* v = input_->addOutput();
     v->setUniqueName(std::move(name));
@@ -877,28 +888,16 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+
   Node* appendNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
     return n;
   }
-
   Node* prependNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertAfter(output_);
     return n;
-  }
-  Graph* owningGraph() {
-    return graph_;
-  }
-  const Graph* owningGraph() const {
-    return graph_;
-  }
-  Node* owningNode() {
-    return owning_node_;
-  }
-  const Node* owningNode() const {
-    return owning_node_;
   }
   // clone all inputs, nodes, and outputs from src and append them
   // to the inputs, nodes, and outputs of this block
@@ -970,21 +969,21 @@ struct Graph {
     return block_->inputs();
   }
   at::ArrayRef<const Value*> inputs() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.inputs();
   }
   at::ArrayRef<Value*> outputs() {
     return block_->outputs();
   }
   at::ArrayRef<const Value*> outputs() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.outputs();
   }
   graph_node_list nodes() {
     return block_->nodes();
   }
   const_graph_node_list nodes() const {
-    const auto& block = *block_;
+    const Block& block = *block_;
     return block.nodes();
   }
   Node* param_node() {
@@ -999,6 +998,10 @@ struct Graph {
   const Node* return_node() const {
     return block_->return_node();
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+    return unique_names_;
+  }
+
   void push_scope(const std::string& scope_name) {
     current_scope_ = current_scope_->push(Symbol::scope(scope_name));
   }
@@ -1011,6 +1014,7 @@ struct Graph {
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
   }
+
   Value* addInput(std::string name = "") {
     return block_->addInput(std::move(name));
   }
@@ -1020,15 +1024,11 @@ struct Graph {
   void eraseInput(size_t i) {
     block_->eraseInput(i);
   }
-  void eraseOutput(size_t i) {
-    block_->eraseOutput(i);
-  }
-  const std::unordered_map<std::string, Value*>& uniqueNames() const {
-    return unique_names_;
-  }
-
   size_t registerOutput(Value* n) {
     return block_->registerOutput(n);
+  }
+  void eraseOutput(size_t i) {
+    block_->eraseOutput(i);
   }
 
   TORCH_API Node* create(NodeKind kind, size_t num_outputs = 1);
@@ -1050,6 +1050,12 @@ struct Graph {
       const TypePtr& elem_type,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value* v, size_t size);
+  TORCH_API Node* createDict(
+      const TypePtr& key_type,
+      const TypePtr& value_type,
+      at::ArrayRef<Value*> keys,
+      at::ArrayRef<Value*> values);
+  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   Node* createPythonOp(
@@ -1146,27 +1152,43 @@ struct Graph {
   TORCH_API void freeBlock(Block* b);
 };
 
-struct WithInsertPoint : public ResourceGuard {
-  WithInsertPoint(Node* n)
-      : ResourceGuard([this] { prev->owningGraph()->setInsertPoint(prev); }),
-        prev(n->owningGraph()->insertPoint()) {
+/** \brief An utility class for setting temporary insertion points.
+ *
+ * When an object of this class is created, it stores the current insertion
+ * point, sets the new one, and restores the original insertion point  when the
+ * object is destroyed.
+ */
+struct WithInsertPoint {
+  WithInsertPoint(Node* n) : prev_(n->owningGraph()->insertPoint()) {
     n->owningGraph()->setInsertPoint(n);
   }
   WithInsertPoint(Block* b) : WithInsertPoint(b->return_node()) {}
 
- private:
-  Node* prev;
-};
-
-struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph& g, ScopePtr scope)
-      : ResourceGuard([&g, this]() { g.set_current_scope(prev_scope); }),
-        prev_scope(g.current_scope()) {
-    g.set_current_scope(std::move(scope));
+  ~WithInsertPoint() {
+    prev_->owningGraph()->setInsertPoint(prev_);
   }
 
  private:
-  ScopePtr prev_scope;
+  Node* prev_;
+};
+
+/** \brief An utility class for setting temporary scopes.
+ *
+ * When an object of this class is created, it stores the current scope, sets
+ * the new one, and restores the original scope when the object is destroyed.
+ */
+struct WithCurrentScope {
+  WithCurrentScope(Graph& g, ScopePtr scope)
+      : graph_(&g), prev_scope_(g.current_scope()) {
+    g.set_current_scope(std::move(scope));
+  }
+  ~WithCurrentScope() {
+    graph_->set_current_scope(prev_scope_);
+  }
+
+ private:
+  Graph* graph_;
+  ScopePtr prev_scope_;
 };
 
 inline Value::Value(Node* node_, size_t offset_)
@@ -1193,49 +1215,6 @@ inline Graph* Value::owningGraph() {
 inline const Graph* Value::owningGraph() const {
   return node()->owningGraph();
 }
-
-// Helper macros for constructing switch statements over Node types
-// instead of heavy-weight visitors
-// read 'between' these defines to see how they turn into a big switch
-// statement
-
-// Mutable case
-// The IFM/ELSEIFM indicate that subclass *refinement* occurs.
-// This is only valid for node types for which we have subclasses.
-#define IR_IFM(x, Kind) GENERIC_IF(, prim::Kind, x, Kind)
-#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(, prim::Kind, Kind)
-
-#define IR_IFM_CONST(x, Kind) GENERIC_IF(const, prim::Kind, x, Kind)
-#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const, prim::Kind, Kind)
-
-#define IR_IF(x, Kind)           \
-  auto&& __match_key = x;        \
-  switch (__match_key->kind()) { \
-    case ::c10::prim::Kind: {    \
-      auto* value = __match_key; \
-      (void)value;
-#define IR_ELSEIF(Kind)        \
-  }                            \
-  break;                       \
-  case ::c10::prim::Kind: {    \
-    auto* value = __match_key; \
-    (void)value;
-
-#define IR_ELSE() GENERIC_ELSE()
-#define IR_END() GENERIC_END()
-
-/* example:
-  Node * n = ...;
-  IR_IF(n,Select)
-    cout << "Select of" << value->input() << "\n";
-  IR_ELSEIF(PythonOp)
-    cout << value->pyobj << "\n";
-  IR_ELSEIF(Add)
-    cout << "Add" << \n";
-  IR_ELSE() // optional
-    cout << "something else\n";
-  IR_END()
-*/
 
 /************* All nodes not required to be defined before Graph **************/
 
@@ -1273,6 +1252,10 @@ struct PythonOp : public Node {
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);
@@ -1281,7 +1264,7 @@ inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
     pyobj_list&& scalar_args) {
-  auto op = allocPythonOp(this);
+  PythonOp* op = allocPythonOp(this);
   return op->init(std::move(pyobj), cconv, std::move(scalar_args));
 }
 

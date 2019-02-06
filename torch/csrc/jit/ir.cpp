@@ -18,6 +18,9 @@
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
@@ -34,7 +37,7 @@ static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 // https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
 
-void printValueRef(std::ostream& out, const Value* n) {
+static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
 }
 
@@ -47,11 +50,14 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 }
 
 template <typename T>
-std::ostream& printValueRefs(std::ostream& out, const at::ArrayRef<T>& nodes) {
+static std::ostream& printValueRefs(
+    std::ostream& out,
+    const at::ArrayRef<T>& nodes) {
   size_t i = 0;
   for (auto n : nodes) {
-    if (i++ > 0)
+    if (i++ > 0) {
       out << ", ";
+    }
     printValueRef(out, n);
   }
   return out;
@@ -78,6 +84,7 @@ struct const_value_list_with_types {
       bool use_newlines = false)
       : values(values), use_newlines(use_newlines) {}
 };
+
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   size_t i = 0;
   for (auto n : l.values) {
@@ -101,24 +108,25 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "[";
   int i = 0;
   for (auto& item : items) {
-    if (i++ > 0)
+    if (i++ > 0) {
       out << ", ";
+    }
     out << item;
   }
   out << "]";
 }
 
-static std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while (pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
+static void printStrList(
+    std::ostream& out,
+    const std::vector<std::string>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    printQuotedString(out, item);
   }
-  return s;
+  out << "]";
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
@@ -136,10 +144,10 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      out << "\"" << escapeString(s(name)) << "\"";
+      printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
-      printPrimList(out, ss(name));
+      printStrList(out, ss(name));
       break;
     case AttributeKind::t: {
       at::Tensor tensor = t(name);
@@ -184,10 +192,12 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   auto names = attributeNames();
   int i = 0;
   for (auto name : names) {
-    if (ignore_subgraph && name == attr::Subgraph)
+    if (ignore_subgraph && name == attr::Subgraph) {
       continue;
-    if (i++ > 0)
+    }
+    if (i++ > 0) {
       out << ", ";
+    }
     // TODO: debugging mode to see the qualifier.  We definitely
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
@@ -200,8 +210,9 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (size_t i = 0; i < level; ++i)
+  for (size_t i = 0; i < level; ++i) {
     out << "  ";
+  }
   return out;
 }
 
@@ -360,37 +371,47 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  IR_IF(this, Constant)
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Return)
-  // Return uses is zero
-  AT_ASSERT(outputs().size() == 0);
-  IR_ELSEIF(Param)
-  // Param inputs is zero
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIFM_CONST(PythonOp)
-  // Python operator cconv is correct
-  size_t n_scalars = 0, n_tensors = 0;
-  for (auto c : value->cconv) {
-    if (c == 'c') {
-      n_scalars++;
-    } else if (c == 'd') {
-      n_tensors++;
-    } else {
-      AT_ASSERT(0);
+  switch (kind()) {
+    case prim::Constant:
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::Return:
+      // Return uses is zero
+      AT_ASSERT(outputs().size() == 0);
+      break;
+    case prim::Param:
+      // Param inputs is zero
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::PythonOp: {
+      // Python operator cconv is correct
+      size_t n_scalars = 0, n_tensors = 0;
+      auto* value = static_cast<const PythonOp*>(this);
+      for (auto c : value->cconv) {
+        if (c == 'c') {
+          n_scalars++;
+        } else if (c == 'd') {
+          n_tensors++;
+        } else {
+          AT_ASSERT(0);
+        }
+        AT_ASSERT(static_cast<bool>(value->pyobj));
+      }
+      AT_ASSERT(n_scalars == value->scalar_args.size());
+      AT_ASSERT(n_tensors == inputs_.size());
+      break;
     }
-    AT_ASSERT(static_cast<bool>(value->pyobj));
+    case prim::Eval:
+      // TODO: add invariants
+      // TODO: It's not good for these ops to be top-level, it makes cases
+      // longer.
+      break;
+    case prim::FusionGroup:
+      checkSameDevice(this);
+      // TODO: Typecheck the parameters
+      g(attr::Subgraph)->lint();
+      break;
   }
-  AT_ASSERT(n_scalars == value->scalar_args.size());
-  AT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIF(Eval)
-  // TODO: add invariants
-  // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(FusionGroup)
-  checkSameDevice(value);
-  // TODO: Typecheck the parameters
-  value->g(attr::Subgraph)->lint();
-  IR_END()
 }
 
 // TODO: When lint fails, give better indication about which
@@ -464,8 +485,7 @@ void Graph::lint() const {
           AT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
-      AT_ASSERT(
-          anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+      AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
@@ -571,8 +591,9 @@ void Block::cloneFrom(Block* src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value* v) {
     auto it = local_map.find(v);
-    if (it != local_map.end())
+    if (it != local_map.end()) {
       return it->second;
+    }
     return value_map(v);
   };
 
@@ -652,8 +673,9 @@ Value* Value::setUniqueName(const std::string& name) {
   }
 
   // allow "" to clear the uniquename
-  if (name == "")
+  if (name == "") {
     return this;
+  }
 
   // if someone else has this name, then rename the other value
   auto old_owner_of_name = names.find(name);
@@ -684,8 +706,9 @@ Value* Value::setUniqueName(const std::string& name) {
 
 Value* Value::copyMetadata(Value* from) {
   setType(from->type());
-  if (from->hasUniqueName())
+  if (from->hasUniqueName()) {
     setUniqueName(from->uniqueName());
+  }
   return this;
 }
 
@@ -726,11 +749,13 @@ Value* Node::namedInput(Symbol name) const {
 bool Node::matches(
     const char* signature_literal,
     at::ArrayRef<Symbol> const_inputs) const {
-  if (!sig(signature_literal).matches(this))
+  if (!sig(signature_literal).matches(this)) {
     return false;
+  }
   for (Symbol s : const_inputs) {
-    if (!is_constant(s))
+    if (!is_constant(s)) {
       return false;
+    }
   }
   return true;
 }
@@ -794,6 +819,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -895,20 +921,24 @@ void Node::eraseBlock(size_t i) {
 }
 
 void Node::destroy() {
-  while (!outputs().empty())
+  while (!outputs().empty()) {
     eraseOutput(outputs().size() - 1);
-  while (!blocks().empty())
+  }
+  while (!blocks().empty()) {
     eraseBlock(blocks().size() - 1);
+  }
   removeAllInputs();
-  if (inBlockList())
+  if (inBlockList()) {
     removeFromList();
+  }
   graph_->freeNode(this);
 }
 
 void Node::cloneFrom(Node* s) {
   setSourceLocation(s->getSourceLocation());
-  if (s->scope_ && !s->scope_->isBlank())
+  if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
+  }
   copyAttributes(*s);
 }
 
@@ -962,8 +992,9 @@ void Node::replaceInputWith(Value* from, Value* to) {
   schema_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
-    if (input == from)
+    if (input == from) {
       replaceInput(i, to);
+    }
     i++;
   }
 }
@@ -1072,8 +1103,9 @@ void Node::removeInput(size_t i) {
 
 void Node::removeAllInputs() {
   schema_ = nullptr;
-  for (size_t i = 0; i < inputs().size(); ++i)
+  for (size_t i = 0; i < inputs().size(); ++i) {
     dropInput(i);
+  }
   inputs_.clear();
 }
 
@@ -1130,8 +1162,9 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++)
+  for (size_t i = 0; i < num_outputs; i++) {
     n->addOutput();
+  }
   return n;
 }
 
@@ -1140,8 +1173,9 @@ Node* Graph::create(
     ArrayRef<Value*> inputs,
     size_t num_outputs) {
   auto n = create(kind, num_outputs);
-  for (auto i : inputs)
+  for (auto i : inputs) {
     n->addInput(i);
+  }
   return n;
 }
 
@@ -1218,6 +1252,33 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   return n;
 }
 
+Node* Graph::createDict(
+    const TypePtr& key_type,
+    const TypePtr& value_type,
+    at::ArrayRef<Value*> keys,
+    at::ArrayRef<Value*> values) {
+  AT_ASSERT(keys.size() == values.size());
+  auto n = create(prim::DictConstruct, 1);
+  for (size_t i = 0; i < keys.size(); ++i) {
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+
+    n->addInput(keys[i]) ;
+    n->addInput(values[i]);
+  }
+  n->output()->setType(DictType::create(key_type, value_type));
+  return n;
+}
+
+Node* Graph::createDictIndex(Value* dict, Value* index) {
+  auto dict_type = dict->type()->expect<DictType>();
+  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+
+  auto n = create(prim::DictIndex, {dict, index});
+  n->output()->setType(dict_type->getValueType());
+  return n;
+}
+
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
@@ -1267,12 +1328,15 @@ std::string Graph::toString() const {
 }
 
 Graph::~Graph() {
-  for (const Node* n : all_nodes)
+  for (const Node* n : all_nodes) {
     delete n;
-  for (const Value* v : all_values)
+  }
+  for (const Value* v : all_values) {
     delete v;
-  for (const Block* b : all_blocks)
+  }
+  for (const Block* b : all_blocks) {
     delete b;
+  }
 }
 
 void Graph::freeNode(Node* n) {
@@ -1296,10 +1360,11 @@ void Graph::freeBlock(Block* b) {
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
-  // small peephole optimization to ensure IntList attributes can still turn
+  // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
-  if (v->node()->kind() == prim::TupleConstruct)
+  if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();
+  }
   auto& g = *v->owningGraph();
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }

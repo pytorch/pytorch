@@ -20,7 +20,9 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
         fusion_type_(static_cast<FusionType>(
             OperatorBase::GetSingleArgument<int>("fusion_type", 0))),
         training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
+        conv_algorithm_(
+            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -75,6 +77,11 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
+    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
+      aalgorithm = ideep::algorithm::convolution_winograd;
+    }
+
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
@@ -102,7 +109,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr(),
+          aalgorithm);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -114,7 +122,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr(),
+          aalgorithm);
     }
 
     if (fusion_type_ != FUSION_CONV_RELU) {
@@ -128,8 +137,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
 
  private:
   FusionType fusion_type_;
-
   bool training_mode_;
+  int conv_algorithm_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
 

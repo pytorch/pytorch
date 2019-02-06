@@ -1,13 +1,13 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/utils/functional.h>
 
 namespace torch {
 namespace jit {
@@ -213,7 +213,7 @@ void ConstantPropagation(Block* block, const AliasDb& aliasDb) {
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   ConstantPropagation(graph->block(), aliasDb);
   EliminateDeadCode(graph);
 }

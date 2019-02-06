@@ -47,11 +47,14 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   visited_tensors_.clear();
 
   for (const auto& op : net.op()) {
+    LOG(INFO) << op.type();
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise") {
       InferSparseLengthsSum(op);
     } else if (op.type() == "FC" || op.type() == "FCTransposed") {
       InferFC(op);
+    } else if (op.type() == "Concat") {
+      InferConcat(op);
     } else {
       InferCommonOp(op);
     }
@@ -125,13 +128,19 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       "Shape of DATA input of SparseLengthsSum ",
       op.input(0),
       " needs to be presented");
+  CAFFE_ENFORCE_EQ(
+      it->second.shape.dims().size(),
+      2,
+      "DATA input ",
+      op.input(0),
+      "needs to be 2D");
 
   // Bound inputs
   CheckAndSetTensorShapeAndType(
       op.input(1),
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
-      TensorProto_DataType_INT32);
+      TensorProto_DataType_INT64);
   CheckAndSetTensorShapeAndType(
       op.input(2),
       ShapeInfo::DimType::BATCH,
@@ -142,11 +151,70 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   CAFFE_ENFORCE_EQ(it->second.shape.dims_size(), 2);
   current_dim_type_ = ShapeInfo::DimType::BATCH;
   current_max_batch_size_ = spec_.max_batch_size;
+  auto output_dim1 = it->second.shape.dims(1);
+  // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 for
+  // scale and 4 byte for bias (https://fburl.com/t6dp9tsc)
+  if (op.type() == "SparseLengthsSumFused8BitRowwise") {
+    output_dim1 -= 8;
+  }
   CheckAndSetTensorShapeAndType(
       op.output(0),
       ShapeInfo::DimType::BATCH,
-      {spec_.max_batch_size, it->second.shape.dims(0)},
-      it->second.shape.data_type());
+      {spec_.max_batch_size, output_dim1},
+      TensorProto_DataType_FLOAT);
+}
+
+// For concat net, if some inputs are missing and we have add_axis argument, it
+// means that all the inputs should be of the same dimension. In this case, we
+// can infer the shape of the missing inputs
+void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
+  ArgumentHelper helper(op);
+  auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
+  if (add_axis) {
+    ShapeInfo* ref_input_shape = nullptr;
+    std::string ref_name;
+    std::unordered_set<std::string> missing_shape_inputs;
+    for (const auto& i : op.input()) {
+      const auto it = shape_info_.find(i);
+      if (it != shape_info_.end()) {
+        const auto& current_input_shape = it->second;
+        if (ref_input_shape) {
+          CAFFE_ENFORCE(
+              ref_input_shape->shape.dims_size(),
+              current_input_shape.shape.dims_size());
+          for (int j = 0; j < ref_input_shape->shape.dims_size(); ++j) {
+            CAFFE_ENFORCE_EQ(
+                ref_input_shape->shape.dims(j),
+                current_input_shape.shape.dims(j),
+                "Mismatched size on dim ",
+                j,
+                " between ",
+                ref_name,
+                " and ",
+                i,
+                " (",
+                ref_input_shape->shape.dims(j),
+                " vs ",
+                current_input_shape.shape.dims(j),
+                ")");
+          }
+        } else {
+          ref_input_shape = &it->second;
+          ref_name = i;
+        }
+      } else {
+        missing_shape_inputs.emplace(i);
+      }
+    }
+
+    if (ref_input_shape) {
+      current_dim_type_ = ref_input_shape->dim_type;
+      for (const auto& i : missing_shape_inputs) {
+        shape_info_.emplace(i, *ref_input_shape);
+      }
+    }
+  }
+  InferCommonOp(op);
 }
 
 void BoundShapeInferencer::InferFC(const OperatorDef& op) {
@@ -226,7 +294,8 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   std::vector<TensorShape> input_shapes;
   for (const auto& input : op.input()) {
     const auto it = shape_info_.find(input);
-    CAFFE_ENFORCE(it != shape_info_.end());
+    CAFFE_ENFORCE(
+        it != shape_info_.end(), "Cannot find shape info for ", input);
     input_shapes.emplace_back(it->second.shape);
   }
 

@@ -169,6 +169,9 @@ net models. In particular TorchScript supports:
 ``List[T]``
     A list of which all members are type ``T``
 
+``Optional[T]``
+    A value which is either None or type ``T``
+
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
 
@@ -182,7 +185,6 @@ Example::
             r = 4
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
-
 
 
 There are 2 scenarios in which you can annotate:
@@ -235,6 +237,33 @@ Example::
                 returns.append((x, x))
 
             return returns
+
+
+Optional Type Refinement:
+
+TorchScript will refine the type of a variable of type Optional[T] when
+a comparison to None is made inside the conditional of an if statement.
+The compiler can reason about multiple None checks that are combined with
+AND, OR, or NOT. Refinement will also occur for else blocks of if statements
+that are not explicitly written.
+
+The expression must be emitted within the conditional; assigning
+a None check to a variable and using it in the conditional will not refine types.
+
+
+Example::
+
+  @torch.jit.script
+  def opt_unwrap(x, y, z):
+    # type: (Optional[int], Optional[int], Optional[int]) -> int
+    if x is None:
+      x = 1
+    x = x + 1
+
+    if y is not None and z is not None:
+      x = y + z
+    return x
+
 
 Expressions
 ~~~~~~~~~~~

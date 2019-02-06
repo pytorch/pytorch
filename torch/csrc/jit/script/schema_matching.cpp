@@ -211,7 +211,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       v = self;
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
-      // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+      // allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or zeros(1)
       if (allow_conversions && arg.type()->kind() ==
               TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],

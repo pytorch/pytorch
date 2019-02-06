@@ -142,8 +142,8 @@ struct SymbolicVariable {
   Value* size() const {
     return v->owningGraph()->insert(aten::size, {v});
   }
-  SymbolicVariable sumToSize(Value* size) const {
-    return create(prim::SumToSize, {*this, size})[0];
+  SymbolicVariable gradSumToSize(Value* size) const {
+    return create(aten::_grad_sum_to_size, {*this, size})[0];
   }
   SymbolicVariable expand(Value* size) const {
     return v->owningGraph()->insert(aten::expand, {v, size});
@@ -262,7 +262,7 @@ struct SymbolicVariable {
   SymbolicVariable sum(int dim, bool keepdim) const {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntList{dim}), insertConstant(keepdim)})[0];
+        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];

@@ -75,17 +75,6 @@ DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
 #undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
 
-template <typename T>
-__global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    c10::cuda::compat::sincos(__ldg(X + i), S + i, C + i);
-#else
-    c10::cuda::compat::sincos(X[i], S + i, C + i);
-#endif
-  }
-}
-
 template <typename TIn, typename TOut, class BinaryOperator>
 __global__ void SimpleBinaryOpCUDAKernel(
     const int N,
@@ -312,95 +301,6 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
 }
 
 } // namespace
-
-#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Func, op)            \
-  __global__ void Func##CUDAKernel(const int N, const T* X, T* Y) { \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                     \
-      Y[i] = op(X[i]);                                              \
-    }                                                               \
-  }                                                                 \
-  template <>                                                       \
-  CAFFE2_CUDA_EXPORT void Func<T, CUDAContext>(                     \
-      const int N, const T* x, T* y, CUDAContext* context) {        \
-    Func##CUDAKernel<<<                                             \
-        CAFFE_GET_BLOCKS(N),                                        \
-        CAFFE_CUDA_NUM_THREADS,                                     \
-        0,                                                          \
-        context->cuda_stream()>>>(N, x, y);                         \
-  }
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Acos, acosf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sinh, sinhf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cosh, coshf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tanh, tanhf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, utils::Square<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cbrt, cbrtf)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Erf, erff)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Erf, erf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cube, utils::Cube<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Cube, utils::Cube<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Cube,
-    utils::Cube<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Cube,
-    utils::Cube<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, utils::Not)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, utils::Negate<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, utils::Negate<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Neg,
-    utils::Negate<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Neg,
-    utils::Negate<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, utils::Sign<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, utils::Sign<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Sign,
-    utils::Sign<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Sign,
-    utils::Sign<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
-
-#undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
-
-#define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
-  template <>                                                        \
-  CAFFE2_CUDA_EXPORT void SinCos<T, CUDAContext>(                    \
-      const int N, const T* x, T* ys, T* yc, CUDAContext* context) { \
-    SinCosCUDAKernel<<<                                              \
-        CAFFE_GET_BLOCKS(N),                                         \
-        CAFFE_CUDA_NUM_THREADS,                                      \
-        0,                                                           \
-        context->cuda_stream()>>>(N, x, ys, yc);                     \
-  }
-CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
-CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
-#undef CAFFE2_SPECIALIZED_CUDA_SINCOS
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                     \

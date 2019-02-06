@@ -3,7 +3,7 @@ graph(%x : Tensor) {
   %y.1 : int = prim::Constant[value=0]()
   %3 : int = prim::Constant[value=10]()
   %y : int = prim::Loop(%3, %1, %y.1)
-    block0(%i : int, %6 : int) {
+    block0(%5 : int, %6 : int) {
       %7 : int = prim::Int(%x)
       %8 : int = prim::Constant[value=0]()
       %9 : int = prim::Constant[value=8]()

@@ -183,9 +183,9 @@ class RNNBase(Module):
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = input.new_zeros(self.num_layers * num_directions,
-                                 max_batch_size, self.hidden_size,
-                                 requires_grad=False)
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
         else:
@@ -700,19 +700,17 @@ class RNNCell(RNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
             ret = _VF.rnn_tanh_cell(
-                input, _hx,
+                input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
         elif self.nonlinearity == "relu":
             ret = _VF.rnn_relu_cell(
-                input, _hx,
+                input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
@@ -794,13 +792,11 @@ class LSTMCell(RNNCellBase):
         self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-            _hx = (zeros, zeros)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx[0], '[0]')
-        self.check_forward_hidden(input, _hx[1], '[1]')
+            hx = (zeros, zeros)
+        self.check_forward_hidden(input, hx[0], '[0]')
+        self.check_forward_hidden(input, hx[1], '[1]')
         return _VF.lstm_cell(
-            input, _hx,
+            input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
@@ -877,12 +873,10 @@ class GRUCell(RNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         return _VF.gru_cell(
-            input, _hx,
+            input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )

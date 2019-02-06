@@ -399,6 +399,7 @@ struct Environment {
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -2118,25 +2119,8 @@ struct to_ir {
           FutureType::create(fn_simple_output->type()));
     }
 
-    // Fork a new graph from its orignal owning graph
-    auto forked_graph = std::make_shared<Graph>();
-
-    // Make sure we capture everything in the new graph.
-    // The uncaptured values will be added to the fork signature.
-    std::unordered_map<Value*, Value*> uncaptures_map;
-    auto env = [&](Value* v) -> Value* {
-      if (!uncaptures_map.count(v)) {
-        // Capture values for both graphs
-        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-        fork_node->addInput(v);
-      }
-      return uncaptures_map[v];
-    };
-    forked_graph->block()->cloneFrom(body_block, env);
-
-    // Separate the subgraph and clean up the orignal one
-    fork_node->g_(attr::Subgraph, forked_graph);
-    fork_node->eraseBlock(0);
+    // Lambda lift block(0) into attr::Subgraph
+    lambdaLiftFork(fork_node);
 
     return std::make_shared<SimpleValue>(node_output);
   }
@@ -2241,8 +2225,37 @@ struct to_ir {
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
+      case TK_DICT_LITERAL: {
+        auto dl = DictLiteral(tree);
+        auto key_trees = dl.key_inputs().tree()->trees();
+        auto value_trees = dl.value_inputs().tree()->trees();
+        AT_ASSERT(key_trees.size() == value_trees.size());
+        std::vector<Value*> keys, values;
+        for(size_t i = 0; i < key_trees.size(); ++i) {
+          keys.push_back(emitExpr(Expr(key_trees[i])));
+          values.push_back(emitExpr(Expr(value_trees[i])));
+        }
+
+        TypePtr key_type = nullptr;
+        TypePtr value_type = nullptr;
+
+        if (type_hint && type_hint->kind() == TypeKind::DictType) {
+          auto dict_type = type_hint->expect<DictType>();
+          key_type = dict_type->getKeyType();
+          value_type = dict_type->getValueType();
+        } else if (!keys.empty()) {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
+        } else {
+          key_type = StringType::get();
+          value_type = DynamicType::get();
+        }
+        AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
+      } break;
       default:
-        throw ErrorReport(tree) << "NYI: " << tree;
+        throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
         break;
     }
   }
@@ -2360,9 +2373,9 @@ struct to_ir {
         continue;
       }
       throw ErrorReport(loc)
-          << "Unsupported operation: indexing tensor with unsupported index type "
+          << "Unsupported operation: indexing tensor with unsupported index type '"
           << index->type()->str()
-          << ". Only ints, slices, and tensors are supported.";
+          << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a TensorList where some tensors can be undefined.
     // Convert NULL tensorIndices to undefined tensors to pass to at::index.
@@ -2455,6 +2468,7 @@ struct to_ir {
     }
     return adj_index;
   }
+
   Value* emitTupleIndex(
       const SourceRange& loc,
       Value* tuple_val,
@@ -2463,6 +2477,16 @@ struct to_ir {
     auto adj_index = getTupleIndexVal(
         loc, tuple_typ, idx_val, /*allow_out_of_bounds*/ false);
     return graph->insertNode(graph->createTupleIndex(tuple_val, adj_index))
+        ->output();
+  }
+
+  Value* emitDictIndex(
+      const SourceRange& loc,
+      Value* dict_val,
+      Value* key_val) {
+    auto dict_type = dict_val->type()->cast<DictType>();
+    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
 
@@ -2528,9 +2552,13 @@ struct to_ir {
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitTupleIndex(loc, gatherable, idx);
+    } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
+      auto* idx = emitExpr(subscript_exprs[0]);
+      return emitDictIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
-          << "Indexing only supported on lists, tensors, and tuples.";
+          << "Indexing only supported on lists, dictionaries, "
+             "tensors, and tuples";
     }
   }
 };
@@ -2591,6 +2619,30 @@ void defineMethodsInModule(
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
+}
+
+void lambdaLiftFork(Node* fork_node) {
+  // Fork a new graph from its orignal owning graph
+  auto forked_graph = std::make_shared<Graph>();
+  auto body_block = fork_node->blocks()[0];
+
+  // Make sure we capture everything in the new graph.
+  // The uncaptured values will be added to the fork signature.
+  std::unordered_map<Value*, Value*> uncaptures_map;
+  auto env = [&](Value* v) -> Value* {
+    if (!uncaptures_map.count(v)) {
+      // Capture values for both graphs
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      fork_node->addInput(v);
+    }
+    return uncaptures_map[v];
+  };
+  forked_graph->block()->cloneFrom(body_block, env);
+
+  // Separate the subgraph and clean up the orignal one
+  fork_node->g_(attr::Subgraph, forked_graph);
+  fork_node->eraseBlock(0);
+
 }
 
 } // namespace script
