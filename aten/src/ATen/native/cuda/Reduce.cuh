@@ -362,7 +362,7 @@ struct ReduceOp {
     if (dim_x > warpSize) {
       int address_base = threadIdx.x + threadIdx.y*blockDim.x;
       shared[address_base] = value;
-      for (int offset = dim_x/2; offset >= 32; offset >>= 1) {
+      for (int offset = dim_x/2; offset >= warpSize; offset >>= 1) {
         __syncthreads();
         if (threadIdx.x < offset && threadIdx.x + offset < blockDim.x) {
           arg_t other = shared[address_base + offset];
