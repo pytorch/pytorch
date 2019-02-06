@@ -222,7 +222,7 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
   }
 
   at::DeviceGuard device_guard(storage->device());
-  THPObjectPtr tuple(PyTuple_New(5));
+  THPObjectPtr tuple(PyTuple_New(6));
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
@@ -230,6 +230,7 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
   THPObjectPtr _offset_bytes(PyLong_FromLong(0));
   THPObjectPtr _ref_counter(Py_None);
   Py_INCREF(Py_None);
+  THPObjectPtr _ref_counter_offset(PyLong_FromLong(0));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
     void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
@@ -242,18 +243,27 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
     _handle = PyBytes_FromStringAndSize((char*)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
 
-    int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
-    std::string ref_counter_handle = THPStorage_(__newHandle)();
-    at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
-        ref_counter_handle.c_str(), flags, sizeof(int64_t), nullptr);
-    *(int64_t*)(sptr.get()) = 1; // We create new sptr per each shared cuda
-    auto ptr = new CudaIPCSentData(std::move(sptr));
+    if (!HaveNewRefCounter())
+    {
+      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
+      std::string ref_counter_handle = THPStorage_(__newHandle)();
+      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+          ref_counter_handle.c_str(), flags, sizeof(int64_t) * REF_COUNTERS_FILE_SIZE, nullptr);
+      CreateRefCounter(ref_counter_handle, REF_COUNTERS_FILE_SIZE, std::move(sptr));
+    }
+
+    auto x = GetNewRefCounter();
+    auto ptr = new CudaIPCSentData(x.handler);
+    ptr->counter_ptr = x.counter_ptr;
+    ptr->offset = x.offset;
+
     at::DataPtr new_data_ptr = at::DataPtr(
         storage->data(), ptr, CudaIPCSentDataDelete, storage->device());
     auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
     std::swap(ptr->original_ptr_, old_data_ptr);
 
-    _ref_counter = PyBytes_FromString(ref_counter_handle.c_str());
+    _ref_counter = PyBytes_FromString(x.handler.c_str());
+    _ref_counter_offset = PyLong_FromLong(x.offset);
   }
 
   if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes) {
@@ -272,18 +282,20 @@ static PyObject* THPStorage_(shareCuda)(THPStorage* self) {
   //     Offset in numel cannot uniquely represent a storage.
   PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
   PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
+  PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_(newSharedCuda)(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 5, "tuple of 5 items expected");
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 6, "tuple of 6 items expected");
   PyObject* _device = PyTuple_GET_ITEM(args, 0);
   PyObject* _handle = PyTuple_GET_ITEM(args, 1);
   PyObject* _size_bytes = PyTuple_GET_ITEM(args, 2);
   PyObject* _offset_bytes = PyTuple_GET_ITEM(args, 3);
   PyObject* _ref_counter = PyTuple_GET_ITEM(args, 4);
+  PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 5);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
         (_handle != Py_None && PyBytes_Check(_handle)) &&
         THPUtils_checkLong(_offset_bytes))) {
@@ -321,13 +333,16 @@ static PyObject* THPStorage_(newSharedCuda)(PyObject* _unused, PyObject* args) {
   devPtr = (char*)devPtr + storage_offset_bytes;
 
   std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ptrdiff_t ref_counter_offset =
+      (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
+
   auto c = new CudaIPCReceivedData(std::move(basePtr));
-  auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle](void* ptr) {
+  auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle, ref_counter_offset](void* ptr) {
     int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_NOCREATE;
     auto sptr = THRefcountedMapAllocator::makeDataPtr(
-        ref_counter_handle.c_str(), flags, sizeof(int64_t), nullptr);
-    *(int64_t*)(sptr.get()) -= 1;
-    delete (CudaIPCReceivedData*)ptr;
+        ref_counter_handle.c_str(), flags, sizeof(int64_t)* REF_COUNTERS_FILE_SIZE, nullptr);
+    *(((int64_t*)(sptr.get())) + ref_counter_offset) -= 1;
+      delete (CudaIPCReceivedData*)ptr;
   });
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(

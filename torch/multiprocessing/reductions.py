@@ -87,7 +87,7 @@ def rebuild_tensor(cls, storage, metadata):
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
-                        requires_grad, shared_storage_ref_counter):
+                        requires_grad, shared_storage_ref_counter, ref_counter_offset):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
@@ -100,7 +100,8 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 storage_handle,
                 storage_size_bytes,
                 storage_offset_bytes,
-                shared_storage_ref_counter)
+                shared_storage_ref_counter,
+                ref_counter_offset)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
@@ -212,7 +213,12 @@ def reduce_tensor(tensor):
     # thing.
     #
     if storage.is_cuda:
-        (device, handle, storage_size_bytes, storage_offset_bytes,shared_storage_ref_counter) = storage._share_cuda_()
+        (device,
+        handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        shared_storage_ref_counter,
+        ref_counter_offset) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
@@ -228,7 +234,8 @@ def reduce_tensor(tensor):
                  storage_size_bytes,  # size(in bytes) of the storage
                  storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
                  tensor.requires_grad,
-                 shared_storage_ref_counter))
+                 shared_storage_ref_counter,
+                 ref_counter_offset))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)

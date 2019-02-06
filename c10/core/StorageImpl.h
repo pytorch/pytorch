@@ -15,7 +15,19 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
       int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
-      bool resizable);
+      bool resizable)
+      : data_type_(data_type),
+        data_ptr_(std::move(data_ptr)),
+        numel_(numel),
+        resizable_(resizable),
+        allocator_(allocator) {
+    if (numel > 0) {
+      if (data_type_.id() == caffe2::TypeIdentifier::uninitialized()) {
+        AT_ERROR(
+            "Constructing a storage with meta of unknown type and non-zero numel");
+      }
+    }
+  }
 
   StorageImpl(
       caffe2::TypeMeta data_type,
@@ -41,9 +53,12 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl();
+  ~StorageImpl() {  data_ptr_.release_context();};
 
-  void reset();
+  void reset() {
+    data_ptr_.release_context();
+    numel_ = 0;
+  }
 
   template <typename T>
   inline bool IsType() const {
@@ -54,8 +69,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   inline T* data() const {
     // TODO: This is bad: it means storage.data<T>() calls only work on
     // T that are valid ScalarType.  FIXME!
-    auto data_type_T =
-        at::scalarTypeToDataType(c10::CTypeToScalarType<T>::to());
+    auto data_type_T = at::scalarTypeToDataType(c10::CTypeToScalarType<T>::to());
     if (dtype().id() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
@@ -71,7 +85,9 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
-  void release_resources() override;
+  void release_resources() override {
+    data_ptr_.release_context();
+  }
 
   size_t itemsize() const {
     return data_type_.itemsize();
@@ -103,7 +119,11 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   };
 
   // Returns the previous data_ptr
-  at::DataPtr set_data_ptr(at::DataPtr&& data_ptr);
+  at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
+    data_ptr_.release_context();
+    std::swap(data_ptr_, data_ptr);
+    return std::move(data_ptr);
+  };
 
   // XXX: TERRIBLE! DONT USE UNLESS YOU HAVE TO! AND EVEN THEN DONT, JUST DONT!
   // Setting the data_type will require you to audit many other parts of the
@@ -173,14 +193,22 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   void UniqueStorageShareExternalPointer(
       at::DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
-      size_t capacity);
-
-  void set_received_cuda(bool received_cuda) {
-    received_cuda_ = received_cuda;
-  }
-
-  bool received_cuda() {
-    return received_cuda_;
+      size_t capacity) {
+    data_type_ = data_type;
+    // TODO: Use CAFFE_ENFORCE_WITH_CALLER equivalent
+    // For now causes lots of redefine issues if caffe2/core/logging.h is used
+    if (data_type_.id() == caffe2::TypeIdentifier::uninitialized()) {
+      AT_ERROR(
+          "To share with a raw external pointer you need to have meta "
+          "already set.");
+    }
+    data_ptr_ = std::move(data_ptr);
+    // NOTE: data_type might change and so it's also possible that capacity
+    // might not be divisible by itemsize. There is no way for us to keep track
+    // of the exact capacity if we're not explicity storing is. More conrectely
+    // capacity() might not return the value that was set here, if itemsize does
+    // not evenly divide it.
+    numel_ = capacity / data_type_.itemsize();
   }
 
  private:
@@ -189,6 +217,5 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   int64_t numel_;
   bool resizable_;
   Allocator* allocator_;
-  bool received_cuda_;
 };
 } // namespace c10
