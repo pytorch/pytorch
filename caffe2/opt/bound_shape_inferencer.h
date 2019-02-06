@@ -14,6 +14,7 @@ struct CAFFE2_API ShapeInfo {
   enum DimType : int8_t { UNKNOWN = 0, CONSTANT = 1, BATCH = 2, SEQ = 3 };
   ShapeInfo() {}
   ShapeInfo(DimType t, TensorShape&& s) : dim_type(t), shape(std::move(s)) {}
+  ShapeInfo(DimType t, const TensorShape& s) : dim_type(t), shape(s) {}
 
   // type of the shape according its first dim
   DimType dim_type{DimType::UNKNOWN};
@@ -42,8 +43,8 @@ struct CAFFE2_API BoundShapeSpec {
 class CAFFE2_API BoundShapeInferencer {
  public:
   explicit BoundShapeInferencer(const BoundShapeSpec& spec) : spec_(spec) {
-    CAFFE_ENFORCE_GT(spec_.max_batch_size, 0);
-    CAFFE_ENFORCE_GT(spec_.max_seq_size, 0);
+    CAFFE_ENFORCE_GE(spec_.max_batch_size, 0);
+    CAFFE_ENFORCE_GE(spec_.max_seq_size, 0);
   }
 
   void InferBoundShapeAndType(
