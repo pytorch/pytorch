@@ -4,33 +4,6 @@
 
 namespace caffe2 {
 
-// NB: It seems BoxWithNMSLimit is only ever used with
-// 2 inputs and 3 outputs conventionally
-DEFINE_FUNCTION_SCHEMA_OPERATOR(
-    BoxWithNMSLimit,
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("boxes"),
-        // c10::Argument("batch_splits"),
-        c10::Argument("score_thresh", FloatType::get()),
-        c10::Argument("nms", FloatType::get()),
-        c10::Argument("detections_per_im", IntType::get()),
-        c10::Argument("soft_nms_enabled", BoolType::get()),
-        c10::Argument("soft_nms_method", StringType::get()),
-        c10::Argument("soft_nms_sigma", FloatType::get()),
-        c10::Argument("soft_nms_min_score_thres", FloatType::get()),
-        c10::Argument("rotated", BoolType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("boxes"),
-        c10::Argument("classes"),
-        // c10::Argument("batch_splits"),
-        // c10::Argument("keeps"),
-        // c10::Argument("keeps_size"),
-    }),
-    BoxWithNMSLimitOp<CPUContext>);
-
 template <>
 bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   const auto& tscores = Input(0);
