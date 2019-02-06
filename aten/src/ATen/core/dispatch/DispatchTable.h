@@ -99,7 +99,7 @@ class ThreadsafeOperatorTable_ final {
    }
 
    static std::string dispatch_key_to_string(TensorTypeId id) {
-     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + guts::to_string(id) + "]";
+     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + toString(id) + "]";
    }
 
    LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
