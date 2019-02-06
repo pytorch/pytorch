@@ -117,9 +117,9 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void pushOutputParameters_() {
     for (size_t i = 0; i < num_output_parameters; ++i) {
-      auto preallocated_output_tensor = OperatorBase::OutputTensorOrNullopt(i);
-      if (preallocated_output_tensor.has_value()) {
-        stack_.emplace_back(at::Tensor(C10Tensor(std::move(*preallocated_output_tensor))));
+      caffe2::Tensor preallocated_output_tensor = OperatorBase::OutputTensorOrUndefined(i);
+      if (preallocated_output_tensor.defined()) {
+        stack_.emplace_back(at::Tensor(std::move(preallocated_output_tensor)));
       } else {
         stack_.emplace_back(IValue());
       }
