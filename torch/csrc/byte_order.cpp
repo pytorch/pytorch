@@ -164,7 +164,8 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
 
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
-  dst = (bool*)src;
+  for (size_t i = 0; i < len; i++)
+    dst[i] = (*src & (1 << i)) == 0 ? false : true;
 }
 
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len)

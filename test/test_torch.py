@@ -8836,16 +8836,26 @@ class _TestTorchMixin(object):
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
+
         shorts = torch.ShortStorage.from_buffer(a, 'big')
         self.assertEqual(shorts.size(), 2)
         self.assertEqual(shorts.tolist(), [258, 772])
+
         ints = torch.IntStorage.from_buffer(a, 'little')
         self.assertEqual(ints.size(), 1)
         self.assertEqual(ints[0], 67305985)
+
         f = bytearray([0x40, 0x10, 0x00, 0x00])
         floats = torch.FloatStorage.from_buffer(f, 'big')
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
+
+        bools = torch.BoolStorage.from_buffer(a, 'big')
+        self.assertEqual(bools.size(), 4)
+        self.assertEqual(bools[0], True)
+        self.assertEqual(bools[1], False)
+        self.assertEqual(bools[2], False)
+        self.assertEqual(bools[3], False)
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
