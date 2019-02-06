@@ -55,7 +55,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-DynamicTypePtr TensorType::get() {
+TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }

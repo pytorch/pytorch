@@ -247,8 +247,8 @@ using TensorTypePtr = std::shared_ptr<TensorType>;
 // CompleteTensorType <: TensorType <: DynamicType
 // UndefinedTensorType <: DynamicType
 struct CAFFE2_API TensorType : public Type {
-  static DynamicTypePtr create() {
-    return DynamicTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
+  static TensorTypePtr create() {
+    return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TensorType);
 
@@ -262,7 +262,7 @@ struct CAFFE2_API TensorType : public Type {
   }
   static const TypeKind Kind = TypeKind::TensorType;
   // global singleton
-  static DynamicTypePtr get();
+  static TensorTypePtr get();
 protected:
   TensorType(TypeKind kind=TypeKind::TensorType)
   : Type(kind) {}
@@ -304,8 +304,8 @@ using DimentionedTensorTypePtr = std::shared_ptr<DimentionedTensorType>;
 // This type represents a single Tensor with a specific size
 struct CAFFE2_API DimentionedTensorType : public TensorType {
   template<typename ... T>
-  static TensorTypePtr create( T&& ... all ) {
-    return TensorTypePtr(new DimentionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static DimentionedTensorTypePtr create( T&& ... all ) {
+    return DimentionedTensorTypePtr(new DimentionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   at::ScalarType scalarType() const { return scalar_type_; }
@@ -313,17 +313,17 @@ struct CAFFE2_API DimentionedTensorType : public TensorType {
   int64_t dim() const { return dim_; }
   bool requires_grad() const override { return requires_grad_; }
 
-  TensorTypePtr toScalarType(at::ScalarType type){
+  DimentionedTensorTypePtr toScalarType(at::ScalarType type){
     auto t = DimentionedTensorType::create(*this);
     t->scalar_type_ = type;
     return t;
   }
-  TensorTypePtr withDim(size_t new_dim) {
+  DimentionedTensorTypePtr withDim(size_t new_dim) {
     auto t = DimentionedTensorType::create(*this);
     t->dim_ = new_dim;
     return t;
   }
-  TensorTypePtr withRequiresGrad(bool req) {
+  DimentionedTensorTypePtr withRequiresGrad(bool req) {
     auto t = DimentionedTensorType::create(*this);
     t->requires_grad_ = req;
     return t;

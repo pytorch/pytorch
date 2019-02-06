@@ -499,8 +499,8 @@ class ShapePropagator {
   // primitive/tensor outputs.
 
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
-    static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types,
-                                     size_t arg_for_type) -> TensorTypePtr {
+    static const auto broadcast = [](std::vector<DimentionedTensorTypePtr>& tensor_types,
+                                     size_t arg_for_type) -> DimentionedTensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0];
       }
@@ -514,7 +514,7 @@ class ShapePropagator {
           any_type->scalarType(), any_type->device(), max_dims);
     };
 
-    using type_vec_t = std::vector<TensorTypePtr>;
+    using type_vec_t = std::vector<DimentionedTensorTypePtr>;
     // Formula is expected to return a vector of length equal to the number of
     // tensor outputs of the node, or an empty vector which implies that it
     // failed to propagate.
@@ -710,7 +710,7 @@ class ShapePropagator {
           return {};
         }};
 
-    static const auto any_tensor_type = [](Node* node) -> TensorTypePtr {
+    static const auto any_tensor_type = [](Node* node) -> DimentionedTensorTypePtr {
       for (Value* input : node->inputs()) {
         if (auto type = input->type()->cast<DimentionedTensorType>()) {
           return type;
@@ -1238,11 +1238,11 @@ class ShapePropagator {
 
     // The code below implements formulas that need type information for all
     // their tensor inputs, and have exactly one output.
-    std::vector<TensorTypePtr> tensor_types;
+    std::vector<DimentionedTensorTypePtr> tensor_types;
     static const auto reshape_prop =
         [](Node* node,
            Symbol shape_input,
-           const std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
+           const std::vector<DimentionedTensorTypePtr>& tensor_types) -> DimentionedTensorTypePtr {
       if (auto list_size = determineListSize(node->namedInput(shape_input))) {
         return tensor_types.at(0)->withDim(*list_size);
       }
