@@ -50,7 +50,7 @@ inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
 /**
  * Return product of all dimensions starting from k
  */
-inline int64_t size_from_dim_(int k, IntList dims) {
+inline int64_t size_from_dim_(int k, IntArrayRef dims) {
   int64_t r = 1;
   for (size_t i = k; i < dims.size(); ++i) {
     r *= dims[i];
@@ -59,7 +59,7 @@ inline int64_t size_from_dim_(int k, IntList dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline int64_t size_to_dim_(int k, IntList dims) {
+inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   AT_ASSERT((unsigned)k <= dims.size());
   int64_t r = 1;
   for (int i = 0; i < k; ++i) {
@@ -69,7 +69,7 @@ inline int64_t size_to_dim_(int k, IntList dims) {
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
-inline int64_t size_between_dim_(int k, int l, IntList dims) {
+inline int64_t size_between_dim_(int k, int l, IntArrayRef dims) {
   AT_ASSERT((unsigned)l < dims.size());
   int64_t r = 1;
   if (k < l) {
@@ -277,13 +277,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  virtual IntList sizes() const;
+  virtual IntArrayRef sizes() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
    */
-  virtual IntList strides() const;
+  virtual IntArrayRef strides() const;
 
   /**
    * Return the number of dimensions of this tensor.  Note that 0-dimension
@@ -357,7 +357,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto tid = type_id();
-    if (tid == CUDATensorId() || tid == HIPTensorId()) {
+    if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
     }
@@ -369,7 +369,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: This is a little convoluted so it would be good to investigate
     // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
     const auto tid = type_id();
-    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId()) {
+    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() ||
+        tid == XLATensorId()) {
       // NB: storage(), not storage_, b/c of Variable.
       const auto& mystorage = storage();
       if (mystorage) {
@@ -433,7 +434,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   bool is_wrapped_number() const {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     return is_wrapped_number_;
   }
 
@@ -446,7 +447,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_wrapped_number(bool value) {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
@@ -556,7 +557,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -587,7 +588,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   inline void* data() const {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERT(storage_initialized());
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
@@ -721,9 +722,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_contiguous(IntList new_size) {
+  void set_sizes_contiguous(IntArrayRef new_size) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
@@ -746,9 +747,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_and_strides(IntList new_size, IntList new_stride) {
+  void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -872,7 +873,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
   DeviceType device_type() const {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     return storage_.device_type();
   }
 
@@ -1068,7 +1069,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = 0;
   }
 
-  /**
+   /**
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
@@ -1080,6 +1081,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * The source tensor should already have its data allocated.
    */
+  // To be deprecated
   void ShareData(const TensorImpl& src) {
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add
@@ -1279,23 +1281,23 @@ private:
   }
 
   bool SetDims() {
-    return SetDims(IntList{});
+    return SetDims(IntArrayRef{});
   }
 
   bool SetDims(const int64_t d0) {
-    return SetDims(IntList{d0});
+    return SetDims(IntArrayRef{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    return SetDims(IntList{d0, d1});
+    return SetDims(IntArrayRef{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    return SetDims(IntList{d0, d1, d2});
+    return SetDims(IntArrayRef{d0, d1, d2});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    return SetDims(IntList{d0, d1, d2, d3});
+    return SetDims(IntArrayRef{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
@@ -1332,7 +1334,7 @@ protected:
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
    */
   void refresh_numel() {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     numel_ = compute_numel();
   }
 
@@ -1341,7 +1343,7 @@ protected:
    * or strides.
    */
   void refresh_contiguous() {
-    AT_ASSERT(!is_variable());
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     is_contiguous_ = compute_contiguous();
   }
 

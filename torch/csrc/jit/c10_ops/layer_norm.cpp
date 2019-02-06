@@ -1,59 +1,64 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/opschema/layer_norm.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/operator.h>
+#include <ATen/core/stack.h>
+#include <torch/csrc/jit/custom_operator.h>
 
 using at::Tensor;
 using c10::IValue;
 using c10::ArrayRef;
 
+namespace torch {
+namespace jit {
+
+// TODO This code is currently written specifically for LayerNorm, but it is
+//      *not* the plan to have to write this manually for each operation.
+//      This is just a proof of concept. To expand this to all operators,
+//      we'd ideally not need any per-operator code (possibly thanks to boxing
+//      or templates). If that's not possible, then we should at least offer
+//      a macro that takes this burden so that we only need to write one line
+//      for each operation we want to support (i.e. the macro invocation).
+
+// TODO This currently only handles tensors with requires_grad==False correctly.
+//      It should also handle autograd.
+
 namespace {
-// TODO Return tuple<Tensor, Tensor, Tensor> instead of vector<Tensor>
-std::vector<at::Tensor> layer_norm(
-    at::Tensor input,
-    int64_t axis,
-    double epsilon) {
+RegisterOperators reg({
+  Operator(
+    //Note: This schema is: caffe2::layer_norm_dont_use_this_op_yet(Tensor input, int axis, float epsilon, Tensor? output = None, Tensor? output_mean = None, Tensor? output_stdev = None) -> (Tensor, Tensor, Tensor)
+    c10::core::opschema::LayerNorm().schema(),
+    [](Stack& stack) {
+        Tensor tensor_input = std::move(stack[stack.size()-6]).toTensor();
+        if (tensor_input.requires_grad()) {
+          throw std::runtime_error("Autograd not yet supported for c10 ops.");
+        }
+        auto device = tensor_input.device();
 
-  // TODO This code is currently written specifically for LayerNorm, but it is
-  //      *not* the plan to have to write this manually for each operation.
-  //      This is just a proof of concept. To expand this to all operators,
-  //      we'd ideally not need any per-operator code (possibly thanks to boxing
-  //      or templates). If that's not possible, then we should at least offer
-  //      a macro that takes this burden so that we only need to write one line
-  //      for each operation we want to support (i.e. the macro invocation).
+        // unwrap inputs from variable
+        torch::jit::peek(stack, 0, 6) = torch::autograd::Variable(std::move(tensor_input)).data();
 
-  // TODO This currently only handles tensors with requires_grad==False correctly.
-  //      It should also handle autograd.
+        // allocate the output tensors that aren't set yet
+        for (int i = 3; i < 6; ++i) {
+          // TODO this should just check for isNone, not for undefined tensor. @wanchaol is working on this.
+          if (torch::jit::peek(stack, i, 6).isNone() || !torch::jit::peek(stack, i, 6).toTensor().defined()) {
+            torch::jit::peek(stack, i, 6) = at::empty({0}, device);
+          }
+        }
 
-  if (input.requires_grad()) {
-    throw std::runtime_error("Autograd not yet supported for c10 ops.");
-  }
+        // call caffe2 kernel
+        c10::Dispatcher::singleton().lookup(c10::core::opschema::LayerNorm(), &stack).call(&stack);
 
-  c10::intrusive_ptr<caffe2::Blob> cache = c10::make_intrusive<caffe2::Blob>();
-  cache->GetMutable<c10::core::opschema::LayerNorm::Cache>(); // initialize cache
+        // wrap outputs into Variable
+        for (int i = 0; i < 3; ++i) {
+          torch::jit::peek(stack, i, 3) = torch::autograd::make_variable(std::move(torch::jit::peek(stack, i, 3)).toTensor(), false);
+        }
 
-  Tensor c10_input(torch::autograd::Variable(std::move(input)).data());
-  Tensor c10_output(at::empty({0}));
-  Tensor c10_output_mean(at::empty({0}));
-  Tensor c10_output_stdev(at::empty({0}));
-
-  c10::Dispatcher<c10::core::opschema::LayerNorm>::call(ArrayRef<c10::IValue>{
-    IValue(c10_input),
-    IValue(c10_output),
-    IValue(c10_output_mean),
-    IValue(c10_output_stdev),
-    IValue(axis),
-    IValue(epsilon),
-    IValue(cache)
+        return 0;
+      })
   });
-  return {
-    torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
-    torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),
-    torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
-  };
-}
 }
 
-static auto registry =
-  torch::jit::RegisterOperators("caffe2::layer_norm_dont_use_this_op_yet", &layer_norm);
+}
+}

@@ -203,7 +203,7 @@ __global__ void replication_pad_backward_kernel(
 void replication_pad1d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
@@ -276,7 +276,7 @@ void replication_pad1d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
 
   AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
@@ -334,7 +334,7 @@ void replication_pad1d_backward_out_cuda_template(
 void replication_pad2d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
@@ -415,7 +415,7 @@ void replication_pad2d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
 
   AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
@@ -571,7 +571,7 @@ static inline void shapeAndGradOutputCheck3d(
 void replication_pad3d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
   int pleft = paddingSize[0];
@@ -652,7 +652,7 @@ void replication_pad3d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
   int pleft = paddingSize[0];
@@ -711,7 +711,7 @@ void replication_pad3d_backward_out_cuda_template(
 Tensor& replication_pad1d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad1d_out_cuda_template(
       output, input, paddingSize);
@@ -720,7 +720,7 @@ Tensor& replication_pad1d_out_cuda(
 
 Tensor replication_pad1d_cuda(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad1d_out_cuda_template(
@@ -732,7 +732,7 @@ Tensor& replication_pad1d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad1d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
@@ -742,7 +742,7 @@ Tensor& replication_pad1d_backward_out_cuda(
 Tensor replication_pad1d_backward_cuda(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad1d_backward_out_cuda_template(
@@ -753,7 +753,7 @@ Tensor replication_pad1d_backward_cuda(
 Tensor& replication_pad2d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_out_cuda_template(
       output, input, paddingSize);
@@ -762,7 +762,7 @@ Tensor& replication_pad2d_out_cuda(
 
 Tensor replication_pad2d_cuda(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad2d_out_cuda_template(
@@ -774,7 +774,7 @@ Tensor& replication_pad2d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
@@ -784,7 +784,7 @@ Tensor& replication_pad2d_backward_out_cuda(
 Tensor replication_pad2d_backward_cuda(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad2d_backward_out_cuda_template(
@@ -795,7 +795,7 @@ Tensor replication_pad2d_backward_cuda(
 Tensor& replication_pad3d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_out_cuda_template(
       output, input, paddingSize);
@@ -804,7 +804,7 @@ Tensor& replication_pad3d_out_cuda(
 
 Tensor replication_pad3d_cuda(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad3d_out_cuda_template(
@@ -816,7 +816,7 @@ Tensor& replication_pad3d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
@@ -826,7 +826,7 @@ Tensor& replication_pad3d_backward_out_cuda(
 Tensor replication_pad3d_backward_cuda(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad3d_backward_out_cuda_template(

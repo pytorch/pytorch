@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
@@ -399,6 +399,7 @@ struct Environment {
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -435,8 +436,8 @@ struct Environment {
     //          inputs: loop_counter, lcd0, lcd1, ...
     //         outputs: loop_condition, lcd0, lcd1, ...
     // captured_inputs: lcd0, lcd1, ...
-    JIT_ASSERT(b->inputs().size() == b->outputs().size());
-    JIT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
+    AT_ASSERT(b->inputs().size() == b->outputs().size());
+    AT_ASSERT(b->inputs().size() == captured_inputs.size() + 1);
     for (size_t i = b->inputs().size() - 1; i > 0; i--) {
       // nothing changed along this loop
       if (b->inputs()[i] == b->outputs()[i]) {
@@ -520,7 +521,7 @@ struct to_ir {
         graph(method.graph()),
         resolver(std::move(resolver_)),
         environment_stack(nullptr) {
-    JIT_ASSERT(resolver);
+    AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
@@ -724,7 +725,7 @@ struct to_ir {
           << expected_annotation_size << ")!";
     }
     if (self) {
-      JIT_ASSERT(it != end);
+      AT_ASSERT(it != end);
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
@@ -750,7 +751,7 @@ struct to_ir {
       const FunctionSchema& schema,
       Block* block) {
     // rewrites ensure there is always a return statement in program
-    JIT_ASSERT(def_stack_.back().merged_return_type_);
+    AT_ASSERT(def_stack_.back().merged_return_type_);
     // outputs
     Value* result = environment_stack->getVar("$return", range);
     block->registerOutput(result);
@@ -865,7 +866,7 @@ struct to_ir {
             << result->type()->python_str();
       }
     }
-    JIT_ASSERT(result_type);
+    AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
     environment_stack->setVar(stmt.range(), "$return", result);
   }
@@ -1608,7 +1609,7 @@ struct to_ir {
       //     list.set_item(get_item(idx).add_(value))
       // similar to how Python handles things.
       const auto listType = sliceable->type()->cast<ListType>();
-      JIT_ASSERT(listType != nullptr);
+      AT_ASSERT(listType != nullptr);
 
       bool isTensorList =
           listType->getElementType()->isSubtypeOf(DynamicType::get());
@@ -2090,7 +2091,7 @@ struct to_ir {
     Stack stack;
     stack.push_back(*maybe_constant_input);
     op(stack);
-    JIT_ASSERT(stack.size() == 1);
+    AT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], tree->range());
   }
 
@@ -2118,25 +2119,8 @@ struct to_ir {
           FutureType::create(fn_simple_output->type()));
     }
 
-    // Fork a new graph from its orignal owning graph
-    auto forked_graph = std::make_shared<Graph>();
-
-    // Make sure we capture everything in the new graph.
-    // The uncaptured values will be added to the fork signature.
-    std::unordered_map<Value*, Value*> uncaptures_map;
-    auto env = [&](Value* v) -> Value* {
-      if (!uncaptures_map.count(v)) {
-        // Capture values for both graphs
-        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-        fork_node->addInput(v);
-      }
-      return uncaptures_map[v];
-    };
-    forked_graph->block()->cloneFrom(body_block, env);
-
-    // Separate the subgraph and clean up the orignal one
-    fork_node->g_(attr::Subgraph, forked_graph);
-    fork_node->eraseBlock(0);
+    // Lambda lift block(0) into attr::Subgraph
+    lambdaLiftFork(fork_node);
 
     return std::make_shared<SimpleValue>(node_output);
   }
@@ -2241,8 +2225,37 @@ struct to_ir {
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
+      case TK_DICT_LITERAL: {
+        auto dl = DictLiteral(tree);
+        auto key_trees = dl.key_inputs().tree()->trees();
+        auto value_trees = dl.value_inputs().tree()->trees();
+        AT_ASSERT(key_trees.size() == value_trees.size());
+        std::vector<Value*> keys, values;
+        for(size_t i = 0; i < key_trees.size(); ++i) {
+          keys.push_back(emitExpr(Expr(key_trees[i])));
+          values.push_back(emitExpr(Expr(value_trees[i])));
+        }
+
+        TypePtr key_type = nullptr;
+        TypePtr value_type = nullptr;
+
+        if (type_hint && type_hint->kind() == TypeKind::DictType) {
+          auto dict_type = type_hint->expect<DictType>();
+          key_type = dict_type->getKeyType();
+          value_type = dict_type->getValueType();
+        } else if (!keys.empty()) {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
+        } else {
+          key_type = StringType::get();
+          value_type = DynamicType::get();
+        }
+        AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
+      } break;
       default:
-        throw ErrorReport(tree) << "NYI: " << tree;
+        throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
         break;
     }
   }
@@ -2290,10 +2303,10 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      JIT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
       args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
     } else {
-      JIT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
     }
 
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
@@ -2360,9 +2373,9 @@ struct to_ir {
         continue;
       }
       throw ErrorReport(loc)
-          << "Unsupported operation: indexing tensor with unsupported index type "
+          << "Unsupported operation: indexing tensor with unsupported index type '"
           << index->type()->str()
-          << ". Only ints, slices, and tensors are supported.";
+          << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a TensorList where some tensors can be undefined.
     // Convert NULL tensorIndices to undefined tensors to pass to at::index.
@@ -2420,8 +2433,8 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    JIT_ASSERT(subscript_exprs.size() == 1);
-    JIT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
+    AT_ASSERT(subscript_exprs.size() == 1);
+    AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     c10::optional<int64_t> maybe_dim;
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
@@ -2455,6 +2468,7 @@ struct to_ir {
     }
     return adj_index;
   }
+
   Value* emitTupleIndex(
       const SourceRange& loc,
       Value* tuple_val,
@@ -2463,6 +2477,16 @@ struct to_ir {
     auto adj_index = getTupleIndexVal(
         loc, tuple_typ, idx_val, /*allow_out_of_bounds*/ false);
     return graph->insertNode(graph->createTupleIndex(tuple_val, adj_index))
+        ->output();
+  }
+
+  Value* emitDictIndex(
+      const SourceRange& loc,
+      Value* dict_val,
+      Value* key_val) {
+    auto dict_type = dict_val->type()->cast<DictType>();
+    AT_ASSERT(key_val->type()->isSubtypeOf(dict_type->getKeyType()));
+    return graph->insertNode(graph->createDictIndex(dict_val, key_val))
         ->output();
   }
 
@@ -2516,7 +2540,7 @@ struct to_ir {
       const SourceRange& loc,
       Value* gatherable,
       const List<Expr>& subscript_exprs) {
-    JIT_ASSERT(subscript_exprs.size() == 1);
+    AT_ASSERT(subscript_exprs.size() == 1);
 
     if (gatherable->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
@@ -2528,9 +2552,13 @@ struct to_ir {
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitTupleIndex(loc, gatherable, idx);
+    } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
+      auto* idx = emitExpr(subscript_exprs[0]);
+      return emitDictIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
-          << "Indexing only supported on lists, tensors, and tuples.";
+          << "Indexing only supported on lists, dictionaries, "
+             "tensors, and tuples";
     }
   }
 };
@@ -2540,14 +2568,14 @@ void defineMethodsInModule(
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
     const SugaredValuePtr& self) {
-  JIT_ASSERT(definitions.size() == resolvers.size());
+  AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
   std::unordered_map<std::string, Method*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
-    JIT_ASSERT(resolver);
+    AT_ASSERT(resolver);
     if (!self) {
       // if self is defined, then these are methods and do not go into the
       // global namespace otherwise, they get defined together so we add them to
@@ -2564,7 +2592,7 @@ void defineMethodsInModule(
       };
     }
     auto creator = [def, resolver, self](Method& method) {
-      JIT_ASSERT(resolver);
+      AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
     Method& method = m->create_method(name, creator);
@@ -2591,6 +2619,30 @@ void defineMethodsInModule(
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
+}
+
+void lambdaLiftFork(Node* fork_node) {
+  // Fork a new graph from its orignal owning graph
+  auto forked_graph = std::make_shared<Graph>();
+  auto body_block = fork_node->blocks()[0];
+
+  // Make sure we capture everything in the new graph.
+  // The uncaptured values will be added to the fork signature.
+  std::unordered_map<Value*, Value*> uncaptures_map;
+  auto env = [&](Value* v) -> Value* {
+    if (!uncaptures_map.count(v)) {
+      // Capture values for both graphs
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      fork_node->addInput(v);
+    }
+    return uncaptures_map[v];
+  };
+  forked_graph->block()->cloneFrom(body_block, env);
+
+  // Separate the subgraph and clean up the orignal one
+  fork_node->g_(attr::Subgraph, forked_graph);
+  fork_node->eraseBlock(0);
+
 }
 
 } // namespace script

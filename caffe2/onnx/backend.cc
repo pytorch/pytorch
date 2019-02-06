@@ -1776,37 +1776,37 @@ void Caffe2Backend::BuildTensorFillingOp(
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(float));
         float f;
-        memcpy(&f, &onnx_tensor.raw_data(), sizeof(float));
+        memcpy(&f, onnx_tensor.raw_data().c_str(), sizeof(float));
         c2_values->set_f(f);
       }
-    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE){
+    } else if (onnx_tensor.data_type() == TensorProto::DOUBLE) {
       c2_dtype->set_i(caffe2::TensorProto::DOUBLE);
       if (onnx_tensor.double_data_size() > 0) {
         c2_values->set_f(static_cast<float>(onnx_tensor.double_data(0)));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(double));
         double d;
-        memcpy(&d, &onnx_tensor.raw_data(), sizeof(double));
+        memcpy(&d, onnx_tensor.raw_data().c_str(), sizeof(double));
         c2_values->set_f(static_cast<float>(d));
       }
-    } else if (onnx_tensor.data_type() == TensorProto::INT64){
+    } else if (onnx_tensor.data_type() == TensorProto::INT64) {
       c2_dtype->set_i(caffe2::TensorProto::INT64);
       if (onnx_tensor.int64_data_size() > 0) {
         c2_values->set_i(onnx_tensor.int64_data(0));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int64_t));
         int64_t i;
-        memcpy(&i, &onnx_tensor.raw_data(), sizeof(int64_t));
+        memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int64_t));
         c2_values->set_i(i);
       }
-    } else if (onnx_tensor.data_type() == TensorProto::INT32){
+    } else if (onnx_tensor.data_type() == TensorProto::INT32) {
       c2_dtype->set_i(caffe2::TensorProto::INT32);
       if (onnx_tensor.int32_data_size() > 0) {
         c2_values->set_i(onnx_tensor.int32_data(0));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int32_t));
         int32_t i;
-        memcpy(&i, &onnx_tensor.raw_data(), sizeof(int32_t));
+        memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int32_t));
         c2_values->set_i(i);
       }
     } else {

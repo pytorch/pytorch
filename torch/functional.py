@@ -4,6 +4,8 @@ from torch._six import inf
 from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
+from collections import Iterable
+from torch._utils import annotate
 from itertools import product
 import math
 import warnings
@@ -141,7 +143,6 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
 
 Examples::
 
@@ -433,8 +434,19 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._C._VariableFunctions.unique(
-        input, sorted=sorted, return_inverse=return_inverse, dim=dim)
+    if dim is not None:
+        output, inverse_indices = torch._unique_dim(
+            input,
+            dim,
+            sorted=sorted,
+            return_inverse=return_inverse
+        )
+    else:
+        output, inverse_indices = torch._unique(
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+        )
     if return_inverse:
         return output, inverse_indices
     else:

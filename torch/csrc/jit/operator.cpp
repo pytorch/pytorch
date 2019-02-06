@@ -160,6 +160,15 @@ struct SchemaParser {
       L.next();
       value = DynamicType::get();
       alias_info = parseAliasAnnotation();
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+      L.next();
+      L.expect('(');
+      auto key_type = parseType().first;
+      L.expect(',');
+      auto value_type = parseType().first;
+      alias_info = parseAliasAnnotation();
+      L.expect(')');
+      value = DictType::create(key_type, value_type);
     } else {
       auto value_alias = parseBaseType();
       value = value_alias.first;
@@ -418,7 +427,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      JIT_ASSERTM(
+      AT_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name);
@@ -492,7 +501,6 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
-
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

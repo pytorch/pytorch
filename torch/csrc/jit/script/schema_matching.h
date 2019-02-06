@@ -1,8 +1,9 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/named_value.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
+
+#include <ATen/core/function_schema.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +21,7 @@ struct MatchedSchema {
 };
 
 TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
-    const FunctionSchema& schema,
+    const ::c10::FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,

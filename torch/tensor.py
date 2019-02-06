@@ -12,6 +12,10 @@ from torch._C import _add_docstr
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
+#
+# NB: If you add a new method to Tensor, you must update
+# torch/__init__.py.in to add a type annotation for your method;
+# otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -343,7 +347,23 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted, return_inverse, dim)
+        if dim is not None:
+            output, inverse_indices = torch._unique_dim(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = torch._unique(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
@@ -368,7 +388,7 @@ class Tensor(torch._C._TensorBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
     def __floordiv__(self, other):
         result = self / other

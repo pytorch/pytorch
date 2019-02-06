@@ -229,7 +229,7 @@ class CAFFE2_API Event {
 
 #ifdef CAFFE2_USE_EXCEPTION_PTR
   std::exception_ptr caught_exception_;
-  int64_t exception_timestamp_;
+  int64_t exception_timestamp_{};
 #endif // CAFFE2_USE_EXCEPTION_PTR
 
   static EventCreateFunction event_creator_[MaxDeviceTypes];

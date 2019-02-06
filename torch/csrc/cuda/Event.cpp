@@ -106,7 +106,7 @@ static PyObject * THCPEvent_record(THCPEvent *self, THCPStream *stream) {
 
 static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
   HANDLE_TH_ERRORS
-  self->cuda_event.block(stream->cuda_stream);
+  with_no_gil([&] { self->cuda_event.block(stream->cuda_stream); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -125,7 +125,7 @@ static PyObject * THCPEvent_elapsed_time(THCPEvent *self, THCPEvent *other) {
 
 static PyObject * THCPEvent_synchronize(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  self->cuda_event.synchronize();
+  with_no_gil([&] { self->cuda_event.synchronize(); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

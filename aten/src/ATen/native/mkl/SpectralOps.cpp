@@ -9,9 +9,9 @@ namespace at { namespace native {
 
 Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
-                bool inverse, IntList checked_signal_sizes,
+                bool inverse, IntArrayRef checked_signal_sizes,
                 bool normalized, bool onesided,
-                IntList output_sizes) {
+                IntArrayRef output_sizes) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
@@ -162,9 +162,9 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 // MKL DFTI
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
-                bool inverse, IntList checked_signal_sizes,
+                bool inverse, IntArrayRef checked_signal_sizes,
                 bool normalized, bool onesided,
-                IntList output_sizes) {
+                IntArrayRef output_sizes) {
   int64_t batch = self.size(0);
   Tensor input = self;
   // real/imag dimension must aligned when viewed as of complex type

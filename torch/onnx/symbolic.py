@@ -1006,6 +1006,8 @@ def exp(g, self):
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
+    if not train:  # in eval mode, dropout is non-op
+        return input
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -1048,16 +1050,10 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-def unique(g, input, sorted, return_inverse, dim):
-    sorted = _parse_arg(sorted, 'i')
-    return_inverse = _parse_arg(return_inverse, 'i')
-    if dim.node().kind() == "prim::None":
-        return g.op("ATen", input, operator_s="unique", sorted_i=sorted,
-                    return_inverse_i=return_inverse, outputs=2)
-    else:
-        dim = _parse_arg(dim, 'i')
-        return g.op("ATen", input, operator_s="unique", sorted_i=sorted,
-                    return_inverse_i=return_inverse, dim_i=dim, outputs=2)
+@parse_args('v', 'i', 'i')
+def _unique(g, input, sorted, return_inverse):
+    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
+                return_inverse_i=return_inverse, outputs=2)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
@@ -1128,7 +1124,8 @@ scalar_type_to_onnx = [
 @parse_args('v', 'i', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
-    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
+    return g.op("ConstantOfShape", sizes,
+                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
@@ -1140,7 +1137,8 @@ def zeros_like(g, input, dtype, layout, device):
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
-    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
+    return g.op("ConstantOfShape", sizes,
+                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
@@ -1157,8 +1155,8 @@ def full(g, sizes, value, dtype, layout, device):
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
-        return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype],
-                    input_as_shape_i=1, value_f=const_value)
+        return g.op("ConstantOfShape", sizes,
+                    value_t=torch.tensor(const_value, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'f', 'i', 'v', 'v')
@@ -1492,3 +1490,28 @@ def log_sigmoid(g, input):
 @parse_args('v')
 def erf(g, input):
     return g.op('Erf', input)
+
+
+@parse_args('v', 'i', 'i')
+def flatten(g, input, start_dim, end_dim):
+    dim = input.type().dim()
+    if end_dim < 0 :
+        end_dim = dim + end_dim
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1 and end_dim == dim - 1 :
+        return g.op("Flatten", input, axis_i=start_dim)
+    if start_dim == 0 and end_dim == dim - 2 :
+        return g.op("Flatten", input, axis_i=end_dim + 1)
+    # use Reshape for cases where the output shape is not 2D
+    if input.type().kind() != "CompleteTensorType":
+        return _unimplemented("flatten", "input size not accesible")
+    input_dims = input.type().sizes()
+    output_dims = []
+    for i in range(0, dim):
+        if start_dim < i and end_dim >= i:
+            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
+        else:
+            output_dims.append(input_dims[i])
+    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
+    p = _reshape_from_tensor(g, input, shape)
+    return p

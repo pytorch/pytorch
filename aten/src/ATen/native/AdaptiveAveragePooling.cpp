@@ -73,7 +73,7 @@ namespace {
   void adaptive_avg_pool2d_out_cpu_template(
     at::Tensor& output,
     at::Tensor const& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     int dimD = 0;
     int dimH = 1;
@@ -285,7 +285,7 @@ namespace {
   Tensor& adaptive_avg_pool2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
@@ -294,7 +294,7 @@ namespace {
 
   Tensor adaptive_avg_pool2d_cpu(
     at::Tensor const& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     auto output = at::empty({0}, input.options());
     adaptive_avg_pool2d_out_cpu_template(
