@@ -430,7 +430,6 @@ class TestConvolution(hu.HypothesisTestCase):
         output_channels=st.integers(1, 3),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW"]),
-        engine=st.sampled_from(["", "EIGEN"]),
         shared_buffer=st.booleans(),
         use_bias=st.booleans(),
         deformable_group=st.integers(1, 3),
@@ -448,7 +447,6 @@ class TestConvolution(hu.HypothesisTestCase):
         output_channels,
         batch_size,
         order,
-        engine,
         shared_buffer,
         use_bias,
         deformable_group,
@@ -467,7 +465,6 @@ class TestConvolution(hu.HypothesisTestCase):
             pad_r=pad_w,
             kernel=kernel,
             order=order,
-            engine=engine,
             shared_buffer=int(shared_buffer),
             deformable_group=deformable_group,
         )
