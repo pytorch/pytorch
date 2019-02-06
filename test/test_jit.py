@@ -4214,25 +4214,48 @@ a")
             def forward(self, input, opt=None):
                 # type: (Tensor, Optional[Tensor]) -> Tensor
                 x = input
+                # opt is maybeNone until forward get called in runtime
+                # b is either mustNone or neverNone when module created
+                # RHS is None case
+                # LHS = self.b: dispatch always_none_branch
                 if self.b is not None:
                     x = self.b(input)
-
                 if self.b is None:
-                    x = input + 2
+                    x = input + 1
 
+                # LHS = opt: emit normal if stmt
                 if opt is not None:
-                    opt = torch.jit._unwrap_optional(opt)
                     x = opt + x
-
                 if opt is None:
-                    x = x + 4
+                    x = x + 3
+
+                # LHS is None case
+                # RHS = opt emit normal if stmt
+                if None is opt:
+                    x = x + 5
+                if None is not opt:
+                    x = x + 6
+
+                # RHS = self.b dispatch always_none_branch
+                if None is self.b:
+                    x = input + x
+                if None is not self.b:
+                    x = input + x
+
+                # LHS, RHS both are None
+                # dispatch always_none_branch
+                if None is None:
+                    x = x + 7
+
+                if None is not None:
+                    x = x + 9
 
                 return x
 
         inputs = torch.zeros(1, 2)
         self.assertExpectedGraph(Test().graph)
         out = Test()(inputs)
-        self.assertEqual(out, inputs + 6)
+        self.assertEqual(out, inputs + 16)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
@@ -4507,7 +4530,7 @@ a")
             if x is None:
                 res = res + 1
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_tensor_none
@@ -4522,7 +4545,7 @@ a")
             if x is None:
                 res = res + 1.0
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_other_none
