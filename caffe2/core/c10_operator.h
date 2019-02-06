@@ -39,7 +39,6 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) {
 
   Caffe2Operator(schema, std::move(inputs), std::move(outputPtrs)).Run();
 
-  torch::jit::drop(*stack, total_num_arguments);
   for (auto& output: outputs) {
     torch::jit::push(*stack, std::move(output));
   }
@@ -66,6 +65,11 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
 
 }
 }
+
+#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                                                   \
+  namespace caffe2 { namespace _c10_ops {                                                           \
+    C10_DECLARE_OP_SCHEMA(OperatorName);                                                            \
+  }}
 
 /**
  * To register a caffe2 operator caffe2::MyOperator with the c10 dispatcher, call:
@@ -95,7 +99,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  *
  * Notes:
  * - all macros must be defined in the top level namespace, not in namespace caffe2.
- * - all operators must call C10_REGISTER_CAFFE2_OPERATOR and C10_REGISTER_CAFFE2_OPERATOR_CPU.
+ * - all operators must call C10_DECLARE_CAFFE2_OPERATOR and C10_REGISTER_CAFFE2_OPERATOR_CPU.
  * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if you don't want to expose
  *   the operator for CUDA operations.
  */
