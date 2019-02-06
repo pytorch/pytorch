@@ -525,7 +525,7 @@ class Module(object):
             # object is used here instead of super() for performance
             return object.__getattribute__(self, name)
         except AttributeError:
-            __dict__ = super().__getattribute__('__dict__')
+            __dict__ = object.__getattribute__('__dict__')
             if '_parameters' in __dict__:
                 _parameters = __dict__['_parameters']
                 if name in _parameters:
