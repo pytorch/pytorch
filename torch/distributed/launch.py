@@ -183,7 +183,7 @@ def parse_args():
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communciation during distributed "
                              "training")
-    parser.add_argument("--use_env", default=False, type=bool,
+    parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use enviroentment variable to pass "
                              "'local rank'. The default value is False. "
                              "If set to True, the script will not pass "
