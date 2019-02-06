@@ -184,7 +184,7 @@ to the end.)
 
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR(
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
   LayerNorm,
   (std::vector<c10::Argument>{
     c10::Argument("input"),
