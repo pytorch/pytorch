@@ -459,7 +459,7 @@ private:
     , strides_(tensor.strides().vec()) {}
   CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntListRef sizes, at::IntListRef strides, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
     : DimentionedTensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
