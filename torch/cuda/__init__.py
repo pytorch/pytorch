@@ -611,6 +611,7 @@ class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
 class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
+
 class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
     pass
 
