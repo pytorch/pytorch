@@ -13,6 +13,14 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
             return self * other, backward
 
+        def stack(tensors: List[Tensor],
+                  dim: int=0):
+            def backward(grad_output):
+                grad_tensors = torch.unbind(grad_output, dim)
+                return grad_tensors, None
+
+            return torch.stack(tensors, dim), backward
+
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
             def backward(grad_output):

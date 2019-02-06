@@ -164,8 +164,18 @@ struct DifferentiableGraphBackward : public autograd::Function {
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
     executor.run(stack);
-    AT_ASSERT(stack.size() == num_outputs());
 
+    // NB: stack.size() == num_outputs() is not always true
+    // after we added TensorList support.
+    // Example: aten::stack(Tensor[] tensors, int) where
+    // tensors = [x, x]
+    // Here stack.size()[=1] with a TensorList IValue of
+    // backward graph output.
+    // num_outputs()[=2], however, is the number of outputs of
+    // grad_fn (an autograd::Function). grad_fn's outputs are
+    // grads with regard to Tensor/Variables `x`, but not
+    // graph input TensorList [x, x]. These two grads will
+    // be accumulated to x.grad later using autograd::InputBuffer.
     variable_list outputs;
     outputs.reserve(num_outputs());
     size_t output_index = 0;

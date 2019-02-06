@@ -3658,6 +3658,31 @@ a")
             canonical(foo2.graph) +
             canonical(foo3.graph))
 
+    def test_stack(self):
+        @torch.jit.script
+        def func(x, y: int):
+            return torch.stack((x, x), y)
+        x = torch.rand(10, 10)
+        y = 1
+        self.assertEqual(func(x, y), torch.stack((x, x), dim=1))
+
+        @torch.jit.script
+        def func2(x, y):
+            return torch.stack((x, y), dim=0)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        x = torch.randn([2, 2]).requires_grad_()
+        y = torch.randn([2, 2]).requires_grad_()
+
+        outputs = func2(x, y)
+        outputs_ref = torch.stack((x, y), 0)
+        self.assertEqual(outputs, outputs_ref)
+
+        grads = torch.autograd.grad(outputs.sum(), (x, y))
+        grads_ref = torch.autograd.grad(outputs_ref.sum(), (x, y))
+        self.assertEqual(grads, grads_ref)
+
     def test_list_literal(self):
         def reassign():
             x = [1]
