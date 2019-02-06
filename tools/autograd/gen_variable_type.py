@@ -810,11 +810,11 @@ def unpack_args(env, declaration):
     unpacked_tensors = []
     unpacked_tensorlists = []
     for i, arg in enumerate(declaration['arguments']):
+        dynamic_type = arg['dynamic_type']
         if not requires_unpack(arg):
-            unpacked_args.append(arg['name'])
+            unpacked_args.append((arg['name'], arg['dynamic_type']))
             continue
 
-        dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
@@ -837,11 +837,9 @@ def unpack_args(env, declaration):
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
-        unpacked_args.append(arg['name'] + '_')
+        unpacked_args.append((arg['name'] + '_', dynamic_type))
 
     env['unpacked_args'] = unpacked_args
-    env['unpacked_tensors'] = unpacked_tensors
-    env['unpacked_tensorlists'] = unpacked_tensorlists
     return body
 
 
