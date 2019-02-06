@@ -9,14 +9,11 @@
 
 namespace caffe2 {
 
-DECLARE_FUNCTION_SCHEMA_OPERATOR(RoIAlign);
-
 template <typename T, class Context>
 class RoIAlignOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  RoIAlignOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  RoIAlignOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         spatial_scale_(
