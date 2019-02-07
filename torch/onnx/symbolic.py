@@ -575,6 +575,29 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
+def get_pool_ceil_padding(input, kernel_size, stride, padding):
+    dim = input.type().sizes()[-len(padding):]
+    ceiled_output_dim = [math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
+                         for i in range(0, len(padding))]
+    # ensure last pooling starts inside
+    ceiled_output_dim = [ceiled_output_dim[i]-1
+                         if (((ceiled_output_dim[i]-1)*stride[i]) >= (dim[i] + padding[i]))
+                         else ceiled_output_dim[i]
+                         for i in range(0, len(ceiled_output_dim))]
+    padding_ceil = [0
+                    if (stride[i] == 1)
+                    else
+                    (kernel_size[i] - ( dim[i] + 2 * padding[i] - ((ceiled_output_dim[i]-1) * stride[i] + 1 )))
+                    for i in range(0, len(padding))]
+    # ensure padding is not > kernel_size
+    padding_ceil = [(padding_ceil[i] if padding_ceil[i] < kernel_size[i]-1 else kernel_size[i]-1)
+                    if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+                    else
+                    padding_ceil[i]
+                    for i in range(0, len(padding_ceil))]
+    return padding_ceil
+
+
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode and input.type().kind() != "CompleteTensorType":
@@ -583,44 +606,22 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
-
-    padding = tuple(_single(padding))
-    # padding to add in front in ceil_mode
+    padding = tuple(_single(padding))    
     if ceil_mode:
-        d = input.type().sizes()[-len(padding):]
-        ceil_out_dim = [math.ceil((d[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
-                        for i in range(0, len(padding))]
-        padding_ceil = [(ceil_out_dim[i] - 1) * stride[i] - d[i] - 2 * padding[i] + kernel_size[i]
-                        for i in range(0, len(padding))]
-        padding_ceil = padding + tuple(padding_ceil) + padding * 2
-        # ONNX does not support padding >=  kernel_size. Keep support padding < kernel_size,
-        # and add NaN padding to the output when padding >= kernel_size to respect the output shape
-        padding = ((0,) * len(padding) + padding) * 2
-        padding = numpy.add(padding, padding_ceil)
-        padding_overflow = [1
-                            if i -  len(kernel_size) in range(0, len(kernel_size))
-                            and padding[i] >= kernel_size[i -  len(kernel_size)]
-                            else 0
-                            for i in range(int(len(padding) / 4), int(len(padding) / 4) + len(kernel_size))]
-        padding_overflow = (0,) * int(len(padding) / 4) * 3 + tuple(padding_overflow)
-        padding = [kernel_size[i - len(kernel_size)] - 1
-                    if i - len(kernel_size) in range(0, len(kernel_size))
-                    and padding[i] >= kernel_size[i - len(kernel_size)]
-                    else padding[i]
-                    for i in range(0, len(padding))]
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
-
     r = g.op("MaxPool", input,
              kernel_shape_i=_single(kernel_size),
              pads_i=padding,
              strides_i=_single(stride))
 
     if ceil_mode and padding_overflow != ((0,) * len(padding)):
-            r = g.op("Pad", r,
-                     pads_i=padding_overflow,
-                     mode_s='constant',
-                     value_f=numpy.NaN)
+        r = g.op("Pad", r,
+                 pads_i=padding_overflow,
+                 mode_s='constant',
+                 value_f=numpy.NaN)
     return r, None
 
 
@@ -632,44 +633,16 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-
     padding = tuple(_pair(padding))
-    # padding to add in front in ceil_mode
     if ceil_mode:
-        d = input.type().sizes()[-len(padding):]
-        ceil_out_dim = [math.ceil((d[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
-                        for i in range(0, len(padding))]
-        padding_ceil = [(ceil_out_dim[i] - 1) * stride[i] - d[i] - 2 * padding[i] + kernel_size[i]
-                        for i in range(0, len(padding))]
-        padding_ceil = padding + tuple(padding_ceil) + padding * 2
-        # ONNX does not support padding >=  kernel_size. Keep support padding < kernel_size,
-        # and add NaN padding to the output when padding >= kernel_size to respect the output shape
-        padding = ((0,) * len(padding) + padding) * 2
-        padding = numpy.add(padding, padding_ceil)
-        padding_overflow = [1
-                            if i - len(kernel_size) in range(0, len(kernel_size))
-                            and padding[i] >= kernel_size[i - len(kernel_size)]
-                            else 0
-                            for i in range(int(len(padding) / 4), int(len(padding) / 4) + len(kernel_size))]
-        padding_overflow = (0,) * int(len(padding) / 4) * 3 + tuple(padding_overflow)
-        padding = [kernel_size[i -  len(kernel_size)] - 1
-                   if i - len(kernel_size) in range(0, len(kernel_size))
-                   and padding[i] >= kernel_size[i - len(kernel_size)]
-                   else padding[i]
-                   for i in range(0, len(padding))]
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
-
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
              pads_i=padding,
              strides_i=_pair(stride))
-
-    if ceil_mode and padding_overflow != ((0,) * len(padding)):
-            r = g.op("Pad", r,
-                     pads_i=padding_overflow,
-                     mode_s='constant',
-                     value_f=numpy.NaN)
     return r, None
 
 
@@ -681,44 +654,16 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-
     padding = tuple(_triple(padding))
-    # padding to add in front in ceil_mode
     if ceil_mode:
-        d = input.type().sizes()[-len(padding):]
-        ceil_out_dim = [math.ceil((d[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
-                        for i in range(0, len(padding))]
-        padding_ceil = [(ceil_out_dim[i] - 1) * stride[i] - d[i] - 2 * padding[i] + kernel_size[i]
-                        for i in range(0, len(padding))]
-        padding_ceil = padding + tuple(padding_ceil) + padding * 2
-        # ONNX does not support padding >=  kernel_size. Keep support padding < kernel_size,
-        # and add NaN padding to the output when padding >= kernel_size to respect the output shape
-        padding = ((0,) * len(padding) + padding) * 2
-        padding = numpy.add(padding, padding_ceil)
-        padding_overflow = [1
-                            if i - len(kernel_size) in range(0, len(kernel_size))
-                            and padding[i] >= kernel_size[i -  len(kernel_size)]
-                            else 0
-                            for i in range(int(len(padding) / 4), int(len(padding) / 4) + len(kernel_size))]
-        padding_overflow = (0,) * int(len(padding) / 4) * 3 + tuple(padding_overflow)
-        padding = [kernel_size[i - len(kernel_size)] - 1
-                   if i - len(kernel_size) in range(0, len(kernel_size))
-                   and padding[i] >= kernel_size[i - len(kernel_size)]
-                   else padding[i]
-                   for i in range(0, len(padding))]
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil,padding))
     else:
         padding = padding * 2
-
     r = g.op("MaxPool", input,
              kernel_shape_i=_triple(kernel_size),
              pads_i=padding,
              strides_i=_triple(stride))
-
-    if ceil_mode and padding_overflow != ((0,) * len(padding)):
-            r = g.op("Pad", r,
-                     pads_i=padding_overflow,
-                     mode_s='constant',
-                     value_f=numpy.NaN)
     return r, None
 
 
@@ -729,51 +674,23 @@ def _avg_pool(name, tuple_fn):
             return _unimplemented(name, "input size not accesible")
         if not stride:
             stride = kernel_size
-
         padding = tuple(tuple_fn(padding))
-        # padding to add in front in ceil_mode
         if ceil_mode:
-            d = input.type().sizes()[-len(padding):]
-            ceil_out_dim = [math.ceil((d[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
-                            for i in range(0, len(padding))]
-            padding_ceil = [(ceil_out_dim[i] - 1) * stride[i] - d[i] - 2 * padding[i] + kernel_size[i]
-                            for i in range(0, len(padding))]
-            padding_ceil_beg = (0,) * len(padding) if count_include_pad else padding
-            padding_ceil = padding_ceil_beg + tuple(padding_ceil) + tuple(tuple_fn(padding)) * 2
-
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
                          mode_s='constant',
                          value_f=0.)
             padding = (0,) * len(padding)
-        padding = ((0,) * len(padding) + padding) * 2
-        # ONNX does not support padding >=  kernel_size. Keep support padding < kernel_size,
-        # and add NaN padding to the output when padding >= kernel_size to respect the output shape
         if ceil_mode:
-            padding = numpy.add(padding, padding_ceil)
-            padding_overflow = [1
-                                if i - len(kernel_size) in range(0, len(kernel_size))
-                                and padding[i] >= kernel_size[i - len(kernel_size)]
-                                else 0
-                                for i in range(int(len(padding) / 4), int(len(padding) / 4) + len(kernel_size))]
-            padding_overflow = (0,) * int(len(padding) / 4) * 3 + tuple(padding_overflow)
-            padding = [kernel_size[i - len(kernel_size)] - 1
-                       if i - len(kernel_size) in range(0, len(kernel_size))
-                       and padding[i] >= kernel_size[i - len(kernel_size)]
-                       else padding[i]
-                       for i in range(0, len(padding))]
-
+            padding = padding + tuple(numpy.add(padding_ceil,padding))
+        else:
+            padding = padding * 2
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
                       strides_i=tuple_fn(stride),
                       pads_i=padding)
-
-        if ceil_mode and padding_overflow != ((0,) * len(padding)):
-            output = g.op("Pad", output,
-                          pads_i=padding_overflow,
-                          mode_s='constant',
-                          value_f=numpy.NaN)
         return output
     return symbolic_fn
 
