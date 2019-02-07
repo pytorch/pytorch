@@ -4,8 +4,7 @@
 #include <iostream>
 #include <map>
 
-namespace c10 {
-namespace cuda {
+namespace torch {
 
 CudaIPCReceivedData::CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
     : shared_ptr_(std::move(shared_ptr)) {}
@@ -110,5 +109,4 @@ CudaIPCSentData* GetNewRefCountedSentData() {
 
 CudaIPCRefCountersFile::~CudaIPCRefCountersFile() {}
 
-} // namespace cuda
-} // namespace c10
+} // namespace torch

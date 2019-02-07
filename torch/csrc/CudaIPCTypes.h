@@ -4,8 +4,8 @@
 #define CUDA_IPC_REF_COUNTER_FILE_SIZE 10000
 #define CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO 1000
 
-namespace c10 {
-namespace cuda {
+namespace torch {
+
 
 struct CudaIPCReceivedData {
   CudaIPCReceivedData(std::shared_ptr<void> shared_ptr);
@@ -58,5 +58,4 @@ struct CudaIPCRefCountersFile {
     return static_cast<int64_t*>(refcounted_shared_mem.get()) + next_offset;
   }
 };
-} // namespace cuda
-} // namespace c10
+} // namespace torch

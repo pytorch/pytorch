@@ -243,19 +243,19 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
 
-    if (!c10::cuda::CudaIPCHaveRefCounter())
+    if (!torch::CudaIPCHaveRefCounter())
     {
       int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
       std::string ref_counter_handle = THPStorage_(__newHandle)();
       at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(), flags, sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
-      c10::cuda::CudaIPCCreateRefCounter(ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
+      torch::CudaIPCCreateRefCounter(ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
     }
-    auto sent_data =c10::cuda::GetNewRefCountedSentData();
+    auto sent_data =torch::GetNewRefCountedSentData();
 
     // Put Storage Data behind new ref counting context
     at::DataPtr new_data_ptr = at::DataPtr(
-        storage->data(), sent_data, c10::cuda::CudaIPCSentDataDelete, storage->device());
+        storage->data(), sent_data, torch::CudaIPCSentDataDelete, storage->device());
     auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
     std::swap(sent_data->original_ptr_, old_data_ptr);
 
@@ -331,13 +331,13 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   ptrdiff_t ref_counter_offset =
       (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
 
-  auto c = new c10::cuda::CudaIPCReceivedData(std::move(basePtr));
+  auto c = new torch::CudaIPCReceivedData(std::move(basePtr));
   auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle, ref_counter_offset](void* ptr) {
     int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_NOCREATE;
     auto sptr = THRefcountedMapAllocator::makeDataPtr(
         ref_counter_handle.c_str(), flags, sizeof(int64_t)* CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-      delete (c10::cuda::CudaIPCReceivedData*)ptr;
+      delete static_cast<torch::CudaIPCReceivedData*>(ptr);
   });
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
