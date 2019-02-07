@@ -395,10 +395,11 @@ struct Environment {
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
-           std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
+           std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -498,7 +499,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 }
 
 inline bool isSupportedListElementType(const TypePtr& type) {
-  return type->isSubtypeOf(DynamicType::get()) ||
+  return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
 }
 
@@ -836,7 +837,7 @@ struct to_ir {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(result_type->isSubtypeOf(DynamicType::get()) &&
+      if (!(result_type->isSubtypeOf(TensorType::get()) &&
             result->type()->isSubtypeOf(NoneType::get()))) {
         result = tryConvertToType(
             stmt.range(),
@@ -1051,7 +1052,7 @@ struct to_ir {
       ErrorReport error(cond);
       error << "expected a boolean expression for condition but found "
             << v->type()->str();
-      if (v->type()->isSubtypeOf(DynamicType::get())) {
+      if (v->type()->isSubtypeOf(TensorType::get())) {
         error << ", to use a tensor in a boolean"
               << " expression, explicitly cast it with `bool()`";
       }
@@ -1502,7 +1503,7 @@ struct to_ir {
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
       // for module parameter/buffer assignment, only consider tensor types,
       // emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
@@ -1527,7 +1528,7 @@ struct to_ir {
     const auto lhs = Var(stmt.lhs());
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
@@ -1559,7 +1560,7 @@ struct to_ir {
     const auto lhs = Subscript(stmt.lhs());
     const auto sliceable = emitExpr(lhs.value());
 
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
@@ -1611,7 +1612,7 @@ struct to_ir {
       AT_ASSERT(listType != nullptr);
 
       bool isTensorList =
-          listType->getElementType()->isSubtypeOf(DynamicType::get());
+          listType->getElementType()->isSubtypeOf(TensorType::get());
 
       // Get the idx to augment
       const auto subscriptExprs = lhs.subscript_exprs();
@@ -1653,7 +1654,7 @@ struct to_ir {
     auto sliceable = emitExpr(lhs.value());
 
     // If it's a tensor, copy the RHS data into it
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
@@ -2212,7 +2213,7 @@ struct to_ir {
         // if we have a type hint of List[T], use T
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
-        TypePtr elem_type = DynamicType::get();
+        TypePtr elem_type = TensorType::get();
         if (type_hint && type_hint->kind() == TypeKind::ListType) {
           elem_type = type_hint->expect<ListType>()->getElementType();
         } else if (!values.empty()) {
@@ -2240,7 +2241,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
-        for(size_t i = 0; i < keys.size(); ++i) {
+        for(size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
         }
@@ -2257,7 +2258,7 @@ struct to_ir {
           value_type = values.at(0)->type();
         } else {
           key_type = StringType::get();
-          value_type = DynamicType::get();
+          value_type = TensorType::get();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
@@ -2312,10 +2313,10 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      AT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
       args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
     } else {
-      AT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
 
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
@@ -2395,7 +2396,7 @@ struct to_ir {
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
         index =
-            graph->insertNode(graph->createNone(DynamicType::get()))->output();
+            graph->insertNode(graph->createNone(TensorType::get()))->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
@@ -2423,7 +2424,7 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
           << "indexing on a non-tensor type.";
@@ -2451,7 +2452,7 @@ struct to_ir {
     AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     c10::optional<int64_t> maybe_dim;
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }
@@ -2561,7 +2562,7 @@ struct to_ir {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitBuiltinCall(
           loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
+    } else if (gatherable->type()->isSubtypeOf(TensorType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript_exprs);
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);

@@ -143,7 +143,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "TensorType" or tensor.type().kind() == "CompleteTensorType":
+    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:

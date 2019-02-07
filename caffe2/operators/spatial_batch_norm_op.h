@@ -323,7 +323,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(rstd.numel(), C);
 
     auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
-    at::IntList dscale_sizes, dbias_sizes;
+    at::IntArrayRef dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
       dscale_sizes = scale.sizes();
       dbias_sizes = scale.sizes();

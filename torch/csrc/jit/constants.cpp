@@ -18,7 +18,7 @@ Value* insertConstant(
     at::Tensor ref = val.toTensor();
     if (!ref.defined()) {
       n->destroy();
-      return g.insertNode(g.createNone(DynamicType::get()))->output();
+      return g.insertNode(g.createNone(TensorType::get()))->output();
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
@@ -83,7 +83,7 @@ RegisterOperators reg({
             /*is_varret=*/true),
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
-          if (type->isSubtypeOf(DynamicType::get())) {
+          if (type->isSubtypeOf(TensorType::get())) {
             auto t = autograd::make_variable(node->t(attr::value));
             return [t](Stack& stack) {
               push(stack, t);

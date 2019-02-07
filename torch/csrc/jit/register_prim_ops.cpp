@@ -13,6 +13,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -470,7 +471,8 @@ RegisterOperators reg({
             std::vector<int64_t> last_shape = shape;
             int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
             AT_CHECK(
-                dim < (int64_t)regular_shape.size(), "Dimension out of range for chunk");
+                dim < (int64_t)regular_shape.size(),
+                "Dimension out of range for chunk");
             int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
             regular_shape[dim] = split_size;
             if (shape[dim] % chunks == 0) {
@@ -551,7 +553,7 @@ RegisterOperators reg({
             pop(stack, input, shape);
             shape = shape.contiguous();
             AT_ASSERT(shape.ndimension() == 1);
-            at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
+            at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
             push(stack, input.reshape(shape_list));
             return 0;
           };
@@ -561,7 +563,7 @@ RegisterOperators reg({
         [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
-            at::IntList sizes = t.sizes();
+            at::IntArrayRef sizes = t.sizes();
             auto sizes_tensor = torch::empty(
                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
@@ -750,7 +752,7 @@ RegisterOperators reg({
               stack.insert(stack.end(), list.begin(), list.end());
               return 0;
             };
-          } else if (lt->getElementType() == DynamicType::get()) {
+          } else if (lt->getElementType() == TensorType::get()) {
             return [=](Stack& stack) {
               auto ilist = pop(stack);
               const auto& list = ilist.toTensorList()->elements();
@@ -789,7 +791,7 @@ RegisterOperators reg({
             return listConstruct<double>(num_inputs);
           } else if (lt->getElementType() == BoolType::get()) {
             return listConstruct<bool>(num_inputs);
-          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+          } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
               std::vector<at::Tensor> vals;
@@ -816,36 +818,21 @@ RegisterOperators reg({
           }
         }),
     Operator(
-      prim::DictConstruct,
-      [](const Node* node) -> Operation {
-        const auto num_inputs = node->inputs().size();
-        if (num_inputs % 2 != 0) {
-          throw std::runtime_error("DictConstruct must have an even number of inputs");
-        }
-        return [=](Stack& stack) {
-          c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
-          for (size_t i = 0; i < num_inputs; i += 2) {
-            auto val = pop(stack);
-            auto key = pop(stack);
-            vals[key] = val;
+        prim::DictConstruct,
+        [](const Node* node) -> Operation {
+          const auto num_inputs = node->inputs().size();
+          if (num_inputs % 2 != 0) {
+            throw std::runtime_error(
+                "DictConstruct must have an even number of inputs");
           }
-          push(stack, std::move(vals));
-          return 0;
-        };
-      }
-    ),
-    Operator(
-        prim::DictIndex,
-        [](const Node* node) {
           return [=](Stack& stack) {
-            auto index = pop(stack);
-            auto dict = pop(stack).toGenericDict();
-            const auto& elems = dict->elements();
-            auto value = elems.find(index);
-            if (value == elems.end()) {
-              AT_ERROR("KeyError: '", index, "'");
+            c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+            for (size_t i = 0; i < num_inputs; i += 2) {
+              auto val = pop(stack);
+              auto key = pop(stack);
+              vals[key] = val;
             }
-            push(stack, value->second);
+            push(stack, std::move(vals));
             return 0;
           };
         }),
@@ -1120,6 +1107,14 @@ Operation listNe<Shared<TensorList>>(const Node* node) {
   };
 }
 
+Operation listList(const Node* node) {
+  return [=](Stack& stack) {
+    // Intentional no-op, needed to match Python semantics for list(iterable),
+    // but in JIT these will already be lists
+    return 0;
+  };
+}
+
 template <class TList, class TElement>
 Operation listAdd(const Node* node) {
   return [=](Stack& stack) {
@@ -1214,6 +1209,46 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
+int dictLen(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  push(stack, int64_t(dict.size()));
+  return 0;
+}
+
+int dictKeys(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> keys;
+  keys.reserve(dict.size());
+  for (auto item : dict) {
+    keys.push_back(item.first);
+  }
+  push(stack, IValue(keys));
+  return 0;
+}
+
+int dictValues(Stack& stack) {
+  auto dict = pop(stack).toGenericDictRef();
+  std::vector<IValue> values;
+  values.reserve(dict.size());
+  for (auto item : dict) {
+    values.push_back(item.second);
+  }
+  push(stack, IValue(values));
+  return 0;
+}
+
+int dictIndex(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    AT_ERROR("KeyError: '", index, "'");
+  }
+  push(stack, value->second);
+  return 0;
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                    \
@@ -1242,15 +1277,21 @@ RegisterOperators reg2({
           push(stack, t.sizes()[0]);
           return 0;
         }),
-    Operator(
-        "aten::append(Tensor[](a!) self, Tensor(c) el) -> Tensor[](a!)",
-        listAppend<Shared<TensorList>, at::Tensor>),
-    Operator(
-        "aten::select(Tensor[](a) list, int idx) -> Tensor(*)",
-        listSelect<Shared<TensorList>>),
-    Operator(
-        "aten::_set_item(Tensor[](a!) l, int idx, Tensor el) -> Tensor[](a!)",
-        listSetItem<Shared<TensorList>, at::Tensor>),
+// Mutable ops for lists containing mutable types.
+#define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
+  Operator(                                                                 \
+      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)", \
+      listSelect<Shared<c_type>>),                                          \
+      Operator(                                                             \
+          "aten::append( " decl_type "[](a!) self, " decl_type              \
+          "(c) el) -> " decl_type "[](a!)",                                 \
+          listAppend<Shared<c_type>, c_type::ElemType>),                    \
+      Operator(                                                             \
+          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
+          " el) -> " decl_type "[](a!)",                                    \
+          listSetItem<Shared<c_type>, c_type::ElemType>)
+
+    CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
@@ -1268,8 +1309,11 @@ RegisterOperators reg2({
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
-    CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
     CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
+
+    // NOTE: this must be after the other list specializations so that operator
+    // resolution doesn't pick this up first
+    CREATE_MUTABLE_LIST_OPS("t", GenericList),
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
   Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
@@ -1281,7 +1325,8 @@ RegisterOperators reg2({
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
-          listSlice<Shared<c_type>, c_type::ElemType>)
+          listSlice<Shared<c_type>, c_type::ElemType>),                             \
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
 
     CREATE_LIST_OPS("int", IntList),
     CREATE_LIST_OPS("float", DoubleList),
@@ -1478,6 +1523,21 @@ RegisterOperators reg2({
             return 0;
           };
         }),
+#define CREATE_DICT_OPS(key_type)                                              \
+  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),           \
+      Operator(                                                                \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",          \
+          dictKeys),                                                           \
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues), \
+      Operator(                                                                \
+          "prim::DictIndex(Dict(" key_type ", t) self, " key_type              \
+          " key) -> t",                                                        \
+          dictIndex)
+
+    CREATE_DICT_OPS("str"),
+    CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("float"),
+#undef CREATE_DICT_OPS
 });
 
 // reference: _output_size in torch/nn/functional.py
