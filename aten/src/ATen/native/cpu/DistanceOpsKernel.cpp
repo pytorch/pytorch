@@ -266,8 +266,7 @@ struct PDist {
       run_backward_parallel_pdist<pdist_calc>(result, grad, self, p, dist);
     }
   }
-
-  // Assumes self is nonempty, contiguous, and 2D and dist is also contiguous
+  
   static void apply_backward_cdist(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
     result.fill_(0);
     if (p == 0.0) {
