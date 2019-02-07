@@ -1307,11 +1307,6 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return g.op('Concat', *slices, axis_i=0)
 
     def transform_weights(layer_index):
-        # if variant == 'RNN':
-        #     weight_ih, weight_hh, bias_ih, bias_hh = layer_weights[layer_index]
-        # elif variant == 'GRU' or variant == 'LSTM':
-        #     weight_ih, weight_hh, bias_ih, bias_hh = \
-        #         [reform_weights(g, w, hidden_size, reform_permutation) for w in layer_weights[layer_index]]
         weight_ih, weight_hh, bias_ih, bias_hh = layer_weights[layer_index]
         bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
 
