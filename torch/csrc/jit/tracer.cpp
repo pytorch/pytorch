@@ -47,7 +47,7 @@ TORCH_API std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
- void delValueTrace(const Variable& var) {
+void delValueTrace(const Variable& var) {
   AT_ASSERT(var.defined());
   auto& env_stack = getTracingState()->env_stack;
   for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -83,7 +83,7 @@ Value* getValueTrace(const IValue& var) {
   if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
-      Node* n = state->graph->createUndefined();
+      Node* n = state->graph->createNone(TensorType::get());
       return state->graph->insertNode(n)->output();
     }
     for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -156,7 +156,7 @@ Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const Variable& var) {
   if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
+    Node* n = state->graph->createNone(TensorType::get());
     return state->graph->insertNode(n)->output();
   }
 
@@ -179,8 +179,8 @@ Value* getNestedOutputTrace(
     return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
-    auto tuple_node = state->graph->createTuple(
-        fmap(elems, [&state](const IValue& ival) {
+    auto tuple_node =
+        state->graph->createTuple(fmap(elems, [&state](const IValue& ival) {
           return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
@@ -376,10 +376,21 @@ void addInputs(
   }
 }
 
-void addInputs(Node* n, const char* name, at::TensorList value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    at::TensorList value,
+    bool allow_undefined) {
   Graph* g = n->owningGraph();
-  Node* list_node = g->insertNode(
-      g->createList(TensorType::get(), fmap(value, getValueTrace)));
+  Node* list_node = nullptr;
+  if (allow_undefined) {
+    // if allow undefined, we create a list of optional tensors
+    list_node = g->insertNode(
+        g->createList(OptionalType::ofTensor(), fmap(value, getValueTrace)));
+  } else {
+    list_node = g->insertNode(
+        g->createList(TensorType::get(), fmap(value, getValueTrace)));
+  }
   n->addInput(list_node->output());
 }
 
@@ -474,9 +485,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   return size_var;
 }
 
-void ensureUniqueIfOutOfPlaced(
-    const char* name,
-    const at::Tensor& tensor) {
+void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
   auto& state = getTracingState();
   if (state && state->force_outplace == false) {
     // If we're not converting in-place ops to out-of-place, this check is
