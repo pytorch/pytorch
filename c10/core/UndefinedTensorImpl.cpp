@@ -25,7 +25,7 @@ int64_t UndefinedTensorImpl::dim() const {
 }
 
 bool UndefinedTensorImpl::has_storage() const {
-  return false;
+  AT_ERROR("has_storage() called on undefined Tensor");
 }
 
 const Storage& UndefinedTensorImpl::storage() const {
