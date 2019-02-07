@@ -3,19 +3,9 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
+from torch.distributions.multivariate_normal import (_batch_mahalanobis, _batch_mv,
                                                      _batch_trtrs_lower)
 from torch.distributions.utils import _standard_normal, lazy_property
-
-
-def _batch_vector_diag(bvec):
-    """
-    Returns the diagonal matrices of a batch of vectors.
-    """
-    n = bvec.size(-1)
-    bmat = bvec.new_zeros(bvec.shape + (n,))
-    bmat.view(bvec.shape[:-1] + (-1,))[..., ::n + 1] = bvec
-    return bmat
 
 
 def _batch_capacitance_tril(W, D):
@@ -37,7 +27,7 @@ def _batch_lowrank_logdet(W, D, capacitance_tril):
     where :math:`C` is the capacitance matrix :math:`I + W.T @ inv(D) @ W`, to compute
     the log determinant.
     """
-    return 2 * _batch_diag(capacitance_tril).log().sum(-1) + D.log().sum(-1)
+    return 2 * capacitance_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) + D.log().sum(-1)
 
 
 def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
@@ -162,7 +152,7 @@ class LowRankMultivariateNormal(Distribution):
     def covariance_matrix(self):
         covariance_matrix = (torch.matmul(self._unbroadcasted_cov_factor,
                                           self._unbroadcasted_cov_factor.transpose(-1, -2))
-                             + _batch_vector_diag(self._unbroadcasted_cov_diag))
+                             + torch.diag_embed(self._unbroadcasted_cov_diag))
         return covariance_matrix.expand(self._batch_shape + self._event_shape +
                                         self._event_shape)
 
@@ -174,7 +164,7 @@ class LowRankMultivariateNormal(Distribution):
         Wt_Dinv = (self._unbroadcasted_cov_factor.transpose(-1, -2)
                    / self._unbroadcasted_cov_diag.unsqueeze(-2))
         A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
-        precision_matrix = (_batch_vector_diag(self._unbroadcasted_cov_diag.reciprocal())
+        precision_matrix = (torch.diag_embed(self._unbroadcasted_cov_diag.reciprocal())
                             - torch.matmul(A.transpose(-1, -2), A))
         return precision_matrix.expand(self._batch_shape + self._event_shape +
                                        self._event_shape)

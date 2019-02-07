@@ -34,8 +34,8 @@ struct TORCH_API TensorDesc {
   // Delegating constructors
   TensorDesc(
       const at::ScalarType& type,
-      const at::IntList& sizes,
-      const at::IntList& strides)
+      const at::IntArrayRef& sizes,
+      const at::IntArrayRef& strides)
       : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
 
   TensorDesc(const at::Tensor& t)
@@ -55,8 +55,8 @@ struct TORCH_API TensorDesc {
   }
 
   static std::vector<bool> findContiguous(
-      const at::IntList& sizes,
-      const at::IntList& strides) {
+      const at::IntArrayRef& sizes,
+      const at::IntArrayRef& strides) {
     AT_ASSERT(sizes.size() == strides.size());
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {

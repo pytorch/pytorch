@@ -426,7 +426,25 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
         {
-          // TODO: eliminate this
+          // The reason we have this stream guard here is to preserve
+          // the historical behavior of the 'thc' allocator in Caffe2,
+          // which is to put all allocations on the same (default)
+          // stream.  This behavior is morally wrong (since passing
+          // allocations between streams allows for the possibility
+          // of you handing out some memory that an old stream
+          // is still working on), but it doesn't seem to cause issues
+          // in Caffe2 today.  Our hypothesis for why this is the case
+          // is that Caffe2 doesn't really do very many allocations
+          // on the fly; instead they allocate once and then reuse
+          // the allocations for the whole program.  In this case,
+          // the hazard is avoided.
+          //
+          // We intend to remove this stream guard, but the benefit
+          // to putting all allocations on the same stream is it
+          // reduces per-stream fragmentation, and this helps
+          // some models that are currently running with the thc
+          // allocator fit in memory.  We will need to find some
+          // way of resolving this problem.
           cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,

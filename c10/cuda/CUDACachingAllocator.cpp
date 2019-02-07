@@ -661,12 +661,13 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 }
 
 void* raw_alloc(size_t nbytes) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  if (nbytes != 0) {
-    caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
-  }
+  caching_allocator.malloc(&r, nbytes, cuda::getCurrentCUDAStream(device));
   return r;
 }
 

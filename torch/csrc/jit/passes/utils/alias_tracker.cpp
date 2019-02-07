@@ -237,5 +237,17 @@ bool AliasTracker::Element::bfs(Fn fn, BfsDirection dir) const {
   }
   return false;
 }
+
+ValueSet AliasTracker::getMemoryLocations(const Value* v) const {
+  ValueSet ret;
+  if (!map_.count(v)) {
+    return ret;
+  }
+
+  for (const auto el : map_.at(v)->getMemoryLocations()) {
+    ret.insert(el->value);
+  }
+  return ret;
+}
 } // namespace jit
 } // namespace torch
