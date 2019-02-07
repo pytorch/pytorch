@@ -1313,11 +1313,11 @@
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
 
-- func: logsumexp(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: logsumexp(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: logsumexp(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
@@ -1345,7 +1345,7 @@
 
 - func: max(Tensor self, int64_t dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) ->(Tensor(a!) values, Tensor(b!) indices)
 
-- func: max_values(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
@@ -1404,7 +1404,7 @@
 
 - func: min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) ->(Tensor(a!), Tensor(b!))
 
-- func: min_values(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 

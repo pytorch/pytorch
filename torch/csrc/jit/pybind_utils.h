@@ -133,8 +133,8 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::DynamicType:
     case TypeKind::TensorType:
+    case TypeKind::DimensionedTensorType:
     case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
@@ -197,8 +197,8 @@ inline IValue toIValue(
             std::vector<double> repeated(*N, value);
             return repeated;
           }
+        case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-        case TypeKind::DynamicType:
           return py::cast<std::vector<at::Tensor>>(obj);
         default:
           return createGenericList(obj, elem_type);
@@ -213,7 +213,7 @@ inline IValue toIValue(
       const auto& elem_type = type->expect<OptionalType>()->getElementType();
       // check if it's a none obj since optional accepts NoneType
       if (obj == Py_None) {
-        if (elem_type->isSubtypeOf(DynamicType::get())) {
+        if (elem_type->isSubtypeOf(TensorType::get())) {
           // return undefined tensor for Optional[Tensor]
           return at::Tensor();
         } else {

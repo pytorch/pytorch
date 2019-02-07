@@ -839,11 +839,11 @@ Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
   return input.coalesce().values().sum(dtype);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, ScalarType dtype) {
+Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
   return at::_sparse_sum(input.to(dtype), dims_to_sum);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
+Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   AT_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
 
   const int64_t input_dim = input.dim();
@@ -853,7 +853,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
 
   LongTensor indices = input._indices();
   Tensor values = input._values();
-  IntList sizes = input.sizes();
+  IntArrayRef sizes = input.sizes();
   const int64_t sparse_dim = input.sparse_dim();
   const int64_t dense_dim = input.dense_dim();
 
@@ -960,7 +960,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
 // - assign zero values to input gradients if cannot find matched indices at grad
 // - grad.values might have zeros
 // --------------------------------------------------------------------
-Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_, IntList dims_to_sum) {
+Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
   AT_CHECK(!grad_.is_cuda(), "_sparse_sum_backward_cpu: expected 'grad_' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!input_.is_cuda(), "_sparse_sum_backward_cpu: expected 'input_' to be CPU tensor, but got CUDA tensor");
 
@@ -972,7 +972,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
 
   LongTensor input_indices = input._indices();
   Tensor input_values = input._values();
-  IntList input_sizes = input.sizes();
+  IntArrayRef input_sizes = input.sizes();
   const int64_t input_sparse_dim = input.sparse_dim();
   const int64_t input_dense_dim = input.dense_dim();
   const int64_t input_nnz = input._nnz();

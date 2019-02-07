@@ -97,7 +97,7 @@ Value* tryConvertToType(
   // implicit conversions
   if (allow_conversions) {
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
-        value->type()->isSubtypeOf(DynamicType::get())) {
+        value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
                   ->setSourceLocation(std::make_shared<SourceRange>(loc))
@@ -211,7 +211,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       v = self;
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
-      // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+      // allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or zeros(1)
       if (allow_conversions && arg.type()->kind() ==
               TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],

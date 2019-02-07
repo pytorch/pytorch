@@ -978,7 +978,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
+autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
@@ -989,7 +989,7 @@ int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
 }
 
-bool isEqual(at::IntList lhs, at::IntList rhs) {
+bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
   return lhs.size() == rhs.size() &&
       std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
@@ -1233,9 +1233,9 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
     ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+        op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1262,10 +1262,10 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "b");
     ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+        op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
     ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));

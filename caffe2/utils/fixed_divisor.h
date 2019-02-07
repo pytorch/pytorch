@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+// See Note [hip-clang differences to hcc]
+
 #if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
 #define FIXED_DIVISOR_DECL inline __host__ __device__
 #else

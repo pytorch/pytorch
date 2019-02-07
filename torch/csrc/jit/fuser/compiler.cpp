@@ -117,7 +117,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     // This needs to be revisited when you start allowing
     // other things e.g. nonconstant scalars.
     if (producer->kind() == prim::Param &&
-        val->type()->isSubtypeOf(DynamicType::get())) {
+        val->type()->isSubtypeOf(TensorType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -270,7 +270,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
-    graph->inputs()[i]->setType(TensorType::create(
+    graph->inputs()[i]->setType(DimensionedTensorType::create(
         desc.scalar_type,
         device,
         desc.nDim())); // TODO: nDim is bad, as it is collapsed
@@ -284,7 +284,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
-      if (!p->type()->isSubtypeOf(DynamicType::get())) {
+      if (!p->type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
       if (const Node* chunk = usedInFusedChunk(p)) {
@@ -311,7 +311,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     if (o->node()->kind() == prim::FusedConcat) {
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
-    auto scalar_type = o->type()->expect<c10::TensorType const>()->scalarType();
+    auto scalar_type = o->type()->expect<c10::DimensionedTensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
