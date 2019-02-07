@@ -87,8 +87,8 @@ DONT_REQUIRE_DERIVATIVE = {
 #
 # The following code templates implement the checks for this invariant:
 SAVE_TENSOR_STORAGE = CodeTemplate("""\
-Storage ${tensor_name}_storage_saved =
-  ${tensor_name}.has_storage() ? ${tensor_name}.storage() : Storage();
+c10::optional<Storage> ${tensor_name}_storage_saved =
+  ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
@@ -96,9 +96,10 @@ if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alia
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
-std::vector<Storage> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
 for (Tensor tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(tensor.has_storage() ? tensor.storage() : Storage());
+  ${tensorlist_name}_storage_saved.push_back(
+    tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
 """)
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
