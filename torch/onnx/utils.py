@@ -215,7 +215,7 @@ def _weight_transformation(param, name, type):
         raise RuntimeError("Parameter type must be either 'lstm' or 'gru'.")
 
     param_size = param.size()
-    if ((param_size[0] & (num_gates - 1) != 0 )):
+    if (param_size[0] & (num_gates - 1) != 0 ):
         raise RuntimeError("Weight matrix size must be a multiple of number of gates for the RNN node.")
     hidden_size = param_size[0] // num_gates
     start_indices = [x * hidden_size for x in gate_permutation]
@@ -273,8 +273,8 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         all_names = list(_unique_state_dict(model).keys())
         if (operator_export_type == OperatorExportTypes.ONNX):
             rnn_param_dict = _rnn_unique_param_name_dict(model)
-            params = [_weight_transformation(param, name, rnn_param_dict[name]) 
-            if name in rnn_param_dict.keys() else param for (param, name) in zip(params, all_names)]
+            params = [_weight_transformation(param, name, rnn_param_dict[name])
+                if name in rnn_param_dict.keys() else param for (param, name) in zip(params, all_names)]
 
     graph = _optimize_graph(graph, operator_export_type)
 
