@@ -42,10 +42,10 @@ class FileCheckBuilder:
     def reset(self):
         self.commands = []
 
-    def run(self, string):
+    def run(self, test_string):
         check_str = "\n".join(self.commands)
         self.has_run = True
-        FileCheck.run(check_str, string)
+        FileCheck.run(check_str, test_string)
 
     # Avoid accidentally not running FileCheck
     def __del__(self):

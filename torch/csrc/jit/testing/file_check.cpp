@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// modified from llvm::FileCheck
+// API modified from llvm::FileCheck
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
