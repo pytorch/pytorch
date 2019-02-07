@@ -130,7 +130,7 @@ def get_cudnn_version(run_lambda):
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
     files = list(sorted(files))
-    if len(files)==1:
+    if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
     return 'Probably one of the following:\n{}'.format(result)
