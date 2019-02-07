@@ -184,9 +184,9 @@ sampleMultinomialOnce(int64_t* dest,
     T val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      assert(THCNumerics<T>::ge(val, zero));
-      assert(!THCNumerics<T>::isinf(val));
-      assert(!THCNumerics<T>::isnan(val));
+      AT_ASSERT(THCNumerics<T>::ge(val, zero));
+      AT_ASSERT(!THCNumerics<T>::isinf(val));
+      AT_ASSERT(!THCNumerics<T>::isnan(val));
       sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
 
