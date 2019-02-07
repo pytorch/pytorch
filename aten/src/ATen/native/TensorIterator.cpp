@@ -22,14 +22,14 @@ void TensorIterator::reorder_dimensions() {
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
-  auto should_swap = [&](int dim0, int dim1) {
+  auto should_swap = [&](size_t dim0, size_t dim1) {
     int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
       if (operands_[arg].stride_bytes.empty()) {
         continue;
       }
-      int stride0 = operands_[arg].stride_bytes[dim0];
-      int stride1 = operands_[arg].stride_bytes[dim1];
+      int64_t stride0 = operands_[arg].stride_bytes[dim0];
+      int64_t stride1 = operands_[arg].stride_bytes[dim1];
       if (operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
