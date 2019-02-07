@@ -8,7 +8,7 @@
 template <typename TypeDst, typename TypeSrc>
 struct CopyOp {
   __device__ __forceinline__ void operator()(TypeDst* dst, TypeSrc* src) {
-#if __CUDA_ARCH__ >= 350 && defined(THE_REAL_IS_BOOL)
+#if __CUDA_ARCH__ >= 350 && defined(TH_REAL_IS_BOOL)
     *dst = ScalarConvert<TypeSrc, TypeDst>::to(__ldg(src));
 #else
     *dst = ScalarConvert<TypeSrc, TypeDst>::to(*src);
