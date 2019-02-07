@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/graph_executor.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -230,7 +231,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
       }
-    } else {
+    } else if (v.isTensor()) {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }

@@ -1195,7 +1195,7 @@ inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
       unique_(node_->graph_->next_unique_++),
-      type_(DynamicType::get()) {
+      type_(TensorType::get()) {
   node_->graph_->all_values.emplace(this);
 }
 

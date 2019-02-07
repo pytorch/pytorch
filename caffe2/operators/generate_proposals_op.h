@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-DECLARE_FUNCTION_SCHEMA_OPERATOR(GenerateProposals);
-
 namespace utils {
 
 // A sub tensor view
@@ -78,9 +76,8 @@ template <class Context>
 class GenerateProposalsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  GenerateProposalsOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  GenerateProposalsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         spatial_scale_(
             this->template GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
         feat_stride_(1.0 / spatial_scale_),
@@ -101,8 +98,7 @@ class GenerateProposalsOp final : public Operator<Context> {
         angle_bound_hi_(
             this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
-  }
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
 
   ~GenerateProposalsOp() {}
 

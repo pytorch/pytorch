@@ -1665,7 +1665,7 @@ class TestJit(JitTestCase):
         graph = f.graph_for(t)
         input_types = list(next(graph.inputs()).type().elements())
         for t in input_types:
-            self.assertEqual(t.kind(), 'TensorType')
+            self.assertEqual(t.kind(), 'DimensionedTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2274,6 +2274,16 @@ class TestJit(JitTestCase):
             j.save(f.name)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
+
+    def test_legacy_constructors(self):
+        def fn(x):
+            return x.new_zeros(5, 5, requires_grad=False)
+
+        with warnings.catch_warnings(record=True) as warns:
+            torch.jit.trace(fn, (torch.ones(2, 2)))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 1)
+        self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
 
 
 class TestBatched(TestCase):
@@ -2965,6 +2975,16 @@ class TestScript(JitTestCase):
             return torch.jit.annotate(float, a)
         self.checkScript(baz, (torch.rand(()),))
 
+        # test annotate none types
+        def annotate_none():
+            return torch.jit.annotate(Optional[torch.Tensor], None)
+
+        def annotate_none_no_optional():
+            return torch.jit.annotate(torch.Tensor, None)
+
+        self.checkScript(annotate_none, ())
+        self.checkScript(annotate_none_no_optional, ())
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
@@ -3443,7 +3463,6 @@ a")
 
             formals = ''.join(map(', {}'.format, formals))
             inputs = [tensor] + values
-
             self._check_code(template.format(formals=formals, expr=indexing),
                              "func", inputs)
 
@@ -3619,7 +3638,7 @@ a")
             return x.sum(dim=4)
 
         self.assertExpected(canonical(func.graph), subname='1')
-        # test that shape analysis is written correctly for sum with IntList[1] dim argument
+        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         torch._C._jit_pass_shape_analysis(
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
@@ -10485,6 +10504,7 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_2',
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
+
 }
 
 EXCLUDE_TYPE_CHECK = {

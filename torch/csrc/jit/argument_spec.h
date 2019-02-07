@@ -44,8 +44,8 @@ struct ArgumentInfo {
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
-    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
+      return TensorType::get();
+    return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
  private:
@@ -153,11 +153,11 @@ struct ArgumentSpec {
 
  private:
   TypePtr fillType(TypePtr original, size_t& offset) const {
-    if (original->isSubtypeOf(DynamicType::get())) {
+    if (original->isSubtypeOf(TensorType::get())) {
       auto& arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return TensorType::create(
+      return DimensionedTensorType::create(
           arg.type(),
           ConvertIntToCPUOrCUDA(arg.device()),
           arg.dim(),
@@ -315,18 +315,18 @@ struct CompleteArgumentInfo {
     // See [valid range], it is always valid to ask for offset for (i + 1)
     return (sizes_strides_offset(i + 1) - sizes_strides_offset(i)) / 2;
   }
-  at::IntList sizes() const {
-    return at::IntList(
+  at::IntArrayRef sizes() const {
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i), ndimension());
   }
-  at::IntList strides() const {
+  at::IntArrayRef strides() const {
     int ndim = ndimension();
-    return at::IntList(
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
+      return TensorType::get();
     return CompleteTensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
