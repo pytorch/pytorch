@@ -159,7 +159,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
       return fmap(genericList, [](const IValue& v) { return v.toInt(); });
     } else if (containedType == FloatType::get()) {
       return fmap(genericList, [](const IValue& v) { return v.toDouble(); });
-    } else if (containedType->isSubtypeOf(DynamicType::get())) {
+    } else if (containedType->isSubtypeOf(TensorType::get())) {
       return fmap(genericList, [](const IValue& v) { return v.toTensor(); });
     } else {
       return c10::nullopt;

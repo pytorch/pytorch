@@ -3,6 +3,8 @@
 
 #include "caffe2/core/common.h"
 
+// See Note [hip-clang differences to hcc]
+
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIP__)
 #define MATH_UTILS_DECL inline __host__ __device__
 #else

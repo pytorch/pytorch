@@ -29,6 +29,9 @@ using Operation = std::function<int(Stack&)>;
 static inline IValue& peek(Stack& stack, size_t i, size_t N) {
   return *(stack.end() - N + i);
 }
+static inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
+  return *(stack.end() - N + i);
+}
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
 static inline at::ArrayRef<IValue> peekSlice(

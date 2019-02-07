@@ -819,6 +819,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -1359,7 +1360,7 @@ void Graph::freeBlock(Block* b) {
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
-  // small peephole optimization to ensure IntList attributes can still turn
+  // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
   if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();

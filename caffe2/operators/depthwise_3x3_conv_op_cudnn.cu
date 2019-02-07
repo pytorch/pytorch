@@ -290,7 +290,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     auto& filter = Input(1);
     Tensor* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
 
     CAFFE_ENFORCE_EQ(M, X.dim32(1));
@@ -342,7 +342,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
           Y->dim32(2),
           Y->dim32(3)));
       auto& bias = Input(2);
-      CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+      CAFFE_ENFORCE_EQ(bias.dim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),
@@ -389,16 +389,16 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
     auto& X = Input(INPUT);
     auto& filter = Input(FILTER);
     auto& dY = Input(OUTPUT_GRAD);
-    auto* dfilter = Output(FILTER_GRAD);
+
     const int N = X.dim32(0), C = X.dim32(1);
 
     const vector<int> input_dims = this->GetDims(X);
     ConvPoolOpBase<CUDAContext>::ComputePads(input_dims);
-    CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
     CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
     CAFFE_ENFORCE(M % group_ == 0);
-    dfilter->ResizeLike(filter);
+    auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<float>());
     DepthwiseArgs args;
     args.batch = X.dim32(0);
     args.in_rows = X.dim32(2);
@@ -414,8 +414,11 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
     args.out_depth = dY.dim32(1);
 
     CAFFE_ENFORCE(OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+        X.sizes(),
+        at::dtype<float>());
     math::Set<float, CUDAContext>(
         dfilter->size(), 0, dfilter->mutable_data<float>(), &context_);
     DepthwiseConv2dBackpropFilterGPUKernelNCHW<float, 3, 3>

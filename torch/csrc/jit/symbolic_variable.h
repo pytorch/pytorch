@@ -193,7 +193,7 @@ struct SymbolicVariable {
       auto value_inputs =
           fmap(inputs, [](const SymbolicVariable& v) { return v.value(); });
       input_list =
-          g->insertNode(g->createList(DynamicType::get(), value_inputs))
+          g->insertNode(g->createList(TensorType::get(), value_inputs))
               ->output();
     }
     return create(aten::cat, {input_list, dim})[0];
@@ -207,7 +207,7 @@ struct SymbolicVariable {
     auto value_inputs =
         fmap(inputs, [](const SymbolicVariable& v) { return v.value(); });
     Value* input_list =
-        g->insertNode(g->createList(DynamicType::get(), value_inputs))
+        g->insertNode(g->createList(TensorType::get(), value_inputs))
             ->output();
     return create(aten::stack, {input_list, dim})[0];
   }
@@ -222,7 +222,7 @@ struct SymbolicVariable {
     auto value_inputs =
         fmap(inputs, [](const SymbolicVariable& v) { return v.value(); });
     Value* input_list =
-        g->insertNode(g->createList(DynamicType::get(), value_inputs))
+        g->insertNode(g->createList(TensorType::get(), value_inputs))
             ->output();
     Value* output_list = g->insert(aten::broadcast_tensors, {input_list});
     Node* unpack = g->insertNode(
@@ -262,7 +262,7 @@ struct SymbolicVariable {
   SymbolicVariable sum(int dim, bool keepdim) const {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntList{dim}), insertConstant(keepdim)})[0];
+        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];

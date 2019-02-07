@@ -20,6 +20,7 @@ std::string runJITCPPTests() {
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);
   testDynamicDAG();
+  testEvalModeForLoadedModule();
   testFromQualString();
   testFusion();
   testGraphExecutor();
@@ -31,11 +32,11 @@ std::string runJITCPPTests() {
   testTopologicalIndex();
   testTopologicalMove();
   testSubgraphUtils();
-  testAliasAnalysis();
   testTHNNConv();
   testATenNativeBatchNorm();
   testRegisterFusionCachesKernel();
   testAliasAnalysis();
+  testAliasTracker();
   return out.str();
 }
 

@@ -54,8 +54,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = node->input(0)->type()->cast<TensorType>();
-      auto other_type = node->input(1)->type()->cast<TensorType>();
+      auto self_type = node->input(0)->type()->cast<DimensionedTensorType>();
+      auto other_type = node->input(1)->type()->cast<DimensionedTensorType>();
       if (self_type && other_type &&
           self_type->scalarType() == other_type->scalarType() &&
           self_type->device() == other_type->device()) {
@@ -88,7 +88,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           // type_as conditional on the tensor shape being a scalar, but that
           // might add overhead, and make analysis harder.
           auto add_mat_type =
-              node->input(1 - mm_side)->type()->cast<TensorType>();
+              node->input(1 - mm_side)->type()->cast<DimensionedTensorType>();
           if (!add_mat_type)
             continue;
 
@@ -101,9 +101,9 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             SymbolicVariable mat1(mm_node->input(0));
             SymbolicVariable mat2(mm_node->input(1));
 
-            auto mat_type = mat1.value()->type()->cast<TensorType>();
+            auto mat_type = mat1.value()->type()->cast<DimensionedTensorType>();
             if (!mat_type) {
-              mat_type = mat2.value()->type()->cast<TensorType>();
+              mat_type = mat2.value()->type()->cast<DimensionedTensorType>();
             }
             // We insert the type_as if we're sure that the added element is a
             // scalar, and we either don't know what is the type of the

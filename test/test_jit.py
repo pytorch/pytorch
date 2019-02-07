@@ -1303,9 +1303,12 @@ class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
+        from cpp.jit import tests_setup
+        tests_setup.setup()
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
         self.assertExpected(torch._C._jit_run_cpp_tests())
+        tests_setup.shutdown()
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
@@ -1662,7 +1665,7 @@ class TestJit(JitTestCase):
         graph = f.graph_for(t)
         input_types = list(next(graph.inputs()).type().elements())
         for t in input_types:
-            self.assertEqual(t.kind(), 'TensorType')
+            self.assertEqual(t.kind(), 'DimensionedTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2017,6 +2020,23 @@ class TestJit(JitTestCase):
             torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
+    def test_trace_dict_input(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, a, b):
+                return self.foo({'a': a, 'b': b})['a']
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return {'a': x['a'] * x['b']}
+
+        x = (torch.rand(3), torch.rand(3))
+        model = Bar()
+        self.checkTrace(model, x)
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)
@@ -2254,6 +2274,16 @@ class TestJit(JitTestCase):
             j.save(f.name)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
+
+    def test_legacy_constructors(self):
+        def fn(x):
+            return x.new_zeros(5, 5, requires_grad=False)
+
+        with warnings.catch_warnings(record=True) as warns:
+            torch.jit.trace(fn, (torch.ones(2, 2)))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 1)
+        self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
 
 
 class TestBatched(TestCase):
@@ -3599,7 +3629,7 @@ a")
             return x.sum(dim=4)
 
         self.assertExpected(canonical(func.graph), subname='1')
-        # test that shape analysis is written correctly for sum with IntList[1] dim argument
+        # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         torch._C._jit_pass_shape_analysis(
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
@@ -8814,7 +8844,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
@@ -9703,6 +9733,39 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    def test_ignore_decorator(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                tensor = torch.zeros(1, requires_grad=False)
+                self.register_buffer('some_state', torch.nn.Parameter(tensor))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                self.ignored_code(x)
+                return x
+
+            @torch.jit.ignore
+            def ignored_code(self, x):
+                self.some_state = torch.tensor((100,))
+
+        # Assert ignored code is run
+        m = M()
+        self.assertEqual(m.some_state, torch.zeros(1))
+        m(torch.ones(1))
+        self.assertEqual(m.some_state, torch.zeros(1) + 100)
+
+        # Export and ensure ignored code not present
+        pp, constants = m._python_print()
+        printed = torch.jit.ScriptModule()
+        ppv = "op_version_set = 0\n{}".format(pp)
+        torch._C._jit_import_methods(printed, ppv, constants)
+        self.assertIn('IgnoredPythonOp', ppv)
+        self.assertNotIn('ignored_code', ppv)
+
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
+            printed(torch.ones(1))
+
     def test_view_write(self):
         def fn(x, y):
             l = []
@@ -9713,6 +9776,88 @@ a")
             b = x + x
             return a == b
         self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
+
+    def test_dict_view(self):
+        def fn(x, y):
+            l = {"a": x}
+            x_view = l["a"]
+            a = x + x
+            x_view.add_(y)
+            b = x + x
+            return a == b
+        self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
+
+    def test_dict_ops(self):
+        d = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+
+        @torch.jit.script
+        def keys(x):
+            # type: (Dict[str, Tensor]) -> List[str]
+            return list(x.keys())
+
+        self.assertEqual(set(keys(d)), set(d.keys()))
+
+        @torch.jit.script
+        def values(x):
+            # type: (Dict[str, Tensor]) -> List[Tensor]
+            return list(x.values())
+
+        self.assertEqual(set(values(d)), set(d.values()))
+
+        def length(x):
+            # type: (Dict[str, Tensor]) -> int
+            return len(x)
+
+        self.checkScript(length, (d,))
+
+    def test_dict(self):
+        def simple(x):
+            # type: (Dict[str, int]) -> Dict[str, int]
+            return x
+
+        self.checkScript(simple, ({'item': 20, 'other_item': 120},))
+
+        def index(x):
+            # type: (Dict[str, int]) -> int
+            return x['item']
+
+        self.checkScript(index, ({'item': 20, 'other_item': 120},))
+
+        def type_default():
+            # type: () -> Dict[str, Tensor]
+            return {}
+
+        self.checkScript(type_default, ())
+
+        @torch.jit.script
+        def missing_index(x):
+            # type: (Dict[str, int]) -> int
+            return x['dne']
+
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            missing_index({'item': 20, 'other_item': 120})
+
+        code = dedent('''
+            def literal1():
+                return torch.jit.annotate(Dict[int, float], {})
+            def literal2():
+                return torch.jit.annotate(Dict[int, float], {10: 1.2})
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        self.assertEqual({}, cu.literal1())
+        self.assertEqual({10: 1.2}, cu.literal2())
+
+        cu = torch.jit.CompilationUnit(dedent('''
+            def literal3():
+                return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
+        '''))
+        self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
+
+        def list_of_dicts():
+            # type: () -> List[Dict[str, Tensor]]
+            return [{'word': torch.ones(2) + 3}, {'other word': torch.ones(1) + 2}]
+
+        self.checkScript(list_of_dicts, ())
 
 
 class MnistNet(nn.Module):
