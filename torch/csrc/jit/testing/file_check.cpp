@@ -1,3 +1,14 @@
+//==-- llvm/Support/FileCheck.h ---------------------------*- C++ -*-==//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
+// modified from llvm::FileCheck
+
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -27,7 +38,7 @@ struct Check {
       CheckType type,
       std::string str,
       c10::optional<size_t> count = c10::nullopt)
-      : type_(type), str_(std::move(str)) {
+      : type_(type), search_str_(std::move(str)) {
     count_ = count;
   };
 
@@ -37,8 +48,18 @@ struct Check {
 
   CheckType type_;
   c10::optional<size_t> count_;
-  const std::string str_;
+  const std::string search_str_;
   c10::optional<SourceRange> source_range_;
+};
+
+// For a basic CHECK, the match is equal to the matching substring
+// For a CHECK-DAG group, the begin is first position of all checks,
+// and end is the last position of all checks.
+struct Match {
+  Match(int64_t begin, int64_t end) : begin(begin), end(end){};
+
+  int64_t begin; // inclusive
+  int64_t end; // exclusive
 };
 
 namespace {
@@ -111,16 +132,6 @@ void assertNotFind(
   }
 }
 } // namespace
-
-// For a basic CHECK, the match is equal to the matching substring
-// For a group of CHECK-DAG, the begin is first position of all checks,
-// and end is the last position of all checks
-struct Match {
-  Match(int64_t begin, int64_t end) : begin(begin), end(end){};
-
-  int64_t begin; // inclusive
-  int64_t end; // exclusive
-};
 
 struct FileCheckImpl {
  public:
@@ -214,7 +225,7 @@ struct FileCheckImpl {
     const auto& substr = file.substr(start, end - start);
     for (const auto& check : nots) {
       AT_ASSERT(check.type_ == CHECK_NOT);
-      assertNotFind(substr, check.str_, check);
+      assertNotFind(substr, check.search_str_, check);
     }
   }
 
@@ -228,9 +239,9 @@ struct FileCheckImpl {
     AT_ASSERT(groups.size() != 0);
     for (const auto& check : group) {
       AT_ASSERT(check.type_ == group[0].type_);
-      auto pos = assertFind(test_file, check.str_, prev.end, check);
+      auto pos = assertFind(test_file, check.search_str_, prev.end, check);
       group_beg = std::min(pos, group_beg);
-      group_end = std::max(pos + check.str_.size(), group_end);
+      group_end = std::max(pos + check.search_str_.size(), group_end);
     }
 
     return Match(group_beg, group_end);
@@ -255,30 +266,33 @@ struct FileCheckImpl {
 
     switch (check.type_) {
       case CHECK: {
-        start_range = assertFind(test_file, check.str_, start_range, check);
-        end_range = start_range + check.str_.size();
+        start_range =
+            assertFind(test_file, check.search_str_, start_range, check);
+        end_range = start_range + check.search_str_.size();
       } break;
       case CHECK_SAME: {
-        auto pos = assertFind(test_file, check.str_, start_range, check);
+        auto pos = assertFind(test_file, check.search_str_, start_range, check);
         assertNotFind(test_file.substr(prev.end, pos), "\n", check);
         start_range = pos;
-        end_range = pos + check.str_.size();
+        end_range = pos + check.search_str_.size();
       } break;
       case CHECK_NEXT: {
         auto line_end = assertFind(test_file, "\n", start_range, check);
-        auto pos = assertFind(test_file, check.str_, line_end + 1, check);
+        auto pos =
+            assertFind(test_file, check.search_str_, line_end + 1, check);
         assertNotFind(
             test_file.substr(line_end + 1, pos - (line_end + 1)), "\n", check);
         start_range = pos;
-        end_range = pos + check.str_.size();
+        end_range = pos + check.search_str_.size();
       } break;
       case CHECK_COUNT: {
         auto group_start_range = std::string::npos;
         AT_ASSERT(check.count_ && *check.count_ != 0);
         for (size_t i = 0; i < *check.count_; ++i) {
-          start_range = assertFind(test_file, check.str_, start_range, check);
+          start_range =
+              assertFind(test_file, check.search_str_, start_range, check);
           group_start_range = std::min(start_range, group_start_range);
-          end_range = start_range + check.str_.size();
+          end_range = start_range + check.search_str_.size();
           start_range = end_range;
         }
         start_range = group_start_range;
