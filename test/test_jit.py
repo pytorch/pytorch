@@ -5540,6 +5540,18 @@ a")
         with self.assertRaisesRegex(RuntimeError, "did you forget to add it __constants__"):
             M()
 
+        # Specialized error for Tensors
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                self.tensor_constant = torch.ones(2)
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.tensor_constant + 2
+
+        with self.assertRaisesRegex(RuntimeError, "Tensors must be added to a module as a buffer or parameter"):
+            S()
+
     class DerivedStateModule(torch.jit.ScriptModule):
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
