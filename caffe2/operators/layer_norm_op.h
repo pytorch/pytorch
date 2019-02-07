@@ -10,9 +10,9 @@
 #include "caffe2/utils/math.h"
 #include <ATen/core/dispatch/OpSchemaRegistration.h>
 
-namespace caffe2 {
+C10_DECLARE_CAFFE2_OPERATOR(LayerNorm)
 
-C10_DECLARE_OP_SCHEMA(LayerNorm);
+namespace caffe2 {
 
 template <class Context>
 class LayerNormOp final : public Operator<Context> {
