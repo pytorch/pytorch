@@ -240,13 +240,12 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 };
 
 
-// A list of all the parameters on a module
-struct VISIBILITY_HIDDEN ParameterListValue : public SugaredValue {
-  ParameterListValue(std::shared_ptr<Module> module)
-      : module_(module) {}
+struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
+  ConstantParameterList(std::shared_ptr<Module> module, std::vector<at::Tensor*> slots)
+      : module_(module), slots_(slots) {}
 
   std::string kind() const override {
-    return "parameter list";
+    return "constant parameter list";
   }
 
   Value* asValue(const SourceRange& loc, Method& m) override {
@@ -256,14 +255,16 @@ struct VISIBILITY_HIDDEN ParameterListValue : public SugaredValue {
       if (!(*it)->is_buffer) {
         params.push_back(m.get_or_add_parameter((*it)->slot()));
       }
+      // params.push_back(m.get_or_add_parameter(*it));
     }
-    auto list = m.graph()->createList(DynamicType::get(), params);
+    auto list = m.graph()->createList(TensorType::get(), params);
     m.graph()->insertNode(list);
     return list->output();
   }
 
  private:
   std::shared_ptr<Module> module_;
+  std::vector<at::Tensor*> slots_;
 };
 
 // defines how modules/methods behave inside the script subset.
@@ -278,6 +279,24 @@ struct ModuleValue : public SugaredValue {
 
   std::string kind() const override {
     return "module";
+  }
+
+  bool is_list_of_all_parameters(const py::object& list) {
+    bool is_parameter_list = true;
+    for (auto item : list) {
+      // py::module::import("torch.jit").attr("inspector")(item);
+      if (!py::isinstance(item, py::module::import("torch.nn").attr("Parameter"))) {
+        is_parameter_list = false;
+        break;
+      }
+    }
+    size_t num_params = 0;
+    for (auto& item : module->get_parameters()) {
+      if (!item.value().is_buffer) {
+        num_params++;
+      }
+    }
+    return is_parameter_list && num_params == py::len(list);
   }
 
   // select an attribute on it, e.g. `this.field`
@@ -318,16 +337,9 @@ struct ModuleValue : public SugaredValue {
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
         if (py::isinstance<py::list>(attr)) {
-          // TODO: make sure it's a list of parameters
-          bool is_parameter_list = true;
-          for (auto item : attr) {
-            if (!py::isinstance(item, py::module::import("torch").attr("Tensor"))) {
-              is_parameter_list = false;
-              break;
-            }
-          }
-          if (is_parameter_list) {
-            return std::make_shared<ParameterListValue>(module);
+          if (is_list_of_all_parameters(attr)) {
+            std::vector<at::Tensor*> params;
+            return std::make_shared<ConstantParameterList>(module, params);
           }
         }
         return toSugaredValue(attr, m, loc, true);
