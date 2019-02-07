@@ -37,7 +37,7 @@ def _replicatable_module(module, memo=None):
     for child in module.children():
         if child in memo:
             continue
-        if not _replicatable_module(module, memo):
+        if not _replicatable_module(child, memo):
             return False
 
     return True

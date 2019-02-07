@@ -593,6 +593,7 @@ struct Module {
     std::vector<at::Tensor*> member_inputs;
     for (auto& p : params) {
       NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+      AT_ASSERT(np != nullptr);
       member_inputs.push_back(np->slot());
     }
 
