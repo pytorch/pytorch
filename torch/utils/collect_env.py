@@ -113,15 +113,25 @@ def get_cudnn_version(run_lambda):
     if get_platform() == 'win32':
         cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
     else:
-        cudnn_cmd = 'find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null'
+        cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
     if len(out) == 0:
         return None
     if rc != 1 and rc != 0:
         return None
+    files = set()
+    for fn in out.split('\n'):
+        fn = os.path.realpath(fn)  # eliminate symbolic links
+        if os.path.isfile(fn):
+            files.add(fn)
+    if not files:
+        return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    result = '\n'.join(sorted(out.split('\n')))
+    files = list(sorted(files))
+    if len(files)==1:
+        return files[0]
+    result = '\n'.join(files)
     return 'Probably one of the following:\n{}'.format(result)
 
 
