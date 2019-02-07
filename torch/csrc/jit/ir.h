@@ -139,6 +139,7 @@ template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using topo_position_t = int64_t;
+using ValueSet = std::unordered_set<const Value*>;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);

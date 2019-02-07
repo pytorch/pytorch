@@ -331,6 +331,32 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
       return ret;
     }
+  } else if (auto dict_formal = formal->cast<DictType>()) {
+    if (auto dict_actual = actual->cast<DictType>()) {
+      auto key_type = matchTypeVariables(
+        dict_formal->getKeyType(),
+        dict_actual->getKeyType(),
+        type_env
+      );
+      if (!key_type.type) {
+        return key_type;
+      }
+      auto value_type = matchTypeVariables(
+        dict_formal->getValueType(),
+        dict_actual->getValueType(),
+        type_env
+      );
+      if (!value_type.type) {
+        return value_type;
+      }
+      ret.type = DictType::create(*key_type.type, *value_type.type);
+      return ret;
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a dict to " << actual->str();
+      ret.errMsg = ss.str();
+      return ret;
+    }
   }
 
   AT_ERROR("unhandled free variable container: ", formal->str());

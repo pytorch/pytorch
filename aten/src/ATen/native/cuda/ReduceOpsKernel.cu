@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
@@ -10,6 +11,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <limits>
 #include <tuple>
+#include <THC/THCNumerics.cuh>
 
 
 namespace at { namespace native {
@@ -158,6 +160,34 @@ void or_kernel_cuda(TensorIterator& iter) {
     }), false);
 }
 
+template <typename scalar_t>
+void max_values_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (THCNumerics<scalar_t>::isnan(a) || a > b) ? a : b;
+    }), at::numeric_limits<scalar_t>::lower_bound());
+}
+
+template <typename scalar_t>
+void min_values_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (THCNumerics<scalar_t>::isnan(a) || a < b) ? a : b;
+    }), at::numeric_limits<scalar_t>::upper_bound());
+}
+
+void max_values_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "max_values", [&]() {
+    max_values_kernel_cuda_impl<scalar_t>(iter);
+  });
+}
+
+void min_values_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "min_values", [&]() {
+    min_values_kernel_cuda_impl<scalar_t>(iter);
+  });
+}
+
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
@@ -165,5 +195,7 @@ REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_cuda);
 REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 
 }} // namespace at::native

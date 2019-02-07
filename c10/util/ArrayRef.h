@@ -265,6 +265,10 @@ bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
+using IntArrayRef = ArrayRef<int64_t>;
+
+// This alias is deprecated because it doesn't make ownership
+// semantics obvious.  Use IntArrayRef instead!
 using IntList = ArrayRef<int64_t>;
 
 } // namespace c10
