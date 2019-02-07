@@ -8,19 +8,19 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
 
-DECLARE_FUNCTION_SCHEMA_OPERATOR(LayerNorm);
+C10_DECLARE_OP_SCHEMA(LayerNorm);
 
 template <class Context>
 class LayerNormOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template <class... Args>
-  LayerNormOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  LayerNormOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(int, "axis", axis_, 1),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5f) {}
 

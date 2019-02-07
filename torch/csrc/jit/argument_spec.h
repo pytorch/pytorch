@@ -44,8 +44,8 @@ struct ArgumentInfo {
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
-    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
+      return TensorType::get();
+    return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
  private:
@@ -153,11 +153,11 @@ struct ArgumentSpec {
 
  private:
   TypePtr fillType(TypePtr original, size_t& offset) const {
-    if (original->isSubtypeOf(DynamicType::get())) {
+    if (original->isSubtypeOf(TensorType::get())) {
       auto& arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return TensorType::create(
+      return DimensionedTensorType::create(
           arg.type(),
           ConvertIntToCPUOrCUDA(arg.device()),
           arg.dim(),
@@ -326,7 +326,7 @@ struct CompleteArgumentInfo {
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
+      return TensorType::get();
     return CompleteTensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }

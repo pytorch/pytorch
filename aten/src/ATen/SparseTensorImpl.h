@@ -106,7 +106,7 @@ public:
       bool shrinking_dense_dim = false;
       auto sparse_size_original = sizes().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
-      for (int i = 0; i < sparse_dim; i++) {
+      for (int64_t i = 0; i < sparse_dim; i++) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
           shrinking_sparse_dims = true;
           break;
@@ -114,7 +114,7 @@ public:
       }
       auto dense_size_original = sizes().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
-      for (int i = 0; i < dense_dim; i++) {
+      for (int64_t i = 0; i < dense_dim; i++) {
         if (dense_size_new[i] < dense_size_original[i]) {
           shrinking_dense_dim = true;
           break;

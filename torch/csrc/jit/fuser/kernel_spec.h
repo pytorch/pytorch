@@ -101,7 +101,7 @@ struct TORCH_API KernelSpec {
     }
     nTensorInputs_ = std::count_if(
         graph_->inputs().begin(), graph_->inputs().end(), [](const Value* v) {
-          return v->type()->isSubtypeOf(DynamicType::get());
+          return v->type()->isSubtypeOf(TensorType::get());
         });
   }
 
