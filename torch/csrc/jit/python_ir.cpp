@@ -583,7 +583,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
-      .def("dim", [](const Type& t) { return t.expect<TensorType>()->dim(); })
+      .def("dim", [](const Type& t) { return t.expect<DimensionedTensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -599,7 +599,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "scalarType",
           [](Type& t) {
-            return toString(t.expect<TensorType>()->scalarType());
+            return toString(t.expect<DimensionedTensorType>()->scalarType());
           })
       .def(
           "__eq__",
@@ -618,8 +618,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
-      .def_static("get", &DynamicType::get);
+  py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "DynamicType")
+      .def_static("get", &TensorType::get);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
 

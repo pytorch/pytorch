@@ -99,9 +99,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       args.reserve(actual_n_args);
       for (size_t i = 0; i < actual_n_args; ++i) {
         args.push_back(
-            Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+            Argument(std::to_string(i), TensorType::get(), {}, {}, false));
       }
-      TypePtr ret_type = DynamicType::get();
+      TypePtr ret_type = TensorType::get();
       if (n_binders == 0) {
         ret_type = NoneType::get();
       } else if (n_binders > 1) {
