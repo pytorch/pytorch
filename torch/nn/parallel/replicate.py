@@ -94,7 +94,7 @@ def replicate(network, devices, detach=False):
     modules = list(network.modules())
     module_copies = [[] for device in devices]
     module_indices = {}
-    scriptmodule_skip_attr = {"_paramaters", "_buffers", "_modules"}
+    scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules"}
 
     for i, module in enumerate(modules):
         module_indices[module] = i
