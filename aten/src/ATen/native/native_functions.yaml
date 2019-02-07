@@ -1094,7 +1094,7 @@
 - func: _cufft_clear_plan_cache() -> void
   device_guard: False
 
-- func: index(Tensor self, Tensor[] indices) -> Tensor
+- func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -1102,11 +1102,11 @@
 - func: index_copy_(Tensor(a!) self, int dim, IndexTensor index, Tensor source) -> Tensor(a!)
   variants: method
 
-- func: index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor
+- func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: index_put_(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+- func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   matches_jit_signature: True
   variants: function, method
 
@@ -1593,7 +1593,7 @@
   matches_jit_signature: True
 
 - func: cdist(Tensor x1, Tensor x2, double p=2) -> Tensor
-    
+
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
 
