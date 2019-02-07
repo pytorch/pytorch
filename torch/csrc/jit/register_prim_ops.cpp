@@ -752,7 +752,7 @@ RegisterOperators reg({
               stack.insert(stack.end(), list.begin(), list.end());
               return 0;
             };
-          } else if (lt->getElementType() == DynamicType::get()) {
+          } else if (lt->getElementType() == TensorType::get()) {
             return [=](Stack& stack) {
               auto ilist = pop(stack);
               const auto& list = ilist.toTensorList()->elements();
@@ -791,7 +791,7 @@ RegisterOperators reg({
             return listConstruct<double>(num_inputs);
           } else if (lt->getElementType() == BoolType::get()) {
             return listConstruct<bool>(num_inputs);
-          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+          } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
               std::vector<at::Tensor> vals;

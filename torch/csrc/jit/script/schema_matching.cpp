@@ -97,7 +97,7 @@ Value* tryConvertToType(
   // implicit conversions
   if (allow_conversions) {
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
-        value->type()->isSubtypeOf(DynamicType::get())) {
+        value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
                   ->setSourceLocation(std::make_shared<SourceRange>(loc))

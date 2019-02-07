@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 namespace {
 bool shouldAnnotate(const TypePtr& type) {
-  return type->isSubtypeOf(DynamicType::get()) ||
+  return type->isSubtypeOf(TensorType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
       type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
@@ -211,14 +211,14 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       inputType = inputType->cast<OptionalType>()->getElementType();
     }
 
-    if (inputType->isSubtypeOf(DynamicType::get())) {
+    if (inputType->isSubtypeOf(TensorType::get())) {
       tensors.push_back(input);
     } else if (inputType->kind() == TypeKind::ListType) {
       auto containedType = inputType->containedTypes().at(0);
       // All tensor subtypes may alias to each other, so we should consider all
       // lists of them to alias to each other.
-      if (containedType->isSubtypeOf(DynamicType::get())) {
-        containedType = DynamicType::get();
+      if (containedType->isSubtypeOf(TensorType::get())) {
+        containedType = TensorType::get();
       }
       listTypes[containedType->kind()].push_back(input);
     } else if (inputType->kind() == TypeKind::TupleType) {
