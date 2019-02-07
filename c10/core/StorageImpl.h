@@ -20,6 +20,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
         data_ptr_(std::move(data_ptr)),
         numel_(numel),
         resizable_(resizable),
+        received_cuda_(false),
         allocator_(allocator) {
     if (resizable) {
       AT_ASSERTM(
@@ -213,11 +214,22 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     resizable_ = false;
   }
 
+  void set_received_cuda(bool received_cuda) {
+    received_cuda_ = received_cuda;
+  }
+
+  bool received_cuda() {
+    return received_cuda_;
+  }
+
  private:
   caffe2::TypeMeta data_type_;
   DataPtr data_ptr_;
   int64_t numel_;
   bool resizable_;
+  // Identifies that Storage was received from another process and doesn't have
+  // local to process cuda memory allocation
+  bool received_cuda_;
   Allocator* allocator_;
 };
 } // namespace c10

@@ -35,7 +35,6 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THC_GENERIC_FILE
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
   static std::random_device rd;
@@ -50,6 +49,7 @@ static std::string THPStorage_(__newHandle)() {
   return handle;
 }
 
+#ifndef THC_GENERIC_FILE
 static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
@@ -216,13 +216,22 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
+
+  if (storage->received_cuda()) {
+    AT_ERROR(
+        "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
+  }
+
   at::DeviceGuard device_guard(storage->device());
-  THPObjectPtr tuple(PyTuple_New(4));
+  THPObjectPtr tuple(PyTuple_New(6));
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr size_bytes(PyLong_FromLong(storage->numel() * sizeof(scalar_t)));
   THPObjectPtr _offset_bytes(PyLong_FromLong(0));
+  THPObjectPtr _ref_counter(Py_None);
+  Py_INCREF(Py_None);
+  THPObjectPtr _ref_counter_offset(PyLong_FromLong(0));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
     void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
@@ -233,6 +242,25 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
+
+    if (!c10::cuda::CudaIPCHaveRefCounter())
+    {
+      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
+      std::string ref_counter_handle = THPStorage_(__newHandle)();
+      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+          ref_counter_handle.c_str(), flags, sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
+      c10::cuda::CudaIPCCreateRefCounter(ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
+    }
+    auto sent_data =c10::cuda::GetNewRefCountedSentData();
+
+    // Put Storage Data behind new ref counting context
+    at::DataPtr new_data_ptr = at::DataPtr(
+        storage->data(), sent_data, c10::cuda::CudaIPCSentDataDelete, storage->device());
+    auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
+    std::swap(sent_data->original_ptr_, old_data_ptr);
+
+    _ref_counter = PyBytes_FromString((sent_data->handle).c_str());
+    _ref_counter_offset = PyLong_FromLong(sent_data->offset);
   }
 
   if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes) {
@@ -248,6 +276,8 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   //     as key in shared_cache(multiprocessing/reduction.py).
   //     Offset in numel cannot uniquely represent a storage.
   PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
+  PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
@@ -255,16 +285,24 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 4, "tuple of 4 items expected");
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 6, "tuple of 6 items expected");
   PyObject *_device = PyTuple_GET_ITEM(args, 0);
   PyObject *_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size_bytes = PyTuple_GET_ITEM(args, 2);
   PyObject *_offset_bytes = PyTuple_GET_ITEM(args, 3);
-  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes)
-      && (_handle != Py_None && PyBytes_Check(_handle))
-      && THPUtils_checkLong(_offset_bytes))) {
-    THPUtils_invalidArguments(args, nullptr, "_new_shared in CUDA mode", 1,
-        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes)");
+  PyObject *_ref_counter = PyTuple_GET_ITEM(args, 4);
+  PyObject *_ref_counter_offset = PyTuple_GET_ITEM(args, 5);
+  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
+        (_handle != Py_None && PyBytes_Check(_handle)) &&
+        (_ref_counter != Py_None && PyBytes_Check(_ref_counter)) &&
+        THPUtils_checkLong(_offset_bytes) &&
+        THPUtils_checkLong(_ref_counter_offset))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_new_shared in CUDA mode",
+        1,
+        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset)");
     return nullptr;
   }
 
@@ -289,11 +327,25 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   void* devPtr = basePtr.get();
   devPtr = (char*)devPtr + storage_offset_bytes;
 
+  std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ptrdiff_t ref_counter_offset =
+      (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
+
+  auto c = new c10::cuda::CudaIPCReceivedData(std::move(basePtr));
+  auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle, ref_counter_offset](void* ptr) {
+    int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_NOCREATE;
+    auto sptr = THRefcountedMapAllocator::makeDataPtr(
+        ref_counter_handle.c_str(), flags, sizeof(int64_t)* CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
+    *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
+      delete (c10::cuda::CudaIPCReceivedData*)ptr;
+  });
+
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE
-      THCIpcDeleter::makeDataPtr(std::move(basePtr), devPtr),
+      THCIpcDeleter::makeDataPtr(std::move(sp), devPtr),
       storage_size, /* allocator */ nullptr));
   base->set_resizable(false);
+  base->set_received_cuda(true);
 
   return THPStorage_(New)(base.release());
   END_HANDLE_TH_ERRORS

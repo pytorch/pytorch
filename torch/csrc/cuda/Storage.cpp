@@ -12,6 +12,7 @@
 #include <torch/csrc/cuda/override_macros.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/CudaIPCTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #include <THC/THCGenerateAllTypes.h>
