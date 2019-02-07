@@ -924,6 +924,7 @@ private:
         return static_cast<Equal &>(*this)(lhs, rhs);
     }
 
+private:
     struct convertible_to_iterator
     {
         EntryPointer it;

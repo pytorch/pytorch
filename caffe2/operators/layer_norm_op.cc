@@ -196,12 +196,32 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
   c10::ArrayRef<c10::IValue> inputs = torch::jit::peekSlice(*stack, 0, 3, 6);
   c10::ArrayRef<c10::IValue> outputs = torch::jit::peekSlice(*stack, 3, 3, 6);
 
-  caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
+
+  caffe2::Tensor X{inputs[0].toTensor()};
   int64_t axis = inputs[1].toInt();
   float epsilon = inputs[2].toDouble();
-  caffe2::Tensor Y{c10::C10Tensor(outputs[0].toTensor())};
-  caffe2::Tensor mean{c10::C10Tensor(outputs[1].toTensor())};
-  caffe2::Tensor sig{c10::C10Tensor(outputs[2].toTensor())};
+
+  auto device = X.GetDevice();
+
+  caffe2::Tensor Y, mean, sig;
+  if (outputs[0].isTensor()) {
+    Y = caffe2::Tensor(std::move(torch::jit::peek(*stack, 0, 3)).toTensor());
+  }
+  if (outputs[1].isTensor()) {
+    mean = caffe2::Tensor(std::move(torch::jit::peek(*stack, 1, 3)).toTensor());
+  }
+  if (outputs[2].isTensor()) {
+    sig = caffe2::Tensor(std::move(torch::jit::peek(*stack, 2, 3)).toTensor());
+  }
+  if (!Y.defined()) {
+    Y = caffe2::empty({0}, device);
+  }
+  if (!mean.defined()) {
+    mean = caffe2::empty({0}, device);
+  }
+  if (!sig.defined()) {
+    sig = caffe2::empty({0}, device);
+  }
 
   caffe2::CPUContext context;
   Cache* cache = static_cast<Cache*>(cache_);
@@ -226,9 +246,9 @@ void layer_norm_c10(c10::Stack* stack, c10::KernelCache* cache_) { // TODO Pass 
 
   torch::jit::drop(*stack, 6);
   torch::jit::push(*stack,
-    at::Tensor(c10::C10Tensor(std::move(Y))),
-    at::Tensor(c10::C10Tensor(std::move(mean))),
-    at::Tensor(c10::C10Tensor(std::move(sig)))
+    at::Tensor(std::move(Y)),
+    at::Tensor(std::move(mean)),
+    at::Tensor(std::move(sig))
   );
 
   return;
