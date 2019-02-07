@@ -54,8 +54,8 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   std::vector<c10::Argument> actual_inputs = std::move(inputs);
   actual_inputs.reserve(actual_inputs.size() + outputs.size());
   for (const auto& elem : outputs) {
-    AT_ASSERT(elem.type()->isSubtypeOf(DynamicType::get())); // DynamicType means type is tensor
-    actual_inputs.push_back(c10::Argument(elem.name(), OptionalType::create(elem.type()), nullopt, IValue()));
+    AT_ASSERT(elem.type()->isSubtypeOf(c10::DynamicType::get())); // DynamicType means type is tensor
+    actual_inputs.push_back(c10::Argument(elem.name(), c10::OptionalType::create(elem.type()), nullopt, IValue()));
   }
 
   return c10::FunctionSchema(
