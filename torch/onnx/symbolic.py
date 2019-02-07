@@ -580,17 +580,17 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     ceiled_output_dim = [math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
                          for i in range(0, len(padding))]
     # ensure last pooling starts inside
-    ceiled_output_dim = [ceiled_output_dim[i]-1
-                         if (((ceiled_output_dim[i]-1)*stride[i]) >= (dim[i] + padding[i]))
+    ceiled_output_dim = [ceiled_output_dim[i] - 1
+                         if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
                          else ceiled_output_dim[i]
                          for i in range(0, len(ceiled_output_dim))]
     padding_ceil = [0
                     if (stride[i] == 1)
                     else
-                    (kernel_size[i] - ( dim[i] + 2 * padding[i] - ((ceiled_output_dim[i]-1) * stride[i] + 1 )))
+                    (kernel_size[i] - ( dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1 )))
                     for i in range(0, len(padding))]
     # ensure padding is not > kernel_size
-    padding_ceil = [(padding_ceil[i] if padding_ceil[i] < kernel_size[i]-1 else kernel_size[i]-1)
+    padding_ceil = [(padding_ceil[i] if padding_ceil[i] < kernel_size[i] - 1 else kernel_size[i] - 1)
                     if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
                     else
                     padding_ceil[i]
@@ -616,12 +616,6 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
              kernel_shape_i=_single(kernel_size),
              pads_i=padding,
              strides_i=_single(stride))
-
-    if ceil_mode and padding_overflow != ((0,) * len(padding)):
-        r = g.op("Pad", r,
-                 pads_i=padding_overflow,
-                 mode_s='constant',
-                 value_f=numpy.NaN)
     return r, None
 
 
