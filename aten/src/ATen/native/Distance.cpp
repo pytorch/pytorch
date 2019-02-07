@@ -9,6 +9,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(pdist_forward_stub);
 DEFINE_DISPATCH(pdist_backward_stub);
 DEFINE_DISPATCH(cdist_stub);
+DEFINE_DISPATCH(cdist_backward_stub);
 
 Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double eps, bool keepdim) {
   return at::norm(x1 - x2 + eps, p, 1, keepdim);
@@ -49,6 +50,21 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
       cdist_stub(device1, result, x1.contiguous(), x2.contiguous(), p);
     }
   }
+  return result;
+}
+
+Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
+  AT_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
+  AT_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
+  AT_CHECK(dist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
+  int64_t n = x1.size(-2);
+  int64_t m = x1.size(-1);
+  auto device1 = x1.type().device_type();
+  AT_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
+  auto device2 = x2.type().device_type();
+  AT_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
+  Tensor result = at::empty({n, m}, x1.options());
+  cdist_backward_stub(device1, result, grad, x1, x2, p, dist);
   return result;
 }
 
