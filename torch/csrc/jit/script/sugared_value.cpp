@@ -63,7 +63,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     Method& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value->type()->isSubtypeOf(DynamicType::get())) {
+  if (value->type()->isSubtypeOf(TensorType::get())) {
     if (builtin_cast_methods().count(field)) {
       return std::make_shared<BuiltinFunction>(
           Symbol::aten(builtin_cast_methods().at(field)),

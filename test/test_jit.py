@@ -1665,7 +1665,7 @@ class TestJit(JitTestCase):
         graph = f.graph_for(t)
         input_types = list(next(graph.inputs()).type().elements())
         for t in input_types:
-            self.assertEqual(t.kind(), 'TensorType')
+            self.assertEqual(t.kind(), 'DimensionedTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script

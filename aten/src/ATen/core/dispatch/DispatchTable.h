@@ -174,7 +174,7 @@ class DispatchTable final {
  private:
   static size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
-      if (schema.arguments()[i].type()->isSubtypeOf(DynamicType::get())) {  // DynamicType means it's a tensor
+      if (schema.arguments()[i].type()->isSubtypeOf(TensorType::get())) {  // DynamicType means it's a tensor
         return i;
       }
     }
