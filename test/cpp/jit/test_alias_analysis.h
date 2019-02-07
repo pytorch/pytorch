@@ -2,6 +2,7 @@
 
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
@@ -248,6 +249,40 @@ void testTopologicalMove() {
   }
 }
 
+namespace {
+Node* insertIf(
+    Graph& g,
+    Value* condValue,
+    std::function<std::vector<Value*>()> trueInst,
+    std::function<std::vector<Value*>()> falseInst) {
+  auto if_ = g.insertNode(g.create(prim::If, 0));
+  if_->addInput(condValue); // condition value
+  auto trueBlock = if_->addBlock();
+  auto falseBlock = if_->addBlock();
+  {
+    // Mutate in true block
+    WithInsertPoint g(trueBlock);
+    auto outputs = trueInst();
+    for (auto output : outputs) {
+      trueBlock->registerOutput(output);
+    }
+  }
+  {
+    WithInsertPoint g(falseBlock);
+    auto outputs = falseInst();
+    for (auto output : outputs) {
+      falseBlock->registerOutput(output);
+    }
+  }
+
+  AT_ASSERT(trueBlock->outputs().size() == falseBlock->outputs().size());
+  for (auto output : trueBlock->outputs()) {
+    if_->addOutput()->setType(output->type());
+  }
+  return if_;
+}
+} // namespace
+
 void testAliasAnalysis() {
   {
     auto graph = std::make_shared<Graph>();
@@ -295,6 +330,235 @@ void testAliasAnalysis() {
         aliasesB->node(), mutatesAliasOfB->node()));
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
+  }
+  {
+    // Test moves across inner blocks
+
+    // a = rand(1)
+    // b = rand(1)
+    // if True:
+    //   a.add_(b)
+    // c = a + b
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto b = graph->insert(aten::rand, {constant});
+
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto aMut = graph->insert(aten::add_, {a, b});
+          return {aMut};
+        },
+        [&]() -> std::vector<Value*> { return {a}; });
+
+    auto c = graph->insert(aten::add, {a, b});
+
+    graph->lint();
+
+    // we should not be able to move `c` before the if statement, since it
+    // may write to `a`.
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
+  }
+  {
+    // test fork/wait
+
+    // a = rand(1)
+    // fut = fork(a)
+    //    Subgraph is: return a.add_(1)
+    // ... some unrelated code
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+
+    auto forkNode = graph->insertNode(graph->create(prim::fork));
+    auto forkBlock = forkNode->addBlock();
+    {
+      WithInsertPoint g(forkBlock);
+      auto aMut = graph->insert(aten::add_, {a, constant});
+      forkBlock->registerOutput(aMut);
+      forkNode->output()->setType(FutureType::create(aMut->type()));
+    }
+    script::lambdaLiftFork(forkNode);
+
+    auto fut = forkNode->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
+  }
+  {
+    // test fork/wait in an if statement
+
+    // a = rand(1)
+    // if 1:
+    //   fut = fork(a)
+    //     Subgraph is: return a.add_(1)
+    // else:
+    //   fut = fork(a)
+    //     Subgraph is: return a.sub_(1)
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::add_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        },
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::sub_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        });
+
+    auto fut = if_->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
+  }
+}
+
+void testAliasTracker() {
+  auto graph = std::make_shared<Graph>();
+  const Value* a = graph->addInput();
+  const Value* b = graph->addInput();
+  const Value* c = graph->addInput();
+  const Value* d = graph->addInput();
+  const Value* e = graph->addInput();
+  const Value* f = graph->addInput();
+  const Value* g = graph->addInput();
+  const Value* wc = graph->addInput();
+
+  {
+    // test contains()
+    AliasTracker t;
+    t.makeFreshValue(a);
+    ASSERT_TRUE(t.contains(a));
+    ASSERT_FALSE(t.contains(b));
+  }
+  {
+    // a <- b <- c
+    //      b <- d
+    // a <- e
+    // f <- e
+    // g is by itself
+    // wc is a wildcard value
+    AliasTracker t;
+    t.makeFreshValue(a);
+    t.makeFreshValue(f);
+    t.makeFreshValue(g);
+    t.makePointerTo(b, a);
+    t.makePointerTo(c, b);
+    t.makePointerTo(d, b);
+    t.makePointerTo(e, a);
+    t.makePointerTo(e, f);
+    t.setWildcard(wc);
+
+    /**
+     * Test mayAlias()
+     */
+    // Values should alias themselves
+    ASSERT_TRUE(t.mayAlias(a, a));
+    ASSERT_TRUE(t.mayAlias(g, g));
+
+    // Values that point to the same location should alias
+    ASSERT_TRUE(t.mayAlias(a, b));
+    ASSERT_TRUE(t.mayAlias(a, c));
+    ASSERT_TRUE(t.mayAlias(c, d));
+
+    // e may point to a OR f
+    ASSERT_TRUE(t.mayAlias(e, a));
+    ASSERT_TRUE(t.mayAlias(e, f));
+    // But a and f don't alias
+    ASSERT_FALSE(t.mayAlias(a, f));
+
+    // Wildcards should alias everything
+    ASSERT_TRUE(t.mayAlias(wc, a));
+    ASSERT_TRUE(t.mayAlias(wc, b));
+    ASSERT_TRUE(t.mayAlias(wc, f));
+    ASSERT_TRUE(t.mayAlias(wc, g));
+
+    /**
+     * Test mayAlias() set interface
+     */
+    std::multiset<const Value*> foo{c, c, d};
+    std::multiset<const Value*> bar{e, f};
+    std::unordered_set<const Value*> baz{f, g};
+    std::set<const Value*> containsWildcard{wc};
+    ASSERT_TRUE(t.mayAlias(foo, bar));
+    ASSERT_TRUE(t.mayAlias(bar, baz));
+    ASSERT_FALSE(t.mayAlias(foo, baz));
+    // wildcard stuff aliases everything
+    ASSERT_TRUE(t.mayAlias(containsWildcard, foo));
+    ASSERT_TRUE(t.mayAlias(containsWildcard, bar));
+    ASSERT_TRUE(t.mayAlias(containsWildcard, baz));
+
+    /**
+     * Test writer tracking
+     */
+    auto n1 = graph->appendNode(graph->create(prim::Undefined));
+    auto n2 = graph->appendNode(graph->create(prim::Undefined));
+    auto n3 = graph->appendNode(graph->create(prim::Undefined));
+    t.registerWrite(a, n1);
+    t.registerWrite(f, n2);
+    // We should report those writes accurately
+    ASSERT_TRUE(t.writesTo(n1, a));
+    ASSERT_TRUE(t.writesTo(n2, f));
+    ASSERT_FALSE(t.writesTo(n1, f));
+    ASSERT_FALSE(t.writesTo(n2, a));
+    // We should correctly report writes to aliases as well
+    ASSERT_TRUE(t.writesTo(n1, c));
+
+    // Check hasWriters()
+    ASSERT_TRUE(t.hasWriters(a));
+    // Aliases of written-to values should have writers
+    ASSERT_TRUE(t.hasWriters(b));
+    ASSERT_TRUE(t.hasWriters(d));
+    ASSERT_TRUE(t.hasWriters(e));
+    // Unique values not registered should be unaffected
+    ASSERT_FALSE(t.hasWriters(g));
+
+    // create a write to the wildcard set
+    t.registerWrite(wc, n3);
+    // Now everything may be written to
+    ASSERT_TRUE(t.hasWriters(g));
+    const auto& wildcardWriters = t.getWildcardWriters();
+    ASSERT_EQ(wildcardWriters.size(), 1);
+    ASSERT_EQ(*wildcardWriters.begin(), n3);
   }
 }
 } // namespace jit

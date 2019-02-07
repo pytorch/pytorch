@@ -44,7 +44,7 @@ void inline flip_cpu_kernel(
   }
 }
 
-Tensor flip_cpu(const Tensor& self, IntList dims) {
+Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t total_dims = in_tensor.dim();
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
@@ -73,7 +73,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   return out_tensor;
 }
 
-Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
+Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }
@@ -103,7 +103,7 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
   return at::stack(vec, dim);
 }
 
-Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
+Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
   const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
 
   AT_CHECK(total_rot_dims == 2,

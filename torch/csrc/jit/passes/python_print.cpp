@@ -359,16 +359,17 @@ struct PythonPrintPass {
       buildConstantList(n, constants);
     buildConstantList(b->return_node(), constants);
   }
+
   // get a new name unique across calls to uniqueName() and
   // anything we have used.
-  size_t next_id = 0;
+  std::unordered_map<std::string, size_t> next_id;
 
   std::string genNameImpl(
       const std::string& candidate,
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id++);
+      name = candidate + std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -402,7 +403,7 @@ struct PythonPrintPass {
   // use the uniqueName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "_");
+        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use
@@ -796,7 +797,7 @@ struct PythonPrintPass {
         // we need to annotate it, otherwise it won't be possible
         // to infer the type on import
         if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(DynamicType::get())) {
+            !node->output()->type()->isSubtypeOf(TensorType::get())) {
           stmt << "annotate(" << node->output()->type()->python_str()
                << ", [])";
         } else {
@@ -807,7 +808,7 @@ struct PythonPrintPass {
         auto dict_type = node->output()->type()->expect<DictType>();
         if (node->inputs().size() == 0 &&
             !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            !dict_type->getValueType()->isSubtypeOf(DynamicType::get())) {
+            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
           stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
         } else {
           printDict(stmt, node->inputs());
@@ -1006,7 +1007,6 @@ struct PythonPrintPass {
   }
   void printMethod(script::Method& method) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), parameter_names);
     printMethod(method, parameter_names);
@@ -1027,7 +1027,6 @@ struct PythonPrintPass {
   }
   void printModule(script::Module& module) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), parameter_names);
     for (auto& method : module.get_methods()) {

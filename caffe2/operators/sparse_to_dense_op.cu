@@ -38,7 +38,7 @@ namespace caffe2 {
     CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& sparse_values = Input(VALUES);
     CAFFE_ENFORCE_GE(sparse_values.dim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.size(), sparse_values.dim(0));
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const int32_t sparse_indices_len = sparse_indices.dim32(0);
@@ -51,13 +51,13 @@ namespace caffe2 {
     auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
-    math::Set<TData>(output->size(), TData(0), output_data, &context_);
+    math::Set<TData>(output->numel(), TData(0), output_data, &context_);
 
     const auto block_nitems = sparse_values.size_from_dim(1);
     const TData* sparse_values_vec = sparse_values.template data<TData>();
 
     size_t N = block_nitems * sparse_indices_len;
-    CAFFE_ENFORCE_EQ(output->size(), output_first_dim * block_nitems);
+    CAFFE_ENFORCE_EQ(output->numel(), output_first_dim * block_nitems);
     SparseToDenseKernel<TInd, TData><<<
       CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS, 0,
       context_.cuda_stream()>>>(

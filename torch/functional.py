@@ -8,7 +8,6 @@ from collections import Iterable
 from torch._utils import annotate
 from itertools import product
 import math
-from typing import Optional, Tuple, List, Union
 import warnings
 
 __all__ = [

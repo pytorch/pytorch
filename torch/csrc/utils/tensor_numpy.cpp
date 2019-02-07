@@ -30,7 +30,7 @@ using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
-static std::vector<npy_intp> to_numpy_shape(IntList x) {
+static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
