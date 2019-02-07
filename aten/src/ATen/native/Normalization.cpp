@@ -348,7 +348,7 @@ Tensor instance_norm(
   return out.view(input.sizes());
 }
 
-Tensor layer_norm(const Tensor& input, IntList normalized_shape,
+Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     double eps, bool cudnn_enabled) {
 

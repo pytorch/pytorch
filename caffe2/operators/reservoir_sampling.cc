@@ -106,6 +106,13 @@ class ReservoirSamplingOp final : public Operator<Context> {
     output->ExtendTo(output_num, 50);
     if (pos_to_object) {
       pos_to_object->ExtendTo(output_num, 50);
+      // ExtendTo doesn't zero-initialize tensors any more, explicitly clear
+      // the memory
+      memset(
+          pos_to_object->template mutable_data<int64_t>() +
+              output_batch_size * sizeof(int64_t),
+          0,
+          (output_num - output_batch_size) * sizeof(int64_t));
     }
 
     auto* output_data =

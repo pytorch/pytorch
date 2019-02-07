@@ -106,7 +106,7 @@ struct PDist {
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=](int64_t k, int64_t end) {
+    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start, combs](int64_t k, int64_t end) {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
@@ -234,7 +234,7 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=](int64_t l, int64_t end) {
+    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
       const scalar_t * self_l = self_start + l * Vec::size();

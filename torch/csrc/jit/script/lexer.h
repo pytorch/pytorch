@@ -39,6 +39,7 @@ namespace script {
   _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_DICT, "dict", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
@@ -79,6 +80,7 @@ namespace script {
   _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
   _(TK_NOTHING, "nothing", "")                   \
+  _(TK_DICT_LITERAL, "dict-literal", "")         \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \

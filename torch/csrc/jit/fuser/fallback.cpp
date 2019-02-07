@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/fuser/fallback.h>
 
+#include <ATen/core/functional.h> //fmap
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/stack.h>
-#include <torch/csrc/utils/functional.h> //fmap
 
 #include <stdexcept>
 

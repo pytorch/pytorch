@@ -257,10 +257,11 @@ void computeOutputHW(
     int* OH,
     int* OW) {
   Tensor input = caffe2::empty({1, 1, H, W}, at::dtype<float>().device(CPU));
-  auto sizes = op->GetOutputSize(input, 1);
-  CAFFE_ENFORCE_EQ(sizes.size(), 4);
-  *OH = sizes[2];
-  *OW = sizes[3];
+  Tensor output(CPU);
+  op->SetOutputSize(input, &output, 1);
+  CAFFE_ENFORCE_EQ(output.dim(), 4);
+  *OH = output.size(2);
+  *OW = output.size(3);
 }
 
 constexpr int computeMPSAlignOffset(int kernel, int pad) {

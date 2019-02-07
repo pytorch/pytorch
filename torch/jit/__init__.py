@@ -9,12 +9,14 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
+from torch._jit_internal import ignore
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
 
 import math
 from collections import defaultdict, OrderedDict, namedtuple
+import textwrap
 import sys
 import warnings
 import itertools
@@ -738,6 +740,14 @@ def _try_get_weak_module(mod):
     return _jit_internal.weak_modules.get(mod)
 
 
+def _try_get_ignored_op(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return fn in _jit_internal.ignored_fns
+
+
 def _is_weak_type(cls):
     """
     Check if a type has been annotated with `weak_module`
@@ -908,13 +918,13 @@ def _get_valid_constant(attr, v):
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(
-        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
-        "is not a valid constant.\n" +
-        "Valid constants are:\n" +
-        "  1. a nn.ModuleList\n" +
-        "  2. a value of type {{{}}}\n".format(constants) +
-        "  3. a list or tuple of (2)\n")
+    raise TypeError(textwrap.dedent("""
+        '{}' object for attribute '{}' is not a valid constant.
+        Valid constants are:
+          1. a nn.ModuleList
+          2. a value of type {{{}}}
+          3. a list or tuple of (2)
+        """.format(type(v).__name__, attr, constants)))
 
 
 def _create_methods_from_stubs(self, stubs):
@@ -1232,7 +1242,9 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 else:
-    ScriptModule = torch.nn.Module
+    class ScriptModule(torch.nn.Module):
+        def __init__(self, optimize=True):
+            super(ScriptModule, self).__init__()
 
 
 def _get_weak_stubs(cls):

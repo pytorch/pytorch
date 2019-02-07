@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -359,16 +359,17 @@ struct PythonPrintPass {
       buildConstantList(n, constants);
     buildConstantList(b->return_node(), constants);
   }
+
   // get a new name unique across calls to uniqueName() and
   // anything we have used.
-  size_t next_id = 0;
+  std::unordered_map<std::string, size_t> next_id;
 
   std::string genNameImpl(
       const std::string& candidate,
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id++);
+      name = candidate + std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -402,7 +403,7 @@ struct PythonPrintPass {
   // use the uniqueName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "_");
+        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use
@@ -444,7 +445,7 @@ struct PythonPrintPass {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Pretty printer expected 2 lists of same size");
+      AT_ERROR("Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
@@ -462,6 +463,25 @@ struct PythonPrintPass {
     for (auto* value : list) {
       stmt << delimiter;
       stmt << useOf(value);
+      delimiter = ", ";
+    }
+    stmt << end;
+  }
+
+  void printDict(
+      std::ostream& stmt,
+      at::ArrayRef<Value*> key_value_pairs,
+      const char* begin = "{",
+      const char* end = "}") {
+    stmt << begin;
+    auto delimiter = "";
+    for (size_t i = 0; i < key_value_pairs.size(); i += 2) {
+      stmt << delimiter;
+      auto key = key_value_pairs[i];
+      auto value = key_value_pairs[i + 1];
+
+      stmt << useOf(key) << ": " << useOf(value);
+
       delimiter = ", ";
     }
     stmt << end;
@@ -577,6 +597,15 @@ struct PythonPrintPass {
   void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
+    if (node->kind() == prim::PythonOp) {
+      auto value = static_cast<const PythonOp*>(node);
+      if (enforce_importable_ && value->ignore_on_export) {
+          // Op has been marked as ignored, so insert an error in its place
+          indent();
+          out << "ops.prim.IgnoredPythonOp()\n";
+          return;
+      }
+    }
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -610,7 +639,6 @@ struct PythonPrintPass {
         out << useOf(node->input()) << "\n";
         break;
       default:
-
         std::stringstream ss;
         printRHS(ss, node);
 
@@ -685,7 +713,7 @@ struct PythonPrintPass {
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
-              << ". Remove calls to python functions before export.";
+              << ". Remove calls to Python functions before export";
         }
 
         stmt << "^" << value->name();
@@ -702,12 +730,6 @@ struct PythonPrintPass {
           stmt << "None";
           break;
         }
-        // XXX - we'd like to just print None in these circumstances
-        // but implicit conversions from None to Tensor/Generator
-        // are not always considered. E.g. if they are being put into a list.
-        // Fixing this depends on removing specializations for Optional[Tensor]
-        // an Optional[Generator] and universally using None.
-
         // XXX - when None has an Optional[T] type, we must ensure that type
         // can be recovered on parsing. It cannot be recovered if it will be
         // matched to schema with free variables. If it is used only in places
@@ -769,12 +791,26 @@ struct PythonPrintPass {
         // we need to annotate it, otherwise it won't be possible
         // to infer the type on import
         if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(DynamicType::get())) {
+            !node->output()->type()->isSubtypeOf(TensorType::get())) {
           stmt << "annotate(" << node->output()->type()->python_str()
                << ", [])";
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
+      } break;
+      case prim::DictConstruct: {
+        auto dict_type = node->output()->type()->expect<DictType>();
+        if (node->inputs().size() == 0 &&
+            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+        } else {
+          printDict(stmt, node->inputs());
+        }
+      } break;
+      case prim::DictIndex: {
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
@@ -864,15 +900,6 @@ struct PythonPrintPass {
       return;
     }
     stmt << "=";
-    if (value.isTensor() && !value.toTensor().defined()) {
-      // XXX - because undefined tensors are not stored as None, we need special
-      // handling. otherwise they get printed as CONSTANTS.c0 and then cannot be
-      // recreated because constant nodes cannot have an undefined value in
-      // them. The right solution is to make None of type Tensor actually be an
-      // IValue None.
-      stmt << "None";
-      return;
-    }
     printConstant(stmt, value);
   }
   void printFunctionDefinition(
@@ -965,7 +992,6 @@ struct PythonPrintPass {
   }
   void printMethod(script::Method& method) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), parameter_names);
     printMethod(method, parameter_names);
@@ -986,7 +1012,6 @@ struct PythonPrintPass {
   }
   void printModule(script::Module& module) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
-    ;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), parameter_names);
     for (auto& method : module.get_methods()) {
@@ -1044,12 +1069,14 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::Constant,
       prim::fork,
       prim::ListConstruct,
+      prim::DictConstruct,
       prim::ListUnpack,
       prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
+      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,

@@ -43,8 +43,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     double Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
 
-    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X.t, W.t.dim32(0));
-    ReinitializeTensor(&(Y->t), sizes, at::dtype<uint8_t>().device(CPU));
+    ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), W.t.dim32(0));
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
@@ -88,8 +87,13 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
             Y->zero_point,
             Y->scale,
             activationLimits(Y->scale, Y->zero_point, Ac).first,
