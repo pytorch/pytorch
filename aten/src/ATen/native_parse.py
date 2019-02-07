@@ -48,9 +48,9 @@ def type_argument_translations(arg):
     # Enables Tensor[] by translating to legacy TensorList.
     elif t == 'Tensor[]':
         t = 'TensorList'
-    # Enables int[] by translating to legacy IntList.
+    # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
-        t = 'IntList'
+        t = 'IntArrayRef'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -59,10 +59,10 @@ def type_argument_translations(arg):
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
-    # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
+    # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
-        t = 'IntList'
+        t = 'IntArrayRef'
         size = int(match.group(1))
     # Enables bool[x] by translating to legacy std::array<bool,x>. See [temp translations]
     elif re.match(r'bool\[(\d+)\]', t):

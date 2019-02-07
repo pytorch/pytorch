@@ -198,7 +198,7 @@ def get_pip_packages(run_lambda):
             grep_cmd = r'findstr /R "numpy torch"'
         else:
             grep_cmd = r'grep "torch\|numpy"'
-        return run_and_read_all(run_lambda, pip + ' list --format=legacy | ' + grep_cmd)
+        return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
 
     if not PY3:
         return 'pip', run_with_pip('pip')
