@@ -10,14 +10,11 @@
 
 namespace caffe2 {
 
-DECLARE_FUNCTION_SCHEMA_OPERATOR(BBoxTransform);
-
 template <typename T, class Context>
 class BBoxTransformOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  BBoxTransformOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  BBoxTransformOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         weights_(this->template GetRepeatedArgument<T>(
             "weights",
             vector<T>{1.0f, 1.0f, 1.0f, 1.0f})),

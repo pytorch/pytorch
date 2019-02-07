@@ -143,7 +143,11 @@ activationLimits(float scale, int32_t zero_point, Activation Ac) {
       return {QuantizeUint8(scale, zero_point, 0.0),
               std::numeric_limits<uint8_t>::max()};
     default:
+#ifdef _MSC_VER
+      __assume(0);
+#else
       __builtin_unreachable();
+#endif
   }
 }
 
