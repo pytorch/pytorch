@@ -919,7 +919,7 @@ class Caffe2Backend(Backend):
         if device.type == DeviceType.CPU:
             return True
         elif core.IsGPUDeviceType(device.type):
-            return workspace.has_gpu_support or workspace.has_hip_support
+            return workspace.has_gpu_support
         return False
 
     @classmethod
