@@ -17,11 +17,13 @@ namespace caffe2 {
 
 namespace {
 
+using ShapeInfoMap = std::unordered_map<std::string, ShapeInfo>;
+
 const std::string kNetPos("net_pos");
 const std::string kModelId("model_id");
 constexpr size_t kBufferSize = 64;
 
-void AnnotateOpIndex(NetDef* net, const std::string& net_id) {
+void AnnotateOpIndex(NetDef* net) {
   int i = 0;
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
@@ -38,14 +40,24 @@ std::string GetModelId(const NetDef& net) {
   return model_id;
 }
 
+// Convert ShapeInfo map to TensorShape map
+std::unordered_map<std::string, TensorShape> StripShapeInfoMap(
+    const ShapeInfoMap& info_map) {
+  std::unordered_map<std::string, TensorShape> shape_map;
+  for (const auto& kv : info_map) {
+    shape_map.emplace(kv.first, kv.second.shape);
+  }
+  return shape_map;
+}
+
 // Wrap TensorShape into TensorProto
-TensorProto WrapShapeIntoTensorProto(
+TensorProto WrapShapeInfoIntoTensorProto(
     const std::string& name,
-    const TensorShape& shape) {
+    const ShapeInfo& shape_info) {
   TensorProto t;
   t.set_name(name);
-  t.set_data_type(shape.data_type());
-  for (const auto i : shape.dims()) {
+  t.set_data_type(shape_info.shape.data_type());
+  for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
   return t;
@@ -72,29 +84,45 @@ uint64_t OnnxifiDataType(caffe2::TensorProto::DataType t) {
 #undef CAFFE2_TO_ONNXIFI_TYPE
 }
 
-std::unordered_map<std::string, TensorShape> InferShapes(
+// TODO: Use ShapeInfo instead of shape
+ShapeInfoMap InferShapes(
     Workspace* ws,
     NetDef* pred_net,
     CaffeMap<std::string, TensorShape>* shape_hints_ordered,
-    bool infer_shapes) {
-  std::unordered_map<std::string, TensorShape> shape_hints;
+    bool infer_shapes,
+    const BoundShapeSpec& spec) {
+  ShapeInfoMap shape_map;
   if (infer_shapes) {
     // Populate shapes from workplace
     const std::vector<std::string> ws_blobs = ws->Blobs();
     for (const auto& s : ws_blobs) {
       auto shape = GetTensorShapeOfBlob(ws->GetBlob(s));
       if (!shape.unknown_shape()) {
-        shape_hints_ordered->emplace(s, std::move(shape));
+        shape_map.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(s),
+            std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, shape));
       }
     }
-
-    std::vector<NetDef*> nets;
-    nets.emplace_back(pred_net);
-    InferBlobShapesAndTypes(*shape_hints_ordered, nets);
     for (const auto& kv : *shape_hints_ordered) {
-      shape_hints.emplace(kv.first, kv.second);
+      shape_map.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(kv.first),
+          std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, kv.second));
+    }
+    BoundShapeInferencer eng(spec);
+    eng.InferBoundShapeAndType(*pred_net, shape_map);
+    const auto& out_map = eng.shape_info();
+
+    for (const auto& kv : out_map) {
+      shape_map.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(kv.first),
+          std::forward_as_tuple(
+              ShapeInfo::DimType::CONSTANT, kv.second.shape));
     }
   } else {
+    // TODO: deprecate this path
     Workspace ws_local(ws);
     ws_local.RunNetOnce(*pred_net);
     const std::vector<std::string> ws_blobs = ws_local.Blobs();
@@ -102,12 +130,16 @@ std::unordered_map<std::string, TensorShape> InferShapes(
       const Blob* b = ws_local.GetBlob(s);
       auto shape = GetTensorShapeOfBlob(b);
       if (!shape.unknown_shape()) {
-        shape_hints.emplace(s, std::move(shape));
+        shape_map.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(s),
+            std::forward_as_tuple(
+                ShapeInfo::DimType::CONSTANT, std::move(shape)));
       }
     }
   }
 
-  return shape_hints;
+  return shape_map;
 }
 
 std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
@@ -200,6 +232,147 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   opset_id->set_domain("");
   opset_id->set_version(7);
 }
+
+string MkBatchSizeBlob() {
+  return "real_batch_size";
+}
+
+string MkSeqSizeBlob(const string& blob_name) {
+  return blob_name + "_real_seq_size";
+}
+
+string MkOutputForAdjustBatchOp(const string& input) {
+  return input + "_post_adjust_batch";
+}
+
+string MkInputForAdjustBatchOp(const string& output) {
+  return output + "_pre_adjust_batch";
+}
+
+OperatorDef MkAdjustBatchOp(
+    const string& input_blob,
+    const string& output_blob,
+    int max_batch_size,
+    const string& real_batch_size_blob,
+    bool adjust_to_max_batch_size) {
+  OperatorDef adjust_batch_op;
+  adjust_batch_op.set_type("AdjustBatch");
+  auto* arg = adjust_batch_op.add_arg();
+  arg->set_name("max_batch_size");
+  arg->set_i(max_batch_size);
+  adjust_batch_op.add_input(input_blob);
+  adjust_batch_op.add_output(output_blob);
+  if (adjust_to_max_batch_size) {
+    adjust_batch_op.add_output(real_batch_size_blob);
+  } else {
+    adjust_batch_op.add_input(real_batch_size_blob);
+  }
+  return adjust_batch_op;
+}
+
+std::unordered_set<string> ToHashSet(
+    const ::google::protobuf::RepeatedPtrField<string>& strs) {
+  return std::unordered_set<string>(strs.begin(), strs.end());
+}
+
+int64_t GetBlob1stDimSize(
+    const ShapeInfo& shape_info,
+    const string& blob_name) {
+  CAFFE_ENFORCE(
+      shape_info.shape.dims_size() > 0 && shape_info.shape.dims(0) > 0,
+      "Tensor " + blob_name +
+          " is type BATCH / SEQ, however the batch_size is unknown. " +
+          "Dims size: " + to_string(shape_info.shape.dims_size()) +
+          ", dim[0] = " + to_string(shape_info.shape.dims(0)));
+  return shape_info.shape.dims(0);
+}
+
+// Generates AdjustBatchOps for external inputs / outputs with type BATCH or
+// SEQ and adds them to input_ops and output_ops.
+// Meanwhile, modifies inputs / outputs of corresponding operators in the
+// wrapper_net to use the new inputs / outputs of AdjustBatchOps.
+void AddAdjustBatchOps(
+    const ShapeInfoMap& shape_hints,
+    NetDef* wrapper_net,
+    vector<OperatorDef>* input_ops,
+    vector<OperatorDef>* output_ops) {
+  const auto external_inputs = ToHashSet(wrapper_net->external_input());
+  const auto external_outputs = ToHashSet(wrapper_net->external_output());
+
+  for (auto& op : *(wrapper_net->mutable_op())) {
+    // Add AdjustBatchOp for all external inputs with type BATCH or SEQ.
+    // This will adjust the batch/seq size to the batch/seq size inferred by
+    // bound_shape_inference.
+    for (auto& input_blob : *(op.mutable_input())) {
+      if (external_inputs.count(input_blob)) {
+        auto shape_info_it = shape_hints.find(input_blob);
+        if (shape_info_it == shape_hints.end()) {
+          LOG(WARNING) << "Cannot find shape_info for external input blob: "
+                       << input_blob;
+          continue;
+        }
+        string real_batch_size_blob = "";
+        if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
+          real_batch_size_blob = MkBatchSizeBlob();
+        } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
+          real_batch_size_blob = MkSeqSizeBlob(input_blob);
+        } else {
+          continue;
+        }
+        auto output_blob = MkOutputForAdjustBatchOp(input_blob);
+        input_ops->push_back(MkAdjustBatchOp(
+            input_blob,
+            output_blob,
+            GetBlob1stDimSize(shape_info_it->second, input_blob),
+            real_batch_size_blob,
+            true /* adjust_to_max_batch_size */));
+        input_blob = output_blob;
+      }
+    }
+    // Add AdjustBatchOp for all external outputs with type BATCH.
+    // This will adjust the batch size to the original batch size.
+    for (auto& output_blob : *(op.mutable_output())) {
+      if (external_outputs.count(output_blob)) {
+        auto shape_info_it = shape_hints.find(output_blob);
+        if (shape_info_it == shape_hints.end()) {
+          continue;
+        }
+        if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
+          auto input_blob = MkInputForAdjustBatchOp(output_blob);
+          output_ops->push_back(MkAdjustBatchOp(
+              input_blob,
+              output_blob,
+              GetBlob1stDimSize(shape_info_it->second, output_blob),
+              MkBatchSizeBlob(),
+              false /* adjust_to_max_batch_size */));
+          output_blob = input_blob;
+        } else {
+          CAFFE_ENFORCE(
+              shape_info_it->second.dim_type != ShapeInfo::DimType::SEQ,
+              "Output tensor " + output_blob +
+                  " should never have dim_type SEQ.");
+        }
+      }
+    }
+  }
+}
+
+NetDef ComposeResultNet(
+    const vector<OperatorDef>& input_ops,
+    const vector<OperatorDef>& output_ops,
+    const OperatorDef& onnxifi_op) {
+  NetDef net_opt;
+  for (const auto& op : input_ops) {
+    *(net_opt.add_op()) = op;
+  }
+  *(net_opt.add_op()) = onnxifi_op;
+  // Add AdjustBatch ops for output blobs to the net.
+  for (const auto& op : output_ops) {
+    *(net_opt.add_op()) = op;
+  }
+  return net_opt;
+}
+
 } // namespace
 
 OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
@@ -294,7 +467,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
 NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     const caffe2::NetDef& net,
     const std::unordered_set<std::string>& weights_in_ws,
-    const std::unordered_map<std::string, TensorShape>& shape_hints) {
+    const ShapeInfoMap& shape_hints) {
   // We already have all the ops and external inputs and outputs!
   NetDef wrapper_net(net);
 
@@ -304,7 +477,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     const auto it = shape_hints.find(o);
     CAFFE_ENFORCE(
         it != shape_hints.end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second;
+    const auto& shape = it->second.shape;
     output_shape_hints.emplace(o, shape);
   }
 
@@ -330,6 +503,10 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     }
   }
 
+  vector<OperatorDef> input_ops;
+  vector<OperatorDef> output_ops;
+  AddAdjustBatchOps(shape_hints, &wrapper_net, &input_ops, &output_ops);
+
   // Figure out weights and add it to external_inputs too
   std::vector<std::string> extra_weights;
   std::unordered_set<std::string> initialization_list;
@@ -346,26 +523,20 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   for (const auto& i : total_inputs_vec) {
     wrapper_net.add_external_input(i);
     shape_arg->mutable_tensors()->Add()->CopyFrom(
-        WrapShapeIntoTensorProto(i, shape_hints.at(i)));
+        WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
   }
+
+  // Build ONNXIFI Op
+  std::string model_str;
+  wrapper_net.SerializeToString(&model_str);
+  auto onnxifi_op = BuildOnnxifiOp(
+      model_str, output_shape_hints, initialization_list, net_copy);
+  NetDef net_opt = ComposeResultNet(input_ops, output_ops, onnxifi_op);
 
   // Debugging stuff
   if (opts_.debug) {
-    WriteProtoToTextFile(wrapper_net, "debug.pb_txt");
-  }
-
-  // C2 model is ready. Build ONNXIFI Op
-  std::string model_str;
-  wrapper_net.SerializeToString(&model_str);
-  NetDef net_opt;
-  auto* op = net_opt.add_op();
-  *op = BuildOnnxifiOp(
-      model_str, output_shape_hints, initialization_list, net_copy);
-  for (const auto& i : op->input()) {
-    net_opt.add_external_input(i);
-  }
-  for (const auto& o : op->output()) {
-    net_opt.add_external_output(o);
+    WriteProtoToTextFile(wrapper_net, "debug_wrapper_net.pb_txt");
+    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt");
   }
   return net_opt;
 }
@@ -375,9 +546,15 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     const std::unordered_set<std::string>& weights_in_ws,
     Workspace* ws,
     onnx::OnnxExporter* exporter,
-    std::unordered_map<std::string, TensorShape>* shape_hints) {
+    ShapeInfoMap* shape_hints,
+    std::unordered_map<std::string, TensorShape>* shape_hints_onnx) {
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   FillModelInfo(&onnx_model);
+
+  caffe2::NetDef wrapper_net(net);
+  vector<OperatorDef> input_ops;
+  vector<OperatorDef> output_ops;
+  AddAdjustBatchOps(*shape_hints, &wrapper_net, &input_ops, &output_ops);
 
   // Convert c2 ops to onnx ops, add const weights if there are any
   DeviceOption option;
@@ -385,7 +562,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   context.SwitchToDevice();
   std::vector<std::string> extra_weights;
   for (const auto& op : net.op()) {
-    const auto results = exporter->Caffe2OpToOnnxNodes(op, *shape_hints);
+    const auto results = exporter->Caffe2OpToOnnxNodes(op, *shape_hints_onnx);
     for (const auto& n : results.first) {
       onnx_model.mutable_graph()->add_node()->CopyFrom(n);
     }
@@ -393,7 +570,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       VLOG(2) << "Adding extra init tensor: " << t.name();
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
-      shape_hints->emplace(t.name(), std::move(shape));
+      auto ret = shape_hints_onnx->emplace(t.name(), std::move(shape));
+      shape_hints->emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(ret.first->first),
+          std::forward_as_tuple(
+              ShapeInfo::DimType::CONSTANT, ret.first->second));
 
       // Feed into workspace as CPU Tensors
       auto* blob = ws->CreateBlob(t.name());
@@ -434,14 +616,14 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   }
   auto io_vec = ConvertToValueInfo(
       io_names,
-      *shape_hints,
+      *shape_hints_onnx,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
   std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints->find(i.name());
+    const auto it = shape_hints_onnx->find(i.name());
     CAFFE_ENFORCE(
-        it != shape_hints->end(),
+        it != shape_hints_onnx->end(),
         "Cannot find shape info for output ",
         i.name());
     const auto& shape = it->second;
@@ -459,7 +641,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       &total_inputs_vec);
   io_vec = ConvertToValueInfo(
       total_inputs_vec,
-      *shape_hints,
+      *shape_hints_onnx,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
@@ -473,15 +655,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   // Onnx model is ready. Build ONNXIFI Op
   std::string model_str;
   onnx_model.SerializeToString(&model_str);
-  NetDef net_opt;
-  auto* op = net_opt.add_op();
-  *op = BuildOnnxifiOp(model_str, output_shape_hints, initialization_list, net);
-  for (const auto& i : op->input()) {
-    net_opt.add_external_input(i);
-  }
-  for (const auto& i : op->output()) {
-    net_opt.add_external_output(i);
-  }
+  auto onnxifi_op =
+      BuildOnnxifiOp(model_str, output_shape_hints, initialization_list, net);
+  NetDef net_opt = ComposeResultNet(input_ops, output_ops, onnxifi_op);
 
   return net_opt;
 }
@@ -492,7 +668,7 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
-  AnnotateOpIndex(pred_net, model_id_);
+  AnnotateOpIndex(pred_net);
   std::vector<std::string> external_inputs;
   for (const auto kv : input_mapping_) {
     reverse_input_mapping_.emplace(kv.second, kv.first);
@@ -519,7 +695,7 @@ NetDef OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
-    const std::unordered_map<std::string, TensorShape>& shape_hints) {
+    const ShapeInfoMap& shape_hints) {
   onnxifi_library* backend = lib_;
   idx_ = 0;
   // Try to find a backend that support Caffe2 proto. Note that this is quite
@@ -567,13 +743,13 @@ NetDef OnnxifiTransformer::TransformViaC2(
       shape_arg->set_name("input_shape_info");
       for (const auto& i : op.input()) {
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
       }
       shape_arg = net.add_arg();
       shape_arg->set_name("output_shape_info");
       for (const auto& i : op.output()) {
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
       }
 
       std::string c2_model_str;
@@ -606,13 +782,15 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
-    std::unordered_map<std::string, TensorShape>* shape_hints) {
+    ShapeInfoMap* shape_hints) {
   onnxifi_library* backend = lib_;
   onnxBackendID backend_id = backend_ids_[0];
+  auto shape_hints_onnx = StripShapeInfoMap(*shape_hints);
+
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   onnx::OnnxExporter exporter(nullptr);
   auto onnx_supports = [&exporter,
-                        shape_hints,
+                        &shape_hints_onnx,
                         &blacklisted_ops,
                         backend,
                         backend_id](const caffe2::OperatorDef& op) {
@@ -633,7 +811,7 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
 
       ::ONNX_NAMESPACE::ModelProto onnx_model;
       FillModelInfo(&onnx_model);
-      auto results = exporter.Caffe2OpToOnnxNodes(op, *shape_hints);
+      auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints_onnx);
       std::unordered_set<std::string> used_inputs;
       std::unordered_set<std::string> used_outputs;
       std::vector<std::string> boundary_inputs;
@@ -681,13 +859,13 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
       }
 
       // Add input/output shape info
-      auto io_vec =
-          ConvertToValueInfo(boundary_inputs, *shape_hints, extra_shape_hints);
+      auto io_vec = ConvertToValueInfo(
+          boundary_inputs, shape_hints_onnx, extra_shape_hints);
       for (const auto& i : io_vec) {
         onnx_model.mutable_graph()->add_input()->CopyFrom(i);
       }
-      io_vec =
-          ConvertToValueInfo(boundary_outputs, *shape_hints, extra_shape_hints);
+      io_vec = ConvertToValueInfo(
+          boundary_outputs, shape_hints_onnx, extra_shape_hints);
       for (const auto& i : io_vec) {
         onnx_model.mutable_graph()->add_output()->CopyFrom(i);
       }
@@ -714,10 +892,12 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
   // the same exporter throughout the process to avoid duplicated dummy name
   // generation
   onnx::OnnxExporter exporter2(nullptr);
-  auto onnx_converter = [this, ws, &weights, shape_hints, &exporter2](
-                            const caffe2::NetDef& net) mutable {
-    return SubnetToOnnxifiOpViaOnnx(net, weights, ws, &exporter2, shape_hints);
-  };
+  auto onnx_converter =
+      [this, ws, &weights, shape_hints, &shape_hints_onnx, &exporter2](
+          const caffe2::NetDef& net) mutable {
+        return SubnetToOnnxifiOpViaOnnx(
+            net, weights, ws, &exporter2, shape_hints, &shape_hints_onnx);
+      };
 
   return opt::OptimizeForBackend(*pred_net, onnx_supports, onnx_converter);
 }
@@ -743,8 +923,12 @@ void OnnxifiTransformer::Transform(
 
   // Populate shape info
   Workspace mapped_ws(ws, input_mapping_);
-  std::unordered_map<std::string, TensorShape> shape_hints = InferShapes(
-      &mapped_ws, pred_net, &shape_hints_ordered, opts_.infer_shapes);
+  ShapeInfoMap shape_hints = InferShapes(
+      &mapped_ws,
+      pred_net,
+      &shape_hints_ordered,
+      opts_.infer_shapes,
+      opts_.bound_shape_spec);
 
   // Figure out what are the weights
   std::unordered_set<std::string> weights;

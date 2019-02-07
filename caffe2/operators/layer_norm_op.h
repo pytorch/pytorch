@@ -8,8 +8,11 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
+
+C10_DECLARE_OP_SCHEMA(LayerNorm);
 
 template <class Context>
 class LayerNormOp final : public Operator<Context> {

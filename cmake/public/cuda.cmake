@@ -9,12 +9,6 @@ endif()
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
- # we dont want to statically link cudart, because we rely on it's dynamic linkage in
- # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
- # Technically, we can link cudart here statically, and link libtorch_python.so
- # to a dynamic libcudart.so, but that's just wasteful
-SET(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
-
 # Find CUDA.
 find_package(CUDA)
 if(NOT CUDA_FOUND)
@@ -95,9 +89,6 @@ endif()
 
 if(DEFINED ENV{CUDNN_LIBRARY})
   set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
-  if (CUDNN_LIBRARY MATCHES ".*cudnn_static.a")
-    SET(CUDNN_STATIC_LINKAGE ON)
-  endif()
 else()
   find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
@@ -195,7 +186,7 @@ add_library(caffe2::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
 else()
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES

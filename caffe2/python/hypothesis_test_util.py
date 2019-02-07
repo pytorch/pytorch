@@ -277,11 +277,12 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 
 
 cpu_do = caffe2_pb2.DeviceOption()
-gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
+cuda_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
 hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
+gpu_do =  caffe2_pb2.DeviceOption(device_type=workspace.GpuDeviceType) # CUDA or ROCm
 # (bddppq) Do not rely on this no_hip option! It's just used to
 # temporarily skip some flaky tests on ROCM before it's getting more mature.
-_device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+_device_options_no_hip = [cpu_do] + ([cuda_do] if workspace.has_cuda_support else [])
 device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
 
 # Include device option for each GPU
@@ -304,7 +305,8 @@ gcs = dict(
 )
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
-gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+gcs_cuda_only = dict(gc=st.sampled_from([cuda_do]), dc=st.just([cuda_do]))
+gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do])) # CUDA or ROCm
 gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 
