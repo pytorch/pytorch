@@ -23,7 +23,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
-  } else if (auto value = t.cast<TensorType>()) {
+  } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
     for (int i = 0; i < value->dim(); ++i) {
       if (i > 0) {
@@ -55,8 +55,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-DynamicTypePtr DynamicType::get() {
-  static auto value = DynamicType::create();
+TensorTypePtr TensorType::get() {
+  static auto value = TensorType::create();
   return value;
 }
 UndefinedTensorTypePtr UndefinedTensorType::get() {
@@ -96,11 +96,11 @@ DeviceObjTypePtr DeviceObjType::get() {
   return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
-  static auto value = OptionalType::create(DynamicType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 ListTypePtr ListType::ofTensors() {
-  static auto value = ListType::create(DynamicType::get());
+  static auto value = ListType::create(TensorType::get());
   return value;
 }
 ListTypePtr ListType::ofInts() {
@@ -192,8 +192,8 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
 
-  if (t1->isSubtypeOf(DynamicType::get()) && t2->isSubtypeOf(DynamicType::get())) {
-    return static_cast<TypePtr>(DynamicType::get());;
+  if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
+    return static_cast<TypePtr>(TensorType::get());;
   }
 
   // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
