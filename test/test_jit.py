@@ -5537,6 +5537,108 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_filecheck(self):
+        from torch.testing import FileCheckBuilder
+
+        def test_accidental_not_used():
+            def unused():
+                a = FileCheckBuilder()
+
+            with self.capture_stdout() as captured:
+                unused()
+            self.assertTrue("You have not run this instance of FileCheckBuilder"
+                            in captured[0])
+
+        test_accidental_not_used()
+
+        def test_check():
+            file = "232"
+            FileCheckBuilder().check("2").check("3").check("2").run(file)
+            FileCheckBuilder().check("232").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to find '22'"):
+                FileCheckBuilder().check("22").run(file)
+            with self.assertRaisesRegex(RuntimeError, "CHECK:3"):
+                FileCheckBuilder().check("3").check("3").run(file)
+
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheckBuilder().check_count("2", 5).run(file)
+            FileCheckBuilder().check_count("22", 2).run(file)
+            FileCheckBuilder().check_count("222", 1).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to find '22'"):
+                FileCheckBuilder().check_count("22", 3).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "CHECK-COUNT-6:2"):
+                FileCheckBuilder().check_count("2", 6).run(file)
+
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            FileCheckBuilder().check_same("22").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheckBuilder().check_same("33").run(file)
+
+            file = "22  1  3"
+
+            FileCheckBuilder().check("2").check_same("3").run(file)
+            FileCheckBuilder().check_count("2", 2).check_same("3").run(file)
+
+        test_check_same()
+
+        def test_check_next():
+            file = "\n1\n2\n3"
+            FileCheckBuilder().check("1").check_next("2").check_next("3").run(file)
+            FileCheckBuilder().check_next("1").check_next("2").check_next("3").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to find"):
+                FileCheckBuilder().check("1").check_next("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheckBuilder().check("1").check_next("2").run("1\n\n2")
+
+        test_check_next()
+
+        def test_check_dag():
+            fc = FileCheckBuilder().check_dag("1").check_dag("2").check_not("2")
+            fc.run("12")
+            fc.run("21")
+
+            fc = FileCheckBuilder()
+            fc.check_not("3").check_dag("1").check_dag("2").check_not("3")
+            fc.run("1 3 2")
+            fc.run("2 3 1")
+
+            fc = FileCheckBuilder().check_dag("1").check_dag("2").check("3")
+            with self.assertRaisesRegex(RuntimeError, "Expected to find '3' but did not find it"):
+                fc.run("1 3 2")
+
+        test_check_dag()
+
+        def test_check_not():
+            FileCheckBuilder().check_not("2").check("1").run("12")
+            FileCheckBuilder().check("2").check_not("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find '2'"):
+                FileCheckBuilder().check_not("2").check("1").run("21")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find '1'"):
+                FileCheckBuilder().check("2").check_not("1").run("21")
+
+            # checks with distinct range matchings
+            fb = FileCheckBuilder().check_count("2", 2).check_count("2", 2).check_not("2")
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find '2'"):
+                fb.run("22 2 22")
+
+            fb = FileCheckBuilder().check_count("2", 2).check_not("1").check_count("2", 2)
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find '1'"):
+                fb.run("22 1 22")
+
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):

@@ -40,6 +40,7 @@
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
+#include <torch/csrc/jit/testing/init.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <caffe2/serialize/inline_container.h>
@@ -459,6 +460,7 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
+  testing::initJitTestingBindings(module);
   initBatchTensorBindings(module);
   initRegisterBatchOpsBindings(module);
 }
