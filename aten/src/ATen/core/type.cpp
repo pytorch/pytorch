@@ -25,7 +25,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << ")";
   } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
-    for (int i = 0; i < value->dim(); ++i) {
+    for (int64_t i = 0; i < value->dim(); ++i) {
       if (i > 0) {
         out << ", ";
       }

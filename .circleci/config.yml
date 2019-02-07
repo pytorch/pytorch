@@ -797,8 +797,15 @@ binary_linux_upload: &binary_linux_upload
         source /home/circleci/project/env
         declare -x "AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
         declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
-        declare -x "CONDA_USERNAME=${PYTORCH_BINARY_PJH5_CONDA_USERNAME}"
-        declare -x "CONDA_PASSWORD=${PYTORCH_BINARY_PJH5_CONDA_PASSWORD}"
+        cat >/home/circleci/project/login_to_anaconda.sh <<EOL
+        set +x
+        echo "Trying to login to Anaconda"
+        yes | anaconda login \
+            --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
+            --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
+        set -x
+        EOL
+        chmod +x /home/circleci/project/login_to_anaconda.sh
         set -ex
         export PATH="$MINICONDA_ROOT/bin:$PATH"
 
@@ -806,13 +813,7 @@ binary_linux_upload: &binary_linux_upload
         pushd /home/circleci/project/final_pkgs
         if [[ "$PACKAGE_TYPE" == conda ]]; then
           retry conda install -yq anaconda-client
-          set +x
-          echo 'If there is no more output then logging into Anaconda failed'
-          retry timeout 120 \
-              yes | anaconda login \
-                  --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD"
-          set -x
+          retry timeout 30 /home/circleci/project/login_to_anaconda.sh 
           anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
           retry pip install -q awscli
@@ -925,8 +926,15 @@ binary_mac_upload: &binary_mac_upload
       command: |
         export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
         export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
-        export CONDA_USERNAME="${PYTORCH_BINARY_PJH5_CONDA_USERNAME}"
-        export CONDA_PASSWORD="${PYTORCH_BINARY_PJH5_CONDA_PASSWORD}"
+        cat >/Users/distiller/project/login_to_anaconda.sh <<EOL
+        set +x
+        echo "Trying to login to Anaconda"
+        yes | anaconda login \
+            --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
+            --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
+        set -x
+        EOL
+        chmod +x /Users/distiller/project/login_to_anaconda.sh
         set -ex
         source "/Users/distiller/project/env"
         export "PATH=$workdir/miniconda/bin:$PATH"
@@ -934,12 +942,7 @@ binary_mac_upload: &binary_mac_upload
         pushd "$workdir/final_pkgs"
         if [[ "$PACKAGE_TYPE" == conda ]]; then
           retry conda install -yq anaconda-client
-          set +x
-          echo 'If there is no more output then logging into Anaconda failed'
-          retry yes | anaconda login \
-                  --username "$CONDA_USERNAME" \
-                  --password "$CONDA_PASSWORD"
-          set -x
+          retry /Users/distiller/project/login_to_anaconda.sh
           retry anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
           retry pip install -q awscli
@@ -1282,13 +1285,28 @@ jobs:
 
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
-          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
-            # Do a dry_run of the docs build. This will build the docs but not push them.
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          else
+          # master branch docs push
+          if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # stable release docs push. Due to some circleci limitations, we keep
+          # an eternal PR open (#16502) for merging v1.0.1 -> master for this job.
+          # XXX: The following code is only run on the v1.0.1 branch, which might
+          # not be exactly the same as what you see here.
+          elif [[ "${CIRCLE_BRANCH}" == "v1.0.1" ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.0.1") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # For open PRs: Do a dry_run of the docs build, don't push build
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
+
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Save the docs build so we can debug any problems
+          export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
+          docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
+          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
     macos:
