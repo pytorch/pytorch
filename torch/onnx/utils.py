@@ -267,7 +267,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             raise RuntimeError('\'forward\' method must be a script method')
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
-        params = list(_unique_state_dict(model).values())
+        params = list(_unique_state_dict(model).values()).copy()
 
         all_names = list(_unique_state_dict(model).keys())
         if (operator_export_type == OperatorExportTypes.ONNX):
