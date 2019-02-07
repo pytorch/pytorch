@@ -80,6 +80,8 @@ class AliasDb {
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
+  ValueSet getWrites(Block* b) const;
+  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
 
   // Get all the values that `n` reads from.
@@ -110,6 +112,8 @@ class AliasDb {
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
   void analyzeBroadcastingChunk(Node* node);
+  void analyzeFork(Node* node);
+  void analyzeWait(Node* node);
 
   void makeAliasOf(const Value* value, const Value* to);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
