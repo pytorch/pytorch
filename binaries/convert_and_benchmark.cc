@@ -51,14 +51,6 @@ C10_DEFINE_string(
 C10_DEFINE_string(input_images, "", "Comma separated images");
 C10_DEFINE_string(input_image_file, "", "The file containing imput images");
 C10_DEFINE_string(input_text_file, "", "the text file to be written to blobs");
-// C10_DEFINE_string(
-//     output_tensor,
-//     "",
-//     "The output tensor file in NCHW for input images");
-// C10_DEFINE_string(
-//     output_text_tensor,
-//     "",
-//     "The output tensor file for the text input specified in input_text_file");
 C10_DEFINE_string(
     preprocess,
     "",
@@ -79,7 +71,6 @@ C10_DEFINE_string(
     "min pixels. But if the other edge is more than the max pixels, the "
     "other edge and scaled to max pixels (and the shorter edge can be less "
     "than the min pixels");
-// C10_DEFINE_bool(text_output, false, "Write the output in text format.");
 C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
@@ -693,15 +684,6 @@ int benchmark(
     std::ifstream init_net_file(FLAGS_init_net);
     CAFFE_ENFORCE(init_net_file.good());
     init_net_file.close();
-
-    // if (FLAGS_input_file.size() > 0) {
-    //   vector<string> input_files = caffe2::split(',', FLAGS_input_file);
-    //   for (auto input_file : input_files) {
-    //     std::ifstream ifile(input_file);
-    //     CAFFE_ENFORCE(ifile.good());
-    //     ifile.close();
-    //   }
-    // }
   }
 
   observerConfig();
@@ -730,15 +712,6 @@ int benchmark(
 
   int num_blobs = proto_images->protos_size();
 
-  // int num_blobs = loadInput(
-  //     workspace,
-  //     run_on_gpu,
-  //     tensor_protos_map,
-  //     FLAGS_input,
-  //     FLAGS_input_file,
-  //     FLAGS_input_dims,
-  //     FLAGS_input_type);
-  //
   runNetwork(
       workspace,
       net_def,
