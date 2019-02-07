@@ -930,6 +930,10 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+  m.def("_jit_parse_function", [](const std::string& str, bool is_method) {
+    Parser p(str);
+    return Def(p.parseFunction(is_method));
+  });
 }
 
 } // namespace script

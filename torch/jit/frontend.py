@@ -139,12 +139,16 @@ def _uses_true_division(fn):
 
 def get_jit_ast(fn, is_method):
     source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
-    type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
-    return build_def(ctx, py_ast.body[0], type_line, is_method)
+    lines = source.split('\n')
+    if '@' in lines[0]:
+        source = '\n'.join(lines[1:])
+    return torch._C._jit_parse_function(source, is_method)
+    # py_ast = ast.parse(source)
+    # if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
+    #     raise RuntimeError("expected a single top-level function")
+    # type_line = torch.jit.annotations.get_type_line(source)
+    # ctx = SourceContext(source, _uses_true_division(fn))
+    # return build_def(ctx, py_ast.body[0], type_line, is_method)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata

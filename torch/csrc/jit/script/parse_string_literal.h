@@ -36,8 +36,15 @@ inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
 inline std::string parseStringLiteral(
     const SourceRange& range,
     const std::string& str) {
-  int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
-  auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+  size_t offset = 0;
+  if (str[0] == 'r') {
+    offset = 1;
+  }
+  int quote_len = isCharCount(str[offset], str, offset, 3) ? 3 : 1;
+  auto ret_str = str.substr(offset + quote_len, str.size() - (quote_len * 2 + offset));
+  if (offset == 1) {
+    return ret_str;
+  }
   size_t pos = ret_str.find('\\');
   while (pos != std::string::npos) {
     // invariant: pos has to escape a character because it is a valid string

@@ -200,6 +200,11 @@ struct SharedParserData {
   // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
   bool isString(const std::string& str, size_t start, size_t* len) {
+    if (str[start] == 'r' && start + 1 < str.size()) {
+      bool r = isString(str, start + 1, len);
+      *len += 1;
+      return r;
+    }
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
