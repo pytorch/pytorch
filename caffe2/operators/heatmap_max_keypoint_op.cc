@@ -2,19 +2,6 @@
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
-using HeatmapMaxKeypointFloatCPUImpl = HeatmapMaxKeypointOp<float, CPUContext>;
-DEFINE_FUNCTION_SCHEMA_OPERATOR(
-    HeatmapMaxKeypoint,
-    (std::vector<c10::Argument>{
-        c10::Argument("in0"),
-        c10::Argument("in1"),
-        c10::Argument("should_output_softmax", BoolType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("out0"),
-    }),
-    HeatmapMaxKeypointFloatCPUImpl);
-
 namespace {
 
 REGISTER_CPU_OPERATOR(

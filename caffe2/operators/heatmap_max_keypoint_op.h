@@ -10,14 +10,11 @@
 
 namespace caffe2 {
 
-DECLARE_FUNCTION_SCHEMA_OPERATOR(HeatmapMaxKeypoint);
-
 template <typename T, class Context>
 class HeatmapMaxKeypointOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  HeatmapMaxKeypointOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  HeatmapMaxKeypointOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         should_output_softmax_(this->template GetSingleArgument<bool>(
             "should_output_softmax",
             false)) {}
