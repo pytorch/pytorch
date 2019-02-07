@@ -80,16 +80,20 @@ static std::string escapeString(const std::string& input) {
 }
 
 size_t assertFind(
-    std::shared_ptr<std::string> file,
+    const std::string& file,
     const std::string& sub,
-    size_t start) {
-  auto pos = file->find(sub, start);
+    size_t start,
+    std::function<void(std::ostream& out)> extra_msg = nullptr) {
+  auto pos = file.find(sub, start);
   if (pos == std::string::npos) {
-    auto range = SourceRange(file, start, sub.size());
+    auto range =
+        SourceRange(std::make_shared<std::string>(file), start, sub.size());
     std::stringstream ss;
     ss << "Expected to find '" << escapeString(sub)
        << "' but did not find it\n";
     range.highlight(ss);
+    if (extra_msg)
+      extra_msg(ss);
     throw std::runtime_error(ss.str());
   }
   return pos;
@@ -100,19 +104,10 @@ size_t assertFind(
     const std::string& sub,
     size_t start,
     const Check& check) {
-  auto pos = file.find(sub, start);
-  if (pos == std::string::npos) {
-    auto range =
-        SourceRange(std::make_shared<std::string>(file), start, sub.size());
-    std::stringstream ss;
-    ss << "Expected to find '" << escapeString(sub)
-       << "' but did not find it\n";
-    range.highlight(ss);
-    ss << "From the check defined\n";
-    check.source_range_->highlight(ss);
-    throw std::runtime_error(ss.str());
-  }
-  return pos;
+  return assertFind(file, sub, start, [&](std::ostream& out) {
+    out << "From the check defined\n";
+    check.source_range_->highlight(out);
+  });
 }
 
 void assertNotFind(
@@ -171,7 +166,7 @@ struct FileCheckImpl {
         CheckType type = check_pair.first;
         c10::optional<size_t> count = c10::nullopt;
         if (type == CHECK_COUNT) {
-          size_t end = assertFind(check_file, ":", end_check_string);
+          size_t end = assertFind(*check_file, ":", end_check_string);
           count = std::stoll(
               check_file->substr(end_check_string, end - end_check_string));
           end_check_string = end + 1;
@@ -188,16 +183,12 @@ struct FileCheckImpl {
         break;
       }
       start = check_file->find(prefix, start);
-      ;
     }
     return operands;
   }
 
   // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
   void makeGroups(std::vector<Check> input) {
-    if (input.size() == 0) {
-      return;
-    }
     for (size_t i = 0; i < input.size(); ++i) {
       std::vector<Check> group = {input[i]};
       CheckType type = input[i].type_;
@@ -206,7 +197,8 @@ struct FileCheckImpl {
         continue;
       }
       while (i + 1 < input.size() && input[i + 1].type_ == type) {
-        group.push_back(input[++i]);
+        ++i;
+        group.push_back(input[i]);
       }
       groups.push_back(group);
     }
