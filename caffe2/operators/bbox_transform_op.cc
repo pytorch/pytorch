@@ -2,30 +2,6 @@
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
 namespace caffe2 {
-
-using BBoxTransformCPUFloatImpl = BBoxTransformOp<float, CPUContext>;
-
-DEFINE_FUNCTION_SCHEMA_OPERATOR(
-    BBoxTransform,
-    (std::vector<c10::Argument>{
-        c10::Argument("rois"),
-        c10::Argument("deltas"),
-        c10::Argument("im_info"),
-        c10::Argument("weights", ListType::create(FloatType::get())),
-        c10::Argument("apply_scale", BoolType::get()),
-        c10::Argument("correct_transform_coords", BoolType::get()),
-        c10::Argument("rotated", BoolType::get()),
-        c10::Argument("angle_bound_on", BoolType::get()),
-        c10::Argument("angle_bound_lo", IntType::get()),
-        c10::Argument("angle_bound_hi", IntType::get()),
-        c10::Argument("clip_angle_thresh", FloatType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("output_0"),
-        c10::Argument("output_1"),
-    }),
-    BBoxTransformCPUFloatImpl);
-
 namespace {
 
 REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
