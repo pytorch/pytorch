@@ -1,6 +1,4 @@
 #include <torch/csrc/CudaIPCTypes.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <iostream>
 #include <map>
 
