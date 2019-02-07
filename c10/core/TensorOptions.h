@@ -511,6 +511,8 @@ inline TensorTypeId computeTensorTypeId(TensorOptions options) {
           return HIPTensorId();
         case DeviceType::MSNPU:
           return MSNPUTensorId();
+        case DeviceType::XLA:
+          return XLATensorId();
         default:
           AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
       }
@@ -549,6 +551,8 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::HIP;
   } else if (tid == MSNPUTensorId()) {
     return DeviceType::MSNPU;
+  } else if (tid == XLATensorId()) {
+    return DeviceType::XLA;
   } else if (tid == SparseCPUTensorId()) {
     return DeviceType::CPU;
   } else if (tid == SparseCUDATensorId()) {

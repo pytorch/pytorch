@@ -76,13 +76,6 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
-    'index_add',
-    'index_copy',
-    'index_fill',
-    'scatter',
-    'scatter_add',
-    'masked_scatter',
-    'masked_fill',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -108,9 +101,9 @@ def type_to_python(typename, size=None):
     typename = typename.replace(' ', '')  # normalize spaces, e.g., 'Generator *'
 
     # Disambiguate explicitly sized int/tensor lists from implicitly
-    # sized ones.  These permit non-list inputs too.  (IntList[] and
+    # sized ones.  These permit non-list inputs too.  (IntArrayRef[] and
     # TensorList[] are not real types; this is just for convenience.)
-    if typename in {'IntList', 'TensorList'} and size is not None:
+    if typename in {'IntArrayRef', 'TensorList'} and size is not None:
         typename += '[]'
 
     typename = {
@@ -124,8 +117,8 @@ def type_to_python(typename, size=None):
         'IndexTensor': 'Tensor',
         'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
-        'IntList': '_size',
-        'IntList[]': 'Union[_int, _size]',
+        'IntArrayRef': '_size',
+        'IntArrayRef[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
         'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
         'bool': 'bool',
@@ -162,7 +155,7 @@ def arg_to_type_hint(arg):
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
                 default = None
-            elif arg['dynamic_type'] == 'IntList':
+            elif arg['dynamic_type'] == 'IntArrayRef':
                 default = '(' + default[1:-1] + ')'
             else:
                 raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
@@ -286,7 +279,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
         numargs = len(decl['arguments'])
         vararg_pos = int(is_tensor)
         have_vararg_version = (numargs > vararg_pos and
-                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntList', 'TensorList'} and
+                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef', 'TensorList'} and
                                (numargs == vararg_pos + 1 or python_args[vararg_pos + 1] == '*') and
                                (not is_tensor or decl['arguments'][0]['name'] == 'self'))
 
@@ -294,11 +287,11 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         if have_vararg_version:
             # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
-            # is an IntList or TensorList, it will be used as a vararg variant.
+            # is an IntArrayRef or TensorList, it will be used as a vararg variant.
             # The following outputs the vararg variant, the "pass a list variant" is output above.
             # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
             typelist = decl['arguments'][vararg_pos]['dynamic_type']
-            if typelist == 'IntList':
+            if typelist == 'IntArrayRef':
                 vararg_type = '_int'
             else:
                 vararg_type = 'Tensor'
@@ -406,13 +399,13 @@ def gen_pyi(declarations_path, out):
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
         'new_empty': ['def new_empty(self, size: {}, {}) -> Tensor: ...'.
-                      format(type_to_python('IntList'), FACTORY_PARAMS)],
+                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
-                     format(type_to_python('IntList'), FACTORY_PARAMS)],
+                     format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_zeros': ['def new_zeros(self, size: {}, {}) -> Tensor: ...'.
-                      format(type_to_python('IntList'), FACTORY_PARAMS)],
+                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_full': ['def new_full(self, size: {}, value: {}, {}) -> Tensor: ...'.
-                     format(type_to_python('IntList'), type_to_python('Scalar'), FACTORY_PARAMS)],
+                     format(type_to_python('IntArrayRef'), type_to_python('Scalar'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
