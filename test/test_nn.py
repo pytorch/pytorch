@@ -4463,6 +4463,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_padded_sequence_default_cuda_tensor(self):
         # Set default tensor type to cuda.FloatTensor, as this has triggered the error
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
