@@ -6,6 +6,16 @@ namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
+        #def cat(tensors: List[Tensor],
+        #        dim: int=0):
+        #    split_sizes = torch._get_tensor_list_size(tensors, dim)
+
+        #    def backward(grad_output):
+        #        grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
+        #        return grad_tensors, None
+
+        #    return torch.cat(tensors, dim), backward
+
         def mul(self, other):
             def backward(grad_output):
                 grad_self = (grad_output * other)._grad_sum_to_size(self.size())
@@ -20,6 +30,14 @@ const std::vector<std::string> functions = {
                 return grad_tensors, None
 
             return torch.stack(tensors, dim), backward
+
+        def unbind(self,
+                  dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.stack(grad_outputs, dim)
+                return grad_self, None
+
+            return torch.unbind(self, dim), backward
 
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):

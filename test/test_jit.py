@@ -3654,10 +3654,18 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
+        # func2.debug_disable_autodiff_subgraph_inlining()
 
-        x = torch.rand([2, 2])
+        x = torch.rand([2, 2]).requires_grad_()
         y = torch.tensor(1)
-        self.assertEqual(func2(x, y), torch.cat((x, x), y))
+
+        output = func2(x, y)
+        output_ref = torch.cat((x, x), y)
+        self.assertEqual(output, output_ref)
+
+        grad = torch.autograd.grad(output.sum(), x)
+        grad_ref = torch.autograd.grad(output_ref.sum(), x)
+        self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3683,7 +3691,7 @@ a")
             return torch.stack((x, x), y)
         x = torch.rand(10, 10)
         y = 1
-        self.assertEqual(func(x, y), torch.stack((x, x), dim=1))
+        self.assertEqual(func(x, y), torch.stack((x, x), dim=y))
 
         @torch.jit.script
         def func2(x, y):
@@ -3694,13 +3702,38 @@ a")
         x = torch.randn([2, 2]).requires_grad_()
         y = torch.randn([2, 2]).requires_grad_()
 
-        outputs = func2(x, y)
-        outputs_ref = torch.stack((x, y), 0)
+        output = func2(x, y)
+        output_ref = torch.stack((x, y), 0)
+        self.assertEqual(output, output_ref)
+
+        grads = torch.autograd.grad(output.sum(), (x, y))
+        grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
+        self.assertEqual(grads, grads_ref)
+
+    def test_unbind(self):
+        @torch.jit.script
+        def func(x, y):
+            # type: (Tensor, int) -> List[Tensor]
+            return torch.unbind(x, y)
+        func.debug_disable_autodiff_subgraph_inlining()
+
+        x = torch.rand([2, 2]).requires_grad_()
+        y = 0
+        outputs = func(x, y)
+        outputs_ref = torch.unbind(x, dim=y)
         self.assertEqual(outputs, outputs_ref)
 
-        grads = torch.autograd.grad(outputs.sum(), (x, y))
-        grads_ref = torch.autograd.grad(outputs_ref.sum(), (x, y))
-        self.assertEqual(grads, grads_ref)
+        def sum_of_list(tensorlist):
+            s = 0
+            for t in tensorlist:
+                s += t.sum()
+            return s
+
+        import pdb
+        pdb.set_trace()
+        grad = torch.autograd.grad(sum_of_list(outputs), x)
+        grad_ref = torch.autograd.grad(sum_of_list(outputs_ref), x)
+        self.assertEqual(grad, grad_ref)
 
     def test_list_literal(self):
         def reassign():
