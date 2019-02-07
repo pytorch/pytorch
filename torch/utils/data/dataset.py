@@ -74,7 +74,8 @@ class ConcatDataset(Dataset):
 
     def __getitem__(self, idx):
         if idx < 0:
-            assert -idx <= len(self), "absolute value of index should not exceed dataset length"
+            if -idx > len(self):
+             raise ValueError("absolute value of index should not exceed dataset length")
             idx = len(self) + idx
         dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
         if dataset_idx == 0:
