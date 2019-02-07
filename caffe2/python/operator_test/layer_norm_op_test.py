@@ -143,7 +143,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         epsilon = 1e-4
 
         expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
-        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), axis, epsilon)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X), axis, epsilon)
 
         torch.testing.assert_allclose(expected_norm, actual_norm)
         torch.testing.assert_allclose(expected_mean, actual_mean)
@@ -154,7 +154,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         @torch.jit.script
         def jit_layer_norm(tensor, axis, epsilon):
             # type: (Tensor, int, float) -> Tuple[Tensor, Tensor, Tensor]
-            norm, mean, stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(tensor, axis, epsilon)
+            norm, mean, stdev = torch.ops._caffe2.LayerNorm(tensor, axis, epsilon)
             return norm, mean, stdev
 
         axis = np.random.randint(0, len(X.shape))
