@@ -223,8 +223,7 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss, optimized_loss)
         np.testing.assert_almost_equal(grad, optimized_grad)
 
-    @unittest.skipIf(not workspace.has_gpu_support
-                    and not workspace.has_hip_support, "No gpu support.")
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def test_memonger_mix_cpu_gpu(self):
         '''
         Check that memonger does not make blobs cross CPU/GPU boundary
