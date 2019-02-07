@@ -43,7 +43,7 @@ operator_tracebacks = defaultdict(dict)
 is_asan = C.is_asan
 has_cuda_support = C.has_cuda_support
 has_hip_support = C.has_hip_support
-has_gpu_support = has_cuda_support or has_hip_support
+has_gpu_support = C.has_gpu_support
 if has_cuda_support:
     GpuDeviceType = caffe2_pb2.CUDA
     NumCudaDevices = C.num_cuda_devices
