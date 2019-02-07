@@ -135,6 +135,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/caffe2_operator.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
@@ -179,7 +180,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
