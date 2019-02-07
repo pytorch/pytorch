@@ -797,7 +797,7 @@ struct PythonPrintPass {
         // we need to annotate it, otherwise it won't be possible
         // to infer the type on import
         if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(DynamicType::get())) {
+            !node->output()->type()->isSubtypeOf(TensorType::get())) {
           stmt << "annotate(" << node->output()->type()->python_str()
                << ", [])";
         } else {
@@ -808,7 +808,7 @@ struct PythonPrintPass {
         auto dict_type = node->output()->type()->expect<DictType>();
         if (node->inputs().size() == 0 &&
             !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            !dict_type->getValueType()->isSubtypeOf(DynamicType::get())) {
+            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
           stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
         } else {
           printDict(stmt, node->inputs());
