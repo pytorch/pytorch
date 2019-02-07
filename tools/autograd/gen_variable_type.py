@@ -181,9 +181,6 @@ jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
-ADD_TRACE_INPUT_ALLOW_UNDEFINED = CodeTemplate("""\
-jit::tracer::addInputs(node, "${name}", ${input}, ${allow_undefined});
-""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
@@ -278,7 +275,7 @@ def format_trace_inputs(declaration):
         name, value, simple_type, nullable = arg_spec
         # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
         if simple_type == 'TensorList' and nullable:
-            return ADD_TRACE_INPUT_ALLOW_UNDEFINED.substitute(name=name, input=value, allow_undefined="true")
+            return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, value, "true")
         else:
             return ADD_TRACE_INPUT.substitute(name=name, input=value)
 
