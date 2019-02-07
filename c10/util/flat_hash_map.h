@@ -5,7 +5,6 @@
 // - https://github.com/skarupke/flat_hash_map/pull/26
 // - replace size_t with uint64_t to fix it for 32bit
 // - add "GCC diagnostic" pragma to ignore -Wshadow
-// - fix convertible_to_iterator being declared as a private inner class and being defined as a public one
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -294,9 +293,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal
     using Entry = detailv3::sherwood_v3_entry<T>;
     using AllocatorTraits = std::allocator_traits<EntryAlloc>;
     using EntryPointer = typename AllocatorTraits::pointer;
+    struct convertible_to_iterator;
 
 public:
-    struct convertible_to_iterator;
 
     using value_type = T;
     using size_type = uint64_t;
@@ -925,6 +924,7 @@ private:
         return static_cast<Equal &>(*this)(lhs, rhs);
     }
 
+private:
     struct convertible_to_iterator
     {
         EntryPointer it;
