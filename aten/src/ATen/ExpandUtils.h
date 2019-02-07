@@ -159,12 +159,12 @@ static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
 
 // True if `shape` can be broadcasted to `desired`
 static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
-  int ndim = shape.size();
-  int target_dim = desired.size();
+  size_t ndim = shape.size();
+  size_t target_dim = desired.size();
   if (ndim > target_dim) {
     return false;
   }
-  for (int i = 0; i < ndim; i++) {
+  for (size_t i = 0; i < ndim; i++) {
     int64_t size = shape[ndim - i - 1];
     int64_t target = desired[target_dim - i - 1];
     if (size != target && size != 1) {
