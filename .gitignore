@@ -28,6 +28,7 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
 test/.coverage
+test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
 test/data/gpu_tensors.pt
