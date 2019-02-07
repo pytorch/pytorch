@@ -560,7 +560,11 @@ struct DictType : public Type {
   }
 
   DEFINE_IS_SUBCLASS(DictType);
+
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if (rhs->kind() != TypeKind::DictType) {
+      return false;
+    }
     if (auto dict_rhs = rhs->cast<DictType>()) {
       return getKeyType()->isSubtypeOf(dict_rhs->getKeyType()) &&
           getValueType()->isSubtypeOf(dict_rhs->getValueType());
