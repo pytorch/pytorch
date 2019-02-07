@@ -514,7 +514,7 @@ private:
 
 struct DictType;
 using DictTypePtr = std::shared_ptr<DictType>;
-struct DictType : public Type {
+struct CAFFE2_API DictType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::DictType;
 
