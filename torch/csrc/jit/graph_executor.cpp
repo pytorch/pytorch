@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/graph_executor.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -194,7 +195,12 @@ struct DifferentiableGraphOp {
         // Note: we have to set this up in place, or we have to throw away and
         // reallocate variables that were already created in wrapTensors. We
         // should add an API for this.
-        Variable output = outputs[idx].toTensor();
+
+        // XXX: undefined tensor syntax in autograd
+        Variable output;
+        if (!outputs[idx].isNone()) {
+          output = outputs[idx].toTensor();
+        }
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.
