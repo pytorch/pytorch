@@ -2692,7 +2692,7 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
-    @skipIfRocm
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
         u, s, v = torch.svd(A, compute_uv=False)
