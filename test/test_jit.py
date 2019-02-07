@@ -7733,7 +7733,7 @@ a")
         class PythonMod(torch.nn.Module):
             def __init__(self):
                 super(PythonMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
 
             def forward(self, x):
                 return torch.mm(x, self.param)
@@ -7763,7 +7763,7 @@ a")
         class TracedModule(torch.nn.Module):
             def __init__(self):
                 super(TracedModule, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
 
             def forward(self, x):
                 return torch.mm(x, self.param)
@@ -7793,7 +7793,7 @@ a")
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
 
             @torch.jit.script_method
             def forward(self, x):
