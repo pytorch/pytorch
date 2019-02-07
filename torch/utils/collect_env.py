@@ -73,7 +73,8 @@ def get_conda_packages(run_lambda):
         grep_cmd = r'findstr /R "torch soumith mkl magma"'
     else:
         grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
-    out = run_and_read_all(run_lambda, 'conda list | ' + grep_cmd)
+    conda = os.environ.get('CONDA_EXE', 'conda')
+    out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
         return out
     # Comment starting at beginning of line
