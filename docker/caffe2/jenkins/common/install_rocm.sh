@@ -78,12 +78,6 @@ install_centos() {
                    rocrand \
                    rccl
 
-  # Cleanup
-  yum clean all
-  rm -rf /var/cache/yum
-  rm -rf /var/lib/yum/yumdb
-  rm -rf /var/lib/yum/history
-
   # Needed for now, will be replaced once hip-thrust is packaged for CentOS
   git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
   rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
