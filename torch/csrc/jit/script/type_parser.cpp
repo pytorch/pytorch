@@ -8,7 +8,7 @@ namespace script {
 
 const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
-      {"Tensor", DynamicType::get()},
+      {"Tensor", TensorType::get()},
       {"int", IntType::get()},
       {"float", FloatType::get()},
       {"bool", BoolType::get()},
