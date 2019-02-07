@@ -7760,6 +7760,7 @@ class _TestTorchMixin(object):
         long = torch.LongStorage().element_size()
         float = torch.FloatStorage().element_size()
         double = torch.DoubleStorage().element_size()
+        bool = torch.BoolStorage().element_size()
 
         self.assertEqual(byte, torch.ByteTensor().element_size())
         self.assertEqual(char, torch.CharTensor().element_size())
@@ -7776,6 +7777,7 @@ class _TestTorchMixin(object):
         self.assertGreater(long, 0)
         self.assertGreater(float, 0)
         self.assertGreater(double, 0)
+        self.assertGreater(bool, 0)
 
         # These tests are portable, not necessarily strict for your system.
         self.assertEqual(byte, 1)
