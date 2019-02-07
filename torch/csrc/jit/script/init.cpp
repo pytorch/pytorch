@@ -292,9 +292,13 @@ struct ModuleValue : public SugaredValue {
           py_module.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
       } else {
+        std::string hint = "did you forget to add it __constants__?";
+        if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
+          hint = "Tensors must be added to a module as a buffer or parameter";
+        }
         throw ErrorReport(loc)
             << "attribute '" << field << "' of type '" << typeString(attr)
-            << "' is not usable in a script method (did you forget to add it __constants__?)";
+            << "' is not usable in a script method (" << hint << ")";
       }
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
