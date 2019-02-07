@@ -29,7 +29,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 's_copy_', '_s_copy_from'
@@ -671,22 +670,22 @@ def emit_body(declaration):
         pre_call_block = ''
         post_call_block = ''
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
-            if 'unpacked_tensors' in env:
-                for arg in env['unpacked_tensors']:
-                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
-                    pre_call_block += SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)
-            if 'unpacked_tensorlists' in env:
-                for arg in env['unpacked_tensorlists']:
+            for arg in env.get('unpacked_args', []):
+                dynamic_type = env['unpacked_args_dynamic_type'][arg]
+                if dynamic_type == 'TensorList':
                     pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
                     pre_call_block += SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
+                elif dynamic_type in ['IntegerTensor', 'IndexTensor', 'BoolTensor', 'Tensor']:
+                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
+                    pre_call_block += SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
+                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
+                    post_call_block += ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)
         if pre_call_block:
             call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=pre_call_block) + call
         if post_call_block:
-            call = call + "\n" + RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
+            call = call + RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
         return call
 
     def emit_call(env):
@@ -807,12 +806,12 @@ def unpack_args(env, declaration):
 
     body = []
     unpacked_args = []
-    unpacked_tensors = []
-    unpacked_tensorlists = []
+    unpacked_args_dynamic_type = {}
     for i, arg in enumerate(declaration['arguments']):
         dynamic_type = arg['dynamic_type']
         if not requires_unpack(arg):
-            unpacked_args.append((arg['name'], arg['dynamic_type']))
+            unpacked_args.append(arg['name'])
+            unpacked_args_dynamic_type[arg['name']] = dynamic_type
             continue
 
         if 'TensorOptions' not in dynamic_type:
@@ -826,20 +825,17 @@ def unpack_args(env, declaration):
                 suffix=suffix,
                 ref='&' if ref else '',
             ))
-
-            if dynamic_type == 'TensorList':
-                unpacked_tensorlists.append(arg['name'] + '_')
-            elif dynamic_type != 'SparseTensorRef':
-                unpacked_tensors.append(arg['name'] + '_')
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's stll getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
-        unpacked_args.append((arg['name'] + '_', dynamic_type))
+        unpacked_args.append(arg['name'] + '_')
+        unpacked_args_dynamic_type[arg['name'] + '_'] = dynamic_type
 
     env['unpacked_args'] = unpacked_args
+    env['unpacked_args_dynamic_type'] = unpacked_args_dynamic_type
     return body
 
 
