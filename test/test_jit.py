@@ -2975,6 +2975,16 @@ class TestScript(JitTestCase):
             return torch.jit.annotate(float, a)
         self.checkScript(baz, (torch.rand(()),))
 
+        # test annotate none types
+        def annotate_none():
+            return torch.jit.annotate(Optional[torch.Tensor], None)
+
+        def annotate_none_no_optional():
+            return torch.jit.annotate(torch.Tensor, None)
+
+        self.checkScript(annotate_none, ())
+        self.checkScript(annotate_none_no_optional, ())
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
@@ -3453,7 +3463,6 @@ a")
 
             formals = ''.join(map(', {}'.format, formals))
             inputs = [tensor] + values
-
             self._check_code(template.format(formals=formals, expr=indexing),
                              "func", inputs)
 
@@ -10470,6 +10479,7 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_2',
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
+
 }
 
 EXCLUDE_TYPE_CHECK = {

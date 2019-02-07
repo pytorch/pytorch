@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -730,12 +730,6 @@ struct PythonPrintPass {
           stmt << "None";
           break;
         }
-        // XXX - we'd like to just print None in these circumstances
-        // but implicit conversions from None to Tensor/Generator
-        // are not always considered. E.g. if they are being put into a list.
-        // Fixing this depends on removing specializations for Optional[Tensor]
-        // an Optional[Generator] and universally using None.
-
         // XXX - when None has an Optional[T] type, we must ensure that type
         // can be recovered on parsing. It cannot be recovered if it will be
         // matched to schema with free variables. If it is used only in places
@@ -906,15 +900,6 @@ struct PythonPrintPass {
       return;
     }
     stmt << "=";
-    if (value.isTensor() && !value.toTensor().defined()) {
-      // XXX - because undefined tensors are not stored as None, we need special
-      // handling. otherwise they get printed as CONSTANTS.c0 and then cannot be
-      // recreated because constant nodes cannot have an undefined value in
-      // them. The right solution is to make None of type Tensor actually be an
-      // IValue None.
-      stmt << "None";
-      return;
-    }
     printConstant(stmt, value);
   }
   void printFunctionDefinition(

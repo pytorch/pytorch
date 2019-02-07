@@ -18,7 +18,7 @@ Value* insertConstant(
     at::Tensor ref = val.toTensor();
     if (!ref.defined()) {
       n->destroy();
-      return g.insertNode(g.createUndefined())->output();
+      return g.insertNode(g.createNone(TensorType::get()))->output();
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();

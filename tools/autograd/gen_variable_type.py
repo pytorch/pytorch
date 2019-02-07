@@ -271,6 +271,14 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
+    def dispatch_trace_input(arg_spec):
+        name, value, simple_type, nullable = arg_spec
+        # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
+        if simple_type == 'TensorList' and nullable:
+            return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, value, "true")
+        else:
+            return ADD_TRACE_INPUT.substitute(name=name, input=value)
+
     trace_inputs = declaration['arguments']
 
     if is_out_overload(declaration):
@@ -279,10 +287,10 @@ def format_trace_inputs(declaration):
         out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
 
-    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+    trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
 
     trace_inputs = \
-        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+        '\n'.join(dispatch_trace_input(arg_spec) for arg_spec in trace_input_spec)
 
     if is_out_overload(declaration):
         # for *_out functions, handle the result argument differently for inplace/outplace.
@@ -726,7 +734,7 @@ def unpack_args(env, declaration):
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
-            suffix = '_opt' if is_nullable else ''
+            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
