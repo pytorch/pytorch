@@ -1259,6 +1259,7 @@ class TestSparse(TestCase):
             self.assertEqual(res.sparse_dim(), len(template_shape_i))
             self.assertEqual(res.dense_dim(), len(template_shape_v))
 
+    @skipIfRocm
     def test_zeros_like(self):
         def test_shape(i_shapes, v_shapes, nnzs):
             for i_dim in range(1, len(i_shapes) + 1):
