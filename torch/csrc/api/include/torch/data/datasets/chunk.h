@@ -416,7 +416,7 @@ class ChunkDataset final
 
   // keep track of running preloaders to notify batch buffer. A value 0
   // indicates that the chunk loading is completed.
-  std::atomic<size_t> running_preloaders_ = 0;
+  std::atomic<size_t> running_preloaders_;
 };
 } // namespace datasets
 } // namespace data
