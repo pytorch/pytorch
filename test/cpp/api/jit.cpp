@@ -85,7 +85,16 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
                   "position 0, but instead got value of type Tensor[][]") == 0);
 
   };
+}
 
 
-
+TEST(TorchScriptTest, TestDictArgMatching) {
+  auto module = torch::jit::compile(R"JIT(
+      def dict_op(a: Dict[str, Tensor], b: str):
+        return a[b]
+    )JIT");
+  c10::ivalue::DictUnorderedMap<torch::jit::IValue, torch::jit::IValue> dict;
+  dict[std::string("hello")] = torch::ones({2});
+  auto output = module->run_method("dict_op", dict, std::string("hello"));
+  ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
