@@ -915,6 +915,7 @@
     - Long
     - Int
     - Short
+    - Byte
   backends:
     - CPU
     - CUDA
