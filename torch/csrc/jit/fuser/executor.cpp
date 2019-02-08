@@ -109,19 +109,19 @@ static bool expandArgs(
       if (arg.sizes().equals(map_size))
         continue;
       if (!dry_run) {
-         arg = arg.expand(map_size);
-         has_broadcast = true;
+        arg = arg.expand(map_size);
+        has_broadcast = true;
       } else {
-         return true;
+        return true;
       }
     } else {
       map_size.at(pdesc.dim()) *= pdesc.nSubTensors();
       if (!arg.sizes().equals(map_size)) {
         if (!dry_run) {
-           arg = arg.expand(map_size);
-           has_broadcast = true;
+          arg = arg.expand(map_size);
+          has_broadcast = true;
         } else {
-           return true;
+          return true;
         }
       }
       map_size.at(pdesc.dim()) /= pdesc.nSubTensors();
