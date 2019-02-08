@@ -966,6 +966,10 @@ struct Graph {
 
   Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
+  size_t size() const {
+    return all_values.size() + all_nodes.size();
+  }
+
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
   }

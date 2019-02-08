@@ -4,6 +4,7 @@
 #include <test/cpp/jit/test_irparser.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
+#include <test/cpp/jit/test_subgraph_matcher.h>
 
 using namespace torch;
 using namespace torch::jit;
@@ -33,6 +34,7 @@ JIT_TEST(SchemaParser)
 JIT_TEST(TopologicalIndex)
 JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
+JIT_TEST(SubgraphMatching)
 JIT_TEST(AliasAnalysis)
 JIT_TEST(AliasTracker)
 JIT_TEST(IRParser)

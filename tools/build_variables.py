@@ -86,6 +86,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_undef.cpp",
+    "torch/csrc/jit/passes/utils/subgraph_matcher.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/alias_tracker.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
