@@ -248,8 +248,8 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
       int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
       std::string ref_counter_handle = THPStorage_(__newHandle)();
       at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
-          ref_counter_handle.c_str(), flags, sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
-      torch::CudaIPCCreateRefCounter(ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
+          ref_counter_handle.c_str(), flags, sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
+      torch::CudaIPCCreateRefCounter(ref_counter_handle, torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
     }
     auto sent_data =torch::GetNewRefCountedSentData();
 
@@ -335,7 +335,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle, ref_counter_offset](void* ptr) {
     int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_NOCREATE;
     auto sptr = THRefcountedMapAllocator::makeDataPtr(
-        ref_counter_handle.c_str(), flags, sizeof(int64_t)* CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
+        ref_counter_handle.c_str(), flags, sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
       delete static_cast<torch::CudaIPCReceivedData*>(ptr);
   });

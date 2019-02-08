@@ -1,11 +1,10 @@
 #pragma once
 #include <c10/core/Allocator.h>
 
-#define CUDA_IPC_REF_COUNTER_FILE_SIZE 10000
-#define CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO 1000
-
 namespace torch {
 
+constexpr uint CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
+constexpr uint CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
 struct CudaIPCReceivedData {
   CudaIPCReceivedData(std::shared_ptr<void> shared_ptr);
