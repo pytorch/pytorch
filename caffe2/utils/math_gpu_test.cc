@@ -204,24 +204,6 @@ TEST(MathUtilGPUTest, testReduceMax) {
       [](int /*i*/) { return 17.0f; });
 }
 
-TEST(MathUtilGPUTest, testElemwiseMax) {
-  executeGpuBinaryOpTest(
-      13,
-      13,
-      13,
-      [](int i) { return 2.0f - i; },
-      [](int i) { return i - 6.0f; },
-      [](int N0,
-         int /*N1*/,
-         const float* src0,
-         const float* src1,
-         float* dst,
-         CUDAContext* context) {
-        math::ElemwiseMax<float, CUDAContext>(N0, src0, src1, dst, context);
-      },
-      [](int i) { return std::max(2.0f - i, i - 6.0f); });
-}
-
 TEST(MathUtilGPUTest, testCopyVector) {
   executeGpuBinaryOpTest(
       6,
