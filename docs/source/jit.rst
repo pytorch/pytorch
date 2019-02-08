@@ -160,6 +160,9 @@ net models. In particular TorchScript supports:
 ``Tuple[T0, T1, ...]``
     A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)
 
+``bool``
+    A boolean value
+
 ``int``
     A scalar integer
 
@@ -493,9 +496,10 @@ Return
     ``return a, b``
 
     .. note::
-        there must be a return statement as the last member of the function
-        and return statements cannot appear anywhere else in the function. This
-        restriction will be removed in the future.
+        TorchScript allows returns in the following circumstances:
+           1. At the end of a function
+           2. In an if-statement where <true> and <false> both return
+           3. In an if-statement where <true> returns and <false> is empty (an early return)
 
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
@@ -851,10 +855,10 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of the builtin tensor and neural network
+TorchScript supports a subset of the builtin tensor and neural network
 functions that PyTorch provides. Most methods on Tensor as well as functions in
 the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in Torch Script, excluding those in the
+modules from ``torch.nn`` are supported in TorchScript, excluding those in the
 table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
 Unsupported ``torch.nn`` Modules  ::
@@ -872,3 +876,32 @@ Unsupported ``torch.nn`` Modules  ::
 
 
 .. automodule:: torch.jit.supported_ops
+
+Frequently Asked Questions
+--------------------------
+
+Q: I would like to train a model on GPU and do inference on CPU. What are the
+best practices?
+   First convert your model from GPU to CPU and then save it, like so: ::
+
+      cpu_model = gpu_model.cpu()
+      sample_input_cpu = sample_input_gpu.cpu()
+      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pth")
+
+      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pth")
+
+      # ... later, when using the model:
+
+      if use_gpu:
+         model = torch.jit.load("gpu.pth")
+      else:
+         model = torch.jit.load("cpu.pth")
+
+      model(input)
+
+   This is recommended because the tracer may witness tensor creation on a
+   specific device, so casting an already-loaded model may have unexpected
+   effects. Casting the model *before* saving it ensures that the tracer has
+   the correct device information.
