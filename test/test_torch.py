@@ -7782,6 +7782,7 @@ class _TestTorchMixin(object):
         # These tests are portable, not necessarily strict for your system.
         self.assertEqual(byte, 1)
         self.assertEqual(char, 1)
+        self.assertEqual(bool, 1)
         self.assertGreaterEqual(short, 2)
         self.assertGreaterEqual(int, 2)
         self.assertGreaterEqual(int, short)
@@ -8860,6 +8861,18 @@ class _TestTorchMixin(object):
         self.assertEqual(bools[5], True)
         self.assertEqual(bools[6], True)
         self.assertEqual(bools[7], True)
+
+        f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 19)
+
+        f = bytearray(b'\0x4A')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 4)
+        self.assertEqual(bools[0], False)
+        self.assertEqual(bools[1], True)
+        self.assertEqual(bools[2], True)
+        self.assertEqual(bools[3], True)
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
