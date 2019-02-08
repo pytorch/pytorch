@@ -136,7 +136,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   namespace caffe2 { namespace detail {                                                           \
   template<>                                                                                      \
   const c10::OperatorHandle&                                                                      \
-        c10_op_handle_for_c2_op<OperatorClass<caffe2::CUDAContext>>() {                           \
+        c10_op_handle_for_c2_op<OperatorClass>() {                                                \
     return caffe2::_c10_ops::OperatorName();                                                      \
   }                                                                                               \
   }}                                                                                              \
