@@ -15,9 +15,10 @@ extern "C" {
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
+#include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/reduce.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
 
@@ -31,9 +32,6 @@ class CAFFE2_API DefaultEngine {};
 namespace math {
 
 #define C10_DECLARE_COMPARE_OP(Comp)                                         \
-  template <typename T, class Context>                                       \
-  void Comp(const int N, const T* A, const T* B, bool* C, Context* context); \
-                                                                             \
   template <typename T, class Context, bool kBroadcast1st = false>           \
   void Rowwise##Comp(                                                        \
       const int rows,                                                        \
@@ -72,37 +70,34 @@ C10_DECLARE_COMPARE_OP(GE)
 
 #undef C10_DECLARE_COMPARE_OP
 
-#define C10_DECLARE_BINARY_OP(Func)                                       \
-  template <typename T, class Context>                                    \
-  void Func(const int N, const T* A, const T* B, T* C, Context* context); \
-                                                                          \
-  template <typename T, class Context, bool kBroadcast1st = false>        \
-  void Rowwise##Func(                                                     \
-      const int rows,                                                     \
-      const int cols,                                                     \
-      const T* A,                                                         \
-      const T* B,                                                         \
-      T* C,                                                               \
-      Context* context);                                                  \
-                                                                          \
-  template <typename T, class Context, bool kBroadcast1st = false>        \
-  void Colwise##Func(                                                     \
-      const int rows,                                                     \
-      const int cols,                                                     \
-      const T* A,                                                         \
-      const T* B,                                                         \
-      T* C,                                                               \
-      Context* context);                                                  \
-                                                                          \
-  template <typename T, class Context>                                    \
-  void Func(                                                              \
-      const int A_ndim,                                                   \
-      const int* A_dims,                                                  \
-      const int B_ndim,                                                   \
-      const int* B_dims,                                                  \
-      const T* A,                                                         \
-      const T* B,                                                         \
-      T* C,                                                               \
+#define C10_DECLARE_BINARY_OP(Func)                                \
+  template <typename T, class Context, bool kBroadcast1st = false> \
+  void Rowwise##Func(                                              \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      Context* context);                                           \
+                                                                   \
+  template <typename T, class Context, bool kBroadcast1st = false> \
+  void Colwise##Func(                                              \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
+      Context* context);                                           \
+                                                                   \
+  template <typename T, class Context>                             \
+  void Func(                                                       \
+      const int A_ndim,                                            \
+      const int* A_dims,                                           \
+      const int B_ndim,                                            \
+      const int* B_dims,                                           \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      T* C,                                                        \
       Context* context);
 
 C10_DECLARE_BINARY_OP(Add)
@@ -237,11 +232,6 @@ RowwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void
 ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
-
-// Elemwise maximum of vector x and vector y. z[i] = max(x[i], y[i])
-template <typename T, class Context>
-CAFFE2_API void
-ElemwiseMax(const int N, const T* x, const T* y, T* z, Context* context);
 
 // Elemwise maximum of vector x and scalar alpha. y[i] = max(x[i], alpha)
 template <typename T, class Context>
@@ -620,7 +610,6 @@ CAFFE2_API void NHWC2NCHW(
     const T* X,
     T* Y,
     Context* context);
-
 
 } // namespace math
 } // namespace caffe2
