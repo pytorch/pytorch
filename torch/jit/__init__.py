@@ -1141,7 +1141,7 @@ if _enabled:
                 if not isinstance(module_value, (ModuleList, Sequential)):
                     return module_value
                 for i in len(module_value):
-                    module_value[i] = recur_conv_to_const(module_value[i])
+                    module_value[i] = conv_module_to_const(module_value[i])
                 if isinstance(module_value, Sequential):
                     return _ConstSequential(module_value)
                 else:
