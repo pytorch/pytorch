@@ -8853,14 +8853,8 @@ class _TestTorchMixin(object):
         f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
         bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 8)
-        self.assertEqual(bools[0], False)
-        self.assertEqual(bools[1], True)
-        self.assertEqual(bools[2], True)
-        self.assertEqual(bools[3], True)
-        self.assertEqual(bools[4], True)
-        self.assertEqual(bools[5], True)
-        self.assertEqual(bools[6], True)
-        self.assertEqual(bools[7], True)
+        self.assertEqual(bools.tolist(), [0, 1, 2, 3, 4, 5, 16, 64])
+        self.assertEqual(bools.type(), 'torch.BoolStorage')
 
         f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
         bools = torch.BoolStorage.from_buffer(f, 'big')
@@ -8869,10 +8863,7 @@ class _TestTorchMixin(object):
         f = bytearray(b'\0x4A')
         bools = torch.BoolStorage.from_buffer(f, 'big')
         self.assertEqual(bools.size(), 4)
-        self.assertEqual(bools[0], False)
-        self.assertEqual(bools[1], True)
-        self.assertEqual(bools[2], True)
-        self.assertEqual(bools[3], True)
+        self.assertEqual(bools.tolist(), [0, 120, 52, 65])
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
