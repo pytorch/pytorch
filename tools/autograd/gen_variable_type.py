@@ -704,8 +704,8 @@ def emit_body(declaration):
         assert (save_ptrs_block and enforce_same_ptrs_block) or (not save_ptrs_block and not enforce_same_ptrs_block)
         if save_ptrs_block and enforce_same_ptrs_block:
             call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=save_ptrs_block) + \
-                   call + \
-                   RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_block)
+                call + \
+                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_block)
         return call
 
     def emit_call(env):
