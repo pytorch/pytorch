@@ -23,6 +23,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace caffe2 {
 
