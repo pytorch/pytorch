@@ -6,25 +6,36 @@
 #include <test/cpp/api/init_baseline.h>
 #include <test/cpp/api/support.h>
 
+#include <functional>
 #include <vector>
 
 void check_exact_values(
-    std::vector<torch::Tensor> parameters,
-    std::vector<std::vector<torch::Tensor>> expected_parameters) {
+    const std::vector<torch::Tensor>& parameters,
+    const std::vector<std::vector<torch::Tensor>>& expected_parameters) {
   ASSERT_EQ(parameters.size(), expected_parameters.size());
 
   for (size_t i = 0; i < parameters.size(); i++) {
     auto layerParameters = parameters[i];
     auto expectedLayerParameters = expected_parameters[i];
 
-    ASSERT_EQ(layerParameters.size(0), expectedLayerParameters.size());
+    if (layerParameters.size(0) != expectedLayerParameters.size()) {
+      std::cout << "layer #" << i
+                << " layerParameters size: " << layerParameters.size(0)
+                << " != "
+                << " expectedLayerParameters size: "
+                << expectedLayerParameters.size() << std::endl;
+      ASSERT_TRUE(false);
+    }
 
     for (size_t p = 0; p < layerParameters.size(0); p++) {
       auto tensor = layerParameters[p];
       auto expectedTensor = expectedLayerParameters[p];
 
-      ASSERT_TRUE(
-          tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4));
+      if (!tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4)) {
+        std::cout << "layer " << i << ": " << tensor << " != " << expectedTensor
+                  << " (parameter " << p << ")" << std::endl;
+        ASSERT_TRUE(false);
+      }
     }
   }
 }
@@ -57,7 +68,7 @@ void check_initializer_against_baseline(
 
 TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
   auto expected = expected_parameters::Xavier_Uniform();
-  auto initializer = [](torch::Tensor tensor) -> void {
+  auto initializer = [](torch::Tensor tensor) {
     torch::nn::init::xavier_uniform_(tensor);
   };
   check_initializer_against_baseline(initializer, expected);
@@ -65,7 +76,7 @@ TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
 
 TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   auto expected = expected_parameters::Xavier_Normal();
-  auto initializer = [](torch::Tensor tensor) -> void {
+  auto initializer = [](torch::Tensor tensor) {
     torch::nn::init::xavier_normal_(tensor);
   };
   check_initializer_against_baseline(initializer, expected);
@@ -73,7 +84,7 @@ TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
 
 TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   auto expected = expected_parameters::Kaiming_Normal();
-  auto initializer = [](torch::Tensor tensor) -> void {
+  auto initializer = [](torch::Tensor tensor) {
     torch::nn::init::kaiming_normal_(tensor);
   };
   check_initializer_against_baseline(initializer, expected);
@@ -81,8 +92,35 @@ TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
 
 TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   auto expected = expected_parameters::Kaiming_Uniform();
-  auto initializer = [](torch::Tensor tensor) -> void {
+  auto initializer = [](torch::Tensor tensor) {
     torch::nn::init::kaiming_uniform_(tensor);
   };
   check_initializer_against_baseline(initializer, expected);
+}
+
+TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
+  auto tensor = torch::empty({3, 4}, torch::requires_grad());
+  ASSERT_THROWS_WITH(
+      tensor.fill_(1),
+      "a leaf Variable that requires grad "
+      "has been used in an in-place operation");
+  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
+}
+
+TEST(InitTest, CalculateGainWithTanh) {
+  double gain =
+      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Tanh);
+  ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
+}
+
+TEST(InitTest, CalculateGainWithRelu) {
+  double gain =
+      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::ReLU);
+  ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
+}
+
+TEST(InitTest, CalculateGainWithLeakyRelu) {
+  double gain =
+      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyReLU);
+  ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }

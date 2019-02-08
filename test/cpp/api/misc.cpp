@@ -44,33 +44,6 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
 
-TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
-  auto tensor = torch::empty({3, 4}, torch::requires_grad());
-  ASSERT_THROWS_WITH(
-      tensor.fill_(1),
-      "a leaf Variable that requires grad "
-      "has been used in an in-place operation");
-  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
-}
-
-TEST(NNInitTest, CalculateGainWithTanh) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Tanh);
-  ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
-}
-
-TEST(NNInitTest, CalculateGainWithRelu) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::ReLU);
-  ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
-}
-
-TEST(NNInitTest, CalculateGainWithLeakyRelu) {
-  double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyReLU);
-  ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
-}
-
 #if !defined(_WIN32)
 TEST(TempFileTest, MatchesExpectedPattern) {
   torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
