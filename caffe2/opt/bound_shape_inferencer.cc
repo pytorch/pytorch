@@ -47,7 +47,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   visited_tensors_.clear();
 
   for (const auto& op : net.op()) {
-    LOG(INFO) << op.type();
+    VLOG(1) << op.type();
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise") {
       InferSparseLengthsSum(op);
@@ -215,6 +215,10 @@ void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
     }
   }
   InferCommonOp(op);
+  // split_info should be a constant
+  if (op.output_size() > 1) {
+    shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
+  }
 }
 
 void BoundShapeInferencer::InferFC(const OperatorDef& op) {
