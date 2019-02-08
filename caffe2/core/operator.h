@@ -213,6 +213,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
+  Tensor OutputTensorOrUndefined(int idx) {
+    return BlobGetTensorOrUndefined(*outputs_.at(idx));
+  }
+
   inline Tensor*
   OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
@@ -1200,7 +1204,7 @@ C10_DECLARE_REGISTRY(
     std::vector<c10::IValue>,
     std::vector<c10::IValue*>);
 
-struct FunctionSchemaStorageBase {
+struct CAFFE2_API FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
   virtual c10::FunctionSchema getSchema() = 0;
   virtual ~FunctionSchemaStorageBase() {}
@@ -1211,14 +1215,15 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 // Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
 // as they wrap it all in a Meyer's singleton accessible from Torch.
 
-#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
-  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
-  struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
-    c10::FunctionSchema getSchema() override {                                \
-      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);         \
-    }                                                                         \
-  };                                                                          \
-  C10_REGISTER_CLASS(                                                         \
+#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)       \
+  struct CAFFE2_API FunctionSchemaStorageBase##name                    \
+      : public FunctionSchemaStorageBase {                             \
+    c10::FunctionSchema getSchema() override {                         \
+      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);  \
+    }                                                                  \
+  };                                                                   \
+  C10_REGISTER_CLASS(                                                  \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
 
 #define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
@@ -1355,5 +1360,7 @@ CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
+
+#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

@@ -1,7 +1,6 @@
 #ifndef CAFFE2_OPERATORS_MINMAX_OPS_H_
 #define CAFFE2_OPERATORS_MINMAX_OPS_H_
 
-#include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -11,49 +10,99 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class MaxMinOpBase : public Operator<Context> {
+class MaxOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(MaxMinOpBase)
+
+  USE_SIMPLE_CTOR_DTOR(MaxOp)
 
   bool RunOnDevice() override {
-    auto& input0 = Input(0);
-    auto* output = Output(0);
-
-    output->ResizeLike(input0);
-    output->CopyFrom(input0, /* async */ true);
-
+    const auto& X0 = Input(0);
+    auto* Y = Output(0);
+    Y->ResizeLike(X0);
+    const T* X0_data = X0.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    const int N = X0.numel();
     if (InputSize() == 1) {
+      if (Y != &X0) {
+        context_.template CopySameDevice<T>(N, X0_data, Y_data);
+      }
       return true;
     }
-
-    // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
+    const auto& X1 = Input(1);
+    CAFFE_ENFORCE_EQ(
+        X0.sizes(),
+        Y->sizes(),
+        "Description: Input #1, input dimension:",
+        X1.sizes(),
+        " should match output dimension: ",
+        Y->sizes());
+    const T* X1_data = X1.template data<T>();
+    math::Max<T, Context>(N, X0_data, X1_data, Y_data, &context_);
+    for (int i = 2; i < InputSize(); ++i) {
+      const auto& Xi = Input(i);
       CAFFE_ENFORCE_EQ(
-          output->sizes(),
-          Input(i).sizes(),
+          Xi.sizes(),
+          Y->sizes(),
           "Description: Input #",
           i,
           ", input dimension:",
           Input(i).sizes(),
           " should match output dimension: ",
-          output->sizes());
+          Y->sizes());
+      const T* Xi_data = Xi.template data<T>();
+      math::Max<T, Context>(N, Y_data, Xi_data, Y_data, &context_);
     }
-
-    return this->Compute();
+    return true;
   }
-
-  virtual bool Compute() = 0;
 };
 
 template <typename T, class Context>
-class MaxOp : public MaxMinOpBase<T, Context> {
+class MinOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : MaxMinOpBase<T, Context>(operator_def, ws) {}
-  virtual ~MaxOp() noexcept {}
-  bool Compute() override;
+
+  USE_SIMPLE_CTOR_DTOR(MinOp)
+
+  bool RunOnDevice() override {
+    const auto& X0 = Input(0);
+    auto* Y = Output(0);
+    Y->ResizeLike(X0);
+    const T* X0_data = X0.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    const int N = X0.numel();
+    if (InputSize() == 1) {
+      if (Y != &X0) {
+        context_.template CopySameDevice<T>(N, X0_data, Y_data);
+      }
+      return true;
+    }
+    const auto& X1 = Input(1);
+    CAFFE_ENFORCE_EQ(
+        X0.sizes(),
+        Y->sizes(),
+        "Description: Input #1, input dimension:",
+        X1.sizes(),
+        " should match output dimension: ",
+        Y->sizes());
+    const T* X1_data = X1.template data<T>();
+    math::Min<T, Context>(N, X0_data, X1_data, Y_data, &context_);
+    for (int i = 2; i < InputSize(); ++i) {
+      const auto& Xi = Input(i);
+      CAFFE_ENFORCE_EQ(
+          Xi.sizes(),
+          Y->sizes(),
+          "Description: Input #",
+          i,
+          ", input dimension:",
+          Input(i).sizes(),
+          " should match output dimension: ",
+          Y->sizes());
+      const T* Xi_data = Xi.template data<T>();
+      math::Min<T, Context>(N, Y_data, Xi_data, Y_data, &context_);
+    }
+    return true;
+  }
 };
 
 template <typename T, class Context>
@@ -66,29 +115,21 @@ class SelectGradientOpBase : public Operator<Context> {
 };
 
 template <typename T, class Context>
-class MaxGradientOp : public SelectGradientOpBase<T, Context> {
+class MaxGradientOp final : public SelectGradientOpBase<T, Context> {
  public:
   MaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SelectGradientOpBase<T, Context>(operator_def, ws) {}
-  virtual ~MaxGradientOp() noexcept {}
+
+  ~MaxGradientOp() = default;
 };
 
 template <typename T, class Context>
-class MinOp : public MaxMinOpBase<T, Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MinOp(const OperatorDef& operator_def, Workspace* ws)
-      : MaxMinOpBase<T, Context>(operator_def, ws) {}
-  virtual ~MinOp() noexcept {}
-  bool Compute() override;
-};
-
-template <typename T, class Context>
-class MinGradientOp : public SelectGradientOpBase<T, Context> {
+class MinGradientOp final : public SelectGradientOpBase<T, Context> {
  public:
   MinGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SelectGradientOpBase<T, Context>(operator_def, ws) {}
-  virtual ~MinGradientOp() noexcept {}
+
+  ~MinGradientOp() = default;
 };
 
 } // namespace caffe2
