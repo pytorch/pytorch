@@ -6,15 +6,18 @@ namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
-        #def cat(tensors: List[Tensor],
-        #        dim: int=0):
-        #    split_sizes = torch._get_tensor_list_size(tensors, dim)
+        def cat(tensors: List[Tensor],
+                dim: int=0):
+            sizes = len(tensors)
+            split_sizes = [0] * sizes
+            for i in range(sizes):
+                split_sizes[i] = tensors[i].size()[dim]
 
-        #    def backward(grad_output):
-        #        grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
-        #        return grad_tensors, None
+            def backward(grad_output):
+                grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
+                return grad_tensors, None
 
-        #    return torch.cat(tensors, dim), backward
+            return torch.cat(tensors, dim), backward
 
         def index(self,
                   indices: List[Tensor]):

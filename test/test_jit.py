@@ -3654,7 +3654,7 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
-        # func2.debug_disable_autodiff_subgraph_inlining()
+        func2.debug_disable_autodiff_subgraph_inlining()
 
         x = torch.rand([2, 2]).requires_grad_()
         y = torch.tensor(1)
