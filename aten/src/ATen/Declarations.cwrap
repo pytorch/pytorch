@@ -916,6 +916,7 @@
     - Int
     - Short
     - Byte
+    - Char
   backends:
     - CPU
     - CUDA
