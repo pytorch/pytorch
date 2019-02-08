@@ -683,10 +683,11 @@ def emit_body(declaration):
                     pre_call_block += SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
                     post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
                     post_call_block += ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)
-        if pre_call_block:
-            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=pre_call_block) + call
-        if post_call_block:
-            call = call + RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
+        assert (pre_call_block and post_call_block) or (not pre_call_block and not post_call_block)
+        if pre_call_block and post_call_block:
+            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=pre_call_block) + \
+                   call + \
+                   RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
         return call
 
     def emit_call(env):
