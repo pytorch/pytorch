@@ -90,12 +90,12 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * >      c10::Argument("output1"),
  * >      c10::Argument("output2")
  * >    }),
- * >    caffe2::MyOperator // This is the caffe2 operator class template
+ * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator class template
  * > )
  *
  * In caffe2/operators/MyOperator.cu
  *
- * > C10_REGISTER_CAFFE2_OPERATOR_CUDA(C10MyOperator, caffe2::MyOperator)
+ * > C10_REGISTER_CAFFE2_OPERATOR_CUDA(C10MyOperator, caffe2::MyOperator<caffe2::CUDAContext>)
  *
  * Notes:
  * - all macros must be defined in the top level namespace, not in namespace caffe2.
@@ -119,7 +119,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   /* Store the c10 operator handle so call_caffe2_op_from_c10 can access it */                    \
   namespace detail {                                                                              \
   template<>                                                                                      \
-  const c10::OperatorHandle& c10_op_handle_for_c2_op<OperatorClass<caffe2::CPUContext>>() {       \
+  const c10::OperatorHandle& c10_op_handle_for_c2_op<OperatorClass>() {                           \
     return caffe2::_c10_ops::OperatorName();                                                      \
   }                                                                                               \
   }}                                                                                              \
@@ -127,7 +127,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   namespace c10 {                                                                                 \
   C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName)                                             \
       /*.withCache<Cache>()*/                                                                     \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass<caffe2::CPUContext>, at::DeviceType::CPU>>()      \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass, at::DeviceType::CPU>>()     \
       .dispatchKey(CPUTensorId());                                                                \
   }
 
@@ -143,6 +143,6 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   namespace c10 {                                                                                 \
   C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName)                                             \
       /*.withCache<Cache>()*/                                                                     \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass<caffe2::CUDAContext>, at::DeviceType::CUDA>>()     \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass, at::DeviceType::CUDA>>()    \
       .dispatchKey(CUDATensorId());                                                               \
   }
