@@ -1766,7 +1766,6 @@ class TestSparse(TestCase):
         self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
 
-    @skipIfRocm
     def test_resize(self):
         # 1. Expand the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
