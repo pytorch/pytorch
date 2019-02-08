@@ -92,7 +92,8 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
 """)
 
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
-if (${tensor_name}_storage_saved) AT_ASSERT(${tensor_name}_storage_saved.is_alias_of(${tensor_name}.storage()));
+if (${tensor_name}_storage_saved.has_value())
+  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${tensor_name}.storage()));
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
@@ -104,9 +105,8 @@ for (Tensor tensor : ${tensorlist_name})
 
 ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  if (${tensorlist_name}_storage_saved[i]) {
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].is_alias_of(${tensorlist_name}[i].storage()));
-  }
+  if (${tensorlist_name}_storage_saved[i].has_value())
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
 }
 """)
 
