@@ -19,7 +19,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Loop,
     prim::Constant,
     prim::Undefined,
-    prim::unchecked_unwrap_optional, //TODO remove
+    prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
 };
@@ -60,6 +60,7 @@ void propagateNode(Node* n) {
   for (size_t i = 0; i < outputs.size(); ++i) {
     try {
       auto new_output = graph->insertConstant(outputs[i]);
+      new_output->setType(n->outputs()[i]->type());
       n->outputs()[i]->replaceAllUsesWith(new_output);
     } catch (constant_not_supported_error& err) {
       // we cannot actually represent the IValue as a constant node,

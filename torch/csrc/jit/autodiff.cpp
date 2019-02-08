@@ -141,7 +141,7 @@ bool isDifferentiable(Node* n) {
   if (n->matches(
           "aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
     // TODO(asuhan): support weight
-    return n->namedInput(attr::weight)->node()->kind() == prim::None;
+    return n->namedInput(attr::weight)->node()->isNone();
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
@@ -282,10 +282,10 @@ class GradientHelper {
 
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {
-          gradSumToSizeOf(grads.at(0), attr::self),
-          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
-          nullptr};
+      return {gradSumToSizeOf(grads.at(0), attr::self),
+              gradSumToSizeOf(
+                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+              nullptr};
 
     } else if (
         node->matches(
@@ -539,12 +539,12 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
-      return {
-          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
-          grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
-          inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
-          nullptr,
-          nullptr};
+      return {gradSumToSizeOf(
+                  grads.at(0) * node->namedInput(attr::beta), attr::self),
+              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
+              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
+              nullptr,
+              nullptr};
 
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return {grads.at(0).mm(inputs.at(1).t()),

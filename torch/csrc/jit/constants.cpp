@@ -1,5 +1,5 @@
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/functional.h>
@@ -145,7 +145,7 @@ RegisterOperators reg({
               push(stack, d);
               return 0;
             };
-          } else if (type == NoneType::get()) {
+          } else if (node->isNone()) {
             return [](Stack& stack) {
               push(stack, IValue());
               return 0;
