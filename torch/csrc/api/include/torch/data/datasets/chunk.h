@@ -294,9 +294,8 @@ class ChunkDataset final
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
-        quit_worker_(false), 
-        running_preloaders_(0) {
-  }
+        quit_worker_(false),
+        running_preloaders_(0) {}
 
   virtual ~ChunkDataset() {
     free_workers();
@@ -353,16 +352,25 @@ class ChunkDataset final
     return torch::nullopt;
   }
 
+  // provide a references to chunk sampler. Used mainly in distributed data
+  // loading to set the epoch number for the sampler.
+  ChunkSamplerType& chunk_sampler() {
+    return chunk_sampler_;
+  }
+
  private:
   /// running on worker thread to preload chunk data.
   void preloader(size_t id) {
     while (!quit_worker_.load()) {
       try {
         size_t chunk_id = 0;
-        if (auto chunk_sampler_result = chunk_sampler_.next(1)) {
-          chunk_id = chunk_sampler_result.value()[0];
-        } else {
-          break;
+        {
+          std::lock_guard<std::mutex> lock(chunk_index_guard_);
+          if (auto chunk_sampler_result = chunk_sampler_.next(1)) {
+            chunk_id = chunk_sampler_result.value()[0];
+          } else {
+            break;
+          }
         }
         UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_id);
         if (!data.empty()) { // skip empty chunks.
@@ -396,7 +404,7 @@ class ChunkDataset final
   ChunkReader chunk_reader_;
 
   // chunk sampler to shuffle different chunks
-  samplers::LockedSampler<ChunkSamplerType> chunk_sampler_;
+  ChunkSamplerType chunk_sampler_;
 
   // example sampler to shuffle examples in a specific chunk
   ExampleSamplerType example_sampler_;
@@ -417,6 +425,9 @@ class ChunkDataset final
   // keep track of running preloaders to notify batch buffer. A value 0
   // indicates that the chunk loading is completed.
   std::atomic<size_t> running_preloaders_;
+
+  // mutex to synchronize chunk sampler next() call.
+  std::mutex chunk_index_guard_;
 };
 } // namespace datasets
 } // namespace data
