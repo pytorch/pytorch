@@ -1140,7 +1140,7 @@ if _enabled:
             def conv_module_to_const(module_value):
                 if not isinstance(module_value, (ModuleList, Sequential)):
                     return module_value
-                for i in len(module_value):
+                for i in range(len(module_value)):
                     module_value[i] = conv_module_to_const(module_value[i])
                 if isinstance(module_value, Sequential):
                     return _ConstSequential(module_value)
