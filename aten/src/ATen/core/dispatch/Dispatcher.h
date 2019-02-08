@@ -90,7 +90,7 @@ public:
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
 
-  static Dispatcher& singleton();
+  static CAFFE2_API Dispatcher& singleton();
 
   /**
    * Register a new operator schema. The handle returned can be used to register
