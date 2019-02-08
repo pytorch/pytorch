@@ -5395,8 +5395,8 @@ Returns a tuple containing the LU factorization and pivots. Pivoting is done if
 :attr:`pivot` is set.
 
 .. note::
-    LU factorization without pivoting is not available for CPU, and attempting
-    to do so will throw an error. However, LU factorization without pivoting is
+    LU factorization with :attr:`pivot` = ``True`` is not available for CPU, and attempting
+    to do so will throw an error. However, LU factorization with :attr:`pivot` = ``True`` is
     available for CUDA.
 
 Arguments:
