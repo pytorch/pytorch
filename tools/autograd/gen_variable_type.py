@@ -132,6 +132,16 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 }
 """)
 
+SAVE_STORAGE_AND_IMPL = CodeTemplate("""\
+${save_storage}
+${save_impl}
+""")
+
+ENFORCE_SAME_STORAGE_AND_IMPL = CodeTemplate("""\
+${enforce_same_storage}
+${enforce_same_impl}
+""")
+
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
@@ -668,26 +678,34 @@ def emit_body(declaration):
             return 'as_variable({})'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
-        pre_call_block = ''
-        post_call_block = ''
+        save_ptrs_block = ''
+        enforce_same_ptrs_block = ''
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             for arg in env.get('unpacked_args', []):
                 simple_type = env['unpacked_args_simple_type'][arg]
                 if simple_type == 'TensorList':
-                    pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
-                    pre_call_block += SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
+                    save_ptrs_block += SAVE_STORAGE_AND_IMPL.substitute(
+                        save_storage=SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                        save_impl=SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
+                    )
+                    enforce_same_ptrs_block += ENFORCE_SAME_STORAGE_AND_IMPL.substitute(
+                        enforce_same_storage=ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                        enforce_same_impl=ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
+                    )
                 elif simple_type == 'Tensor':
-                    pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
-                    pre_call_block += SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
-                    post_call_block += ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)
-        assert (pre_call_block and post_call_block) or (not pre_call_block and not post_call_block)
-        if pre_call_block and post_call_block:
-            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=pre_call_block) + \
+                    save_ptrs_block += SAVE_STORAGE_AND_IMPL.substitute(
+                        save_storage=SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
+                        save_impl=SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
+                    )
+                    enforce_same_ptrs_block += ENFORCE_SAME_STORAGE_AND_IMPL.substitute(
+                        enforce_same_storage=ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
+                        enforce_same_impl=ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)
+                    )
+        assert (save_ptrs_block and enforce_same_ptrs_block) or (not save_ptrs_block and not enforce_same_ptrs_block)
+        if save_ptrs_block and enforce_same_ptrs_block:
+            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=save_ptrs_block) + \
                    call + \
-                   RUN_ONLY_IN_DEBUG_MODE.substitute(statements=post_call_block)
+                   RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_block)
         return call
 
     def emit_call(env):
