@@ -34,6 +34,13 @@ private:
 
 #define C10_DEFINE_OP_SCHEMA(Name, Schema)                                      \
   C10_EXPORT const c10::OperatorHandle& Name() {                                \
+    /* must be meyers singleton to make sure this is registered before any */   \
+    /* kernels referencing it are registered. */                                \
     static ::c10::detail::OpSchemaRegistrar registrar(Schema);                  \
     return registrar.opHandle();                                                \
+  }                                                                             \
+  namespace {                                                                   \
+    /* to make sure the schema is registered even if it is not referenced by */ \
+    /* a kernel registration, call it in a global object.                    */ \
+    const c10::OperatorHandle& _c10_op_registration_instance_##Name = Name();   \
   }
