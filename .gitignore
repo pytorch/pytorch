@@ -28,6 +28,7 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
 test/.coverage
+test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
 test/data/gpu_tensors.pt
@@ -75,6 +76,7 @@ torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/site-packages/
 torch/lib/python*
+torch/lib64
 torch/include/
 torch/share/
 torch/test/

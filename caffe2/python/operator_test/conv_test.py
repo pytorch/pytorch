@@ -748,7 +748,7 @@ class TestConvolution(serial.SerializedTestCase):
             ["simple", "dag"]
             + (
                 ["async_dag"]
-                if workspace.has_gpu_support or workspace.has_hip_support
+                if workspace.has_gpu_support
                 else []
             )
         ),

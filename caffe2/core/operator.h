@@ -185,7 +185,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival->toTensor());
-    if (tensor.GetDeviceType() != type) {
+    if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
       tensor = Tensor(type);
       auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
@@ -196,7 +196,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline Tensor
-  XOutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  XOutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
@@ -213,8 +213,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
+  Tensor OutputTensorOrUndefined(int idx) {
+    return BlobGetTensorOrUndefined(*outputs_.at(idx));
+  }
+
   inline Tensor*
-  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE_WITH_CALLER(
           options.device_opt() != c10::nullopt,
@@ -667,7 +671,7 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
@@ -724,7 +728,7 @@ class Operator : public OperatorBase {
   /// helpful, as we may be able to fit the output in the same
   /// space that was previously used.
   ///
-  Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor* Output(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
@@ -1200,7 +1204,7 @@ C10_DECLARE_REGISTRY(
     std::vector<c10::IValue>,
     std::vector<c10::IValue*>);
 
-struct FunctionSchemaStorageBase {
+struct CAFFE2_API FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
   virtual c10::FunctionSchema getSchema() = 0;
   virtual ~FunctionSchemaStorageBase() {}
@@ -1211,14 +1215,15 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 // Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
 // as they wrap it all in a Meyer's singleton accessible from Torch.
 
-#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
-  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
-  struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
-    c10::FunctionSchema getSchema() override {                                \
-      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);         \
-    }                                                                         \
-  };                                                                          \
-  C10_REGISTER_CLASS(                                                         \
+#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)       \
+  struct CAFFE2_API FunctionSchemaStorageBase##name                    \
+      : public FunctionSchemaStorageBase {                             \
+    c10::FunctionSchema getSchema() override {                         \
+      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);  \
+    }                                                                  \
+  };                                                                   \
+  C10_REGISTER_CLASS(                                                  \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
 
 #define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
@@ -1355,5 +1360,7 @@ CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
+
+#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

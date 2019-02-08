@@ -46,6 +46,31 @@ using ::c10::filter;
 
 namespace {
 
+// TODO: remove the toOptionalTensor and toListOfOptionalTensor
+// when we remove the undefined tensor semantic from TH
+
+// XXX: This function is to specialize IValue for tensor type in
+// interpreter, it should only be used in this file
+at::Tensor toOptionalTensor(const IValue& v) {
+  if (v.isNone()) {
+    return at::Tensor();
+  }
+  return v.toTensor();
+}
+
+// XXX: This function is to specialize IValue for list of optional
+// tensor type in interpreter, it should only be used in this file
+std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
+  // v is a list of optional tensor, loop over as generic list
+  auto vlist = v.toGenericListRef();
+  std::vector<Tensor> res;
+
+  for (const IValue &v: vlist) {
+    res.emplace_back(toOptionalTensor(v));
+  }
+  return res;
+}
+
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
   std::array<bool, N> res;
