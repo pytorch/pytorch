@@ -30,10 +30,8 @@ Operator createOperatorFromCaffe2(const std::string& name) {
       std::list<c10::IValue> outputs_real;
       std::vector<c10::IValue*> outputs;
       for (size_t i = 0; i < output_size; ++i) {
-        if (TensorType::get() == fn.returns()[i].type()) {
-          caffe2::Tensor tensor(caffe2::CPU);
-          auto at_tensor = at::Tensor(c10::C10Tensor(std::move(tensor)));
-          outputs_real.emplace_back(c10::IValue(at_tensor));
+        if (DimensionedTensorType::get() == fn.returns()[i].type()) {
+          outputs_real.emplace_back(c10::IValue(at::Tensor()));
         } else {
           outputs_real.emplace_back(c10::IValue());
         }

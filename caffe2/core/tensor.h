@@ -83,7 +83,7 @@ class CAFFE2_API Tensor final {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(at::IntList dims, DeviceType type) : Tensor(type) {
+  explicit Tensor(at::IntArrayRef dims, DeviceType type) : Tensor(type) {
     // TODO: here, we create a Storage
     // and immediately discard it in Resize() since
     // reset_tensor will be true and FreeMemory will be called,
@@ -92,7 +92,7 @@ class CAFFE2_API Tensor final {
   }
 
   // we want to preserve index information
-  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
+  explicit Tensor(at::IntArrayRef dims, at::Device device): Tensor(device) {
     Resize(dims);
   }
 
@@ -500,7 +500,7 @@ class CAFFE2_API Tensor final {
     return impl_->numel() * itemsize();
   }
 
-  inline at::IntList sizes() const {
+  inline at::IntArrayRef sizes() const {
     return impl_.get()->sizes();
   }
 
@@ -535,7 +535,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::IntList strides() const {
+  inline at::IntArrayRef strides() const {
     return impl_.get()->strides();
   }
 
@@ -614,7 +614,7 @@ class CAFFE2_API Tensor final {
  * this will not do anything if the
  * Tensor already has correct size and data type
  */
-CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
+CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(
     Tensor* t,
@@ -651,7 +651,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
+CAFFE2_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
 
 /**
  * @brief Creates a CPU tensor, and fills its contents with the given values.
@@ -660,9 +660,9 @@ CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
 // TODO: can be unified with at::from_blob when Tensor is merged and string
 // types are supported
 template <typename T>
-Tensor TensorCPUFromValues(at::IntList dims, at::ArrayRef<T> values) {
+Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
   Tensor r = empty(dims, at::device(CPU).dtype<T>());
-  CAFFE_ENFORCE_EQ(values.size(), r.size());
+  CAFFE_ENFORCE_EQ(values.size(), r.numel());
   CPUContext context;
   context.CopyItemsFromCPU(
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());

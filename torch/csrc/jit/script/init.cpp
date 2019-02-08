@@ -99,9 +99,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       args.reserve(actual_n_args);
       for (size_t i = 0; i < actual_n_args; ++i) {
         args.push_back(
-            Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+            Argument(std::to_string(i), TensorType::get(), {}, {}, false));
       }
-      TypePtr ret_type = DynamicType::get();
+      TypePtr ret_type = TensorType::get();
       if (n_binders == 0) {
         ret_type = NoneType::get();
       } else if (n_binders > 1) {
@@ -292,9 +292,13 @@ struct ModuleValue : public SugaredValue {
           py_module.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
       } else {
+        std::string hint = "did you forget to add it __constants__?";
+        if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
+          hint = "Tensors must be added to a module as a buffer or parameter";
+        }
         throw ErrorReport(loc)
             << "attribute '" << field << "' of type '" << typeString(attr)
-            << "' is not usable in a script method (did you forget to add it __constants__?)";
+            << "' is not usable in a script method (" << hint << ")";
       }
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";

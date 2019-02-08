@@ -1,10 +1,11 @@
 list(APPEND Caffe2_CPU_SRCS
   utils/bench_utils.cc
   utils/cpuid.cc
+  utils/math/broadcast.cc
   utils/math/elementwise.cc
   utils/math/reduce.cc
+  utils/math/utils.cc
   utils/math_cpu.cc
-  utils/math_utils.cc
   utils/murmur_hash3.cc
   utils/proto_convert.cc
   utils/proto_utils.cc
@@ -26,12 +27,14 @@ if (NOT MSVC)
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
+        utils/math/broadcast.cu
         utils/math/elementwise.cu
         utils/math/reduce.cu
         utils/math_gpu.cu
         )
 
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
+        utils/math/hip/broadcast.hip
         utils/math/hip/elementwise.hip
         utils/math/hip/reduce.hip
         utils/hip/math_gpu.hip

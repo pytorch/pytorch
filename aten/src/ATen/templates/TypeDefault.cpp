@@ -58,7 +58,7 @@ Type & TypeDefault::toBackend(Backend b) const {
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
-static std::vector<int64_t> defaultStrides(IntList sizes) {
+static std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
@@ -67,7 +67,7 @@ static std::vector<int64_t> defaultStrides(IntList sizes) {
   }
   return strides;
 }
-static int64_t computeStorageSize(IntList sizes, IntList strides) {
+static int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   int64_t size = 1;
@@ -79,17 +79,17 @@ static int64_t computeStorageSize(IntList sizes, IntList strides) {
   }
   return size;
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter) const {
   return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
-Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
