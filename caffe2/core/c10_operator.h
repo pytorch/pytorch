@@ -9,8 +9,8 @@ namespace caffe2 {
 namespace detail {
 
 template<class Caffe2Operator> const c10::OperatorHandle& c10_op_handle_for_c2_op();
-template <class Caffe2Operator, at::DeviceType deviceType>
-void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) {
+template <class Caffe2Operator>
+void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TODO Pass in correct cache type
   // precondition: on the stack, there's an IValue for each input and an IValue for each output.
   // The output ones could either be a preallocated tensor or ivalue::None.
 
@@ -23,7 +23,7 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) {
   auto outputs = torch::jit::pop(*stack, num_outputs);
   auto inputs = torch::jit::pop(*stack, num_inputs);
 
-  const auto device = at::Device(deviceType);
+  const auto device = at::Device(at::DeviceType::CPU); // TODO Handle GPU devices
 
   for (auto& output : outputs) {
     if (output.isNone() || (output.isTensor() && !output.toTensor().defined())) {
@@ -72,77 +72,32 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   }}
 
 /**
- * To register a caffe2 operator caffe2::MyOperator with the c10 dispatcher, call:
- *
- * In caffe2/operators/MyOperator.h:
- *
- * > C10_DECLARE_CAFFE2_OPERATOR(C10MyOperator) // C10MyOperator is the name used by c10 for this operator
- *
- * In caffe2/operators/MyOperator.cc
- *
- * > C10_REGISTER_CAFFE2_OPERATOR_CPU(
- * >    C10MyOperator,
- * >    (std::vector<c10::Argument>{
- * >      c10::Argument("input1"),
- * >      c10::Argument("input2", c10::IntType::get()),
- * >      c10::Argument("input3", c10::FloatType::get())
- * >    }), (std::vector<c10::Argument>{
- * >      c10::Argument("output1"),
- * >      c10::Argument("output2")
- * >    }),
- * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator class template
- * > )
- *
- * In caffe2/operators/MyOperator.cu
- *
- * > C10_REGISTER_CAFFE2_OPERATOR_CUDA(C10MyOperator, caffe2::MyOperator<caffe2::CUDAContext>)
- *
- * Notes:
- * - all macros must be defined in the top level namespace, not in namespace caffe2.
- * - all operators must call C10_DECLARE_CAFFE2_OPERATOR and C10_REGISTER_CAFFE2_OPERATOR_CPU.
- * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if you don't want to expose
- *   the operator for CUDA operations.
+ * Call this macro to register a caffe2 operator with the c10 dispatcher.
  */
-#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                                                   \
-  namespace caffe2 { namespace _c10_ops {                                                           \
-    C10_DECLARE_OP_SCHEMA(OperatorName);                                                            \
-  }}
-
 // TODO This macro should take a JIT schema string instead of a vector of inputs and outputs.
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, Inputs, Outputs, OperatorClass)            \
-  /* Register the op schema with the c10 dispatcher */                                            \
-  namespace caffe2 { namespace _c10_ops {                                                         \
-    C10_DEFINE_OP_SCHEMA(OperatorName,                                                            \
-      caffe2::detail::make_function_schema_for_c10(                                               \
-        #OperatorName, Inputs, Outputs));                                                         \
-  }                                                                                               \
-  /* Store the c10 operator handle so call_caffe2_op_from_c10 can access it */                    \
-  namespace detail {                                                                              \
-  template<>                                                                                      \
-  const c10::OperatorHandle& c10_op_handle_for_c2_op<OperatorClass>() {                           \
-    return caffe2::_c10_ops::OperatorName();                                                      \
-  }                                                                                               \
-  }}                                                                                              \
-  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */                      \
-  namespace c10 {                                                                                 \
-  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName)                                             \
-      /*.withCache<Cache>()*/                                                                     \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass, at::DeviceType::CPU>>()     \
-      .dispatchKey(CPUTensorId());                                                                \
-  }
-
-#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)                            \
-  /* Store the c10 operator handle so call_caffe2_op_from_c10 can access it */                    \
-  namespace caffe2 { namespace detail {                                                           \
-  template<>                                                                                      \
-  const c10::OperatorHandle&                                                                      \
-        c10_op_handle_for_c2_op<OperatorClass<caffe2::CUDAContext>>() {                           \
-    return caffe2::_c10_ops::OperatorName();                                                      \
-  }                                                                                               \
-  }}                                                                                              \
-  namespace c10 {                                                                                 \
-  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName)                                             \
-      /*.withCache<Cache>()*/                                                                     \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass, at::DeviceType::CUDA>>()    \
-      .dispatchKey(CUDATensorId());                                                               \
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                      \
+    OperatorName, Inputs, Outputs, OperatorClass)                              \
+  /* Register the op schema with the c10 dispatcher */                         \
+  namespace caffe2 {                                                           \
+  namespace _c10_ops {                                                         \
+  C10_DEFINE_OP_SCHEMA(                                                        \
+      OperatorName,                                                            \
+      caffe2::detail::make_function_schema_for_c10(                            \
+          #OperatorName,                                                       \
+          Inputs,                                                              \
+          Outputs));                                                           \
+  }                                                                            \
+  /* Store the c10 operator handle so call_caffe2_op_from_c10 can access it */ \
+  namespace detail {                                                           \
+  template <>                                                                  \
+  const c10::OperatorHandle& c10_op_handle_for_c2_op<OperatorClass>() {        \
+    return caffe2::_c10_ops::OperatorName();                                   \
+  }                                                                            \
+  }                                                                            \
+  }                                                                            \
+  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */   \
+  namespace c10 {                                                              \
+  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/  \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<OperatorClass>>()       \
+      .dispatchKey(CPUTensorId());                                             \
   }
