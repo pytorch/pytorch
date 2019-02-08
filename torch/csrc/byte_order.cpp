@@ -1,6 +1,7 @@
 #include <torch/csrc/byte_order.h>
 
 #include <cstring>
+#include <iostream>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
@@ -165,7 +166,10 @@ void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++)
-    dst[i] = (*src & (1 << i)) == 0 ? false : true;
+  {
+    dst[i] = *src != 0;
+    src += sizeof(bool);
+  }
 }
 
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len)
