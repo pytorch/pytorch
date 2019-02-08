@@ -80,6 +80,7 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
+    @skipIfRocm  # ROCm stack doesn't like the x + x call
     def test_print(self):
         shape_sparse_dim_nnz = [
             ((), 0, 2),
