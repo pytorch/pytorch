@@ -672,13 +672,13 @@ def emit_body(declaration):
         post_call_block = ''
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             for arg in env.get('unpacked_args', []):
-                dynamic_type = env['unpacked_args_dynamic_type'][arg]
-                if dynamic_type == 'TensorList':
+                simple_type = env['unpacked_args_simple_type'][arg]
+                if simple_type == 'TensorList':
                     pre_call_block += SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
                     pre_call_block += SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg)
                     post_call_block += ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)
-                elif dynamic_type in ['IntegerTensor', 'IndexTensor', 'BoolTensor', 'Tensor']:
+                elif simple_type == 'Tensor':
                     pre_call_block += SAVE_TENSOR_STORAGE.substitute(tensor_name=arg)
                     pre_call_block += SAVE_TENSOR_IMPL.substitute(tensor_name=arg)
                     post_call_block += ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg)
@@ -808,14 +808,14 @@ def unpack_args(env, declaration):
 
     body = []
     unpacked_args = []
-    unpacked_args_dynamic_type = {}
+    unpacked_args_simple_type = {}
     for i, arg in enumerate(declaration['arguments']):
-        dynamic_type = arg['dynamic_type']
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
-            unpacked_args_dynamic_type[arg['name']] = dynamic_type
+            unpacked_args_simple_type[arg['name']] = arg['simple_type']
             continue
 
+        dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
@@ -834,10 +834,10 @@ def unpack_args(env, declaration):
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
-        unpacked_args_dynamic_type[arg['name'] + '_'] = dynamic_type
+        unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
 
     env['unpacked_args'] = unpacked_args
-    env['unpacked_args_dynamic_type'] = unpacked_args_dynamic_type
+    env['unpacked_args_simple_type'] = unpacked_args_simple_type
     return body
 
 
