@@ -14,7 +14,7 @@ from torch.cuda._utils import _get_device_index
 def _replicatable_module(module, memo=None):
 
     def legal_submodule(m):
-        #weak modules are ScriptModule as well.
+        # weak modules are ScriptModule as well.
         return isinstance(m, torch.jit.ScriptModule)
 
     # module.modules() contains module itself as the first element
