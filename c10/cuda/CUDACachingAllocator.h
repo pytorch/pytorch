@@ -41,6 +41,22 @@ C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
+// Caffe2 legacy entrypoint
+
+struct THCCachingAllocator;
+
+class C10_CUDA_API Legacy {
+ public:
+  Legacy();
+  ~Legacy();
+
+  cudaError_t Alloc(void** refPtr, size_t nbytes, cudaStream_t stream);
+  cudaError_t Free(void* ptr);
+
+ private:
+  THCCachingAllocator* _impl;
+};
+
 } // namespace CUDACachingAllocator
 
 }} // namespace c10::cuda
