@@ -660,6 +660,25 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return sp;
 }
 
+Legacy::Legacy()
+    : _impl(new THCCachingAllocator()) {}
+
+Legacy::~Legacy() {
+  delete _impl;
+}
+
+cudaError_t
+Legacy::Alloc(void** refPtr, size_t nbytes, cudaStream_t stream) {
+  _impl->malloc(refPtr, nbytes, stream);
+  return cudaSuccess;
+}
+
+cudaError_t Legacy::Free(void* ptr) {
+  _impl->free(ptr);
+  return cudaSuccess;
+}
+
+
 } // namespace CUDACachingAllocator
 
 }} // namespace c10::cuda
