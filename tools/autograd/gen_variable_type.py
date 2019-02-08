@@ -122,7 +122,7 @@ if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_n
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (Tensor tensor : ${tensorlist_name})
-  if (tensor.defined()) ${tensorlist_name}_impl_saved.push_back(tensor.getIntrusivePtr());
+  ${tensorlist_name}_impl_saved.push_back(tensor.defined() ? tensor.getIntrusivePtr() : nullptr);
 """)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
