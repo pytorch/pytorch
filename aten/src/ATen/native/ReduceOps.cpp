@@ -38,12 +38,12 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 
 using DimMask = TensorIterator::DimMask;
 
-static DimMask make_dim_mask(IntArrayRef dims, int ndim) {
+static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
   auto mask = DimMask();
   if (dims.empty()) {
     mask.flip();
   } else {
-    for (int dim : dims) {
+    for (int64_t dim : dims) {
       mask.set(maybe_wrap_dim(dim, ndim));
     }
   }
@@ -98,7 +98,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
       " and ",
       toString(dtype),
       ".");
-  int ndim = self.dim();
+  int64_t ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
   allocate_reduction_result(result, self, mask, keepdim, dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);

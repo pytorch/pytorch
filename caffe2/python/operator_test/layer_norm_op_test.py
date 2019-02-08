@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import brew, core
+from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -170,6 +170,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_pytorch_cuda(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))

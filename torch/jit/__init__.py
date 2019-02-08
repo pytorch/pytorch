@@ -16,6 +16,7 @@ import torch.testing
 
 import math
 from collections import defaultdict, OrderedDict, namedtuple
+import textwrap
 import sys
 import warnings
 import itertools
@@ -917,13 +918,13 @@ def _get_valid_constant(attr, v):
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(
-        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
-        "is not a valid constant.\n" +
-        "Valid constants are:\n" +
-        "  1. a nn.ModuleList\n" +
-        "  2. a value of type {{{}}}\n".format(constants) +
-        "  3. a list or tuple of (2)\n")
+    raise TypeError(textwrap.dedent("""
+        '{}' object for attribute '{}' is not a valid constant.
+        Valid constants are:
+          1. a nn.ModuleList
+          2. a value of type {{{}}}
+          3. a list or tuple of (2)
+        """.format(type(v).__name__, attr, constants)))
 
 
 def _create_methods_from_stubs(self, stubs):
