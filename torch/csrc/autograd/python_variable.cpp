@@ -55,6 +55,12 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
       // of the THPFunction is at least the number of referring THPVariables.
       const auto output_nr = v->cdata.output_nr();
       auto grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
+      // When using DataParallel, there could be multiple such shared_ptrs
+      // created from the same raw pointer. As a result, shared_ptrs do not have
+      // a global view on the use_count(). Function deletions have to
+      // check both shared_ptr use_count() and PyObject REFCNT. Hence, each
+      // function needs to know the raw PyObject pointer.
+      grad_fn -> set_pyobj((PyObject *)fn->obj);
       v->cdata.set_gradient_edge({std::move(grad_fn), output_nr});
     }
   }
