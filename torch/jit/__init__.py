@@ -1137,14 +1137,23 @@ if _enabled:
 
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-            if isinstance(value, ModuleList):
+
+            def conv_module_to_const(module_value):
+                if not isinstance(module_value, (ModuleList, Sequential)):
+                    return module_value
+                for i in range(len(module_value)):
+                    module_value[i] = conv_module_to_const(module_value[i])
+                if isinstance(module_value, Sequential):
+                    return _ConstSequential(module_value)
+                else:
+                    return _ConstModuleList(module_value)
+
+            if isinstance(value, (ModuleList, Sequential)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
                 # is set as an attribute of the parent module.
-                super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
-            elif isinstance(value, Sequential):
-                super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
+                super(ScriptModule, self).__setattr__(attr, conv_module_to_const(value))
             else:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
