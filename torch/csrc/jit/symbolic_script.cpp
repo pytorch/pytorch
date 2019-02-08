@@ -16,6 +16,14 @@ const std::vector<std::string> functions = {
 
         #    return torch.cat(tensors, dim), backward
 
+        def index(self,
+                  indices: List[Tensor]):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                return grad_self, None
+
+            return torch.index(self, indices), backward
+
         def mul(self, other):
             def backward(grad_output):
                 grad_self = (grad_output * other)._grad_sum_to_size(self.size())
@@ -32,7 +40,7 @@ const std::vector<std::string> functions = {
             return torch.stack(tensors, dim), backward
 
         def unbind(self,
-                  dim: int=0):
+                   dim: int=0):
             def backward(grad_outputs: List[Tensor]):
                 grad_self = torch.stack(grad_outputs, dim)
                 return grad_self, None
