@@ -79,8 +79,7 @@ void CudaIPCCreateRefCounter(
     std::string handle,
     uint64_t size,
     at::DataPtr data_ptr) {
-  auto rc = std::shared_ptr<CudaIPCRefCountersFile>(
-      new CudaIPCRefCountersFile(handle, size, std::move(data_ptr)));
+  auto rc = std::make_shared<CudaIPCRefCountersFile>(handle, size, std::move(data_ptr));
   ref_counters_files_[handle] = rc;
   next_available_ref_counters_file_ = rc;
 }
