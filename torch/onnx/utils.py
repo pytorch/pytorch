@@ -521,7 +521,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
             elif n.isNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
-                # None is not an ONNX operator; keep it as prim::None
+                # None is not an ONNX operator; keep it as None
                 # let the exporter handle finally eliminating these
 
                 # For ListConstruct/ListUnpack, it will be erased in the ONNX peephole pass
