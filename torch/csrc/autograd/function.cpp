@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/python_headers.h>
 
 #include <ATen/ATen.h>
 
@@ -53,7 +52,7 @@ static void gatherFunctions(
     // pointer. Hence, the use_count() of the shared_ptr does not have a global
     // view, and we have to check refcnt on Python side as well. See #16532 for
     // more details.
-    if (fn.use_count() == 1 && (!fn->pyobj() || Py_REFCNT(fn->pyobj()) == 1)) {
+    if (fn.use_count() == 1 && fn->py_refcnt() <= 1) {
       stack.emplace_back(std::move(fn));
     } else {
       fn.reset();

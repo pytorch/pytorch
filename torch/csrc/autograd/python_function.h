@@ -41,6 +41,7 @@ struct PyFunction : public Function {
   std::string name() const override;
   std::shared_ptr<Function> get_shared_ptr() override;
   bool is_traceable() override;
+  int py_refcnt() const noexcept override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;

@@ -207,6 +207,10 @@ auto PyFunction::is_traceable() -> bool {
   return traceable_py_bool == Py_True;
 }
 
+auto PyFunction::py_refcnt() const noexcept -> int {
+  return pyobj_ ? Py_REFCNT(pyobj_) : 0;
+}
+
 auto PyFunction::release_variables() -> void {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
