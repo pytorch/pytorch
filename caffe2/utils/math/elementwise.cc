@@ -1,5 +1,8 @@
 #include "caffe2/utils/math/elementwise.h"
 
+#include <algorithm>
+#include <functional>
+
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
@@ -12,7 +15,7 @@ namespace math {
 
 ////////////////////////////////////////////////////////////////////////////////
 // MKL VML alternatives.
-// Depending on whether we are using MKL, we will delegate the Caffe math
+// Depending on whether we are using MKL, we will delegate the Caffe2 math
 // functions that are VML-related to either the VML call or the Eigen
 // implementation. If you are setting the flags (such as AVX) right for your CPU
 // architecture, usually Eigen will deliver a throughput as fast as the VML
@@ -90,6 +93,22 @@ DELEGATE_POWX_FUNCTION(float, vsPowx)
 DELEGATE_POWX_FUNCTION(double, vdPowx)
 #undef DELEGATE_POWX_FUNCTION
 
+#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, MKLFunc)                     \
+  template <>                                                                 \
+  C10_EXPORT void Func<T, CPUContext>(                                        \
+      const int N, const T* A, const T* B, T* C, CPUContext* /* context */) { \
+    MKLFunc(N, A, B, C);                                                      \
+  }
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Add, vsAdd)
+DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Sub, vsSub)
+DELEGATE_SIMPLE_BINARY_FUNCTION(double, Sub, vdSub)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Mul, vsMul)
+DELEGATE_SIMPLE_BINARY_FUNCTION(double, Mul, vdMul)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
+DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
+#undef DELEGATE_SIMPLE_BINARY_FUNCTION
+
 #else // CAFFE2_USE_MKL
 
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Func, EigenFunc)        \
@@ -127,68 +146,85 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, inverse)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, inverse)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
-#define DELEGATE_SINH_FUNCTION(T)                                         \
+#define CAFFE2_SPECIALIZED_SINH(T)                                        \
   template <>                                                             \
   C10_EXPORT void Sinh<T, CPUContext>(                                    \
       const int N, const T* X, T* Y, CPUContext* /* context */) {         \
     ConstEigenVectorArrayMap<T> X_arr(X, N);                              \
     EigenVectorArrayMap<T>(Y, N) = (X_arr.exp() - (-X_arr).exp()) / T(2); \
   }
-DELEGATE_SINH_FUNCTION(float)
-DELEGATE_SINH_FUNCTION(double)
-#undef DELEGATE_SINH_FUNCTION
+CAFFE2_SPECIALIZED_SINH(float)
+CAFFE2_SPECIALIZED_SINH(double)
+#undef CAFFE2_SPECIALIZED_SINH
 
-#define DELEGATE_COSH_FUNCTION(T)                                         \
+#define CAFFE2_SPECIALIZED_COSH(T)                                        \
   template <>                                                             \
   C10_EXPORT void Cosh<T, CPUContext>(                                    \
       const int N, const T* X, T* Y, CPUContext* /* context */) {         \
     ConstEigenVectorArrayMap<T> X_arr(X, N);                              \
     EigenVectorArrayMap<T>(Y, N) = (X_arr.exp() + (-X_arr).exp()) / T(2); \
   }
-DELEGATE_COSH_FUNCTION(float)
-DELEGATE_COSH_FUNCTION(double)
-#undef DELEGATE_COSH_FUNCTION
+CAFFE2_SPECIALIZED_COSH(float)
+CAFFE2_SPECIALIZED_COSH(double)
+#undef CAFFE2_SPECIALIZED_COSH
 
-#define DELEGATE_SINCOS_FUNCTION(T)                                         \
+#define CAFFE2_SPECIALIZED_SINCOS(T)                                        \
   template <>                                                               \
   C10_EXPORT void SinCos<T, CPUContext>(                                    \
       const int N, const T* X, T* S, T* C, CPUContext* /* context */) {     \
     EigenVectorArrayMap<T>(S, N) = ConstEigenVectorArrayMap<T>(X, N).sin(); \
     EigenVectorArrayMap<T>(C, N) = ConstEigenVectorArrayMap<T>(X, N).cos(); \
   }
-DELEGATE_SINCOS_FUNCTION(float)
-DELEGATE_SINCOS_FUNCTION(double)
-#undef DELEGATE_SINCOS_FUNCTION
+CAFFE2_SPECIALIZED_SINCOS(float)
+CAFFE2_SPECIALIZED_SINCOS(double)
+#undef CAFFE2_SPECIALIZED_SINCOS
 
-#define DELEGATE_POWX_FUNCTION(T)                                            \
+#define CAFFE2_SPECIALIZED_POWX(T)                                           \
   template <>                                                                \
   C10_EXPORT void Powx<T, CPUContext>(                                       \
       const int N, const T* A, const T b, T* Y, CPUContext* /* context */) { \
     EigenVectorArrayMap<T>(Y, N) = ConstEigenVectorArrayMap<T>(A, N).pow(b); \
   }
-DELEGATE_POWX_FUNCTION(float)
-DELEGATE_POWX_FUNCTION(double)
-#undef DELEGATE_POWX_FUNCTION
+CAFFE2_SPECIALIZED_POWX(float)
+CAFFE2_SPECIALIZED_POWX(double)
+#undef CAFFE2_SPECIALIZED_POWX
 
-#define DELEGATE_CBRT_FUNCTION(T)                                   \
+#define CAFFE2_SPECIALIZED_CBRT(T)                                  \
   template <>                                                       \
   C10_EXPORT void Cbrt<T, CPUContext>(                              \
       const int N, const T* X, T* Y, CPUContext* /* context */) {   \
     std::transform(X, X + N, Y, [](const T x) { return cbrt(x); }); \
   }
-DELEGATE_CBRT_FUNCTION(float)
-DELEGATE_CBRT_FUNCTION(double)
-#undef DELEGATE_CBRT_FUNCTION
+CAFFE2_SPECIALIZED_CBRT(float)
+CAFFE2_SPECIALIZED_CBRT(double)
+#undef CAFFE2_SPECIALIZED_CBRT
 
-#define DELEGATE_ERF_FUNCTION(T)                                   \
+#define CAFFE2_SPECIALIZED_ERF(T)                                  \
   template <>                                                      \
   C10_EXPORT void Erf<T, CPUContext>(                              \
       const int N, const T* X, T* Y, CPUContext* /* context */) {  \
     std::transform(X, X + N, Y, [](const T x) { return erf(x); }); \
   }
-DELEGATE_ERF_FUNCTION(float)
-DELEGATE_ERF_FUNCTION(double)
-#undef DELEGATE_ERF_FUNCTION
+CAFFE2_SPECIALIZED_ERF(float)
+CAFFE2_SPECIALIZED_ERF(double)
+#undef CAFFE2_SPECIALIZED_ERF
+
+#define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp)   \
+  template <>                                                                 \
+  C10_EXPORT void Func<T, CPUContext>(                                        \
+      const int N, const T* A, const T* B, T* C, CPUContext* /* context */) { \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N)               \
+        EigenOp ConstEigenVectorArrayMap<T>(B, N);                            \
+  }
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(float, Add, +)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Add, +)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(float, Sub, -)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Sub, -)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(float, Mul, *)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Mul, *)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(float, Div, /)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Div, /)
+#undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR
 
 #endif // CAFFE2_USE_MKL
 
@@ -202,74 +238,155 @@ DELEGATE_ERF_FUNCTION(double)
 // Eigen's Tanh implementation is faster than MKL, so use Eigen here.
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tanh, tanh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tanh, tanh)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sign, sign)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sign, sign)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int32_t, Sign, sign)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int64_t, Sign, sign)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sign, sign)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sign, sign)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int32_t, Abs, abs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int64_t, Abs, abs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cube, cube)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cube, cube)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int32_t, Cube, cube)
 DELEGATE_SIMPLE_UNARY_FUNCTION(std::int64_t, Cube, cube)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cube, cube)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cube, cube)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
-#define DELEGATE_NEG_FUNCTION(T)                                       \
+#define CAFFE2_SPECIALIZED_NEG(T)                                      \
   template <>                                                          \
   C10_EXPORT void Neg<T, CPUContext>(                                  \
       const int N, const T* X, T* Y, CPUContext* /* context */) {      \
     EigenVectorArrayMap<T>(Y, N) = -ConstEigenVectorArrayMap<T>(X, N); \
   }
-DELEGATE_NEG_FUNCTION(float)
-DELEGATE_NEG_FUNCTION(double)
-DELEGATE_NEG_FUNCTION(std::int32_t)
-DELEGATE_NEG_FUNCTION(std::int64_t)
-#undef DELEGATE_NEG_FUNCTION
+CAFFE2_SPECIALIZED_NEG(std::int32_t)
+CAFFE2_SPECIALIZED_NEG(std::int64_t)
+CAFFE2_SPECIALIZED_NEG(float)
+CAFFE2_SPECIALIZED_NEG(double)
+#undef CAFFE2_SPECIALIZED_NEG
 
-#define CAFFE2_SPECIALIZED_AFFINE_CHANNEL(T)                \
-  template <>                                               \
-  void AffineChannel<T, CPUContext, StorageOrder::NCHW>(    \
-      const int N,                                          \
-      const int C,                                          \
-      const int HxW,                                        \
-      const T* X,                                           \
-      const T* scale,                                       \
-      const T* bias,                                        \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    ConstEigenVectorArrayMap<T> scale_arr(scale, C);        \
-    ConstEigenVectorArrayMap<T> bias_arr(bias, C);          \
-    const int stride = C * HxW;                             \
-    const T* X_ptr = X;                                     \
-    T* Y_ptr = Y;                                           \
-    for (int i = 0; i < N; ++i) {                           \
-      EigenArrayMap<T>(Y_ptr, HxW, C) =                     \
-          (ConstEigenArrayMap<T>(X_ptr, HxW, C).rowwise() * \
-           scale_arr.transpose())                           \
-              .rowwise() +                                  \
-          bias_arr.transpose();                             \
-      X_ptr += stride;                                      \
-      Y_ptr += stride;                                      \
-    }                                                       \
-  }                                                         \
-  template <>                                               \
-  void AffineChannel<T, CPUContext, StorageOrder::NHWC>(    \
-      const int N,                                          \
-      const int C,                                          \
-      const int HxW,                                        \
-      const T* X,                                           \
-      const T* scale,                                       \
-      const T* bias,                                        \
-      T* Y,                                                 \
-      CPUContext* /* context */) {                          \
-    EigenArrayMap<T>(Y, C, N * HxW) =                       \
-        (ConstEigenArrayMap<T>(X, C, N * HxW).colwise() *   \
-         ConstEigenVectorArrayMap<T>(scale, C))             \
-            .colwise() +                                    \
-        ConstEigenVectorArrayMap<T>(bias, C);               \
+#define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp)   \
+  template <>                                                                 \
+  C10_EXPORT void Func<T, CPUContext>(                                        \
+      const int N, const T* A, const T* B, T* C, CPUContext* /* context */) { \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N)               \
+        EigenOp ConstEigenVectorArrayMap<T>(B, N);                            \
   }
-CAFFE2_SPECIALIZED_AFFINE_CHANNEL(float)
-#undef CAFFE2_SPECIALIZED_AFFINE_CHANNEL
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, Add, +)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, Add, +)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, Sub, -)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, Sub, -)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, Mul, *)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, Mul, *)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, Div, /)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, Div, /)
+#undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR
+
+#define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(T, Func, EigenFunc) \
+  template <>                                                                 \
+  C10_EXPORT void Func<T, CPUContext>(                                        \
+      const int N, const T* A, const T* B, T* C, CPUContext* /* context */) { \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N).EigenFunc(    \
+        ConstEigenVectorArrayMap<T>(B, N));                                   \
+  }
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(float, Min, min)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(double, Min, min)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(float, Max, max)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(double, Max, max)
+#undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION
+
+#define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(T, Func, StdFunc)     \
+  template <>                                                                 \
+  C10_EXPORT void Func<T, CPUContext>(                                        \
+      const int N, const T* A, const T* B, T* C, CPUContext* /* context */) { \
+    std::transform(A, A + N, B, C, StdFunc);                                  \
+  }
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    bool,
+    And,
+    std::logical_and<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    bool,
+    Or,
+    std::logical_or<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(bool, Xor, std::bit_xor<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    bool,
+    BitwiseAnd,
+    std::bit_and<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int32_t,
+    BitwiseAnd,
+    std::bit_and<std::int32_t>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int64_t,
+    BitwiseAnd,
+    std::bit_and<std::int64_t>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    bool,
+    BitwiseOr,
+    std::bit_or<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int32_t,
+    BitwiseOr,
+    std::bit_or<std::int32_t>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int64_t,
+    BitwiseOr,
+    std::bit_or<std::int64_t>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    bool,
+    BitwiseXor,
+    std::bit_xor<bool>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int32_t,
+    BitwiseXor,
+    std::bit_xor<std::int32_t>())
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
+    std::int64_t,
+    BitwiseXor,
+    std::bit_xor<std::int64_t>())
+#undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION
+
+#define DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp) \
+  template <>                                                                \
+  C10_EXPORT void Func<T, CPUContext>(                                       \
+      const int N,                                                           \
+      const T* A,                                                            \
+      const T* B,                                                            \
+      bool* C,                                                               \
+      CPUContext* /* context */) {                                           \
+    EigenVectorArrayMap<bool>(C, N) = ConstEigenVectorArrayMap<T>(A, N)      \
+        EigenOp ConstEigenVectorArrayMap<T>(B, N);                           \
+  }
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, EQ, ==)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, EQ, ==)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, EQ, ==)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, EQ, ==)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, EQ, ==)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, NE, !=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, NE, !=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, NE, !=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, NE, !=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, NE, !=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, LT, <)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, LT, <)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, LT, <)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, LT, <)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, LT, <)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, LE, <=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, LE, <=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, LE, <=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, LE, <=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, LE, <=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, GT, >)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, GT, >)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, GT, >)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, GT, >)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, GT, >)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(bool, GE, >=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int32_t, GE, >=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, GE, >=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(float, GE, >=)
+DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR(double, GE, >=)
+#undef DELEGATE_SIMPLE_COMPARE_FUNCTION_BY_EIGEN_OPERATOR
 
 } // namespace math
 } // namespace caffe2
