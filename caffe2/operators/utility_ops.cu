@@ -1,14 +1,14 @@
-#include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/flatten_op.h"
-#include "caffe2/operators/minmax_ops.h"
 #include "caffe2/operators/utility_ops.h"
-#include "caffe2/utils/math.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
+
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/flatten_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -136,102 +136,6 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
 }
 
 REGISTER_CUDA_OPERATOR(NanCheck, NanCheckOp<CUDAContext>);
-
-__global__ void
-ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = fmaxf(X[i], Y[i]);
-  }
-}
-
-template <>
-bool MaxOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->template mutable_data<float>();
-  const int N = Input(0).numel();
-
-  // Run pairwise-maxes
-  for (int i = 1; i < InputSize(); ++i) {
-    ElwiseMaxKernel<<<
-        CAFFE_GET_BLOCKS(N),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        (i == 0 ? Input(0).data<float>() : Output(0)->data<float>()),
-        Input(i).data<float>(),
-        output_data,
-        N);
-  }
-
-  return true;
-}
-
-REGISTER_CUDA_OPERATOR(Max, MaxOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
-
-__global__ void
-ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    minout[i] = fminf(X[i], Y[i]);
-  }
-}
-
-template <>
-bool MinOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->template mutable_data<float>();
-  const int N = Input(0).numel();
-
-  // Run pairwise-mines
-  for (int i = 1; i < InputSize(); ++i) {
-    ElwiseMinKernel<<<
-        CAFFE_GET_BLOCKS(N),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        (i == 0 ? Input(0).data<float>() : Output(0)->data<float>()),
-        Input(i).data<float>(),
-        output_data,
-        N);
-  }
-
-  return true;
-}
-
-REGISTER_CUDA_OPERATOR(Min, MinOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(MinGradient, MinGradientOp<float, CUDAContext>);
-
-template <typename T>
-__global__ void
-MaxMinGradKernel(int N, const T* mx, const T* x, const T* go, T* gi) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    gi[i] = go[i] * (mx[i] == x[i]);
-  }
-}
-
-template <>
-bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
-  auto& output = Input(0);
-  auto& grad_output = Input(1);
-  const int kInputStartOffset = 2;
-
-  const float* data = output.data<float>();
-
-  for (int i = 0; i < OutputSize(); i++) {
-    auto& input = Input(i + kInputStartOffset);
-
-    auto* grad_input = Output(i, input.sizes(), at::dtype<float>());
-    MaxMinGradKernel<<<
-        CAFFE_GET_BLOCKS(input.numel()),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        input.numel(),
-        output.data<float>(),
-        input.data<float>(),
-        grad_output.data<float>(),
-        grad_input->template mutable_data<float>());
-  }
-  return true;
-}
 
 /**
  * @brief Update slices of Y in-place with a batch of weighted X's.
