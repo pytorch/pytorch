@@ -137,7 +137,7 @@ TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t);
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_CHAR) || defined(TH_REAL_IS_BYTE)
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 #endif
 
