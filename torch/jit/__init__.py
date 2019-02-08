@@ -1141,6 +1141,12 @@ if _enabled:
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
                 # is set as an attribute of the parent module.
+
+                # allow Sequential Models to nest within ModuleLists
+                for i in range(len(value)):
+                    if isinstance(value[i], Sequential):
+                        value[i] = _ConstSequential(value[i])
+
                 super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
