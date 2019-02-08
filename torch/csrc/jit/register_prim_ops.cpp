@@ -1209,14 +1209,23 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
   };
 }
 
+int dictSetItem(Stack& stack) {
+  auto value = pop(stack);
+  const auto& idx = pop(stack).toStringRef();
+  auto& dict = pop(stack).toGenericDict()->elements();
+  dict[idx] = value;
+  push(stack, dict);
+  return 0;
+}
+
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto& dict = pop(stack).toGenericDictRef();
   push(stack, int64_t(dict.size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto& dict = pop(stack).toGenericDictRef();
   std::vector<IValue> keys;
   keys.reserve(dict.size());
   for (auto item : dict) {
@@ -1227,7 +1236,7 @@ int dictKeys(Stack& stack) {
 }
 
 int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto& dict = pop(stack).toGenericDictRef();
   std::vector<IValue> values;
   values.reserve(dict.size());
   for (auto item : dict) {
@@ -1532,7 +1541,11 @@ RegisterOperators reg2({
       Operator(                                                                \
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type              \
           " key) -> t",                                                        \
-          dictIndex)
+          dictIndex),                                                          \
+      Operator(                                                                \
+          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type             \
+          " idx, t v) -> Dict(" key_type ", t)(a!)",                           \
+          dictSetItem)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
