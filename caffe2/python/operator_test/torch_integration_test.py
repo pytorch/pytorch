@@ -111,3 +111,40 @@ class TorchIntegration(hu.HypothesisTestCase):
                 -90, 90, clip_angle_thresh)
 
         torch.testing.assert_allclose(box_out, a)
+
+    @given(
+        A=st.integers(min_value=4, max_value=4),
+        H=st.integers(min_value=10, max_value=10),
+        W=st.integers(min_value=8, max_value=8),
+        img_count=st.integers(min_value=3, max_value=3),
+        )
+    def test_generate_proposals(self, A, H, W, img_count):
+        scores = np.ones((img_count, A, H, W)).astype(np.float32)
+        bbox_deltas = np.linspace(0, 10, num=img_count*4*A*H*W).reshape(
+                (img_count, 4*A, H, W)).astype(np.float32)
+        im_info = np.ones((img_count, 3)).astype(np.float32) / 10
+        anchors = np.ones((A, 4)).astype(np.float32)
+
+        def generate_proposals_ref():
+            ref_op = core.CreateOperator(
+                "GenerateProposals",
+                ["scores", "bbox_deltas", "im_info", "anchors"],
+                ["rois", "rois_probs"],
+                spatial_scale=2.0,
+            )
+            workspace.FeedBlob("scores", scores)
+            workspace.FeedBlob("bbox_deltas", bbox_deltas)
+            workspace.FeedBlob("im_info", im_info)
+            workspace.FeedBlob("anchors", anchors)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("rois"), workspace.FetchBlob("rois_probs")
+
+        rois, rois_probs = generate_proposals_ref()
+        rois = torch.tensor(rois)
+        rois_probs = torch.tensor(rois_probs)
+        a, b = torch.ops._caffe2.GenerateProposals(
+                torch.tensor(scores), torch.tensor(bbox_deltas),
+                torch.tensor(im_info), torch.tensor(anchors),
+                2.0, 6000, 300, 0.7, 16, False, True, -90, 90, 1.0)
+        torch.testing.assert_allclose(rois, a)
+        torch.testing.assert_allclose(rois_probs, b)
