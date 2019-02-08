@@ -79,19 +79,21 @@ Mean:
 class GetMeanGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    auto inputs = std::vector<string>();
     auto outputs = std::vector<string>();
+    inputs.push_back(GO(0));
     for (int i = 0; i < def_.input_size(); i++) {
+      inputs.push_back(I(i));
       outputs.push_back(GI(i));
     }
-    return SingleGradientDef(
-        "MeanGradient", "", std::vector<string>{GO(0)}, outputs);
+    return SingleGradientDef("MeanGradient", "", inputs, outputs);
   }
 };
 
 REGISTER_GRADIENT(Mean, GetMeanGradient);
 
 OPERATOR_SCHEMA(MeanGradient)
-    .NumInputs(1)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .AllowInplace({{0, 0}});
 

@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -19,39 +20,50 @@ class MeanOp final : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    auto& input0 = Input(0);
-
-    auto* output = Output(0, input0.sizes(), at::dtype<T>());
-    output->CopyFrom(input0, true /*async*/);
-
-    if (InputSize() == 1) {
-      return true;
+    std::vector<std::vector<int>> input_dims(InputSize());
+    for (int i = 0; i < InputSize(); i++) {
+      std::copy(
+          Input(i).sizes().cbegin(),
+          Input(i).sizes().cend(),
+          std::back_inserter(input_dims[i]));
     }
-
-    // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
-      if (output->sizes() != Input(i).sizes()) {
-        CAFFE_THROW(
-            "Check failed: output->sizes() == Input(i).sizes().",
-            "Description: Input #",
-            i,
-            ", input dimension:",
-            Input(i).sizes(),
-            " should match output dimension: ",
-            output->sizes());
-      }
+    auto output_dims = ComputeBroadcastDims(input_dims);
+    auto* output = Output(0, output_dims, at::dtype<T>());
+    auto* output_data = output->template mutable_data<T>();
+    if (IsInputOutputAlias(0, 0)) {
+      CAFFE_ENFORCE(
+          (output_dims.size() == input_dims[0].size()) &&
+          std::equal(
+              output_dims.begin(),
+              output_dims.begin() + output_dims.size(),
+              input_dims[0].begin()),
+          "Cannot broadcast output to the first input.");
     }
-
-    T* output_data = output->template mutable_data<T>();
-    for (int i = 1; i < InputSize(); ++i) {
+    std::vector<int> output_dims_int;
+    std::copy(
+        output_dims.begin(),
+        output_dims.end(),
+        std::back_inserter(output_dims_int));
+    math::Broadcast(
+        input_dims[0].size(),
+        input_dims[0].data(),
+        output_dims_int.size(),
+        output_dims_int.data(),
+        T(1),
+        Input(0).template data<T>(),
+        output_data,
+        &context_);
+    for (int i = 1; i < InputSize(); i++) {
       math::Add(
-          output->numel(),
-          output_data,
+          input_dims[i].size(),
+          input_dims[i].data(),
+          output_dims_int.size(),
+          output_dims_int.data(),
           Input(i).template data<T>(),
+          output_data,
           output_data,
           &context_);
     }
-
     math::Scale(
         output->numel(),
         1.0f / InputSize(),
@@ -60,6 +72,38 @@ class MeanOp final : public Operator<Context> {
         &context_);
 
     return true;
+  }
+
+
+ private:
+  std::vector<int64_t> ComputeBroadcastDims(
+      const std::vector<std::vector<int>>& input_dims) const {
+    const int ninp = input_dims.size();
+    std::vector<int> input_sizes(ninp);
+    for (int i = 0; i < ninp; i++) {
+      input_sizes[i] = input_dims[i].size() - 1;
+    }
+    const int ndim = *std::max_element(input_sizes.begin(), input_sizes.end());
+    std::vector<int64_t> output_dims(ndim + 1);
+    for (int k = ndim; k >= 0; k--) {
+      int max_dim = -1;
+      for (int i = 0; i < ninp; i++) {
+        int isz = input_sizes[i];
+        if (isz >= 0) {
+          CAFFE_ENFORCE(
+              max_dim == -1 || max_dim == 1 || input_dims[i][isz] == max_dim ||
+              input_dims[i][isz] == 1);
+          if (input_dims[i][isz] == 0) {
+            max_dim = 0;
+          } else {
+            max_dim = std::max(max_dim, input_dims[i][isz]);
+          }
+        }
+        input_sizes[i]--;
+      }
+      output_dims[k] = max_dim;
+    }
+    return output_dims;
   }
 
   bool RunOnDevice() override {
@@ -86,24 +130,49 @@ class MeanGradientOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& dY = Input(0);
     const auto* dY_data = dY.template data<T>();
-    int size = dY.numel();
-
     int num_inputs = OutputSize();
-    float scale = 1.0f / num_inputs;
+    const T scale = T(1) / static_cast<T>(num_inputs);
 
-    // dX0 = scale * dY
+    if (InputSize() == 1) {
+      // Handling legacy case for backwards compatibility
+      auto* dX0 = Output(0, dY.sizes(), at::dtype<T>());
+      int size = dY.numel();
+      math::Scale(
+          size, scale, dY_data, dX0->template mutable_data<T>(), &context_);
 
-    auto* dX0 = Output(0, dY.sizes(), at::dtype<T>());
-    math::Scale(
-        size, scale, dY_data, dX0->template mutable_data<T>(), &context_);
-
-    // Copy the rest dX
-    for (int i = 1; i < num_inputs; i++) {
-      auto* cur_dX = Output(i);
-      cur_dX->ResizeLike(dY);
-      cur_dX->CopyFrom(*dX0, true /*async*/);
+      // Copy the rest dX
+      for (int i = 1; i < num_inputs; i++) {
+        auto* cur_dX = Output(i);
+        cur_dX->ResizeLike(dY);
+        cur_dX->CopyFrom(*dX0, true /*async*/);
+      }
+      return true;
     }
 
+    const std::vector<int> output_dims(dY.sizes().cbegin(), dY.sizes().cend());
+    for (int i = num_inputs; i >= 1; i--) {
+      std::vector<int> input_dims;
+      const auto& original_input_size = Input(i).sizes();
+      std::copy(
+          original_input_size.cbegin(),
+          original_input_size.cend(),
+          std::back_inserter(input_dims));
+      std::vector<int> input_axes;
+      std::vector<int> output_axes;
+      elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
+          input_dims, output_dims, &input_axes, &output_axes);
+      auto* dX = Output(i - 1, original_input_size, at::dtype<T>());
+      auto* dX_data = dX->template mutable_data<T>();
+      math::ReduceSum<T, Context>(
+          output_dims.size(),
+          output_dims.data(),
+          input_axes.size(),
+          input_axes.data(),
+          scale,
+          dY_data,
+          dX_data,
+          &context_);
+    }
     return true;
   }
 
