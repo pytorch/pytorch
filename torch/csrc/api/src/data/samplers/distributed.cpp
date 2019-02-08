@@ -16,13 +16,11 @@ DistributedSampler::DistributedSampler(
     size_t num_replicas,
     size_t rank,
     bool allow_duplicates)
-    : size_(size), num_replicas_(num_replicas), rank_(rank), epoch_(0) {
-  if (allow_duplicates) {
-    local_sample_count_ = (size_ + num_replicas_ - 1) / num_replicas_;
-  } else {
-    local_sample_count_ = size_ / num_replicas_;
-  }
-}
+    : size_(size),
+      num_replicas_(num_replicas),
+      rank_(rank),
+      epoch_(0),
+      allow_duplicates_(allow_duplicates) {}
 
 void DistributedSampler::set_epoch(size_t epoch) {
   epoch_ = epoch;
@@ -71,6 +69,12 @@ void DistributedRandomSampler::reset(optional<size_t> new_size) {
 }
 
 void DistributedRandomSampler::populate_indices() {
+  size_t local_sample_count_;
+  if (allow_duplicates_) {
+    local_sample_count_ = (size_ + num_replicas_ - 1) / num_replicas_;
+  } else {
+    local_sample_count_ = size_ / num_replicas_;
+  }
   size_t sample_count =
       num_replicas_ == 1 ? size_ : local_sample_count_ * num_replicas_;
   all_indices_.resize(sample_count);
@@ -82,7 +86,6 @@ void DistributedRandomSampler::populate_indices() {
                      // replicas to have the same number of samples.
     }
   }
-
   begin_index_ = rank_ * local_sample_count_;
   end_index_ = begin_index_ + local_sample_count_;
   sample_index_ = begin_index_;
@@ -153,6 +156,12 @@ void DistributedSequentialSampler::reset(optional<size_t> new_size) {
 }
 
 void DistributedSequentialSampler::populate_indices() {
+  size_t local_sample_count_;
+  if (allow_duplicates_) {
+    local_sample_count_ = (size_ + num_replicas_ - 1) / num_replicas_;
+  } else {
+    local_sample_count_ = size_ / num_replicas_;
+  }
   begin_index_ = rank_ * local_sample_count_;
   end_index_ = begin_index_ + local_sample_count_;
   sample_index_ = begin_index_;
