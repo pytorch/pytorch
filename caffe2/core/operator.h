@@ -1204,7 +1204,7 @@ C10_DECLARE_REGISTRY(
     std::vector<c10::IValue>,
     std::vector<c10::IValue*>);
 
-struct CAFFE2_API FunctionSchemaStorageBase {
+struct FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
   virtual c10::FunctionSchema getSchema() = 0;
   virtual ~FunctionSchemaStorageBase() {}
@@ -1215,15 +1215,14 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 // Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
 // as they wrap it all in a Meyer's singleton accessible from Torch.
 
-#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
-  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)       \
-  struct CAFFE2_API FunctionSchemaStorageBase##name                    \
-      : public FunctionSchemaStorageBase {                             \
-    c10::FunctionSchema getSchema() override {                         \
-      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);  \
-    }                                                                  \
-  };                                                                   \
-  C10_REGISTER_CLASS(                                                  \
+#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
+  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
+  struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
+    c10::FunctionSchema getSchema() override {                                \
+      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);         \
+    }                                                                         \
+  };                                                                          \
+  C10_REGISTER_CLASS(                                                         \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
 
 #define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
