@@ -1112,7 +1112,6 @@ class _TestTorchMixin(object):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
-    @skipIfRocm
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
@@ -1176,7 +1175,6 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.ones((2, 1, 4), device=device), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device), xb.all())
 
-    @skipIfRocm
     def test_pairwise_distance_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -2635,7 +2633,6 @@ class _TestTorchMixin(object):
                     self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
-    @skipIfRocm
     def test_empty_full(self):
         do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -2833,7 +2830,6 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    @skipIfRocm
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -5280,7 +5276,6 @@ class _TestTorchMixin(object):
         run_test([10, 20, 30, 5], cast)
         run_test([15, 5, 10, 20, 25], cast)
 
-    @skipIfRocm
     def test_chain_matmul(self):
         self._test_chain_matmul(self, cast=lambda x: x)
 
@@ -7253,7 +7248,6 @@ class _TestTorchMixin(object):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
-    @skipIfRocm
     def test_tensor_shape_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -9137,7 +9131,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(empty_strided.stride(), as_strided.stride())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
