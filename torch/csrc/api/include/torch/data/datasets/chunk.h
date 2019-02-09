@@ -341,6 +341,7 @@ class ChunkDataset final
     // create new workers for this new epoch.
     quit_worker_ = false;
 
+    AT_ASSERT(running_preloaders_ == 0);
     for (size_t i = 0; i < options_.preloader_count_; ++i) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
       ++running_preloaders_;
