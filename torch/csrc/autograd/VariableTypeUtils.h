@@ -40,8 +40,6 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-extern std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {

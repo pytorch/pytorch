@@ -63,16 +63,16 @@ TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
 }
 
-std::vector<std::unique_ptr<Type>> type_to_variable_type;
+static std::unique_ptr<Type> type_to_variable_type
+    [static_cast<int>(Backend::NumOptions)]
+    [static_cast<int>(ScalarType::NumOptions)];
 
 // XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(TypeExtendedInterface* baseType) {
+void register_variable_type_for(int backend, int scalar, TypeExtendedInterface* baseType) {
   AT_ASSERT(baseType);
-  const auto base_id = static_cast<size_t>(baseType->ID());
-  if(type_to_variable_type.size() <= base_id) {
-    type_to_variable_type.resize(base_id + 1);
-  }
-  type_to_variable_type[base_id] =
+  AT_ASSERT(backend >= 0 && backend < static_cast<int>(Backend::NumOptions));
+  AT_ASSERT(scalar >= 0 && scalar < static_cast<int>(ScalarType::NumOptions));
+  type_to_variable_type[backend][scalar] =
       make_unique<VariableType>(&at::globalContext(), baseType);
 }
 
@@ -83,7 +83,7 @@ struct VariableTypeRegistry {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
         auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(baseType);
+          register_variable_type_for(p, s, baseType);
         }
       }
     }
@@ -128,7 +128,9 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
-  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
+  register_variable_type_for(static_cast<int>(backend),
+                             static_cast<int>(scalar_type),
+                             static_cast<at::TypeExtendedInterface*>(baseType));
 }
 
 at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
@@ -140,10 +142,9 @@ bool VariableType::isVariableType(const at::Type& type) {
 }
 
 at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
-  auto id = static_cast<size_t>(baseType.ID());
-  if(id >= type_to_variable_type.size())
-    return nullptr;
-  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
+  return static_cast<at::TypeExtendedInterface*>(
+      type_to_variable_type[static_cast<int>(baseType.backend())]
+      [static_cast<int>(baseType.scalarType())].get());
 }
 
 namespace {

@@ -23,7 +23,7 @@ std::unique_ptr<Generator> ${Type}::generator() const {
 }
 
 ScalarType ${Type}::scalarType() const {
-  AT_ERROR("scalarType is not implemented for ${Type}");
+  return ScalarType::Float;
 }
 
 caffe2::TypeMeta ${Type}::typeMeta() const {
