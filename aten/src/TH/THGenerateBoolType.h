@@ -2,7 +2,7 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateBoolType.h"
 #endif
 
-// TODO: define accreal tyoe once the correct value is known.
+// TODO: define accreal type once the correct value is known.
 #define scalar_t bool
 #define ureal uint8_t
 #define Real Bool
