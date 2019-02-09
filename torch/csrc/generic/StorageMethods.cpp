@@ -96,7 +96,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   PyObject *obj = nullptr;
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
-  Py_buffer buffer;
+  Py_buffer buffer = {};
   static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
   const char* argtypes;
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)

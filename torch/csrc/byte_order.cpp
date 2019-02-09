@@ -1,7 +1,6 @@
 #include <torch/csrc/byte_order.h>
 
 #include <cstring>
-#include <iostream>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
