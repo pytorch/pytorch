@@ -27,6 +27,9 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   }
 }
 
+// kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
+// supports at most one output that requires grad. Thus we need to remove
+// the grad for index that doesn't require grad.
 bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
@@ -81,7 +84,6 @@ bool isDifferentiable(Node* n) {
       "aten::acos(Tensor self) -> Tensor",
       "aten::asin(Tensor self) -> Tensor",
       "aten::atan(Tensor self) -> Tensor",
-      //"aten::cat(Tensor[] tensors, int dim) -> Tensor",
       "aten::ceil(Tensor self) -> Tensor",
       "aten::cos(Tensor self) -> Tensor",
       "aten::cosh(Tensor self) -> Tensor",
@@ -208,8 +210,8 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
     for (size_t i = 0; i < outputs.size(); ++i) {
-      new_outputs[i]->setType(outputs[i]->type());
-      outputs[i]->replaceAllUsesWith(new_outputs[i]);
+      new_outputs.at(i)->setType(outputs[i]->type());
+      outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
   }
 
@@ -594,35 +596,6 @@ class GradientHelper {
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim),
               nullptr};
 
-    } else if (node->matches(
-                   "aten::cat(Tensor[] tensors, int dim) -> Tensor",
-                   /*const_inputs=*/attr::dim)) {
-      int dim = *node->get<int64_t>(attr::dim);
-      auto tensor_inputs = inputs;
-      tensor_inputs.pop_back();
-      const auto& first_sizes = tensor_inputs.at(0).sizes();
-      const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
-        return var.sizes() == first_sizes;
-      };
-
-      // NB: this is a specialization for the common case where all inputs are
-      // of equal sizes. We can use a single split operation to handle that.
-      if (std::all_of(
-              tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
-        auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
-        tensor_grads.emplace_back(nullptr); // for attr::dim
-        return tensor_grads;
-      } else {
-        size_t offset = 0;
-        auto grad = grads.at(0);
-        std::vector<SymbolicVariable> tensor_grads;
-        for (auto input : tensor_inputs) {
-          tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
-          offset += input.sizes()[dim];
-        }
-        tensor_grads.emplace_back(nullptr); // for attr::dim
-        return tensor_grads;
-      }
     } else if (comparison_ops.find(node)) {
       return {nullptr, nullptr};
 

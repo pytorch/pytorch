@@ -22,8 +22,9 @@ const std::vector<std::string> functions = {
 
         def erf(self):
             def backward(grad_output):
-                M_PI = 3.14159265358979323846
-                grad_self = 2.0 / torch.sqrt(torch.tensor(M_PI)) * torch.exp(- self.pow(2)) * grad_output
+                # Precomputed constant C = 2.0 / math.sqrt(math.pi)
+                C = 1.1283791670955126
+                grad_self =  C * torch.exp(- self.pow(2)) * grad_output
                 return grad_self
 
             return torch.erf(self), backward
@@ -31,15 +32,17 @@ const std::vector<std::string> functions = {
         def expand(self,
                    size: List[int],
                    implicit: bool=False):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch._grad_sum_to_size(grad_output, self.size())
+                grad_self = torch._grad_sum_to_size(grad_output, self_size)
                 return grad_self, None, None
 
             return torch.expand(self, size, implicit=implicit), backward
 
         def expand_as(self, other):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output._grad_sum_to_size(self.size())
+                grad_self = grad_output._grad_sum_to_size(self_size)
                 return grad_self, None
 
             return torch.expand_as(self, other), backward
@@ -56,8 +59,9 @@ const std::vector<std::string> functions = {
                      dim: int,
                      keepdim: bool):
             result0, result1 = torch.kthvalue(self, k, dim, keepdim)
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.index_select_backward(grad_output, dim, result1, self.size(), keepdim)
+                grad_self = torch.index_select_backward(grad_output, dim, result1, self_size, keepdim)
                 return grad_self, None, None, None
 
             return result0, result1, backward
@@ -74,8 +78,10 @@ const std::vector<std::string> functions = {
             return result, backward
 
         def mean_0(self):
+            self_size = self.size()
+            self_numel = self.numel()
             def backward(grad_output):
-                grad_self = grad_output.expand(self.size()) / self.numel()
+                grad_self = grad_output.expand(self_size) / self_numel
                 return grad_self
 
             return torch.mean(self), backward
@@ -83,16 +89,19 @@ const std::vector<std::string> functions = {
         def mean_1(self,
                    dim: List[int],
                    keepdim: bool):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.sum_backward(grad_output, self.size(), dim, keepdim) / torch._safe_size(self.size(), dim)
+                grad_self = torch.sum_backward(grad_output, self_size, dim, keepdim) / torch._safe_size(self_size, dim)
                 return grad_self, None, None
 
             return torch.mean(self, dim, keepdim), backward
 
         def mul(self, other):
+            self_size = self.size()
+            other_size = other.size()
             def backward(grad_output):
-                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
-                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
+                grad_self = (grad_output * other)._grad_sum_to_size(self_size)
+                grad_other = (grad_output * self)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
             return self * other, backward
@@ -126,9 +135,11 @@ const std::vector<std::string> functions = {
             return torch.pow(self, exponent), backward
 
         def pow_1(self, exponent):
+            self_size = self.size()
+            exponent_size = exponent.size()
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self.size())
-                grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent.size())
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
+                grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent_size)
                 return grad_self, grad_exponent
 
             return torch.pow(self, exponent), backward
@@ -143,9 +154,11 @@ const std::vector<std::string> functions = {
 
         def rsub_0(self, other,
                    alpha: float = 1.0):
+            self_size = self.size()
+            other_size = other.size()
             def backward(grad_output):
-                grad_self = (- grad_output * alpha)._grad_sum_to_size(self.size())
-                grad_other = (grad_output)._grad_sum_to_size(other.size())
+                grad_self = (- grad_output * alpha)._grad_sum_to_size(self_size)
+                grad_other = (grad_output)._grad_sum_to_size(other_size)
                 return grad_self, grad_other, None
 
             return torch.rsub(self, other, alpha), backward
@@ -153,8 +166,9 @@ const std::vector<std::string> functions = {
         def rsub_1(self,
                    other: float,
                    alpha: float = 1.0):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = (- grad_output * alpha)._grad_sum_to_size(self.size())
+                grad_self = (- grad_output * alpha)._grad_sum_to_size(self_size)
                 return grad_self, None, None
 
             return torch.rsub(self, other, alpha), backward
@@ -162,8 +176,9 @@ const std::vector<std::string> functions = {
         def select(self,
                    dim: int,
                    index: int):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.select_backward(grad_output, self.size(), dim, index)
+                grad_self = torch.select_backward(grad_output, self_size, dim, index)
                 return grad_self, None, None
 
             return torch.select(self, dim, index), backward
@@ -177,16 +192,18 @@ const std::vector<std::string> functions = {
             return result, backward
 
         def squeeze_0(self):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.unsqueeze_to(grad_output, self.size())
+                grad_self = torch.unsqueeze_to(grad_output, self_size)
                 return grad_self
 
             return torch.squeeze(self), backward
 
         def squeeze_1(self,
                       dim: int):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.unsqueeze_to(grad_output, dim, self.size())
+                grad_self = torch.unsqueeze_to(grad_output, dim, self_size)
                 return grad_self, None
 
             return torch.squeeze(self, dim), backward
@@ -204,8 +221,9 @@ const std::vector<std::string> functions = {
                  largest: bool = True,
                  sorted: bool = True):
             result0, result1 = torch.topk(self, k, dim, largest, sorted)
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.index_select_backward(grad_output, dim, result1, self.size(), True)
+                grad_self = torch.index_select_backward(grad_output, dim, result1, self_size, True)
                 return grad_self, None, None, None, None
 
             return result0, result1, backward
@@ -239,8 +257,9 @@ const std::vector<std::string> functions = {
 
         def view(self,
                  size: List[int]):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output.reshape(self.size())
+                grad_self = grad_output.reshape(self_size)
                 return grad_self, None
 
             return torch.view(self, size), backward
@@ -258,8 +277,9 @@ const std::vector<std::string> functions = {
                       padding_idx: int,
                       scale_grad_by_freq: bool,
                       sparse: bool):
+            weight_size_0 = weight.size()[0]
             def backward(grad_output):
-                grad_weight = torch.embedding_backward(grad_output, indices, weight.size()[0], padding_idx, scale_grad_by_freq, sparse)
+                grad_weight = torch.embedding_backward(grad_output, indices, weight_size_0, padding_idx, scale_grad_by_freq, sparse)
                 return grad_weight, None, None, None, None
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
@@ -293,6 +313,24 @@ Argument originalReturnType(const TupleTypePtr& tup) {
   std::vector<TypePtr> types = tup->elements().vec();
   types.pop_back();
   return Argument("", TupleType::create(std::move(types)));
+}
+
+// In torchscript AD formulas, we define {func_0, func_1, ...} as
+// overloaded functions of `func`.
+// Remove the suffix before adding the schema string to map
+// schema_to_graphs.
+std::string overloadedSchemaString(const FunctionSchema& schema) {
+  const auto& schema_name = schema.name();
+  auto pos = schema_name.find_last_of('_');
+  auto schema_name_suffix = schema_name.substr(pos + 1);
+  std::string schema_string = canonicalSchemaString(schema);
+  if (!schema_name_suffix.empty()
+      && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
+    schema_string.replace(schema_string.find(schema_name),
+                          schema_name.length(),
+                          schema_name.substr(0, pos));
+  }
+  return schema_string;
 }
 
 void loadModule(const std::shared_ptr<script::Module>& module) {
@@ -337,15 +375,9 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
 
     // modify canonical string for function overloading
     // prefer not to modify the schema name
-    const auto& schema_name = actual_schema.name();
-    auto pos = schema_name.find_last_of('_');
-    auto schema_name_suffix = schema_name.substr(pos + 1);
-    std::string key = canonicalSchemaString(actual_schema);
-    if (!schema_name_suffix.empty() && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
-      key.replace(key.find(schema_name), schema_name.length(), schema_name.substr(0, pos));
-    }
+    auto schema_string = overloadedSchemaString(actual_schema);
 
-    schema_to_graphs[key] = std::move(pair);
+    schema_to_graphs[schema_string] = std::move(pair);
   }
 }
 
@@ -370,7 +402,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // JIT doesn't support keyword only arguments.
     // Remove ' *,' in schema before looking up
-    // TODO: Properly support keyword only arguments in JIT.
+    // TODO: #16921 properly support keyword only arguments in JIT.
     auto n = schema_str.find("*, ");
     if (n != std::string::npos) {
       schema_str = schema_str.erase(n, 3);
