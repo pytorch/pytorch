@@ -172,12 +172,7 @@ class BatchDataBuffer {
     // notify all readers too.
     cv_read_.notify_all();
   }
-
-  /// count of remaining chunk to be loaded. It is initialized with the total
-  /// chunk count and it decreases when a chunk data is retrieved. When this reaches
-  /// to 0, no more chunk needs to be loaded.
-  //size_t remaining_chunk_count_ = 0;
-
+  
   /// The batch size is needed to create batches from the chunk data. Similar to
   /// regular dataloader where the batches are created with prefetches,
   /// BatchDataBuffer perform the batch creation using the provided batch size.
