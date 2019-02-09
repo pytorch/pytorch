@@ -727,7 +727,7 @@ if __name__ == '__main__':
         ok = dist.parse_command_line()
     except DistutilsArgError as msg:
         raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
-    if ok != True:
+    if not ok:
         sys.exit()
 
     if RUN_BUILD_DEPS:
