@@ -19,8 +19,8 @@ DistributedSampler::DistributedSampler(
     : size_(size),
       num_replicas_(num_replicas),
       rank_(rank),
-      epoch_(0),
-      allow_duplicates_(allow_duplicates) {}
+      allow_duplicates_(allow_duplicates),
+      epoch_(0) {}
 
 void DistributedSampler::set_epoch(size_t epoch) {
   epoch_ = epoch;
