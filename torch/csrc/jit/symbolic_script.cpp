@@ -62,6 +62,17 @@ const std::vector<std::string> functions = {
 
             return result0, result1, backward
 
+        def logsumexp(self,
+                      dim: List[int],
+                      keepdim: bool):
+            result = torch.logsumexp(self, dim, keepdim)
+            self_dim = self.dim()
+            def backward(grad_output):
+                grad_self = torch.logsumexp_backward(grad_output, self, result, dim, keepdim)
+                return grad_self, None, None
+
+            return result, backward
+
         def mean_0(self):
             def backward(grad_output):
                 grad_self = grad_output.expand(self.size()) / self.numel()

@@ -452,7 +452,7 @@
   self: zeros_like(grad)
 
 - name: logsumexp(Tensor self, IntArrayRef dim, bool keepdim)
-  self: logsumexp_backward(grad, self, result, dim, keepdim)
+  self: at::logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)

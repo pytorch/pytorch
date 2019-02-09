@@ -335,7 +335,7 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, ScalarType 
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
-int64_t _safe_size(IntList sizes, IntList dim) {
+int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   int64_t size = 1;
   if (sizes.size() == 0) {
     return 1;
@@ -347,7 +347,7 @@ int64_t _safe_size(IntList sizes, IntList dim) {
   return size;
 }
 
-Tensor unsqueeze_multiple(const Tensor & t, IntList dim, size_t n_dims) {
+Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
     auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
     Tensor res = t;
     for (size_t i = 0; i < n_dims; i++){
@@ -358,7 +358,7 @@ Tensor unsqueeze_multiple(const Tensor & t, IntList dim, size_t n_dims) {
     return res;
 }
 
-Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
+Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
@@ -450,6 +450,16 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntArrayRef dims, bool
 Tensor logsumexp(const Tensor &self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
+}
+
+Tensor logsumexp_backward(const Tensor& grad, const Tensor & self, const Tensor& res, IntArrayRef dim, bool keepdim) {
+  Tensor grad_input = grad;
+  Tensor fwd_res = res;
+  if (!keepdim && self.dim() != 0) {
+    grad_input = unsqueeze_multiple(grad, dim, self.sizes().size());
+    fwd_res = unsqueeze_multiple(res, dim, self.sizes().size());
+  }
+  return grad_input * (self - fwd_res).exp();
 }
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
@@ -668,7 +678,7 @@ Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(const Tensor & grad, const Tensor & self, IntList dim, bool unbiased, bool keepdim) {
+Tensor var_backward(const Tensor & grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
   if (self.dim() == 0) {
     return at::var_backward(grad, self, unbiased);
   }

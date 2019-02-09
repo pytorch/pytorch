@@ -34,7 +34,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
-Tensor index_select_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntList sizes, bool keepdim) {
+Tensor index_select_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
   Tensor res = at::zeros(sizes, grad.options());
   if (!keepdim && sizes.size() > 0) {
     return res.scatter_(dim, indices.unsqueeze(dim), grad.unsqueeze(dim));
