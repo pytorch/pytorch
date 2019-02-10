@@ -8,10 +8,11 @@ const std::vector<std::string> functions = {
     R"(
         def cat(tensors: List[Tensor],
                 dim: int=0):
-            sizes = len(tensors)
-            split_sizes = [0] * sizes
-            for i in range(sizes):
-                split_sizes[i] = tensors[i].size()[dim]
+            size = len(tensors)
+            split_sizes = [0] * size
+            for i in range(size):
+                if tensors[i].numel() > 0:
+                    split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
                 grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
@@ -27,12 +28,42 @@ const std::vector<std::string> functions = {
 
             return torch.index(self, indices), backward
 
+        def meshgrid(tensors: List[Tensor]):
+            size = len(tensors)
+            sizes = [0] * size
+            for i in range(size):
+                if tensors[i].dim() != 0:
+                    sizes[i] = tensors[i].size()[0]
+            def backward(grad_outputs: List[Tensor]):
+                grads_tensors = []
+                for i in range(size):
+                    view_shape = [1] * size
+                    if sizes[i] == 0:
+                        view_shape[i] = 1
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape(()))
+                    else:
+                        view_shape[i] = sizes[i]
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape([sizes[i]]))
+                return grads_tensors
+            return torch.meshgrid(tensors), backward
+
         def mul(self, other):
             def backward(grad_output):
                 grad_self = (grad_output * other)._grad_sum_to_size(self.size())
                 grad_other = (grad_output * self)._grad_sum_to_size(other.size())
                 return grad_self, grad_other
             return self * other, backward
+
+        #def split(self,
+        #          split_size: int,
+        #          dim: int):
+        #    self_size = self.size()
+        #    self_type = self.type()
+        #    def backward(grad_outputs: List[Tensor]):
+        #        grad_self = torch.split_backward(grad_outputs, split_size, dim, self_size, self_type)
+        #        return grad_self, None, None
+
+        #    return torch.split(self, split_size, dim), backward
 
         def stack(tensors: List[Tensor],
                   dim: int=0):

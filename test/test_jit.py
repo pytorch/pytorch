@@ -241,6 +241,13 @@ def enable_cpu_fuser(fn):
             torch._C._jit_override_can_fuse_on_cpu(False)
     return wrapper
 
+# helper function to get sum of List[Tensor]
+def _sum_of_list(tensorlist):
+    s = 0
+    for t in tensorlist:
+        s += t.sum()
+    return s
+
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -3723,17 +3730,28 @@ a")
         outputs_ref = torch.unbind(x, dim=y)
         self.assertEqual(outputs, outputs_ref)
 
-        def sum_of_list(tensorlist):
-            s = 0
-            for t in tensorlist:
-                s += t.sum()
-            return s
-
-        import pdb
-        pdb.set_trace()
-        grad = torch.autograd.grad(sum_of_list(outputs), x)
-        grad_ref = torch.autograd.grad(sum_of_list(outputs_ref), x)
+        grad = torch.autograd.grad(_sum_of_list(outputs), x)
+        grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
         self.assertEqual(grad, grad_ref)
+
+    def test_meshgrid(self):
+        @torch.jit.script
+        def func(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return torch.meshgrid(a)
+        func.debug_disable_autodiff_subgraph_inlining()
+
+        a = torch.tensor([1.0, 2, 3]).requires_grad_()
+        b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
+        inputs = [a, b]
+
+        outputs_ref = torch.meshgrid(inputs)
+        outputs = func(inputs)
+        self.assertEqual(outputs, outputs_ref)
+
+        grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
+        grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
+        self.assertEqual(grads, grads_ref)
 
     def test_list_literal(self):
         def reassign():

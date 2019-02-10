@@ -77,41 +77,77 @@ struct ExecutionPlan {
 
 struct CaptureList {
   CaptureList(size_t capture_size) {
-    is_var_capture_.reserve(capture_size);
-    var_captures_.reserve(capture_size);
+    capture_types_.reserve(capture_size);
+    var_captures_.reserve(capture_size); // var_captures_.size() might be greater than capture_size
     ivalue_captures_.reserve(capture_size);
   }
+
+  void captureTensor(const at::Tensor& tensor, bool is_output) {
+    var_captures_.emplace_back(Variable(tensor), is_output);
+  }
+
   void capture(const IValue& val, bool is_output) {
-    const bool is_tensor = val.isTensor();
-    is_var_capture_.push_back(is_tensor);
-    if (is_tensor) {
-      var_captures_.emplace_back(Variable(val.toTensor()), is_output);
+    if (val.isTensor()) {
+      capture_types_.emplace_back(CAPTURE_TENSOR);
+      captureTensor(val.toTensor(), is_output);
+    } else if (val.isTensorList()) {
+      //  For TensorList, we have to flatten it to Tensors during saving and
+      //  unflatten it back to TensorList when using it in backward apply().
+      //  This is to avoid any implicit mutation to TensorList happened
+      //  between forward & backward.
+      capture_types_.emplace_back(CAPTURE_LIST);
+      const std::vector<at::Tensor>& tensors = val.toTensorListRef();
+      sizes_.push_back(tensors.size());
+
+      for (at::Tensor tensor: tensors) {
+        captureTensor(tensor, is_output);
+      }
     } else {
+      capture_types_.emplace_back(CAPTURE_IVALUE);
       ivalue_captures_.push_back(val);
     }
   }
+
   size_t size() const {
-    return is_var_capture_.size();
+    return capture_types_.size();
   }
+
   void unpack(Stack & stack, const std::shared_ptr<autograd::Function>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
-    for (bool is_var : is_var_capture_) {
-      if (is_var) {
-        stack.emplace_back(var_capture_it->unpack(saved_for));
-        ++var_capture_it;
-      } else {
-        stack.push_back(*ivalue_capture_it);
-        ++ivalue_capture_it;
+    auto size_it = sizes_.begin();
+    for (Capture capture_type : capture_types_) {
+      switch(capture_type) {
+        case CAPTURE_TENSOR: {
+          stack.emplace_back(var_capture_it->unpack(saved_for));
+          ++var_capture_it;
+        } break;
+        case CAPTURE_LIST: {
+          std::vector<at::Tensor> lst;
+          auto size = *size_it++;
+          for (size_t i = 0; i < size; i++) {
+            lst.emplace_back(var_capture_it->unpack(saved_for));
+            var_capture_it++;
+          }
+          stack.emplace_back(TensorList::create(std::move(lst)));
+        } break;
+        case CAPTURE_IVALUE: {
+          stack.push_back(*ivalue_capture_it++);
+        } break;
       }
     }
   }
 private:
-  // INVARIANT: is_var_capture.size() == var_captures.size() +
-  // ivalue_captures.size()
-  std::vector<bool> is_var_capture_;
+  enum Capture: uint8_t {
+    CAPTURE_TENSOR,
+    CAPTURE_LIST,
+    CAPTURE_IVALUE,
+  };
+
+  std::vector<Capture> capture_types_;
   std::vector<autograd::SavedVariable> var_captures_;
   std::vector<IValue> ivalue_captures_;
+  std::vector<size_t> sizes_;
 };
 
 // how do we turn a flattened list of tensors back into the ivalues that
@@ -593,7 +629,10 @@ struct GraphExecutorImpl {
           CreateAutodiffSubgraphs(opt_graph, autodiffSubgraphNodeThreshold);
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
+        std::cout << "DIFF:" << std::endl;
+        diff_graph->dump();
         Gradient gradient = differentiate(diff_graph);
+        gradient.df->dump();
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
