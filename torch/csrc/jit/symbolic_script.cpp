@@ -54,16 +54,24 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
             return self * other, backward
 
-        #def split(self,
-        #          split_size: int,
-        #          dim: int):
-        #    self_size = self.size()
-        #    self_type = self.type()
-        #    def backward(grad_outputs: List[Tensor]):
-        #        grad_self = torch.split_backward(grad_outputs, split_size, dim, self_size, self_type)
-        #        return grad_self, None, None
+        def split(self,
+                  split_size: int,
+                  dim: int):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
 
-        #    return torch.split(self, split_size, dim), backward
+            return torch.split(self, split_size, dim), backward
+
+        def split_with_sizes(self,
+                             split_sizes: List[int],
+                             dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                size = len(grad_outputs)
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
+
+            return torch.split_with_sizes(self, split_sizes, dim), backward
 
         def stack(tensors: List[Tensor],
                   dim: int=0):
