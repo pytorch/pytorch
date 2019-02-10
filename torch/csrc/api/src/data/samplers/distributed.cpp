@@ -69,14 +69,14 @@ void DistributedRandomSampler::reset(optional<size_t> new_size) {
 }
 
 void DistributedRandomSampler::populate_indices() {
-  size_t local_sample_count_;
+  size_t local_sample_count;
   if (allow_duplicates_) {
-    local_sample_count_ = (size_ + num_replicas_ - 1) / num_replicas_;
+    local_sample_count = (size_ + num_replicas_ - 1) / num_replicas_;
   } else {
-    local_sample_count_ = size_ / num_replicas_;
+    local_sample_count = size_ / num_replicas_;
   }
   size_t sample_count =
-      num_replicas_ == 1 ? size_ : local_sample_count_ * num_replicas_;
+      num_replicas_ == 1 ? size_ : local_sample_count * num_replicas_;
   all_indices_.resize(sample_count);
   std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
   if (num_replicas_ > 1 && sample_count > size_) {
@@ -86,8 +86,8 @@ void DistributedRandomSampler::populate_indices() {
                      // replicas to have the same number of samples.
     }
   }
-  begin_index_ = rank_ * local_sample_count_;
-  end_index_ = begin_index_ + local_sample_count_;
+  begin_index_ = rank_ * local_sample_count;
+  end_index_ = begin_index_ + local_sample_count;
   sample_index_ = begin_index_;
 }
 
