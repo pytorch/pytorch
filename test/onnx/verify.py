@@ -252,7 +252,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
     PyTorch developers.  You can also debug the issue yourself by removing
     suffixes of operators from your model until verification passes.
 
-    For reproduceability, we recommend explicitly setting PyTorch's seed before
+    For reproducibility, we recommend explicitly setting PyTorch's seed before
     invoking this function.
 
     Arguments:

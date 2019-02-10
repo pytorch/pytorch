@@ -396,7 +396,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 
     default:
       AT_ERROR(
-          "Unknown mode for embedding_bag_backward_cuda %d", mode);
+          "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
 }
 

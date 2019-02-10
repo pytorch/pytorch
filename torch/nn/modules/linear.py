@@ -19,10 +19,10 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in\_features})` where :math:`*` means any number of
-          additional dimensions
-        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
-          are the same shape as the input.
+        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
+          additional dimensions and :math:`H_{in} = \text{in\_features}`
+        - Output: :math:`(N, *, H_{out})` where all but the last dimension
+          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -85,11 +85,12 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in1\_features})`, :math:`(N, *, \text{in2\_features})`
-          where :math:`*` means any number of additional dimensions. All but the last
-          dimension of the inputs should be the same.
-        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
-          are the same shape as the input.
+        - Input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
+          :math:`*` means any number of additional dimensions. All but the last dimension
+          of the inputs should be the same.
+        - Input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
+        - Output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+          and all but the last dimension are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape

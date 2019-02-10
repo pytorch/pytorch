@@ -9,8 +9,8 @@ try:
     # that case.
     from .._utils_internal import get_file_path
 
-    THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
-    THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
+    THNN_H_PATH = get_file_path('torch', 'include', 'THNN', 'generic', 'THNN.h')
+    THCUNN_H_PATH = get_file_path('torch', 'include', 'THCUNN', 'generic', 'THCUNN.h')
 except Exception as e:
     pass
 

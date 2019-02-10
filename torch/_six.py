@@ -20,6 +20,7 @@
 
 import itertools
 import sys
+import builtins
 
 
 PY2 = sys.version_info[0] == 2
@@ -48,7 +49,7 @@ else:
 if PY2:
     FileNotFoundError = IOError
 else:
-    FileNotFoundError = FileNotFoundError
+    FileNotFoundError = builtins.FileNotFoundError
 
 
 if PY2:
@@ -71,11 +72,10 @@ def with_metaclass(meta, *bases):
 
 # A portable way of referring to the generator version of map
 # in both Python 2 and Python 3.
-# TODO: Move this into an appropriate utility library.
 if hasattr(itertools, 'imap'):
-    imap = itertools.imap
+    imap = itertools.imap  # type: ignore
 else:
-    imap = map
+    imap = map  # type: ignore
 
 
 if PY3:
@@ -135,3 +135,18 @@ if PY2:
     import __builtin__ as builtins
 elif PY3:
     import builtins
+
+
+# The codes below is not copied from the six package, so the copyright
+# declaration at the beginning does not apply.
+#
+# Copyright(c) PyTorch contributors
+#
+
+def istuple(obj):
+    # Usually instances of PyStructSequence is also an instance of tuple
+    # but in some py2 environment it is not, so we have to manually check
+    # the name of the type to determine if it is a namedtupled returned
+    # by a pytorch operator.
+    t = type(obj)
+    return isinstance(obj, tuple) or t.__module__ == 'torch.return_types'

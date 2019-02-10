@@ -99,3 +99,7 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         FILES_MATCHING PATTERN "*.h")
 install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
         DESTINATION include/c10/macros)
+
+if (MSVC AND C10_BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
+endif()

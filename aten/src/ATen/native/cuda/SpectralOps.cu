@@ -173,8 +173,8 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 static inline Tensor _run_cufft(
     const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
     bool complex_input, bool complex_output, bool inverse,
-    IntList checked_signal_sizes, bool normalized, bool onesided,
-    IntList output_sizes, bool input_was_cloned
+    IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+    IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
@@ -291,8 +291,8 @@ void cufft_clear_plan_cache_impl() {
 // Currently not utilizing multi GPUs so this can be potentially sped up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
                   bool complex_input, bool complex_output, bool inverse,
-                  IntList checked_signal_sizes, bool normalized, bool onesided,
-                  IntList output_sizes) {
+                  IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+                  IntArrayRef output_sizes) {
   Tensor input = self;
   bool input_was_cloned = false;
 
@@ -308,8 +308,9 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   }
 
   // cuFFT requires input and output data pointers to complex type aligned.
-  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
+  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
+  // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
   auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {

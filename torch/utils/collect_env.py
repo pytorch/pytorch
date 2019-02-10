@@ -52,7 +52,7 @@ def run(command):
 def run_and_read_all(run_lambda, command):
     """Runs command using run_lambda; reads and returns entire output if rc is 0"""
     rc, out, _ = run_lambda(command)
-    if rc is not 0:
+    if rc != 0:
         return None
     return out
 
@@ -60,7 +60,7 @@ def run_and_read_all(run_lambda, command):
 def run_and_parse_first_match(run_lambda, command, regex):
     """Runs command using run_lambda, returns the first regex match if it exists"""
     rc, out, _ = run_lambda(command)
-    if rc is not 0:
+    if rc != 0:
         return None
     match = re.search(regex, out)
     if match is None:
@@ -73,7 +73,8 @@ def get_conda_packages(run_lambda):
         grep_cmd = r'findstr /R "torch soumith mkl magma"'
     else:
         grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
-    out = run_and_read_all(run_lambda, 'conda list | ' + grep_cmd)
+    conda = os.environ.get('CONDA_EXE', 'conda')
+    out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
         return out
     # Comment starting at beginning of line
@@ -98,7 +99,7 @@ def get_gpu_info(run_lambda):
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
-    if rc is not 0:
+    if rc != 0:
         return None
     # Anonymize GPUs by removing their UUID
     return re.sub(uuid_regex, '', out)
@@ -113,15 +114,25 @@ def get_cudnn_version(run_lambda):
     if get_platform() == 'win32':
         cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
     else:
-        cudnn_cmd = 'find /usr/local /usr/lib -type f -name "libcudnn*" 2> /dev/null'
+        cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
     if len(out) == 0:
         return None
     if rc != 1 and rc != 0:
         return None
+    files = set()
+    for fn in out.split('\n'):
+        fn = os.path.realpath(fn)  # eliminate symbolic links
+        if os.path.isfile(fn):
+            files.add(fn)
+    if not files:
+        return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    result = '\n'.join(sorted(out.split('\n')))
+    files = list(sorted(files))
+    if len(files) == 1:
+        return files[0]
+    result = '\n'.join(files)
     return 'Probably one of the following:\n{}'.format(result)
 
 
@@ -165,7 +176,7 @@ def check_release_file(run_lambda):
 def get_os(run_lambda):
     platform = get_platform()
 
-    if platform is 'win32' or platform is 'cygwin':
+    if platform == 'win32' or platform == 'cygwin':
         return get_windows_version(run_lambda)
 
     if platform == 'darwin':
@@ -198,7 +209,7 @@ def get_pip_packages(run_lambda):
             grep_cmd = r'findstr /R "numpy torch"'
         else:
             grep_cmd = r'grep "torch\|numpy"'
-        return run_and_read_all(run_lambda, pip + ' list --format=legacy | ' + grep_cmd)
+        return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
 
     if not PY3:
         return 'pip', run_with_pip('pip')
@@ -208,7 +219,7 @@ def get_pip_packages(run_lambda):
     out3 = run_with_pip('pip3')
 
     num_pips = len([x for x in [out2, out3] if x is not None])
-    if num_pips is 0:
+    if num_pips == 0:
         return 'pip', out2
 
     if num_pips == 1:

@@ -13,19 +13,26 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   const int D = X.size_from_dim(canonical_axis);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
-  // ReinitializeTensor itself has the effect of caching, so there is no need to check for numel of Tensor
   // First, get scales
-  ReinitializeTensor(
-      &scale_, {N}, at::dtype<float>().device(CPU));
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
+    scale_.Resize(N);
+  }
 
-  ReinitializeTensor(
-      &rowmax_, {N}, at::dtype<float>().device(CPU));
+  if (!rowmax_.defined()) {
+    rowmax_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (rowmax_.numel() != N) {
+    rowmax_.Resize(N);
+  }
 
-  ReinitializeTensor(
-      &sum_multiplier_,
-      {D},
-      at::dtype<float>().device(CPU));
-  math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
+    sum_multiplier_.Resize(D);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  }
 
   SoftmaxCPU(
       context_,
@@ -50,18 +57,20 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const int64_t N = Y.size_to_dim(canonical_axis);
   const int64_t D = Y.size_from_dim(canonical_axis);
   // First, get scales
-  if (scale_.numel() != N) {
-    ReinitializeTensor(
-        &scale_, {N}, at::dtype<float>().device(CPU));
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
+    scale_.Resize(N);
   }
-  if (sum_multiplier_.numel() != D) {
-    ReinitializeTensor(
-        &sum_multiplier_,
-        {D},
-        at::dtype<float>().device(CPU));
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
+
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
+    sum_multiplier_.Resize(D);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
+
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();

@@ -1,5 +1,10 @@
 #include "caffe2/image/image_input_op.h"
 
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
+
 namespace caffe2 {
 
 template <>
@@ -111,5 +116,11 @@ The dimension of the output image will always be cropxcrop
             "Tensors read from the input TensorProtos");
 
 NO_GRADIENT(ImageInput);
+
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(
+    ImageInput,
+    IDEEPFallbackOp<ImageInputOp<CPUContext>>);
+#endif
 
 }  // namespace caffe2

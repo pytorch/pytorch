@@ -96,9 +96,7 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
-  return (
-      (CUDNN_VERSION >= (6021)) ||
-      (CUDNN_VERSION >= (6000) && prop->major >= 5));
+  return true;
 #else
   return false;
 #endif

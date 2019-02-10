@@ -466,7 +466,7 @@ add_docstr_all('bernoulli_',
     The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
     value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
 
-    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    :attr:`self` can have integral ``dtype``, but :attr:`p_tensor` must have
     floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
@@ -2770,6 +2770,18 @@ Example::
     >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
     >>> z.size()
     torch.Size([2, 8])
+
+    >>> a = torch.randn(1, 2, 3, 4)
+    >>> a.size()
+    torch.Size([1, 2, 3, 4])
+    >>> b = a.transpose(1, 2)  # Swaps 2nd and 3rd dimension
+    >>> b.size()
+    torch.Size([1, 3, 2, 4])
+    >>> c = a.view(1, 3, 2, 4)  # Does not change tensor layout in memory
+    >>> c.size()
+    torch.Size([1, 3, 2, 4])
+    >>> torch.equal(b, c)
+    False
 
 """)
 

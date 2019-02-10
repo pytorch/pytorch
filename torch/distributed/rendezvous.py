@@ -92,7 +92,7 @@ def _tcp_rendezvous_handler(url):
     rank = int(query["rank"])
     world_size = int(query["world_size"])
     start_daemon = rank == 0
-    store = TCPStore(result.hostname, result.port, start_daemon)
+    store = TCPStore(result.hostname, result.port, world_size, start_daemon)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
@@ -140,7 +140,7 @@ def _env_rendezvous_handler(url):
 
     # Now start the TCP store daemon on the rank 0
     start_daemon = rank == 0
-    store = TCPStore(master_addr, master_port, start_daemon)
+    store = TCPStore(master_addr, master_port, world_size, start_daemon)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it

@@ -120,7 +120,7 @@ template <>
 bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE(X.ndim() == 4, "Only supports 4D tensors for the momement");
+  CAFFE_ENFORCE(X.dim() == 4, "Only supports 4D tensors for the momement");
 
   // Input is (N, C, H, W)
   // Output is (N, C, H + 1, W + 1)
@@ -175,7 +175,7 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
   // Col pass reduces shape to (N, C, H, W)
   vector<int64_t> row_pass_shape(dY.sizes().vec());
   row_pass_shape[3] -= 1;
-  row_pass_buffer_.Resize(row_pass_shape);
+  ReinitializeTensor(&row_pass_buffer_, row_pass_shape, at::dtype<float>().device(CUDA));
   const int chans = row_pass_buffer_.dim32(1);
   const int rows_out = row_pass_buffer_.dim32(2);
   const int cols_out = row_pass_buffer_.dim32(3);

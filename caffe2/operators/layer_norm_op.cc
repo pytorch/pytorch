@@ -1,7 +1,9 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <c10/core/opschema/layer_norm.h>
-#include <c10/core/dispatch/KernelRegistration.h>
+#include "caffe2/core/operator_c10wrapper.h"
+#include <ATen/core/dispatch/KernelRegistration.h>
+#include <c10/core/Tensor.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
 
@@ -182,48 +184,16 @@ to the end.)
 
 } // namespace caffe2
 
-
-// Register layer norm with c10
-namespace {
-template <class DataType>
-void layer_norm_c10(
-    const c10::C10Tensor& X_,
-    const c10::C10Tensor& Y_,
-    const c10::C10Tensor& mean_,
-    const c10::C10Tensor& sig_,
-    int axis,
-    float epsilon,
-    c10::core::opschema::LayerNorm::Cache* cache) {
-  caffe2::Tensor X(X_);
-  caffe2::Tensor Y(Y_);
-  caffe2::Tensor mean(mean_);
-  caffe2::Tensor sig(sig_);
-  caffe2::CPUContext context;
-  if (!cache->scale.has_value()) {
-    cache->scale = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
-  }
-  if (!cache->bias.has_value()) {
-    cache->bias = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
-  }
-  caffe2::Tensor scale(*cache->scale);
-  caffe2::Tensor bias(*cache->bias);
-
-  const int canonical_axis = X.canonical_axis_index(axis);
-  std::vector<int64_t> moments_dims(
-      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
-  moments_dims.push_back(1);
-  mean.Resize(moments_dims);
-  sig.Resize(moments_dims);
-  caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
-    X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
-  );
-}
-}
-namespace c10 {
-C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
-    .kernel(&layer_norm_c10<float>)
-    .dispatchKey(c10::DispatchKey<1>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()}});
-} // namespace c10
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+  LayerNorm,
+  (std::vector<c10::Argument>{
+    c10::Argument("input"),
+    c10::Argument("axis", c10::IntType::get()),
+    c10::Argument("epsilon", c10::FloatType::get())
+  }), (std::vector<c10::Argument>{
+    c10::Argument("output"),
+    c10::Argument("mean"),
+    c10::Argument("stdev")
+  }),
+  caffe2::LayerNormOp<caffe2::CPUContext>
+)

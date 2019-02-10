@@ -13,6 +13,21 @@
 #include <cmath>
 #define device_sqrt std::sqrt
 #endif
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define MAX(X, Y) ::max(X,Y)
+#define MIN(X, Y) ::min(X,Y)
+#else
+#define MAX(X, Y) std::max(X,Y)
+#define MIN(X, Y) std::min(X,Y)
+#endif
+
+// ROCM hcc doesn't work well with using std:: in kernel functions
+#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_pow c10::cuda::compat::pow
+#else
+#define compat_pow std::pow
+#endif
 
 namespace at { namespace native {
 
@@ -105,5 +120,119 @@ struct MeanOps {
   }
 };
 
+template <typename acc_t>
+struct AbsMinOps {
+
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+    return MIN(acc, std::abs(data));
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return MIN(a, b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct AbsMaxOps {
+
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+    return MAX(acc, std::abs(data));
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return MAX(a, b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct NormOps {
+  acc_t norm;
+
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+    return acc + compat_pow(std::abs(data), norm);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a + b;
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return compat_pow(a, acc_t(1.0)/norm);
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+
+  NormOps(acc_t norm): norm(norm) {
+  }
+};
+
+template <typename acc_t>
+struct NormZeroOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+    return acc + (data==acc_t(0) ? acc_t(0) : acc_t(1));
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a + b;
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct NormOneOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+    return acc + std::abs(data);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a + b;
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
 
 }} // namespace at::native
+
+#undef MAX
+#undef MIN

@@ -6,6 +6,45 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 
+// Note [What is CuDNNWrapper good for?]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Suppose you are writing a kernel that calls into CuDNN, and
+// you need a cudnnHandle_t to pass to the kernel call.  How should
+// you go about getting one of those handles?  You'd prefer not
+// to make a new cudnnHandle_t every call; this can be somewhat
+// expensive (1-2%, according to some measurements in TensorFlow.)
+// But cudnnHandle_t is not thread-safe, so we can't just have
+// a single global cudnnHandle_t that everyone uses.
+//
+// Thus, the most common method in Caffe2 for getting a CuDNN handle
+// is to get a per-thread, per-stream CuDNN handle from CUDAContext
+// (which knows what the current thread and stream are).  The idiomatic
+// way to do this in Caffe2 today is to make a CuDNNWrapper and then call
+// inline_cudnn_handle(), although you didn't really need the
+// CuDNNWrapper at all (you could have gotten it directly from
+// CUDAContext.)
+//
+// So, what's all this business about CuDNNWrapper?  In theory, it was
+// designed with a more specialized use-case in mind, where you need to
+// make multiple calls to CuDNN in parallel; e.g., when manually
+// computing group convolution.  By using with_cudnn_state(), you can
+// get separate cudnnHandle_t and CUDA stream per parallel thread of
+// execution, and run all of the cuDNN calls in parallel.  CuDNNWrapper
+// handles the business of synchronizing with the stream prior to this
+// call.
+//
+// (By the way, this is why no such CUBLASWrapper exists; there isn't
+// ever any reason you need to call cublas in parallel, since most
+// cublas operations have batched variants.)
+//
+// Now, that's the theory... in practice, this is only ever used when
+// multiple operators are run in parallel, and not to actually
+// parallelize multiple CuDNN calls (for example, group convolution is
+// now supported natively in CuDNN.)  So... while the kit provided here
+// might be useful for someone else in the future, it's not really used
+// now.  So we might consider deleting it, or unifying this mechanism
+// with PyTorch's own CuDNN handle pool.  (which is it's own thing.)
+
 namespace caffe2 {
 
 class CuDNNWrapper;

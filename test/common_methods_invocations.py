@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
 from torch.autograd import Variable, Function, detect_anomaly
@@ -988,7 +988,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if isinstance(args, tuple):
+    if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

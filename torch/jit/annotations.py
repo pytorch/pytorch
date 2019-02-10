@@ -64,6 +64,8 @@ def get_num_params(fn):
     if source is None:
         return None
     py_ast = ast.parse(source)
+    if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
+        raise RuntimeError("cannot instantiate class object ({}) inside jit.script".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     py_def = py_ast.body[0]
