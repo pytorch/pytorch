@@ -547,23 +547,6 @@ TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
           bool ceil_mode,
           bool count_include_pad);
 
-TH_API void THNN_(SpatialFractionalMaxPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int outputW, int outputH,
-          int kW, int kH,
-          THIndexTensor *indices,
-          THTensor *randomSamples);
-TH_API void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int outputW, int outputH,
-          int kW, int kH,
-          THIndexTensor *indices);
-
 TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -922,21 +905,6 @@ TH_API void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THIndexTensor *indices);
-
-TH_API void THNN_(SpatialReflectionPadding_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int pad_left, int pad_right,
-          int pad_top, int pad_bottom);
-
-TH_API void THNN_(SpatialReflectionPadding_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int pad_left, int pad_right,
-          int pad_top, int pad_bottom);
 
 TH_API void THNN_(FeatureLPPooling_updateOutput)(
           THNNState *state,

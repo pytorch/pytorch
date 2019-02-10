@@ -20,9 +20,10 @@
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
 
-#include <c10/Device.h>
-#include <c10/Stream.h>
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace caffe2 {
 
@@ -57,7 +58,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 
  private:
   ThreadLocalCUDAObjects() {
-    for (DeviceIndex i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+    for (DeviceIndex i = 0; i < C10_COMPILE_TIME_MAX_GPUS; ++i) {
       cuda_streams_[i] = vector<c10::cuda::CUDAStream>();
     }
   }
@@ -153,7 +154,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // WARNING: mapping from logical stream ID to c10::cuda::CUDAStream
   // is NOT bijective; multiple logical stream IDs may map to the
   // same underlying stream ID.
-  vector<c10::cuda::CUDAStream> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  vector<c10::cuda::CUDAStream> cuda_streams_[C10_COMPILE_TIME_MAX_GPUS];
   std::unordered_map<c10::cuda::CUDAStream, cublasHandle_t> cublas_handles_;
 #ifdef CAFFE2_USE_CUDNN
   std::unordered_map<c10::cuda::CUDAStream, cudnnHandle_t> cudnn_handles_;

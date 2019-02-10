@@ -5,9 +5,9 @@
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>
 #include <c10/hip/HIPMacros.h>
-#include <c10/DeviceType.h>
-#include <c10/impl/InlineDeviceGuard.h>
-#include <c10/impl/InlineStreamGuard.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
@@ -15,6 +15,8 @@
 // I don't have to also fix namespaces.  Sorry!
 namespace c10 { namespace hip {
 
+// Note [Masquerading as CUDA]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // HIPGuardImplMasqueradingAsCUDA is like a HIPGuardImpl, but
 // it reports its DeviceType as CUDA (e.g., type() returns CUDA,
 // getDevice() reports the current HIP device as a CUDA device.)

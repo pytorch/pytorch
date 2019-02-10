@@ -4,8 +4,8 @@ graph(%x : Float(*, *)) {
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)) {
   %1 : Float(*, *), %2 : Float(*, *), %3 : Float(*, *) = prim::ConstantChunk[chunks=3, dim=1](%0)
-  %4 : Float(*, *) = aten::mul(%1, %2)
-  %5 : int = prim::Constant[value=1]()
-  %6 : Float(*, *) = aten::add(%4, %3, %5)
+  %4 : int = prim::Constant[value=1]()
+  %5 : Float(*, *) = aten::mul(%1, %2)
+  %6 : Float(*, *) = aten::add(%5, %3, %4)
   return (%6);
 }

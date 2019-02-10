@@ -22,7 +22,7 @@ class WeightedSampleOp final : public Operator<Context> {
 
  private:
   vector<float> cum_mass_;
-  Tensor unif_samples_{Context::GetDeviceType()};
+  Tensor unif_samples_;
 };
 
 } // namespace caffe2

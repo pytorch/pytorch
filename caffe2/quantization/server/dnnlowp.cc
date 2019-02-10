@@ -223,7 +223,11 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
       return ChooseQuantizationParams(min, max, precision, preserve_sparsity);
     }
 
-    Histogram hist(2048, min, max);
+    /** Ajust the granularity of histogram collection to
+     * the quantization precision. Use 8x more number of bins
+     * in the histogram should be sufficient for linear quantization.
+     */
+    Histogram hist(1 << (precision + 3), min, max);
     for (int i = 0; i < len; ++i) {
       hist.Add(values[i]);
     }

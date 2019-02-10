@@ -71,7 +71,7 @@ PredictorConfig makePredictorConfig(
   if (run_init) {
     CAFFE_ENFORCE(ws.RunNetOnce(init_net));
   }
-#if CAFFE2_MOBILE
+#if C10_MOBILE
   GlobalInit();
 #endif
   if (optimization &&

@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
     int nevents;
     if (client_sessions.size() == 0)
       timeout = SHUTDOWN_TIMEOUT;
-    SYSCHECK(nevents = poll(pollfds.data(), pollfds.size(), timeout));
+    SYSCHECK_ERR_RETURN_NEG1(nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;
     if (nevents == 0 && client_sessions.size() == 0)
       break;

@@ -337,7 +337,7 @@ def all_reduce(tensor, op=reduce_op.SUM, group=group.WORLD):
 
 def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
     r"""Reduces the tensor data on multiple GPUs across all machines. Each tensor
-    in :attr`tensor_list` should reside on a separate GPU.
+    in :attr:`tensor_list` should reside on a separate GPU.
 
     Only the GPU of ``tensor_list[0]`` on the process with rank :attr:`dst` is
     going to receive the final result.

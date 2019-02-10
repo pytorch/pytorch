@@ -171,9 +171,12 @@ class GemmBatchedTest
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
-    X_.Resize(std::vector<int64_t>{3, 5, 10});
-    W_.Resize(std::vector<int64_t>{3, 6, 10});
-    Y_.Resize(std::vector<int64_t>{3, 5, 6});
+    ReinitializeTensor(
+        &X_, std::vector<int64_t>{3, 5, 10}, at::dtype<float>().device(CPU));
+    ReinitializeTensor(
+        &W_, std::vector<int64_t>{3, 6, 10}, at::dtype<float>().device(CPU));
+    ReinitializeTensor(
+        &Y_, std::vector<int64_t>{3, 5, 6}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(
         X_.numel(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
@@ -243,9 +246,9 @@ class GemmBatchedTest
 
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
-  Tensor X_{CPU};
-  Tensor W_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor W_;
+  Tensor Y_;
   bool trans_X_;
   bool trans_W_;
 };
@@ -440,8 +443,12 @@ class ReduceTensorTest : public testing::Test {
     for (const int axis : axes) {
       Y_dims[axis] = 1;
     }
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
+    std::vector<int64_t> X_dims_64;
+    std::vector<int64_t> Y_dims_64;
+    std::copy(X_dims.cbegin(), X_dims.cend(), std::back_inserter(X_dims_64));
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    ReinitializeTensor(&X_, X_dims_64, at::dtype<float>().device(CPU));
+    ReinitializeTensor(&Y_, Y_dims_64, at::dtype<float>().device(CPU));
     ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
@@ -462,8 +469,8 @@ class ReduceTensorTest : public testing::Test {
 
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor Y_;
 };
 
 TEST_F(ReduceTensorTest, ReduceMinTest) {
@@ -677,8 +684,12 @@ class BroadcastTest : public testing::Test {
       const std::vector<int>& Y_dims,
       const std::vector<float>& X_data,
       const std::vector<float>& Y_data) {
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
+    std::vector<int64_t> X_dims_64;
+    std::vector<int64_t> Y_dims_64;
+    std::copy(X_dims.cbegin(), X_dims.cend(), std::back_inserter(X_dims_64));
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    ReinitializeTensor(&X_, X_dims_64, at::dtype<float>().device(CPU));
+    ReinitializeTensor(&Y_, Y_dims_64, at::dtype<float>().device(CPU));
     ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
@@ -700,8 +711,8 @@ class BroadcastTest : public testing::Test {
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
 
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor Y_;
 };
 
 TEST_F(BroadcastTest, BroadcastFloatTest) {
@@ -731,101 +742,6 @@ TEST_F(RandFixedSumTest, UpperBound) {
       20, 1, 1000, 1000, l.data(), cpu_context_.get());
 }
 
-class MomentsTest : public testing::Test {
- protected:
-  void SetUp() override {
-    cpu_context_ = make_unique<CPUContext>(option_);
-  }
-
-  void RunMomentsTest(
-      const std::vector<int>& X_dims,
-      const std::vector<int>& axes,
-      const std::vector<float>& X_data,
-      const std::vector<float>& mean_data,
-      const std::vector<float>& variance_data) {
-    const int ndim = X_dims.size();
-    std::vector<int> Y_dims = X_dims;
-    for (const int axis : axes) {
-      Y_dims[axis] = 1;
-    }
-    X_.Resize(X_dims);
-    mean_.Resize(Y_dims);
-    variance_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.numel());
-    cpu_context_->CopyFromCPU<float>(
-        X_data.size(), X_data.data(), X_.mutable_data<float>());
-    math::Moments<float, CPUContext>(
-        X_dims.size(),
-        X_dims.data(),
-        axes.size(),
-        axes.data(),
-        X_.data<float>(),
-        mean_.mutable_data<float>(),
-        variance_.mutable_data<float>(),
-        cpu_context_.get());
-    ASSERT_EQ(mean_data.size(), mean_.numel());
-    for (int i = 0; i < mean_data.size(); ++i) {
-      EXPECT_FLOAT_EQ(mean_data[i], mean_.data<float>()[i]);
-    }
-    ASSERT_EQ(variance_data.size(), variance_.numel());
-    for (int i = 0; i < variance_data.size(); ++i) {
-      EXPECT_NEAR(variance_data[i], variance_.data<float>()[i], kEps);
-    }
-  }
-
-  DeviceOption option_;
-  std::unique_ptr<CPUContext> cpu_context_;
-
-  Tensor X_{CPU};
-  Tensor mean_{CPU};
-  Tensor variance_{CPU};
-};
-
-TEST_F(MomentsTest, MomentsFloatTest) {
-  // Test for 1D tensor.
-  RunMomentsTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {2.0f}, {2.0f / 3.0f});
-
-  // Test for 2D Tensor.
-  RunMomentsTest(
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.0f, 5.0f},
-      {2.0f / 3.0f, 2.0f / 3.0f});
-  RunMomentsTest(
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.5f, 3.5f, 4.5f},
-      {2.25f, 2.25f, 2.25f});
-  RunMomentsTest(
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {3.5f},
-      {35.0f / 12.0f});
-
-  // Test for 3D tensor.
-  RunMomentsTest(
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {2.5f, 6.5f},
-      {1.25, 1.25});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {4.0f, 5.0f},
-      {5.0f, 5.0f});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {3.5f, 5.5f},
-      {4.25, 4.25});
-}
-
 class TransposeTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -842,8 +758,12 @@ class TransposeTest : public testing::Test {
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes[i]];
     }
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
+    std::vector<int64_t> X_dims_64;
+    std::vector<int64_t> Y_dims_64;
+    std::copy(X_dims.cbegin(), X_dims.cend(), std::back_inserter(X_dims_64));
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    ReinitializeTensor(&X_, X_dims_64, at::dtype<float>().device(CPU));
+    ReinitializeTensor(&Y_, Y_dims_64, at::dtype<float>().device(CPU));
     ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
@@ -863,8 +783,8 @@ class TransposeTest : public testing::Test {
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
 
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor Y_;
 };
 
 TEST_F(TransposeTest, TransposeFloatTest) {

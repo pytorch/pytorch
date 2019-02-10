@@ -72,7 +72,8 @@ struct SchemaParser {
   TreeRef parseIdent() {
     return String::create(L.expect(TK_IDENT).text());
   }
-  TypePtr parseBaseType() {
+  using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
+  TypeAndAlias parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
         {"Generator", GeneratorType::get()},
         {"ScalarType", IntType::get()},
@@ -91,11 +92,11 @@ struct SchemaParser {
       if (text.size() > 0 && islower(text[0])) {
         // lower case identifiers that are not otherwise valid types
         // are treated as type variables
-        return VarType::create(text);
+        return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
       }
       throw ErrorReport(tok.range) << "unknown type specifier";
     }
-    return it->second;
+    return TypeAndAlias(it->second, c10::nullopt);
   }
   // Examples:
   // Tensor(a) // Tensor is in set a
@@ -157,10 +158,21 @@ struct SchemaParser {
       value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
-      value = DynamicType::get();
+      value = TensorType::get();
       alias_info = parseAliasAnnotation();
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+      L.next();
+      L.expect('(');
+      auto key_type = parseType().first;
+      L.expect(',');
+      auto value_type = parseType().first;
+      alias_info = parseAliasAnnotation();
+      L.expect(')');
+      value = DictType::create(key_type, value_type);
     } else {
-      value = parseBaseType();
+      auto value_alias = parseBaseType();
+      value = value_alias.first;
+      alias_info = value_alias.second;
     }
     while (true) {
       if (L.cur().kind == '[' && L.lookahead().kind == ']') {
@@ -302,7 +314,7 @@ struct SchemaParser {
       c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
-      case TypeKind::DynamicType:
+      case TypeKind::TensorType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       } break;
@@ -415,7 +427,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      JIT_ASSERTM(
+      AT_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name);
@@ -489,7 +501,6 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
-
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

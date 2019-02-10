@@ -5,6 +5,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -119,7 +120,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  __launch_bounds__(1024)
+  C10_LAUNCH_BOUNDS(1024)
   __global__ void grid_sampler_2d_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> input,
@@ -227,7 +228,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  __launch_bounds__(1024)
+  C10_LAUNCH_BOUNDS(1024)
   __global__ void grid_sampler_3d_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> input,
@@ -391,7 +392,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  __launch_bounds__(1024)
+  C10_LAUNCH_BOUNDS(1024)
   __global__ void grid_sampler_2d_backward_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> grad_output,
@@ -546,7 +547,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  __launch_bounds__(1024)
+  C10_LAUNCH_BOUNDS(1024)
   __global__ void grid_sampler_3d_backward_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> grad_output,

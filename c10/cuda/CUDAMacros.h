@@ -31,3 +31,8 @@
 #else
 #define C10_CUDA_API C10_CUDA_IMPORT
 #endif
+
+/**
+ * The maximum number of GPUs that we recognizes.
+ */
+#define C10_COMPILE_TIME_MAX_GPUS 16

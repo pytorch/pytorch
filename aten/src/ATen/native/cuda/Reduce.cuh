@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/macros/Macros.h>
 #include <functional>
 #include <iosfwd>
 #include <tuple>
@@ -146,7 +147,7 @@ struct ReduceConfig {
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, typename R>
-__launch_bounds__(nt, 4)
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void reduce_kernel(R reduction) {
   reduction.run();
 }
@@ -236,7 +237,8 @@ struct ReduceOp {
 
   static constexpr int vt0 = 4;
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
+    std::is_convertible<arg_t, out_scalar_t>::value
+    && std::is_convertible<out_scalar_t, arg_t>::value;
 
 
   ops_t ops;
@@ -249,6 +251,7 @@ struct ReduceOp {
   void* buffer;
   int* semaphores;
   bool accumulate;
+  bool final_output;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
            const void* src, void* dst, void* buffer, int* semaphores, arg_t ident)
@@ -288,7 +291,7 @@ struct ReduceOp {
       if (accumulate) {
         value = accumulate_in_output<can_accumulate_in_output>(out, value);
       }
-      *out = ops.project(value);
+      *out = project_if_necessary<can_accumulate_in_output>(value);
     }
   }
 
@@ -373,8 +376,17 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    return ops.reduce(*out, value);
+    return ops.combine(*out, value);
   }
+
+  template <bool can_acc>
+  C10_DEVICE out_scalar_t project_if_necessary(
+    arg_t value,
+    typename std::enable_if<can_acc>::type* = nullptr
+  ) const {
+    return final_output ? (out_scalar_t)ops.project(value) : (out_scalar_t)value;
+  }
+
 
   // This function should never be called --
   // it's the version of `accumulate_in_output`
@@ -386,6 +398,15 @@ struct ReduceOp {
   ) const {
     assert(false); // can't use AT_ASSERT in Cuda.
     return arg_t {};
+  }
+
+  template <bool can_acc>
+  C10_DEVICE out_scalar_t project_if_necessary(
+    arg_t value,
+    typename std::enable_if<!can_acc>::type* = nullptr
+  ) const {
+    assert(final_output);
+    return ops.project(value);
   }
 
   C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out) const {
@@ -428,7 +449,7 @@ struct ReduceOp {
         if (accumulate) {
           value = accumulate_in_output<can_accumulate_in_output>(out, value);
         }
-        *out = ops.project(value);
+        *out = project_if_necessary<can_accumulate_in_output>(value);
       }
     }
 
@@ -533,6 +554,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
         (int*)semaphores.get(),
         ident);
     reduce.accumulate = iter.should_accumulate();
+    reduce.final_output = iter.is_final_output();
 
     launch_reduce_kernel<ReduceConfig::NUM_THREADS>(config, reduce);
   } else {
@@ -550,6 +572,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
         ident);
     AT_ASSERT(!iter.should_accumulate());
     reduce.accumulate = false;
+    reduce.final_output = true;
 
     launch_reduce_kernel<ReduceConfig::NUM_THREADS>(config, reduce);
   }

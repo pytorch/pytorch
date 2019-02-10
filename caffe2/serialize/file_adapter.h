@@ -3,14 +3,14 @@
 #include <fstream>
 #include <memory>
 
-#include <c10/macros/Macros.h>
+#include "c10/macros/Macros.h"
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
 namespace caffe2 {
 namespace serialize {
 
-class FileAdapter final : public ReadAdapterInterface {
+class CAFFE2_API FileAdapter final : public ReadAdapterInterface {
  public:
   C10_DISABLE_COPY_AND_ASSIGN(FileAdapter);
   explicit FileAdapter(const std::string& file_name);

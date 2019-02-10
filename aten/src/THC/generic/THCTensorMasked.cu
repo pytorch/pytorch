@@ -54,7 +54,7 @@ void THCTensor_(maskedCopy)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
+  at::IntArrayRef maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
   THCTensor_(copy)(state, maskLong, mask);
 
@@ -69,7 +69,7 @@ void THCTensor_(maskedCopy)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -124,7 +124,7 @@ void THCTensor_(maskedSelect)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
+  at::IntArrayRef maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
   THCTensor_(copy)(state, maskLong, mask);
 
@@ -139,7 +139,7 @@ void THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/detail/static.h>
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 
@@ -113,13 +114,15 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return impl_.get();
   }
 
-  /// Forwards to the call operator of the contained module.
-  /// NOTE: std::forward is qualified to prevent VS2017 emitting
-  ///       error C2872: 'std': ambiguous symbol
+  /// Calls the `forward()` method of the contained module.
   template <typename... Args>
   auto operator()(Args&&... args)
-      -> decltype((*impl_)(::std::forward<Args>(args)...)) {
-    return (*impl_)(::std::forward<Args>(args)...);
+      -> torch::detail::return_type_of_forward_t<Contained, Args...> {
+    // This will not compile if the module does not have a `forward()` method
+    // (as expected).
+    // NOTE: `std::forward` is qualified to prevent VS2017 emitting
+    // error C2872: 'std': ambiguous symbol
+    return impl_->forward(::std::forward<Args>(args)...);
   }
 
   /// Forwards to the subscript operator of the contained module.

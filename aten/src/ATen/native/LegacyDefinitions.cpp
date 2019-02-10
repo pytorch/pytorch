@@ -14,7 +14,7 @@ Tensor & set_(Tensor& self, Storage source) {
   return at::legacy::th::_th_set_(self, source);
 }
 
-Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntList size, IntList stride) {
+Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   return at::legacy::th::_th_set_(self, source, storage_offset, size, stride);
 }
 
@@ -42,7 +42,7 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
   return at::legacy::th::_th_masked_scatter_(self, mask, source);
 }
 
-Tensor view(const Tensor& self, IntList size) {
+Tensor view(const Tensor& self, IntArrayRef size) {
   return at::legacy::th::_th_view(self, size);
 }
 
@@ -128,14 +128,6 @@ Tensor & lgamma_(Tensor& self) {
 
 Tensor & atan2_(Tensor& self, const Tensor & other) {
   return at::legacy::th::_th_atan2_(self, other);
-}
-
-Tensor & tril_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_(self, diagonal);
-}
-
-Tensor & triu_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_(self, diagonal);
 }
 
 Tensor & digamma_(Tensor& self) {
@@ -270,22 +262,6 @@ Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, i
 
 Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
   return at::legacy::th::_th_cross(self, other, dim);
-}
-
-Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_out(result, self, diagonal);
-}
-
-Tensor triu(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu(self, diagonal);
-}
-
-Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_out(result, self, diagonal);
-}
-
-Tensor tril(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril(self, diagonal);
 }
 
 Tensor trace(const Tensor & self) {
@@ -639,11 +615,11 @@ Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
   return at::legacy::th::_th_lerp(self, end, weight);
 }
 
-Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
 
-Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _histc_cpu(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc(self, bins, min, max);
 }
 
@@ -727,14 +703,6 @@ std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const 
 
 std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
-}
-
-Tensor all(const Tensor & self) {
-  return at::legacy::th::_th_all(self);
-}
-
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
 }
 
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

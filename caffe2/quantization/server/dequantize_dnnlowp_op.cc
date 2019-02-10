@@ -19,7 +19,7 @@ bool DequantizeDNNLowPOp<T>::RunOnDevice() {
       GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
   const TensorCPU& input = InputIsType<int8::Int8TensorCPU>(0)
-      ? OperatorBase::Input<int8::Int8TensorCPU>(0).t
+      ? this->template Input<int8::Int8TensorCPU>(0).t
       : Input(0);
 
   CAFFE_ENFORCE(input.template IsType<T>());

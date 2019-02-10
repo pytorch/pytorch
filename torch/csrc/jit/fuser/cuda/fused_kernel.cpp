@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
+#include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THC.h>
@@ -47,7 +48,7 @@ static void getMajorMinor(
   TORCH_NVRTC_CHECK(nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
-  JIT_ASSERT(nvrtc_major >= 6);
+  AT_ASSERT(nvrtc_major >= 6);
 
   // Major and minor is determined by device properties and
   // possibly "downcompiled" to a lower (compatible) compute architecture
@@ -99,7 +100,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(THCCachingAllocator_getCudaFreeMutex()));
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     cudaFree(0);
   }
 
@@ -197,6 +198,28 @@ void FusedKernelCUDA::launch_raw(
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
 }
+
+static std::shared_ptr<FusedKernel> createFusionKernel(
+    int16_t device,
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random) {
+  return std::make_shared<FusedKernelCUDA>(
+      device,
+      std::move(name),
+      std::move(code),
+      std::move(input_desc),
+      std::move(output_desc),
+      std::move(chunk_desc),
+      std::move(concat_desc),
+      has_random);
+}
+
+RegisterFusionBackend reg(at::DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda
 } // namespace fuser

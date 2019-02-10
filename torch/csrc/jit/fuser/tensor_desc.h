@@ -1,11 +1,9 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/type.h>
+#include <c10/util/Exception.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <algorithm>
@@ -36,14 +34,14 @@ struct TORCH_API TensorDesc {
   // Delegating constructors
   TensorDesc(
       const at::ScalarType& type,
-      const at::IntList& sizes,
-      const at::IntList& strides)
+      const at::IntArrayRef& sizes,
+      const at::IntArrayRef& strides)
       : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
 
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
 
-  TensorDesc(const CompleteTensorTypePtr& type)
+  TensorDesc(const c10::CompleteTensorTypePtr& type)
       : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -57,9 +55,9 @@ struct TORCH_API TensorDesc {
   }
 
   static std::vector<bool> findContiguous(
-      const at::IntList& sizes,
-      const at::IntList& strides) {
-    JIT_ASSERT(sizes.size() == strides.size());
+      const at::IntArrayRef& sizes,
+      const at::IntArrayRef& strides) {
+    AT_ASSERT(sizes.size() == strides.size());
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {
       const auto expected_stride =
@@ -99,5 +97,3 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER

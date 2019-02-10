@@ -44,14 +44,21 @@ static inline void swapBytes64(void *ptr)
 {
   uint64_t output;
   memcpy(&output, ptr, sizeof(uint64_t));
-#if defined(_MSC_VER) && !defined(_DEBUG)
+#if defined(_MSC_VER)
   output = _byteswap_uint64(output);
 #elif defined(__llvm__) || defined(__GNUC__) && !defined(__ICC)
   output = __builtin_bswap64(output);
 #else
-   uint64_t Hi = SwapByteOrder_32(uint32_t(value));
-   uint32_t Lo = SwapByteOrder_32(uint32_t(value >> 32));
-   return (Hi << 32) | Lo;
+  uint64_t Byte0 = output & 0x00000000000000FF;
+  uint64_t Byte1 = output & 0x000000000000FF00;
+  uint64_t Byte2 = output & 0x0000000000FF0000;
+  uint64_t Byte3 = output & 0x00000000FF000000;
+  uint64_t Byte4 = output & 0x000000FF00000000;
+  uint64_t Byte5 = output & 0x0000FF0000000000;
+  uint64_t Byte6 = output & 0x00FF000000000000;
+  uint64_t Byte7 = output & 0xFF00000000000000;
+  output = (Byte0 << (7*8)) | (Byte1 << (5*8)) | (Byte2 << (3*8)) | (Byte3 << (1*8)) | 
+           (Byte7 >> (7*8)) | (Byte6 >> (5*8)) | (Byte5 >> (3*8)) | (Byte4 >> (1*8));
 #endif
   memcpy(ptr, &output, sizeof(uint64_t));
 }
