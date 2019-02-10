@@ -1299,6 +1299,10 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+inline bool Tensor::is_xla() const {
+  return impl_->is_xla();
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \

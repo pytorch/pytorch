@@ -38,8 +38,8 @@ namespace at {
 namespace native {
 
 Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
-  if (src.is_cuda()) {
-    _s_copy_from(src, self, non_blocking);
+  if (src.is_cuda() || src.is_xla()) {
+    self = _s_copy_from(src, self, non_blocking);
     return self;
   }
   AT_DISPATCH_ALL_TYPES_AND_HALF(
