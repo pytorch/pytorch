@@ -178,10 +178,17 @@ class TensorFetcher : public BlobFetcherBase {
 template <class Context>
 class TensorFeeder : public BlobFeederBase {
  public:
-  Tensor FeedTensor(
+  Tensor FeedTensor(const DeviceOption& option, PyArrayObject* original_array) {
+    Tensor out;
+    FeedTensor(option, original_array, &out, false);
+    return out;
+  }
+
+  void FeedTensor(
       const DeviceOption& option,
       PyArrayObject* original_array,
-      Tensor* out = nullptr) {
+      Tensor* out,
+      bool in_place) {
 #ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
@@ -203,11 +210,9 @@ class TensorFeeder : public BlobFeederBase {
       dims.push_back(npy_dims[i]);
     }
 
-    Tensor tensor;
-    bool in_place = out != nullptr;
+    Tensor& tensor = *out;
     if (in_place) {
-      out->Resize(dims);
-      tensor = *out;
+      tensor.Resize(dims);
     }
     // Now, copy the data to the tensor.
     switch (npy_type) {
@@ -262,10 +267,8 @@ class TensorFeeder : public BlobFeederBase {
             tensor.raw_mutable_data());
     }
     context.FinishDeviceComputation();
-    return tensor;
 #else
     CAFFE_THROW("Caffe2 compiled without NumPy support.");
-    return caffe2::Tensor(); // will not reach here
 #endif // USE_NUMPY
   }
 
@@ -278,7 +281,8 @@ class TensorFeeder : public BlobFeederBase {
       FeedTensor(
           option,
           original_array,
-          BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+          BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+          true);
     } else {
       blob->Reset<Tensor>(new Tensor(FeedTensor(option, original_array)));
     }

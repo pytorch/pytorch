@@ -11,6 +11,7 @@ namespace caffe2 {
 namespace utils {
 
 // A sub tensor view
+// TODO: Remove???
 template <class T>
 class ConstTensorView {
  public:

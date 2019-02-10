@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/interned_strings.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -30,10 +30,6 @@ void ConstantPooling(
       continue;
     }
 
-    auto first_node = node->owningGraph()->block()->nodes().front();
-    if (node != first_node)
-      node->moveBefore(first_node);
-
     // Check whether the same constant already exists.
     auto subit = constants.insert(node);
     if (!subit.second) {
@@ -41,7 +37,13 @@ void ConstantPooling(
       auto existing = *subit.first;
       node->replaceAllUsesWith(existing);
       node->destroy();
+      continue;
     }
+
+    // Move the constant definition to the beginning of the graph.
+    auto first_node = node->owningGraph()->block()->nodes().front();
+    if (node != first_node)
+      node->moveBefore(first_node);
   }
 }
 

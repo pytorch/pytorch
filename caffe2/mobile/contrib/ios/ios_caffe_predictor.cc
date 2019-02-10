@@ -50,8 +50,7 @@ Caffe2IOSPredictor::Caffe2IOSPredictor(const caffe2::NetDef& init_net,
 
 void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string& errorMessage) {
   FLAGS_caffe2_force_shared_col_buffer = true;
-  caffe2::Tensor input(caffe2::CPU);
-  input.Resize(inData.dims);
+  caffe2::Tensor input = caffe2::empty(inData.dims, at::dtype<uint8_t>().device(caffe2::CPU));
   input.ShareExternalPointer(inData.data);
   caffe2::Predictor::TensorList input_vec;
   input_vec.emplace_back(std::move(input));
@@ -67,7 +66,7 @@ void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string&
     errorMessage.swap(error);
     return;
   }
-  caffe2::TensorCPU* output = &output_vec.front();
+  caffe2::Tensor* output = &output_vec.front();
   outData.data = output->mutable_data<uint8_t>();
-  outData.dims = output->dims().vec();
+  outData.dims = output->sizes().vec();
 }

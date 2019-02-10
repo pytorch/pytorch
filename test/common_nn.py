@@ -832,6 +832,44 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
+def fractional_max_pool2d_test(test_case):
+    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(1, 3, 5, 7),
+            fullname='FractionalMaxPool2d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                4, 3), _random_samples=random_samples),
+            input_size=(1, 3, 7, 6),
+            fullname='FractionalMaxPool2d_size')
+
+
+def fractional_max_pool3d_test(test_case):
+    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(2, 4, 5, 5, 5),
+            fullname='FractionalMaxPool3d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                4, 4, 4), _random_samples=random_samples),
+            input_size=(2, 4, 7, 7, 7),
+            fullname='FractionalMaxPool3d_size')
+    elif test_case == 'asymsize':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
+                10, 3, 2), _random_samples=random_samples),
+            input_size=(2, 4, 16, 7, 5),
+            fullname='FractionalMaxPool3d_asymsize')
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -874,6 +912,11 @@ new_module_tests = [
     multimarginloss_p_no_reduce_test(),
     multimarginloss_margin_no_reduce_test(),
     multimarginloss_weights_no_reduce_test(),
+    fractional_max_pool2d_test('ratio'),
+    fractional_max_pool2d_test('size'),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -1650,19 +1693,6 @@ new_module_tests = [
         fullname='Embedding_sparse',
         check_gradgrad=False,
         test_cuda=(not TEST_WITH_ROCM)
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d(
-            2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 5, 5),
-        fullname='FractionalMaxPool2d_ratio',
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
-            4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 7, 7),
-        fullname='FractionalMaxPool2d_size',
-        test_cuda=False,
     ),
     dict(
         module_name='PixelShuffle',
@@ -3064,7 +3094,7 @@ class ModuleTest(TestBase):
             test_case.assertEqual(cpu_output, gpu_output, self.precision)
 
             # Run backwards on CPU and GPU and compare results
-            for i in range(5):
+            for _ in range(5):
                 cpu_gradOutput = cpu_output.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)

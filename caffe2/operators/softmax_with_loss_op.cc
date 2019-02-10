@@ -178,19 +178,25 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  if (sum_multiplier_.numel() != D) {
-    ReinitializeTensor(
-        &sum_multiplier_,
-        {D},
-        at::dtype<float>().device(CPU));
-    math::Set<float, CPUContext>(
-        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
+    sum_multiplier_.Resize(D);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  ReinitializeTensor(
-      &rowmax_, {N}, at::dtype<float>().device(CPU));
-  ReinitializeTensor(
-      &losses_, {N}, at::dtype<float>().device(CPU));
+  if (!losses_.defined()) {
+    losses_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (losses_.numel() != N) {
+    losses_.Resize(N);
+  }
+
+  if (!rowmax_.defined()) {
+    rowmax_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (rowmax_.numel() != N) {
+    rowmax_.Resize(N);
+  }
 
   SoftmaxCPU(
       context_,

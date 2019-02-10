@@ -24,15 +24,18 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   return tensor && *tensor && tensor->GetDeviceType() == device_type;
 }
 
-inline Tensor* BlobSetTensor(Blob* blob, const Tensor& tensor) {
-  return blob->Reset<Tensor>(new Tensor(tensor));
+inline Tensor* BlobSetTensor(Blob* blob, Tensor&& tensor) {
+  return blob->Reset<Tensor>(new Tensor(std::move(tensor)));
 }
 
 inline Tensor GetSizedTensorWithOptions(
-    const Tensor& t,
-    at::IntList dims,
+    Tensor&& previous_tensor,
+    at::IntArrayRef dims,
     at::TensorOptions options) {
-  Tensor tensor = t;
+  Tensor tensor = std::move(previous_tensor);
+  if (!tensor.defined()) {
+    return caffe2::empty(dims, options);
+  }
   if (tensor.GetDevice() == options.device() ||
       (!tensor.GetDevice().has_index() &&
        tensor.GetDeviceType() == options.device().type())) {
@@ -54,7 +57,7 @@ inline Tensor GetSizedTensorWithOptions(
 // need to keep both functions that returns Tensor* and the one
 // returns Tensor for clangr codemod
 inline Tensor*
-BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
+BlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
@@ -83,8 +86,8 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
 }
 
 inline Tensor
-XBlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
-  return *BlobGetMutableTensor(blob, dims, options);
+XBlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options) {
+  return BlobGetMutableTensor(blob, dims, options)->UnsafeSharedInstance();
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
@@ -111,6 +114,14 @@ inline const Tensor& BlobGetTensor(const Blob& blob, DeviceType device_type) {
     }
   }
   CAFFE_THROW("Blob didn't contain a Tensor or the device_type doesn't match");
+}
+
+inline Tensor BlobGetTensorOrUndefined(const Blob& blob) {
+  if (blob.IsType<Tensor>()) {
+    return blob.Get<Tensor>().UnsafeSharedInstance();
+  } else {
+    return Tensor();
+  }
 }
 
 }  // namespace caffe2

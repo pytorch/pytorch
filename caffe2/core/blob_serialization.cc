@@ -138,7 +138,6 @@ void TensorSerializer::SerializeWithChunkSize(
   };
 
 #ifndef __ANDROID__
-  std::vector<std::future<void>> futures;
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
@@ -147,7 +146,9 @@ void TensorSerializer::SerializeWithChunkSize(
       processChunk(chunkStart);
     }
   };
+  std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
+    futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
     for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
@@ -391,6 +392,7 @@ void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
 // Get dimensions from Tensor proto
 static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
   std::vector<int64_t> dims;
+  dims.reserve(proto.dims().size());
   for (const int64_t d : proto.dims()) {
     dims.push_back(d);
   }

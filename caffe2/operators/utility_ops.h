@@ -169,8 +169,7 @@ class AliasOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
-    Output(0)->ResizeLike(input);
-    Output(0)->ShareData(input);
+    OutputTensorAlias(0, input);
     return true;
   }
 };
@@ -273,7 +272,7 @@ class SumOp : public Operator<Context> {
     for (int i = 1; i < InputSize(); ++i) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
-            "Check failed: output->dims() == Input(i).dims().",
+            "Check failed: output->sizes() == Input(i).sizes().",
             "Description: Input #",
             i,
             ", input dimension:",

@@ -38,6 +38,9 @@ def Parallelize_CPU(*args, **kwargs):
     kwargs['cpu_device'] = True
     Parallelize(*args, **kwargs)
 
+def Parallelize_iDeep(*args, **kwargs):
+    kwargs['ideep'] = True
+    Parallelize(*args, **kwargs)
 
 def Parallelize(
     model_helper_obj,
@@ -58,6 +61,7 @@ def Parallelize(
     use_nccl=False,
     max_concurrent_distributed_ops=16,
     cpu_device=False,
+    ideep=False,
     num_threads_per_device=4,
     shared_model=False,
     combine_spatial_bn=False,
@@ -119,6 +123,7 @@ def Parallelize(
       blobs_to_keep :   A list of blob names to keep and don't free during
                         dynamic memory optimization (for example loss blob).
       cpu_device        Use CPU instead of GPU.
+      ideep             Use ideep.
       combine_spatial_bn:
                         When set to True, applies batch normalization across
                         all devices within the node. If False, batch
@@ -135,12 +140,12 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        if not cpu_device:
-            devices = list(range(0, workspace.NumGpuDevices()))
+        if not (cpu_device or ideep):
+            devices = list(range(0, workspace.NumCudaDevices()))
         else:
             devices = list(range(0, cpu_count()))
 
-    if not cpu_device:
+    if not (cpu_device or ideep):
         for gpu in devices:
             if gpu >= workspace.NumGpuDevices():
                 log.warning("** Only {} GPUs available, GPUs {} requested".format(
@@ -151,6 +156,13 @@ def Parallelize(
         model_helper_obj._shared_model = False
         device_name = "GPU"
         assert shared_model is False, "Shared model only supported on CPU"
+    elif ideep:
+        model_helper_obj._device_type = caffe2_pb2.IDEEP
+        model_helper_obj._device_prefix = "ideep"
+        device_name = "IDEEP"
+        model_helper_obj._shared_model = shared_model
+        if shared_model and rendezvous is not None:
+            assert "Shared model only supported on single-node currently"
     else:
         model_helper_obj._device_type = caffe2_pb2.CPU
         model_helper_obj._device_prefix = "cpu"
@@ -969,7 +981,7 @@ def GetLearningRateBlobNames(model):
     Returns a list of learning rates blob names used in the optimizer.
     '''
     if model._optimizer is not None:
-        if model._device_type == caffe2_pb2.CPU:
+        if model._device_type == caffe2_pb2.CPU or model._device_type == caffe2_pb2.IDEEP:
             return [model._optimizer.get_cpu_blob_name('lr')]
         elif core.IsGPUDeviceType(model._device_type):
             return [model._optimizer.get_gpu_blob_name('lr', gpu, '')
@@ -1160,6 +1172,7 @@ def _SyncAllParamsDistributed(
 
     gpu_device_opt = core.DeviceOption(model._device_type, devices[0])
     cpu_device_opt = core.DeviceOption(caffe2_pb2.CPU)
+    ideep_device_opt = core.DeviceOption(caffe2_pb2.IDEEP)
 
     if model._broadcast_context is None:
         model._broadcast_context = CollectivesConcurrencyControl(
@@ -1186,7 +1199,7 @@ def _SyncAllParamsDistributed(
 
         device_opt = gpu_device_opt if _IsGPUBlob(
             model, param_name
-        ) else cpu_device_opt
+        ) else ideep_device_opt if _IsIDEEPBlob(model, param_name) else cpu_device_opt
 
         if rendezvous['engine'] == 'GLOO':
             with core.DeviceScope(device_opt):
@@ -1586,6 +1599,17 @@ def _InferBlobDevice(model):
     map_ops(model.param_init_net.Proto())
     map_ops(model.net.Proto())
     model._blob_to_device = mapping
+
+def _IsIDEEPBlob(model, blob_name):
+    if blob_name in model._blob_to_device:
+        return model._blob_to_device[blob_name].device_type == caffe2_pb2.IDEEP
+    else:
+        blob_name = "{}_{}/{}".format(
+            model._device_prefix, model._devices[0], blob_name
+        )
+        if blob_name not in model._blob_to_device:
+            return model._device_type == caffe2_pb2.IDEEP
+        return model._blob_to_device[blob_name].device_type == caffe2_pb2.IDEEP
 
 def _IsGPUBlob(model, blob_name):
     if blob_name in model._blob_to_device:
