@@ -12732,8 +12732,8 @@ class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
         def __init__(self):
             super(TestDataParallel.Mpy, self).__init__()
-            self.m = nn.Sequential(nn.Linear(2,2), nn.BatchNorm1d(2),
-                                   nn.ReLU(), nn.Linear(2,2))
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
 
         def forward(self, input):
             return self.m(input)
@@ -12757,11 +12757,13 @@ class TestDataParallel(JitTestCase):
             return self.m2(x)
 
     class Msm(torch.jit.ScriptModule):
+
         __constants__ = ['m']
+
         def __init__(self):
             super(TestDataParallel.Msm, self).__init__(False)
-            self.m = nn.Sequential(nn.Linear(2,2), nn.BatchNorm1d(2),
-                                   nn.ReLU(), nn.Linear(2,2))
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
 
         @torch.jit.script_method
         def forward(self, input):
@@ -12777,7 +12779,7 @@ class TestDataParallel(JitTestCase):
             x = self.block(input)
             return x
 
-    def check_replicas(self, module, replicas, input_shape=(2,2)):
+    def check_replicas(self, module, replicas, input_shape=(2, 2)):
         input = torch.randn(input_shape).cuda()
         expected_output = module(input).data
         for i, replica in enumerate(replicas):
@@ -12820,7 +12822,7 @@ class TestDataParallel(JitTestCase):
         module = self.Msm1(self.Msm()).cuda()
         replica = dp.replicate(module, {0, 1})
         optimizer = optim.SGD(module.parameters(), lr=1, momentum=1)
-        x = torch.ones(2, 2, requires_grad = True).cuda()
+        x = torch.ones(2, 2, requires_grad=True).cuda()
         first_forward = module.forward(x)
         first_forward.sum().backward()
         optimizer.step()
@@ -12833,7 +12835,7 @@ class TestDataParallel(JitTestCase):
 
         # replca which is on a different GPU has a deep copy of the original
         # params and buffers
-        x1 = torch.ones(2, 2, requires_grad = True).cuda(device=1)
+        x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
         r1_forward = replica[1].forward(x1)
         self.assertEqual(first_forward, r1_forward)
 
