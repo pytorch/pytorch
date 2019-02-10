@@ -220,6 +220,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
+  /// Returns if a `Tensor` has XLA backend.
+  bool is_xla() const;
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;

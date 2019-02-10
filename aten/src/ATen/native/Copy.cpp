@@ -42,6 +42,10 @@ Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
+  if (src.is_xla()) {
+    self = src.type().to(src, self, non_blocking, true);
+    return self;
+  }
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
   return self;

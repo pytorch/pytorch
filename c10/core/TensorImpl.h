@@ -354,6 +354,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return tid == HIPTensorId() || tid == SparseHIPTensorId();
   }
 
+  bool is_xla() const {
+    return type_id() == XLATensorId();
+  }
+
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto tid = type_id();
