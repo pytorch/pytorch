@@ -33,7 +33,7 @@ class TestDocCoverage(unittest.TestCase):
                     everything.add(name[0])
         everything -= set(whitelist)
         # get symbols in functional.py and _torch_docs.py
-        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch']
+        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate']
         everything2 = set()
         with open(pypath, 'r') as f:
             body = ast.parse(f.read()).body
