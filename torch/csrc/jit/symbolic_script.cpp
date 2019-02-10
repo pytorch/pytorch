@@ -54,6 +54,15 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
             return self * other, backward
 
+        def reshape(self,
+                    shape: List[int]):
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = grad_output.reshape(self_size)
+                return grad_self, None
+
+            return torch.reshape(self, shape), backward
+
         def split(self,
                   split_size: int,
                   dim: int):
