@@ -28,7 +28,7 @@ class DistributedSampler : public Sampler<> {
       size_t size,
       size_t num_replicas = 1,
       size_t rank = 0,
-      bool allow_duplicates_ = true);
+      bool allow_duplicates = true);
 
   /// Set the epoch for the current enumeration. This can be used to alter the
   /// sample selection and shuffling behavior.
