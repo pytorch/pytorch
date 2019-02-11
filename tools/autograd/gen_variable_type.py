@@ -137,6 +137,7 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     '_th_set_', '_cudnn_rnn_flatten_weight',
     # TODO: Fix these functions to update input tensor in-place
+    # yf225 TODO: fix TestTorch.test_triu_tril in this PR!
     'tril_', 'triu_',
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
