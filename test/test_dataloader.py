@@ -956,6 +956,31 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
 
+class NamedTupleDataset(Dataset):
+    from collections import namedtuple
+    Batch = namedtuple('Batch', ['data', 'label'])
+    Data = namedtuple('Data', ['positive', 'negative'])
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, ndx):
+        return self.Batch(data=self.Data(positive=ndx, negative=-ndx),
+                          label=str(ndx))
+
+
+class TestNamedTupleDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = NamedTupleDataset()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_collate_and_pin_memory_with_namedtuple(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for batch in loader:
+            self.assertIsInstance(batch, NamedTupleDataset.Batch)
+            self.assertIsInstance(batch.data, NamedTupleDataset.Data)
+
+
 class SimpleCustomBatch:
     def __init__(self, data):
         transposed_data = list(zip(*data))
