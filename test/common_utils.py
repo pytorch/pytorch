@@ -395,12 +395,7 @@ class TestCase(expecttest.TestCase):
                     if a.device.type == 'cpu' and a.dtype == torch.float16:
                         # CPU half tensors don't have the methods we need below
                         a = a.to(torch.float32)
-                    if TEST_WITH_ROCM:
-                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
-                        # TODO: remove after the bug is resolved.
-                        b = b.to(a.dtype).to(a.device)
-                    else:
-                        b = b.to(a)
+                    b = b.to(a)
                     diff = a - b
                     if a.is_floating_point():
                         # check that NaNs are in the same locations
@@ -410,7 +405,8 @@ class TestCase(expecttest.TestCase):
                         # inf check if allow_inf=True
                         if allow_inf:
                             inf_mask = torch.isinf(a)
-                            self.assertTrue(torch.equal(inf_mask, torch.isinf(b)), message)
+                            inf_sign = inf_mask.sign()
+                            self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
                             diff[inf_mask] = 0
                     # TODO: implement abs on CharTensor (int8)
                     if diff.is_signed() and diff.dtype != torch.int8:
