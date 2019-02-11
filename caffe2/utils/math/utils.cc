@@ -1,4 +1,4 @@
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 #include <algorithm>
 #include <functional>

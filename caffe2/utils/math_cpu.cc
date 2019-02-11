@@ -623,66 +623,6 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// MKL VML alternatives.
-// Depending on whether we are using MKL, we will delegate the Caffe math
-// functions that are VML-related to either the VML call or the Eigen
-// implementation. If you are setting the flags (such as AVX) right for your CPU
-// architecture, usually Eigen will deliver a throughput as fast as the VML
-// functions.
-////////////////////////////////////////////////////////////////////////////////
-#ifdef CAFFE2_USE_MKL
-
-#define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, FuncImpl)      \
-  template <>                                                   \
-  C10_EXPORT void Func<T, CPUContext>(                          \
-      const int N, const T* A, const T* B, T* C, CPUContext*) { \
-    FuncImpl(N, A, B, C);                                       \
-  }
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Add, vsAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Sub, vsSub)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Sub, vdSub)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Mul, vsMul)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Mul, vdMul)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
-DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
-#undef DELEGATE_SIMPLE_BINARY_FUNCTION
-
-#endif // CAFFE2_USE_MKL
-
-#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
-  template <>                                                   \
-  C10_EXPORT void Func<T, CPUContext>(                          \
-      const int N, const T* A, const T* B, T* C, CPUContext*) { \
-    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N) \
-        expr ConstEigenVectorArrayMap<T>(B, N);                 \
-  }
-
-#ifdef CAFFE2_USE_MKL
-
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
-  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
-  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
-
-#else
-
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Func, expr)        \
-  EIGEN_SIMPLE_BINARY_FUNCTION(float, Func, expr)        \
-  EIGEN_SIMPLE_BINARY_FUNCTION(double, Func, expr)       \
-  EIGEN_SIMPLE_BINARY_FUNCTION(std::int32_t, Func, expr) \
-  EIGEN_SIMPLE_BINARY_FUNCTION(std::int64_t, Func, expr)
-
-#endif
-
-DEFINE_SIMPLE_BINARY_FUNCTION(Add, +)
-DEFINE_SIMPLE_BINARY_FUNCTION(Sub, -)
-DEFINE_SIMPLE_BINARY_FUNCTION(Mul, *)
-DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
-
-#undef DEFINE_SIMPLE_BINARY_FUNCTION
-#undef EIGEN_SIMPLE_BINARY_FUNCTION
-
-////////////////////////////////////////////////////////////////////////////////
 // Common math functions being used in Caffe that do not have a BLAS or MKL
 // equivalent. For all these functions, we will simply implement them either via
 // Eigen or via custom code.
@@ -1332,17 +1272,6 @@ CAFFE2_SPECIALIZED_ROWWISEMAX(float)
 CAFFE2_SPECIALIZED_COLWISEMAX(float)
 #undef CAFFE2_SPECIALIZED_COLWISEMAX
 
-#define CAFFE2_SPECIALIZED_ELEMWISEMAX(T)                                   \
-  template <>                                                               \
-  C10_EXPORT void ElemwiseMax<T, CPUContext>(                               \
-      const int N, const T* x, const T* y, T* z, CPUContext* /*context*/) { \
-    std::transform(x, x + N, y, z, [](const T& x_i, const T& y_i) {         \
-      return std::max(x_i, y_i);                                            \
-    });                                                                     \
-  }
-CAFFE2_SPECIALIZED_ELEMWISEMAX(float)
-#undef CAFFE2_SPECIALIZED_ELEMWISEMAX
-
 #define CAFFE2_SPECIALIZED_MAXIMUM(T)                                          \
   template <>                                                                  \
   C10_EXPORT void Maximum<T, CPUContext>(                                      \
@@ -1608,46 +1537,6 @@ C10_EXPORT void BroadcastBinaryOpImpl(
 }
 
 } // namespace
-
-#define DELEGATE_1D_BINARY_FUNCTION(TIn, TOut, Func, Op)               \
-  template <>                                                          \
-  C10_EXPORT void Func<TIn, CPUContext>(                               \
-      const int N, const TIn* A, const TIn* B, TOut* C, CPUContext*) { \
-    std::transform(A, A + N, B, C, Op<TIn>());                         \
-  }
-
-#define DEFINE_1D_COMPARE_FUNCTION(Func, Op)                \
-  DELEGATE_1D_BINARY_FUNCTION(float, bool, Func, Op)        \
-  DELEGATE_1D_BINARY_FUNCTION(double, bool, Func, Op)       \
-  DELEGATE_1D_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
-  DELEGATE_1D_BINARY_FUNCTION(bool, bool, Func, Op)
-
-DEFINE_1D_COMPARE_FUNCTION(EQ, std::equal_to)
-DEFINE_1D_COMPARE_FUNCTION(NE, std::not_equal_to)
-DEFINE_1D_COMPARE_FUNCTION(LT, std::less)
-DEFINE_1D_COMPARE_FUNCTION(LE, std::less_equal)
-DEFINE_1D_COMPARE_FUNCTION(GT, std::greater)
-DEFINE_1D_COMPARE_FUNCTION(GE, std::greater_equal)
-
-#undef DEFINE_1D_COMPARE_FUNCTION
-
-DELEGATE_1D_BINARY_FUNCTION(bool, bool, And, std::logical_and)
-DELEGATE_1D_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
-DELEGATE_1D_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
-
-#define DEFINE_1D_BITWISE_BINARY_FUNCTION(Func, op)                 \
-  DELEGATE_1D_BINARY_FUNCTION(bool, bool, Func, op)                 \
-  DELEGATE_1D_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, op) \
-  DELEGATE_1D_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, op)
-
-DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
-DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
-DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
-
-#undef DEFINE_1D_BITWISE_BINARY_FUNCTION
-
-#undef DELEGATE_1D_BINARY_FUNCTION
 
 #define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)             \
   template <>                                                                  \
