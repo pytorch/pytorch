@@ -29,6 +29,9 @@ using Operation = std::function<int(Stack&)>;
 static inline IValue& peek(Stack& stack, size_t i, size_t N) {
   return *(stack.end() - N + i);
 }
+static inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
+  return *(stack.end() - N + i);
+}
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
 static inline at::ArrayRef<IValue> peekSlice(
@@ -49,6 +52,15 @@ static inline IValue pop(Stack& stack) {
   stack.pop_back();
   return r;
 }
+static inline std::vector<IValue> pop(Stack& stack, size_t n) {
+  std::vector<IValue> result;
+  result.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    result.push_back(std::move(peek(stack, i, n)));
+  }
+  drop(stack, n);
+  return result;
+}
 
 // variadic pop:
 // int64_t a; at::Tensor b;
@@ -67,7 +79,7 @@ static inline void pop(Stack& stack, Types&... args) {
 }
 template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
-  std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
+  (void)std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
 }
 
 // The packer here is carefully written not to make any unnecessary

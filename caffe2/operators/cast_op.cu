@@ -16,12 +16,12 @@ template <>
 template <typename DstType, typename SrcType>
 bool CastOp<CUDAContext>::DoRunWithType() {
   auto& input = Input(0);
-  auto* output = Output(0);
-  output->ResizeLike(input);
+
+  auto* output = Output(0, input.sizes(), at::dtype<DstType>());
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  DCHECK(input.size() < INT_MAX);
-  int N = input.size();
+  DCHECK(input.numel() < INT_MAX);
+  int N = input.numel();
   if (N == 0) {
     // skip the rest of the computation if input is empty
     return true;

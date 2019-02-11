@@ -119,6 +119,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     auto& X = Input(0);
     auto& filter = Input(1);
     auto& bias = Input(2);
+    auto* Y = Output(0);
 
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     const int M = filter.dim32(0);
@@ -132,8 +133,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
     CAFFE_ENFORCE(bias.numel() == M, "");
 
-    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
-    auto* Y = Output(0, sizes, at::dtype<float>());
+    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
     const int oH = Y->dim32(2), oW = Y->dim32(3);
 
     if (N > 1) {
@@ -250,10 +250,10 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
 
   bool RunOnDeviceWithOrderNCHW() override {
     auto& X = Input(0);
+    auto* Y = Output(0);
     CAFFE_ENFORCE(X.dim() == 4, "");
     const int H = X.dim32(2), W = X.dim32(3);
-    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, X.dim32(1));
-    auto* Y = Output(0, sizes, at::dtype<float>());
+    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
     std::vector<int> pads(
         {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
     std::vector<int> stride({this->stride_h(), this->stride_w()});

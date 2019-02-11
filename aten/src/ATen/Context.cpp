@@ -84,6 +84,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasOpenMP() const {
+#ifdef _OPENMP
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasLAPACK() const {
 #ifdef USE_LAPACK
   return true;

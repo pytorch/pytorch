@@ -18,6 +18,9 @@
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
@@ -113,17 +116,17 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "]";
 }
 
-static std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while (pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
+static void printStrList(
+    std::ostream& out,
+    const std::vector<std::string>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    printQuotedString(out, item);
   }
-  return s;
+  out << "]";
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
@@ -141,10 +144,10 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      out << "\"" << escapeString(s(name)) << "\"";
+      printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
-      printPrimList(out, ss(name));
+      printStrList(out, ss(name));
       break;
     case AttributeKind::t: {
       at::Tensor tensor = t(name);
@@ -816,6 +819,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -1248,6 +1252,33 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   return n;
 }
 
+Node* Graph::createDict(
+    const TypePtr& key_type,
+    const TypePtr& value_type,
+    at::ArrayRef<Value*> keys,
+    at::ArrayRef<Value*> values) {
+  AT_ASSERT(keys.size() == values.size());
+  auto n = create(prim::DictConstruct, 1);
+  for (size_t i = 0; i < keys.size(); ++i) {
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+
+    n->addInput(keys[i]) ;
+    n->addInput(values[i]);
+  }
+  n->output()->setType(DictType::create(key_type, value_type));
+  return n;
+}
+
+Node* Graph::createDictIndex(Value* dict, Value* index) {
+  auto dict_type = dict->type()->expect<DictType>();
+  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+
+  auto n = create(prim::DictIndex, {dict, index});
+  n->output()->setType(dict_type->getValueType());
+  return n;
+}
+
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
@@ -1329,7 +1360,7 @@ void Graph::freeBlock(Block* b) {
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
-  // small peephole optimization to ensure IntList attributes can still turn
+  // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
   if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();

@@ -63,11 +63,27 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
+function assert_git_not_dirty() {
+    # TODO: we should add an option to `build_amd.py` that reverts the repo to
+    #       an unmodified state.
+    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
+        git_status=$(git status --porcelain)
+        if [[ $git_status ]]; then
+            echo "Build left local git repository checkout dirty"
+            echo "git status --porcelain:"
+            echo "${git_status}"
+            exit 1
+        fi
+    fi
+}
+
 if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
   rm ~/sccache_error.log || true
-  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
+  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+  # https://github.com/pytorch/pytorch/pull/16645
+  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
   sccache --zero-stats
@@ -115,7 +131,8 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0
