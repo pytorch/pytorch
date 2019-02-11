@@ -731,6 +731,13 @@ class Scalar(Field):
         if dtype is not None and isinstance(dtype, tuple) and dtype[1] == 1:
             dtype = (dtype[0], (1,))
         if dtype is not None:
+            if isinstance(dtype, tuple) and dtype[0] == np.void:
+                raise TypeError(
+                    "Cannot set the Scalar with type {} for blob {}."
+                    "If this blob is the output of some operation, "
+                    "please verify the input of that operation has "
+                    "proper type.".format(dtype, blob)
+                )
             dtype = np.dtype(dtype)
         # If blob is not None and it is not a BlobReference, we assume that
         # it is actual tensor data, so we will try to cast it to a numpy array.

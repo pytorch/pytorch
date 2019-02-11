@@ -1,4 +1,4 @@
-#include <ATen/core/opschema/layer_norm.h>
+#include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/core/operator_c10wrapper.h"
 
 namespace {
@@ -26,7 +26,7 @@ struct EpsilonParameter final {
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    c10::core::opschema::LayerNorm,
+    caffe2::_c10_ops::LayerNorm,
     C10LayerNorm_DontUseThisOpYet,
     3,
     ParameterHelper<AxisParameter>,

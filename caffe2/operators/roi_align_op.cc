@@ -336,20 +336,6 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
 
 REGISTER_CPU_OPERATOR(RoIAlign, RoIAlignOp<float, CPUContext>);
 
-using RoIAlignCPUFloatImpl = RoIAlignOp<float, CPUContext>;
-DEFINE_FUNCTION_SCHEMA_OPERATOR(
-    RoIAlign,
-    (std::vector<c10::Argument>{
-        c10::Argument("input_0"),
-        c10::Argument("input_1"),
-        c10::Argument("order", StringType::get()),
-        c10::Argument("spatial_scale", FloatType::get()),
-        c10::Argument("pooled_h", IntType::get()),
-        c10::Argument("pooled_w", IntType::get()),
-        c10::Argument("sampling_ratio", IntType::get())}),
-    (std::vector<c10::Argument>{c10::Argument("output_0")}),
-    RoIAlignCPUFloatImpl);
-
 // Input: X, rois; Output: Y
 OPERATOR_SCHEMA(RoIAlign)
     .NumInputs(2)

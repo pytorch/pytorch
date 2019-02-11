@@ -1233,9 +1233,9 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
     ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+        op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1262,10 +1262,10 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "b");
     ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+        op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
     ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
