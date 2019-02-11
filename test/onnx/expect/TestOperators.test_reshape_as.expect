@@ -1,0 +1,74 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "0.4"
+graph {
+  node {
+    output: "1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 3
+        dims: 1
+        dims: 2
+        dims: 1
+        data_type: 1
+        raw_data: "\220\202l>\204m1?\363\241\210\276\374k\013@\\-\321=\353\234\204\276"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "1"
+    output: "2"
+    op_type: "Shape"
+  }
+  node {
+    input: "0"
+    input: "2"
+    output: "3"
+    op_type: "Reshape"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

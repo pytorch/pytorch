@@ -8377,6 +8377,23 @@ a")
         self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
                                     "out of range")
 
+    def test_namedtuple_attr(self):
+        def f(x):
+            return x.max(dim=1).indices + torch.max(x, dim=1).indices
+
+        self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
+            @torch.jit.script
+            def g1(x):
+                return x.max(dim=1).unknown_symbol
+
+        with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
+            @torch.jit.script
+            def g2(x):
+                print((x, x, x).__doc__)
+                return x
+
     def test_tuple_slicing(self):
         def tuple_slice(a):
             if bool(a):
