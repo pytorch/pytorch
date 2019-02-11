@@ -1112,7 +1112,6 @@ class _TestTorchMixin(object):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
-    @skipIfRocm
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
@@ -1176,7 +1175,6 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.ones((2, 1, 4), device=device), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device), xb.all())
 
-    @skipIfRocm
     def test_pairwise_distance_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -2635,7 +2633,6 @@ class _TestTorchMixin(object):
                     self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
-    @skipIfRocm
     def test_empty_full(self):
         do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -2833,7 +2830,6 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    @skipIfRocm
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -5280,7 +5276,6 @@ class _TestTorchMixin(object):
         run_test([10, 20, 30, 5], cast)
         run_test([15, 5, 10, 20, 25], cast)
 
-    @skipIfRocm
     def test_chain_matmul(self):
         self._test_chain_matmul(self, cast=lambda x: x)
 
@@ -7056,16 +7051,25 @@ class _TestTorchMixin(object):
         def _test_abs(tensors_dict):
             for category, tensors in tensors_dict.items():
                 for data in tensors:
-                    switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
-                    res = torch.mul(data, switch)
-                    self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+                    _test_abs_single(data)
 
-        max_val = 1000
-        _test_abs(self._make_tensors((3, 4), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((10, 10, 10), val_range=(0, max_val)))
+        def _test_abs_single(data):
+            switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
+            res = torch.mul(data, switch)
+            self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+
+        shapes = [(3, 4), (3, 5, 7), (2, 2, 5, 8, 2, 3), (1000,), (10, 10, 10)]
+
+        for shape in shapes:
+            # Test all except char/byte
+            _test_abs(self._make_tensors(shape, val_range=(0, 1000)))
+
+            # Test char
+            _test_abs_single(torch.CharTensor(*shape).random_(0, 100))
+
+            # Test byte
+            byte_tensor = torch.ByteTensor(*shape).random_(0, 100)
+            self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
@@ -7253,7 +7257,6 @@ class _TestTorchMixin(object):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
-    @skipIfRocm
     def test_tensor_shape_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -8920,6 +8923,16 @@ class _TestTorchMixin(object):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([1.0000e+28, 1.0000e-28])''')
 
+        # test scientific notation using set_printoptions
+        x = torch.tensor([1e2, 1e-2])
+        torch.set_printoptions(sci_mode=True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
+        torch.set_printoptions(sci_mode=False)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        torch.set_printoptions(sci_mode=None)  # reset to the default value
+
         # test no leading space if all elements positive
         x = torch.tensor([1, 2])
         self.assertEqual(x.__repr__(), str(x))
@@ -9155,7 +9168,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(empty_strided.stride(), as_strided.stride())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())

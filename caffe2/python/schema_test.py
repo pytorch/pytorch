@@ -389,6 +389,15 @@ class TestDB(unittest.TestCase):
         assert t.get('field_1', None) == s2
         assert t.get('field_2', None) is None
 
+    def testScalarForVoidType(self):
+        s0_good = schema.Scalar((None, (2, )))
+        with self.assertRaises(TypeError):
+            s0_bad = schema.Scalar((np.void, (2, )))
+
+        s1_good = schema.Scalar(np.void)
+        s2_good = schema.Scalar(None)
+        assert s1_good == s2_good
+
     def testScalarShape(self):
         s0 = schema.Scalar(np.int32)
         self.assertEqual(s0.field_type().shape, ())
