@@ -254,12 +254,11 @@ std::ostream& Node::print(
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
                            << const_value_list_with_types(b->inputs(), false)
-                           << ") {\n";
+                           << "):\n";
     for (auto nested : b->nodes()) {
       nested->print(out, level + 2, groups);
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
-    indent(out, level + 1) << "}\n";
   }
   return out;
 }
@@ -269,12 +268,12 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
+  out << "graph(" << const_value_list_with_types(g.inputs(), true) << "):\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
     n->print(out, 1, &groups);
   }
-  out << "  return (" << g.outputs() << ");\n}\n";
+  out << "  return (" << g.outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -1195,7 +1194,9 @@ Node* Graph::createFusionGroup() {
   return n;
 }
 
-Node* Graph::createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names) {
+Node* Graph::createTuple(
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
   auto tt = TupleType::create(std::move(types), std::move(field_names));
   auto n = create(prim::TupleConstruct, values);
@@ -1263,7 +1264,7 @@ Node* Graph::createDict(
     AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
     AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
-    n->addInput(keys[i]) ;
+    n->addInput(keys[i]);
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
