@@ -1546,7 +1546,7 @@ RegisterOperators reg2({
           dictIndex),                                                          \
       Operator(                                                                \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type             \
-          " idx, t v) -> Dict(" key_type ", t)(a!)",                           \
+          " idx, t v) -> ()",                                                  \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
