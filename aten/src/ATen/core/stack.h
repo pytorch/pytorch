@@ -52,6 +52,15 @@ static inline IValue pop(Stack& stack) {
   stack.pop_back();
   return r;
 }
+static inline std::vector<IValue> pop(Stack& stack, size_t n) {
+  std::vector<IValue> result;
+  result.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    result.push_back(std::move(peek(stack, i, n)));
+  }
+  drop(stack, n);
+  return result;
+}
 
 // variadic pop:
 // int64_t a; at::Tensor b;

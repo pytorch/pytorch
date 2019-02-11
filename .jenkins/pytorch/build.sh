@@ -118,7 +118,7 @@ fi
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
-  patch -p1 < xla/pytorch.patch
+  ./xla/scripts/apply_patches.sh
 fi
 
 # ppc64le build fails when WERROR=1

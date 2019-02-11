@@ -63,7 +63,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     Method& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value->type()->isSubtypeOf(DynamicType::get())) {
+  if (value->type()->isSubtypeOf(TensorType::get())) {
     if (builtin_cast_methods().count(field)) {
       return std::make_shared<BuiltinFunction>(
           Symbol::aten(builtin_cast_methods().at(field)),
@@ -86,6 +86,20 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
     throw ErrorReport(loc) << "Cannot call methods on numbers";
+  }
+  if (getValue()->type()->kind() == TypeKind::TupleType) {
+    auto tuple_type = getValue()->type()->expect<TupleType>();
+    if (!tuple_type->hasNames()) {
+      throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
+    }
+    auto names = tuple_type->names();
+    for (int i = 0; i < names.size(); i++) {
+      if (names[i] == field) {
+        auto r = m.graph()->insertNode(m.graph()->createTupleIndex(getValue(), i))->output();
+        return std::make_shared<SimpleValue>(r);
+      }
+    }
+    throw ErrorReport(loc) << "Unknown attribute to named tuple";
   }
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value));

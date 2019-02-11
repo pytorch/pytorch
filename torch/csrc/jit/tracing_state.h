@@ -65,31 +65,31 @@ struct TORCH_API TracingState
 
 // This is meant to be used as a thread local place, where we can store extra
 // info that gets lost when we call into ATen from Python bindings. One example
-// for when this happens is when we get an IntList argument with e.g. sizes for
+// for when this happens is when we get an IntArrayRef argument with e.g. sizes for
 // view. When tracing, those might be tensors, which let us encode extra data
 // dependencies, but once they get to the ATen call where we actually have the
-// tracing logic, they get converted into a raw IntList, and we loose all
+// tracing logic, they get converted into a raw IntArrayRef, and we loose all
 // information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
-  struct IntListTrace : std::vector<Value*> {
-    IntListTrace(int size) : std::vector<Value*>(size, nullptr) {}
+  struct IntArrayRefTrace : std::vector<Value*> {
+    IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
   };
 
   static bool empty() {
     return stash.intlists.empty();
   }
 
-  TORCH_API static void stashIntListElem(
+  TORCH_API static void stashIntArrayRefElem(
       const std::string& arg_name,
       size_t size,
       size_t idx,
       const Variable& var);
 
-  static bool hasIntList(const std::string& arg_name) {
+  static bool hasIntArrayRef(const std::string& arg_name) {
     return stash.intlists.count(arg_name) > 0;
   }
 
-  static IntListTrace popIntList(const std::string& arg_name) {
+  static IntArrayRefTrace popIntArrayRef(const std::string& arg_name) {
     auto info = std::move(stash.intlists.at(arg_name));
     stash.intlists.erase(arg_name);
     return info;
@@ -97,7 +97,7 @@ struct ArgumentStash {
 
   // Value stashing: Use these methods to stash arguments which correspond
   // to regular Value*'s in the graph. i.e. they don't require special
-  // handling like in the case of IntLists
+  // handling like in the case of IntArrayRefs
   TORCH_API static void stashValue(
       const std::string& arg_name,
       size_t idx,
@@ -116,7 +116,7 @@ struct ArgumentStash {
 
  private:
   static thread_local ArgumentStash stash;
-  std::unordered_map<std::string, IntListTrace> intlists;
+  std::unordered_map<std::string, IntArrayRefTrace> intlists;
   std::unordered_map<std::string, Value*> values;
 };
 
@@ -133,6 +133,7 @@ using warn_fn_type = void (*)(const std::string& msg);
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
 TORCH_API extern const char* WARN_CONSTRUCTOR;
 TORCH_API extern const char* WARN_RESIZE;
+TORCH_API extern const char* LEGACY_CONSTRUCTOR;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
   if (const auto& state = getTracingState()) {

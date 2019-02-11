@@ -47,7 +47,7 @@ TORCH_API std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
- void delValueTrace(const Variable& var) {
+void delValueTrace(const Variable& var) {
   AT_ASSERT(var.defined());
   auto& env_stack = getTracingState()->env_stack;
   for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -83,7 +83,7 @@ Value* getValueTrace(const IValue& var) {
   if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
-      Node* n = state->graph->createUndefined();
+      Node* n = state->graph->createNone(TensorType::get());
       return state->graph->insertNode(n)->output();
     }
     for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -137,7 +137,7 @@ Value* getNestedValueTrace(const IValue& v) {
   if (v.isTensorList()) {
     return state->graph
         ->insertNode(state->graph->createList(
-            DynamicType::get(),
+            TensorType::get(),
             fmap(
                 v.toTensorListRef(),
                 [](const IValue& val) { return getNestedValueTrace(val); })))
@@ -156,7 +156,7 @@ Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const Variable& var) {
   if (!var.defined()) {
-    Node* n = state->graph->createUndefined();
+    Node* n = state->graph->createNone(TensorType::get());
     return state->graph->insertNode(n)->output();
   }
 
@@ -179,8 +179,8 @@ Value* getNestedOutputTrace(
     return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
-    auto tuple_node = state->graph->createTuple(
-        fmap(elems, [&state](const IValue& ival) {
+    auto tuple_node =
+        state->graph->createTuple(fmap(elems, [&state](const IValue& ival) {
           return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
@@ -204,7 +204,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
   const std::function<IValue(IValue, TypePtr, Value*)> add_input =
       [&](IValue input, TypePtr type, Value* value) -> IValue {
     value->setType(type);
-    if (type->isSubtypeOf(DynamicType::get())) {
+    if (type->isSubtypeOf(TensorType::get())) {
       auto input_tensor = input.toTensor();
       auto name = Variable(input_tensor).name();
       auto& value_map = state->env_stack.back().value_map;
@@ -376,10 +376,21 @@ void addInputs(
   }
 }
 
-void addInputs(Node* n, const char* name, at::TensorList value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    at::TensorList value,
+    bool allow_undefined) {
   Graph* g = n->owningGraph();
-  Node* list_node = g->insertNode(
-      g->createList(DynamicType::get(), fmap(value, getValueTrace)));
+  Node* list_node = nullptr;
+  if (allow_undefined) {
+    // if allow undefined, we create a list of optional tensors
+    list_node = g->insertNode(
+        g->createList(OptionalType::ofTensor(), fmap(value, getValueTrace)));
+  } else {
+    list_node = g->insertNode(
+        g->createList(TensorType::get(), fmap(value, getValueTrace)));
+  }
   n->addInput(list_node->output());
 }
 
@@ -391,11 +402,11 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, options.device());
 }
 
-void addInputs(Node* n, const char* name, at::IntList value) {
+void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
-  std::vector<Value*> info = ArgumentStash::hasIntList(name)
-      ? ArgumentStash::popIntList(name)
-      : ArgumentStash::IntListTrace(value.size());
+  std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)
+      ? ArgumentStash::popIntArrayRef(name)
+      : ArgumentStash::IntArrayRefTrace(value.size());
 
   auto& g = getTracingState()->graph;
   for (size_t i = 0; i < info.size(); ++i) {
@@ -407,7 +418,7 @@ void addInputs(Node* n, const char* name, at::IntList value) {
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
       throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
+          "Type mismatch in setposattr for IntArrayRef. Check that your program "
           "is valid without tracing, and please file a bug report if it is.");
     }
   }
@@ -474,9 +485,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   return size_var;
 }
 
-void ensureUniqueIfOutOfPlaced(
-    const char* name,
-    const at::Tensor& tensor) {
+void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
   auto& state = getTracingState();
   if (state && state->force_outplace == false) {
     // If we're not converting in-place ops to out-of-place, this check is
@@ -502,7 +511,7 @@ void ensureUniqueIfOutOfPlaced(
 ////////////////////////////////////////////////////////////////////////////////
 thread_local ArgumentStash ArgumentStash::stash;
 
-void ArgumentStash::stashIntListElem(
+void ArgumentStash::stashIntArrayRefElem(
     const std::string& arg_name,
     size_t size,
     size_t idx,
@@ -575,6 +584,8 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
+const char* LEGACY_CONSTRUCTOR =
+    " is a legacy constructor and is not supported in the JIT.";
 
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {
