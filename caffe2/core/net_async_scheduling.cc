@@ -204,11 +204,15 @@ void AsyncSchedulingNet::finishRun() {
   std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
-  if (options_.report_stats_) {
-    counters_.ReportRunEnd();
+  try {
+    if (options_.report_stats_) {
+      counters_.ReportRunEnd();
+      // notify observers and waiters
+      StopAllObservers();
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Exception during finishRun: " << e.what();
   }
-  // notify observers and waiters
-  StopAllObservers();
   running_ = false;
   running_cv_.notify_all();
 }
