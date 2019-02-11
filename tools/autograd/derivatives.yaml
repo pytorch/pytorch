@@ -1082,7 +1082,7 @@
 - name: fractional_max_pool2d(Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor random_samples)
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, result1)
 
-- name: fractional_max_pool3d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
+- name: fractional_max_pool3d(Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor random_samples)
   self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, result1)
 
 - name: max_pool2d_with_indices(Tensor self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode)
