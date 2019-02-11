@@ -10,6 +10,18 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
 
+# This system setup script is meant to run before the CI-related scripts, e.g.,
+# installing Git client, checking out code, setting up CI env, and
+# building/testing.
+setup_linux_system_environment: &setup_linux_system_environment
+  name: Set Up System Environment
+  no_output_timeout: "1h"
+  command: |
+    set -e
+
+    # Set up CircleCI GPG keys for apt, if needed
+    curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
+
 # NOTE: We only perform the merge in build step and not in test step, because
 # all source files will be shared from build to test
 install_official_git_client: &install_official_git_client
@@ -17,6 +29,7 @@ install_official_git_client: &install_official_git_client
   no_output_timeout: "1h"
   command: |
     set -e
+
     sudo apt-get -qq update
     sudo apt-get -qq install openssh-client git
 
@@ -124,12 +137,17 @@ install_doc_push_script: &install_doc_push_script
     EOL
     chmod +x /home/circleci/project/doc_push_script.sh
 
+# `setup_ci_environment` has to be run **after** the ``checkout`` step because
+# it writes into the checkout directory and otherwise CircleCI will complain
+# that
+#   Directory (/home/circleci/project) you are trying to checkout to is not empty and not git repository
 setup_ci_environment: &setup_ci_environment
-  name: Set Up CI Environment
+  name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
   command: |
     set -e
 
+    # Set up NVIDIA docker repo
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
     echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
@@ -211,6 +229,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
     image: default
   steps:
   - run:
+      <<: *setup_linux_system_environment
+  - run:
       <<: *install_official_git_client
   - checkout
   - run:
@@ -244,6 +264,8 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
     image: default
   steps:
   - run:
+      <<: *setup_linux_system_environment
+  - run:
       <<: *setup_ci_environment
   - run:
       name: Test
@@ -270,6 +292,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   machine:
     image: default
   steps:
+  - run:
+      <<: *setup_linux_system_environment
   - run:
       <<: *install_official_git_client
   - checkout
@@ -329,6 +353,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: default
   steps:
+  - run:
+      <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
   - run:
@@ -719,6 +745,8 @@ binary_linux_test: &binary_linux_test
     image: default
   steps:
   - run:
+      <<: *setup_linux_system_environment
+  - run:
       <<: *setup_ci_environment
   - attach_workspace:
       at: /home/circleci/project
@@ -783,6 +811,8 @@ binary_linux_upload: &binary_linux_upload
     image: default
   steps:
   - run:
+      <<: *setup_linux_system_environment
+  - run:
       <<: *setup_ci_environment
   - attach_workspace:
       at: /home/circleci/project
@@ -813,7 +843,7 @@ binary_linux_upload: &binary_linux_upload
         pushd /home/circleci/project/final_pkgs
         if [[ "$PACKAGE_TYPE" == conda ]]; then
           retry conda install -yq anaconda-client
-          retry timeout 30 /home/circleci/project/login_to_anaconda.sh 
+          retry timeout 30 /home/circleci/project/login_to_anaconda.sh
           anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
         elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
           retry pip install -q awscli
@@ -965,6 +995,8 @@ smoke_linux_test: &smoke_linux_test
   machine:
     image: default
   steps:
+  - run:
+      <<: *setup_linux_system_environment
   - run:
       <<: *install_official_git_client
   - run:
@@ -1241,6 +1273,8 @@ jobs:
       image: default
     steps:
     - run:
+        <<: *setup_linux_system_environment
+    - run:
         <<: *setup_ci_environment
     - run:
         name: Perf Test
@@ -1269,6 +1303,8 @@ jobs:
     machine:
       image: default
     steps:
+    - run:
+        <<: *setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -1583,6 +1619,8 @@ jobs:
     machine:
       image: default
     steps:
+    - run:
+        <<: *setup_linux_system_environment
     - run:
         <<: *binary_populate_env
     - run:
