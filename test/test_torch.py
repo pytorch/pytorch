@@ -1112,7 +1112,6 @@ class _TestTorchMixin(object):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
-    @skipIfRocm
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
@@ -1176,7 +1175,6 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.ones((2, 1, 4), device=device), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device), xb.all())
 
-    @skipIfRocm
     def test_pairwise_distance_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1974,9 +1972,18 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
-    def test_rpow(self):
-        m = torch.randn(10, 10)
+    @staticmethod
+    def _test_rpow(self, cast):
+        m = cast(torch.randn(10, 10))
         self.assertEqual(torch.pow(2, m), 2**m)
+
+        # test with scalar
+        m = cast(torch.randn(1).squeeze())
+        assert m.dim() == 0, "m is intentionally a scalar"
+        self.assertEqual(torch.pow(2, m), 2**m)
+
+    def test_rpow(self):
+        self._test_rpow(self, lambda x: x)
 
     @staticmethod
     def _test_int_pow(self, cast):
@@ -2215,6 +2222,15 @@ class _TestTorchMixin(object):
                 lambda t, d: t.var(d, unbiased=unbiased),
                 lambda n, d: n.var(d, ddof=1 if unbiased else 0),
                 use_integral=False)
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    def test_logsumexp_dim(self):
+        from scipy.special import logsumexp
+        self._test_dim_ops(
+            lambda t, d: t.logsumexp(d),
+            lambda n, d: logsumexp(n, d),
+            use_integral=False)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
@@ -2617,7 +2633,6 @@ class _TestTorchMixin(object):
                     self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
-    @skipIfRocm
     def test_empty_full(self):
         do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -2815,7 +2830,6 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    @skipIfRocm
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -3441,7 +3455,6 @@ class _TestTorchMixin(object):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
-            full1d = cast(torch.randn(*dims_full).flatten().float())
             small = cast(torch.randn(*dims_small).float())
             large = cast(torch.randn(*dims_large).float())
             small_expanded = small.expand(*dims_full)
@@ -3458,7 +3471,8 @@ class _TestTorchMixin(object):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            if hasattr(large_expanded, fn):
+            # TODO: fix masked_scatter and masked_fill broadcasting
+            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
@@ -3468,10 +3482,6 @@ class _TestTorchMixin(object):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
-                    elif fn == "masked_scatter":
-                        return myfn(t1 < 0.5, full1d)
-                    elif fn == "masked_fill":
-                        return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3499,7 +3509,7 @@ class _TestTorchMixin(object):
                     elif fn == "masked_select":
                         return fntorch(t1, t2 < 0)
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, full1d)
+                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
@@ -3530,7 +3540,7 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, full1d)
+                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
                 elif fn == "map":
@@ -5266,7 +5276,6 @@ class _TestTorchMixin(object):
         run_test([10, 20, 30, 5], cast)
         run_test([15, 5, 10, 20, 25], cast)
 
-    @skipIfRocm
     def test_chain_matmul(self):
         self._test_chain_matmul(self, cast=lambda x: x)
 
@@ -7239,7 +7248,6 @@ class _TestTorchMixin(object):
         # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
-    @skipIfRocm
     def test_tensor_shape_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -9123,7 +9131,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(empty_strided.stride(), as_strided.stride())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -10058,7 +10065,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
         actual_norm, actual_mean, actual_stdev = \
-            torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), 1, epsilon)
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
 # Functions to test negative dimension wrapping

@@ -41,7 +41,7 @@ using CUBLAS_HALF_TYPE = rocblas_half;
 using CUBLAS_HALF_TYPE = __half;
 #endif // __HIP_PLATFORM_HCC
 
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -301,74 +301,6 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
 }
 
 } // namespace
-
-#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Func<TIn, CUDAContext>(                 \
-      const int N,                                                \
-      const TIn* A,                                               \
-      const TIn* B,                                               \
-      TOut* C,                                                    \
-      CUDAContext* context) {                                     \
-    SimpleBinaryOpCUDAKernel<TIn, TOut, Op<TIn>>                  \
-        <<<CAFFE_GET_BLOCKS(N),                                   \
-           CAFFE_CUDA_NUM_THREADS,                                \
-           0,                                                     \
-           context->cuda_stream()>>>(N, Op<TIn>(), A, B, C);      \
-  }
-
-#define DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(Func, Op)                \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
-
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LT, thrust::less)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
-
-#undef DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION
-
-#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Func, Op)                         \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, float, Func, Op)               \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, AddFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, DivFunctor)
-
-#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
-
-#define DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
-
-#undef DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
-    float,
-    float,
-    ElemwiseMax,
-    thrust::maximum);
-
-#undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
 
 #define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
   template <>                                                             \

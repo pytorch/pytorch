@@ -41,9 +41,9 @@ bool FindOp<CUDAContext>::DoRunWithType() {
   int* res_data = res_indices->template mutable_data<int>();
 
   FindKernel<
-      T><<<needles.size(), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-      needles.size(),
-      idx.size(),
+      T><<<needles.numel(), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      needles.numel(),
+      idx.numel(),
       idx_data,
       needles_data,
       res_data,

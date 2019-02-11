@@ -8,64 +8,97 @@ namespace caffe2 {
 namespace math {
 
 template <typename T, class Context>
-void Exp(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Exp(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Log(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Log(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Sin(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Sin(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Asin(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Asin(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Cos(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Cos(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Acos(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Acos(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Tan(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Tan(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Atan(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Atan(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Sinh(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Sinh(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Cosh(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Cosh(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void SinCos(const int N, const T* X, T* S, T* C, Context* context);
+CAFFE2_API void SinCos(int N, const T* X, T* S, T* C, Context* context);
 template <typename T, class Context>
-void Tanh(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Tanh(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Abs(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Abs(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Sqr(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Sqr(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Sqrt(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Sqrt(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Rsqrt(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Rsqrt(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Cube(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Cube(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Cbrt(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Cbrt(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Neg(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Neg(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Sign(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Sign(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Not(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Not(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Powx(const int N, const T* A, const T b, T* Y, Context* context);
+CAFFE2_API void Powx(int N, const T* A, const T b, T* Y, Context* context);
 template <typename T, class Context>
-void Inv(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Inv(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
-void Erf(const int N, const T* X, T* Y, Context* context);
+CAFFE2_API void Erf(int N, const T* X, T* Y, Context* context);
 
-template <typename T, class Context, StorageOrder kOrder>
-CAFFE2_API void AffineChannel(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    const T* scale,
-    const T* bias,
-    T* Y,
-    Context* context);
+template <typename T, class Context>
+CAFFE2_API void Add(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Sub(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Mul(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Div(int N, const T* A, const T* B, T* C, Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void Min(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Max(int N, const T* A, const T* B, T* C, Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void And(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Or(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void Xor(int N, const T* A, const T* B, T* C, Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void
+BitwiseAnd(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void
+BitwiseOr(int N, const T* A, const T* B, T* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void
+BitwiseXor(int N, const T* A, const T* B, T* C, Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void EQ(int N, const T* A, const T* B, bool* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void NE(int N, const T* A, const T* B, bool* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void LT(int N, const T* A, const T* B, bool* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void LE(int N, const T* A, const T* B, bool* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void GT(int N, const T* A, const T* B, bool* C, Context* context);
+template <typename T, class Context>
+CAFFE2_API void GE(int N, const T* A, const T* B, bool* C, Context* context);
 
 } // namespace math
 } // namespace caffe2

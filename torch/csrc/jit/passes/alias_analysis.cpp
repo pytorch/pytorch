@@ -7,11 +7,11 @@ namespace torch {
 namespace jit {
 namespace {
 bool shouldAnnotate(const TypePtr& type) {
-  return type->isSubtypeOf(DynamicType::get()) ||
+  return type->isSubtypeOf(TensorType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
-      type->kind() == TypeKind::DictType ||
-      type->kind() == TypeKind::VarType ||
+      type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
+      type->kind() == TypeKind::FutureType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -68,16 +68,6 @@ bool AliasDb::hasWriters(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasWritersBefore(const Node* n) const {
-  if (hasWildcard(n)) {
-    return true;
-  }
-  const auto writers = getWriters(n);
-  return std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
-    return isBeforeSameGraph(writer, n);
-  });
-}
-
 bool AliasDb::hasWrites(Node* n) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
@@ -112,51 +102,75 @@ bool AliasDb::writesToInputAlias(Node* n) const {
         graph_->inputs().cend(),
         [&](const Value* graphInput) {
           return shouldAnnotate(graphInput) &&
-              aliasTracker_->pointsTo(graphInput, v);
+              aliasTracker_->mayAlias(graphInput, v);
         });
   });
 }
 
-std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
-  std::unordered_set<Node*> writers;
-
-  for (const auto input : n->inputs()) {
-    for (auto writer : aliasTracker_->getWrites(input)) {
-      writers.insert(writer);
-    }
-  }
-
-  for (const auto output : n->outputs()) {
-    for (auto writer : aliasTracker_->getWrites(output)) {
-      writers.insert(writer);
-    }
-  }
-
-  return writers;
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
+  return aliasTracker_->mayAlias(a, b);
 }
 
-std::unordered_set<const Value*> AliasDb::getAliases(const Value* v) const {
-  std::unordered_set<const Value*> ret;
-  if (!aliasTracker_->contains(v)) {
-    return ret;
+void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
+  for (auto node : b->nodes()) {
+    getWritesImpl(node, ret, recurseBlocks);
   }
-
-  return aliasTracker_->getAliases(v);
 }
 
-std::unordered_set<const Value*> AliasDb::getWrites(Node* n) const {
-  std::unordered_set<const Value*> writes;
+void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
-      writes.insert(input);
+      ret.insert(input);
     }
   }
   for (const auto output : n->outputs()) {
     if (writesTo(n, output)) {
-      writes.insert(output);
+      ret.insert(output);
     }
   }
+
+  if (recurseBlocks) {
+    for (auto block : n->blocks()) {
+      getWritesImpl(block, ret, recurseBlocks);
+    }
+  }
+}
+
+// Get all writes by all nodes in a block, recursively exploring sub-blocks
+ValueSet AliasDb::getWrites(Block* b) const {
+  ValueSet writes;
+  getWritesImpl(b, writes, /*recurseBlocks=*/true);
   return writes;
+}
+
+std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
+    const {
+  ValueSet writes;
+  getWritesImpl(n, writes, recurseBlocks);
+  return writes;
+}
+
+void AliasDb::getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
+  for (const auto input : n->inputs()) {
+    ret.insert(input);
+  }
+  for (const auto output : n->outputs()) {
+    ret.insert(output);
+  }
+
+  if (recurseBlocks) {
+    for (auto block : n->blocks()) {
+      for (auto node : block->nodes()) {
+        getReadsImpl(node, ret, recurseBlocks);
+      }
+    }
+  }
+}
+
+ValueSet AliasDb::getReads(Node* n, bool recurseBlocks) const {
+  ValueSet reads;
+  getReadsImpl(n, reads, recurseBlocks);
+  return reads;
 }
 
 void AliasDb::dump() const {
@@ -197,14 +211,14 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       inputType = inputType->cast<OptionalType>()->getElementType();
     }
 
-    if (inputType->isSubtypeOf(DynamicType::get())) {
+    if (inputType->isSubtypeOf(TensorType::get())) {
       tensors.push_back(input);
     } else if (inputType->kind() == TypeKind::ListType) {
       auto containedType = inputType->containedTypes().at(0);
       // All tensor subtypes may alias to each other, so we should consider all
       // lists of them to alias to each other.
-      if (containedType->isSubtypeOf(DynamicType::get())) {
-        containedType = DynamicType::get();
+      if (containedType->isSubtypeOf(TensorType::get())) {
+        containedType = TensorType::get();
       }
       listTypes[containedType->kind()].push_back(input);
     } else if (inputType->kind() == TypeKind::TupleType) {
@@ -262,6 +276,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::FusionGroup:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
+    case prim::fork:
+      return analyzeFork(node);
+    case aten::wait:
+      return analyzeWait(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
@@ -484,6 +502,72 @@ void AliasDb::analyzeChunk(Node* node) {
   }
 }
 
+// Propagate aliasing and write information from the subgraph outputs to the
+// outputs of the corresponding aten::wait() calls, since that's where the
+// values will eventually emerge.
+void AliasDb::analyzeFork(Node* node) {
+  const auto subgraph = node->g(attr::Subgraph).get();
+  subgraphToOwner_.insert({subgraph, node});
+
+  const auto subgraphBlock = subgraph->block();
+  mapAliases(subgraphBlock->inputs(), node->inputs());
+  analyze(subgraphBlock);
+
+  // Give the future that the fork emits a fresh value
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeWait(Node* node) {
+  const auto fut = node->input();
+  AT_ASSERT(fut->type()->kind() == TypeKind::FutureType);
+
+  if (aliasTracker_->isWildcard(fut)) {
+    for (const auto output : node->outputs()) {
+      aliasTracker_->setWildcard(output);
+    }
+    return;
+  }
+
+  const auto originFuts = aliasTracker_->getMemoryLocations(fut);
+  for (const auto originFut : originFuts) {
+    const auto subgraphNode = originFut->node();
+
+    const auto subgraph = subgraphNode->g(attr::Subgraph).get();
+    const auto subgraphWrites = getWrites(subgraph->block());
+
+    // Retrieve aliasing info from the subgraph
+    mapAliases(node->outputs(), subgraph->outputs());
+
+    // Propagate write information to the `wait` node.
+    //
+    // We need to do this for all writes in the entire subgraph, so that we
+    // disallow reorders past a call to "aten::wait".
+    //
+    // Consider the following Fork where the subgraph writes to %a:
+    //
+    //   %c : Future[Tensor] = prim::Fork(%a, %b) <-- writes to %a
+    //   ...
+    //   aten::wait(%c)
+    //   aten::use(%a)   <-- we can't move this node before the `wait` safely!
+    //
+    // Say we define the "live interval" of a fork the interval between the
+    // `fork` and its first corresponding `wait` (inclusive).
+    //
+    // Any writes in the subgraph can happen at any point in the live interval,
+    // so it's not safe to re-order any reads to those memory locations from
+    // outside the live interval to inside.
+    //
+    // In reality, any reads *inside* the live interval are undefined behavior,
+    // since the writes may or may not have been executed yet. But we'll let
+    // users do that and shoot themselves in the foot for now.
+    for (const auto write : subgraphWrites) {
+      aliasTracker_->registerWrite(write, node);
+    }
+  }
+}
+
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
 // This is an intermediate node used only in the graph fuser.
 void AliasDb::analyzeBroadcastingChunk(Node* node) {
@@ -565,39 +649,44 @@ class AliasDb::WorkingSet {
   void add(Node* n) {
     nodes_.push_back(n);
     for (const auto user : getUsersSameBlock(n)) {
-      users_[user]++;
+      users_.insert(user);
     }
 
-    for (const auto& writer : getWritersSameBlock(n)) {
-      writers_[writer]++;
+    for (const auto& write : aliasDb_.getWrites(n, /*recurseBlocks=*/true)) {
+      writes_.insert(write);
+    }
+    for (const auto& read : aliasDb_.getReads(n, /*recurseBlocks=*/true)) {
+      reads_.insert(read);
     }
     if (aliasDb_.hasWildcard(n)) {
       numWildcards_++;
-    }
-    if (aliasDb_.hasWrites(n)) {
-      numWriterNodes_++;
     }
   }
 
   void eraseMover() {
     auto mover = nodes_.front();
     for (const auto user : getUsersSameBlock(mover)) {
-      // If this user node only uses the mover, we can remove it
-      if (users_[user] == 1) {
-        users_.erase(user);
+      const auto it = users_.find(user);
+      if (it != users_.end()) {
+        users_.erase(it);
       }
     }
 
-    for (const auto& writer : getWritersSameBlock(mover)) {
-      if (writers_[writer] == 1) {
-        writers_.erase(writer);
+    for (const auto& write :
+         aliasDb_.getWrites(mover, /*recurseBlocks=*/true)) {
+      const auto it = writes_.find(write);
+      if (it != writes_.end()) {
+        writes_.erase(it);
+      }
+    }
+    for (const auto& read : aliasDb_.getReads(mover, /*recurseBlocks=*/true)) {
+      const auto it = reads_.find(read);
+      if (it != reads_.end()) {
+        reads_.erase(it);
       }
     }
     if (aliasDb_.hasWildcard(mover)) {
       numWildcards_--;
-    }
-    if (aliasDb_.hasWrites(mover)) {
-      numWriterNodes_--;
     }
     nodes_.pop_front();
   }
@@ -632,21 +721,23 @@ class AliasDb::WorkingSet {
     }
 
     // If `n` has a wildcard, the working set can't write to anything.
-    if (aliasDb_.hasWildcard(n) && numWriterNodes_ > 0) {
+    if (aliasDb_.hasWildcard(n) && writes_.size() > 0) {
       return true;
     }
 
     // 2. Handle regular mutable dependencies
-    // Check that this node does not write to anything used by the working set
-    if (writers_.count(n) != 0) {
+    // Check that `n` does not write to anything used by the working set
+    const auto nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    if (aliasDb_.aliasTracker_->mayAlias(nWrites, reads_)) {
       return true;
     }
 
-    // Check that the working set does not write to anything used by this node
-    const auto writersToNode = getWritersSameBlock(n);
-    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
-      return writersToNode.count(node) != 0;
-    });
+    // Check that the working set doesn't write to anything that `n` uses.
+    const auto nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    if (aliasDb_.aliasTracker_->mayAlias(writes_, nReads)) {
+      return true;
+    }
+    return false;
   }
 
   // Does the working set produce any values consumed by `n`?
@@ -679,16 +770,6 @@ class AliasDb::WorkingSet {
     return users;
   }
 
-  std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
-    std::unordered_set<Node*> writers;
-    for (const auto writer : aliasDb_.getWriters(n)) {
-      if (auto sameBlock = findSameBlock(writer, n)) {
-        writers.insert(sameBlock);
-      }
-    }
-    return writers;
-  }
-
   // Traverse `target`'s blockchain upward until we find a node that shares a
   // block with `n`.
   //
@@ -716,10 +797,11 @@ class AliasDb::WorkingSet {
   const AliasDb& aliasDb_;
   std::list<Node*> nodes_;
   // users => # of working set nodes it uses
-  std::unordered_map<Node*, size_t> users_;
-  std::unordered_map<Node*, size_t> writers_;
+  std::unordered_multiset<Node*> users_;
+  // Values written to by the working set => number of nodes writing to value
+  std::unordered_multiset<const Value*> writes_;
+  std::unordered_multiset<const Value*> reads_;
   size_t numWildcards_ = 0;
-  size_t numWriterNodes_ = 0;
 };
 
 // Try to move `toMove` before/after `movePoint` while preserving value

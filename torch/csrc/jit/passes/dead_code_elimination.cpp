@@ -121,7 +121,7 @@ class DeadCodeEliminator {
     }
   }
 
-  // If we output or write to a live value, mark this node
+  // If we output or write to a live memory location, mark this node
   void markIfLive(Node* node) {
     for (const auto output : node->outputs()) {
       if (liveValues_.count(output)) {
@@ -130,10 +130,9 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      for (const auto write : aliasDb_->getWrites(node)) {
-        if (liveAliases_.count(write)) {
-          return mark(node);
-        }
+      const auto writes = aliasDb_->getWrites(node);
+      if (aliasDb_->mayAlias(writes, liveValues_)) {
+        return mark(node);
       }
     }
   }
@@ -164,12 +163,6 @@ class DeadCodeEliminator {
         continue;
       }
       liveValues_.insert(input);
-
-      if (aliasDb_) {
-        for (const auto alias : aliasDb_->getAliases(input)) {
-          liveAliases_.insert(alias);
-        }
-      }
     }
   }
 
@@ -273,7 +266,6 @@ class DeadCodeEliminator {
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
   std::unordered_set<const Value*> liveValues_;
-  std::unordered_set<const Value*> liveAliases_;
   std::function<void(const std::unordered_set<const Value*>&)> deleteCallback_ =
       [](const std::unordered_set<const Value*>&) {};
 };

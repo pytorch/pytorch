@@ -614,7 +614,6 @@ class TestAutograd(TestCase):
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
-    @skipIfRocm
     def test_sparse_mm_backward(self):
         size = (3, 3)
         sparse = torch.sparse_coo_tensor(size, requires_grad=True)
@@ -1094,7 +1093,6 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    @skipIfRocm
     def test_requires_grad_factory(self):
         x = torch.randn(2, 3)
         fns = [torch.ones_like, torch.testing.randn_like]
@@ -1617,7 +1615,6 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
-    @skipIfRocm
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -1741,7 +1738,6 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -2247,7 +2243,6 @@ class TestAutograd(TestCase):
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
-    @skipIfRocm
     def test_pdist_large(self):
         def func(x):
             return torch.pdist(x, p=2)
@@ -2287,7 +2282,6 @@ class TestAutograd(TestCase):
         gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
 
-    @skipIfRocm
     def test_chain_matmul(self):
         def gen_matrices(p):
             matrices = []
@@ -2391,7 +2385,6 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
 
@@ -2622,7 +2615,6 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2630,7 +2622,6 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2644,7 +2635,6 @@ class TestAutograd(TestCase):
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_lstmcell_backward_only_one_output_grad(self):
         # checks that undefined gradients doen't hamper the backward
         # see #11872
@@ -2702,7 +2692,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
-    @skipIfRocm
     @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)

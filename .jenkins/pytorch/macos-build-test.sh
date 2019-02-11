@@ -1,9 +1,9 @@
 #!/bin/bash
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-build* ]]; then
+if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-build* ]]; then
   source "$(dirname "${BASH_SOURCE[0]}")/macos-build.sh"
 fi
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test* ]]; then
+if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test* ]]; then
   source "$(dirname "${BASH_SOURCE[0]}")/macos-test.sh"
 fi
