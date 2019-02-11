@@ -214,11 +214,11 @@ struct SchemaParser {
       alias_info = std::move(container);
     }
     if (is_return) {
-      // optionally named return values
+      // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
         name = L.next().text();
       } else {
-        name = "ret" + std::to_string(idx);
+        name = "";
       }
     } else {
       name = L.expect(TK_IDENT).text();

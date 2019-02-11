@@ -11,7 +11,8 @@ namespace torch { namespace nn {
 
 inline bool check_type(PyObject* obj, at::TypeID typeID) {
   if (THPVariable_Check(obj)) {
-    return ((THPVariable*)obj)->cdata.data().type().ID() == typeID;
+    auto& data_type = ((THPVariable*)obj)->cdata.type();
+    return at::globalContext().getNonVariableType(data_type.backend(), data_type.scalarType()).ID() == typeID;
   }
   return false;
 }
