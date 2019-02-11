@@ -395,7 +395,12 @@ class TestCase(expecttest.TestCase):
                     if a.device.type == 'cpu' and a.dtype == torch.float16:
                         # CPU half tensors don't have the methods we need below
                         a = a.to(torch.float32)
-                    b = b.to(a)
+                    if TEST_WITH_ROCM:
+                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
+                        # TODO: remove after the bug is resolved.
+                        b = b.to(a.dtype).to(a.device)
+                    else:
+                        b = b.to(a)
                     diff = a - b
                     if a.is_floating_point():
                         # check that NaNs are in the same locations
