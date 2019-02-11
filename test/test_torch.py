@@ -8905,6 +8905,16 @@ class _TestTorchMixin(object):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([1.0000e+28, 1.0000e-28])''')
 
+        # test scientific notation using set_printoptions
+        x = torch.tensor([1e2, 1e-2])
+        torch.set_printoptions(sci_mode=True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
+        torch.set_printoptions(sci_mode=False)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        torch.set_printoptions(sci_mode=None)  # reset to the default value
+
         # test no leading space if all elements positive
         x = torch.tensor([1, 2])
         self.assertEqual(x.__repr__(), str(x))
