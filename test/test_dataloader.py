@@ -956,6 +956,47 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
 
+class SimpleCustomBatch:
+    def __init__(self, data):
+        transposed_data = list(zip(*data))
+        self.inp = torch.stack(transposed_data[0], 0)
+        self.tgt = torch.stack(transposed_data[1], 0)
+
+    def pin_memory(self):
+        self.inp = self.inp.pin_memory()
+        self.tgt = self.tgt.pin_memory()
+        return self
+
+
+def collate_wrapper(batch):
+    return SimpleCustomBatch(batch)
+
+
+class TestCustomPinFn(TestCase):
+    def setUp(self):
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        self.dataset = TensorDataset(inps, tgts)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin_worker(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, num_workers=1)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
+
+
 class TestWorkerQueueDataset(Dataset):
     def __init__(self, data):
         self.data = data
