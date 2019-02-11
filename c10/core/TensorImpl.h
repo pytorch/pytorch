@@ -292,7 +292,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t dim() const;
 
   /**
-   * Return the underyling storage of a Tensor.  Multiple tensors may share
+   * True if this tensor has storage. See storage() for details.
+   */
+  virtual bool has_storage() const;
+
+  /**
+   * Return the underlying storage of a Tensor.  Multiple tensors may share
    * a single storage.  A Storage is an impoverished, Tensor-like class
    * which supports far less operations than Tensor.
    *
