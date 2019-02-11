@@ -241,6 +241,7 @@ def enable_cpu_fuser(fn):
             torch._C._jit_override_can_fuse_on_cpu(False)
     return wrapper
 
+
 # helper function to get sum of List[Tensor]
 def _sum_of_list(tensorlist):
     s = 0
@@ -3692,6 +3693,7 @@ a")
             canonical(foo2.graph) +
             canonical(foo3.graph))
 
+    @unittest.skipIf(PY2, "Requires python 3")
     def test_stack(self):
         @torch.jit.script
         def func(x, y: int):

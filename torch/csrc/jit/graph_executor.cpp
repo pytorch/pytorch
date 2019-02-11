@@ -99,7 +99,7 @@ struct CaptureList {
       const std::vector<at::Tensor>& tensors = val.toTensorListRef();
       sizes_.push_back(tensors.size());
 
-      for (at::Tensor tensor: tensors) {
+      for (const at::Tensor& tensor: tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
