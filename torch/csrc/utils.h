@@ -41,8 +41,10 @@
     (PyLong_Check(object) ? PyLong_AsLongLong(object) :                        \
     PyInt_Check(object) ? PyInt_AsLong(object) :                               \
     (throw std::runtime_error("Could not parse real"), 0))
-#else /* PY_MAJOR_VERSION == 2 */
 
+#define THPUtils_checkReal_BOOL(object)                                         \
+    PyBool_Check(object)
+#else /* PY_MAJOR_VERSION == 2 */
 #define THPUtils_checkReal_FLOAT(object)                                       \
     (PyFloat_Check(object) || PyLong_Check(object))
 
@@ -58,6 +60,8 @@
     (PyLong_Check(object) ? PyLong_AsLongLong(object) :                        \
     (throw std::runtime_error("Could not parse real"), 0))
 
+#define THPUtils_checkReal_BOOL(object)                                        \
+    PyBool_Check(object)
 #endif
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
@@ -85,12 +89,12 @@
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
 
-#define THPBoolUtils_checkReal(object)        THPUtils_checkReal_INT(object)
+#define THPBoolUtils_checkReal(object)        THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackReal(object)       (bool)THPUtils_unpackReal_INT(object)
 #define THPBoolUtils_newReal(value)           THPUtils_newReal_BOOL(value)
-#define THPBoolUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPBoolUtils_unpackAccreal(object)    (bool)THPUtils_unpackReal_INT(object)
-#define THPBoolUtils_newAccreal(value)        THPUtils_newReal_INT(value)
+#define THPBoolUtils_checkAccreal(object)     THPUtils_checkReal_BOOL(object)
+#define THPBoolUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
+#define THPBoolUtils_newAccreal(value)        THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPLongUtils_unpackReal(object)       (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value)           THPUtils_newReal_INT(value)
