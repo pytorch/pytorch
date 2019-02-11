@@ -14,10 +14,6 @@ struct CopyOp {
     *dst = ScalarConvert<TypeSrc, TypeDst>::to(*src);
 #endif
   }
-
-  __device__ __forceinline__ void operator()(bool* dst, bool* src) {
-    *dst = ScalarConvert<TypeSrc, TypeDst>::to(*src);
-  }
 };
 
 template <>
