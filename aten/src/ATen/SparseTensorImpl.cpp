@@ -83,7 +83,9 @@ int64_t SparseTensorImpl::storage_offset() const {
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   AT_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
-  AT_ASSERT((!indices.requires_grad() && !values.requires_grad()) || at::NonVariableTypeMode::is_enabled());  // TODO: use `compute_requires_grad()` after it's moved to ATen
+  AT_ASSERT((!(indices.is_variable() && indices.requires_grad()) &&
+             !(values.is_variable() && values.requires_grad()))
+             || at::NonVariableTypeMode::is_enabled());  // TODO: use `compute_requires_grad()` after it's moved to ATen
 
   AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
