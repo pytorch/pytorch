@@ -792,14 +792,22 @@ NetDef OnnxifiTransformer::TransformViaC2(
       auto* shape_arg = net.add_arg();
       shape_arg->set_name("input_shape_info");
       for (const auto& i : op.input()) {
+        const auto it = shape_hints.find(i);
+        if (it == shape_hints.end()) {
+          return false;
+        }
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, it->second));
       }
       shape_arg = net.add_arg();
       shape_arg->set_name("output_shape_info");
       for (const auto& i : op.output()) {
+        const auto it = shape_hints.find(i);
+        if (it == shape_hints.end()) {
+          return false;
+        }
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, it->second));
       }
 
       std::string c2_model_str;

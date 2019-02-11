@@ -713,7 +713,8 @@ struct PythonPrintPass {
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export";
+              << ". Remove calls to Python functions before export."
+              << "Did you forget add @script annotation? If this is a modulelist, add it to __constants__.";
         }
 
         stmt << "^" << value->name();
