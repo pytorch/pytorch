@@ -243,17 +243,17 @@ class _DataLoaderIter(object):
     #           happen when data in queue is corrupted (e.g., due to
     #           `cancel_join_thread` or unexpected exit).
     #
-    #           For child exit on Windows platform, we set a timeout whenever
-    #           we get from `data_queue`, and check the workers' status on each
-    #           timeout and error.
+    #           For child exit, we set a timeout whenever we try to get data
+    #           from `data_queue`, and check the workers' status on each timeout
+    #           and error.
     #           See `_DataLoaderiter._get_batch()` and
-    #           `_DataLoaderiter._try_get_batch()` for details
+    #           `_DataLoaderiter._try_get_batch()` for details.
     #
-    #           For child exit on non-Windows platforms, we register a SIGCHLD
-    #           handler (which is supported on Windows) on main process, which
-    #           checks if any of the workers fail in the (Python) handler. This
-    #           is more efficient and faster in detecting worker failures,
-    #           compared to the above strategy applied for Windows.
+    #           Additionally, for child exit on non-Windows platforms, we also
+    #           register a SIGCHLD handler (which is supported on Windows) on
+    #           the main process, which checks if any of the workers fail in the
+    #           (Python) handler. This is more efficient and faster in detecting
+    #           worker failures, compared to only using the above mechanism.
     #           See `DataLoader.cpp` and `_utils/signal_handling.py` for details.
     #
     #           For `.get()` calls where the sender(s) is not the workers, we
@@ -431,10 +431,10 @@ class _DataLoaderIter(object):
         # also be used as inner loop of fetching without timeout, with the
         # sender status as the loop condition.
         #
-        # This raises a RuntimeError if any worker died expectedly. This error
-        # comes from a SIGCHLD handler in `_utils/signal_handling.py` for
-        # non-Windows platforms, and comes from a manual check on errors and
-        # timeouts on Windows.
+        # This raises a `RuntimeError` if any worker died expectedly. This error
+        # can come from either the SIGCHLD handler in `_utils/signal_handling.py`
+        # (only for non-Windows platforms), or the manual check below on errors
+        # and timeouts.
         #
         # Returns a 2-tuple:
         #   (bool: whether successfully get data, any: data if successful else None)
@@ -442,12 +442,12 @@ class _DataLoaderIter(object):
             data = self.data_queue.get(timeout=timeout)
             return (True, data)
         except Exception as e:
-            if _utils.IS_WINDOWS:
-                # Windows doesn't have SIGCHLD handler, so at timeout and error,
-                # we need to manually check whether any worker has failed.
-                if not all(w.is_alive() for w in self.workers):
-                    pids_str = ', '.join(str(w.pid) for w in self.workers if not w.is_alive())
-                    raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
+            # At timeout and error, we manually check whether any worker has
+            # failed. Note that this is the only mechanism for Windows to detect
+            # worker failures.
+            if not all(w.is_alive() for w in self.workers):
+                pids_str = ', '.join(str(w.pid) for w in self.workers if not w.is_alive())
+                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
             if isinstance(e, queue.Empty):
                 return (False, None)
             raise
@@ -455,12 +455,11 @@ class _DataLoaderIter(object):
     def _get_batch(self):
         # Fetches data from `self.data_queue`.
         #
-        # Worker exit is covered by the SIGCHLD handler in
-        # _utils/signal_handling.py for non-Windows platforms. For Windows, we
-        # must check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
+        # We check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
         # which we achieve by running `self._try_get_batch(timeout=MP_STATUS_CHECK_INTERVAL)`
-        # in a loop. On Windows, The `self._try_get_batch` will check workers'
-        # status on errors and timeouts.
+        # in a loop. This is the only mechanism to detect worker failures for
+        # Windows. For other platforms, a SIGCHLD handler is also used for
+        # worker failure detection.
         #
         # If `pin_memory=True`, we also need check if `pin_memory_thread` had
         # died at timeouts.
@@ -481,16 +480,10 @@ class _DataLoaderIter(object):
             # In this case, `self.data_queue` is a `queue.Queue`,. But we don't
             # need to call `.task_done()` because we don't use `.join()`.
         else:
-            if _utils.IS_WINDOWS:
-                # Windows doesn't have SIGCHLD handler and relies on the check
-                # in `self._try_get_batch()` to detect worker failures, so we
-                # need to do a while loop here.
-                while True:
-                    success, data = self._try_get_batch()
-                    if success:
-                        return data
-            else:
-                return self.data_queue.get()
+            while True:
+                success, data = self._try_get_batch()
+                if success:
+                    return data
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading

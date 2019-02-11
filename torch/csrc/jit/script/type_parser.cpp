@@ -8,7 +8,7 @@ namespace script {
 
 const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
-      {"Tensor", DynamicType::get()},
+      {"Tensor", TensorType::get()},
       {"int", IntType::get()},
       {"float", FloatType::get()},
       {"bool", BoolType::get()},
@@ -67,6 +67,19 @@ subscript_to_type_fns() {
                  parseTypeFromExpr(*subscript.subscript_exprs().begin());
              return FutureType::create(elem_type);
            }},
+           {"Dict",
+            [](Subscript subscript) -> TypePtr {
+              if (subscript.subscript_exprs().size() != 2) {
+                throw ErrorReport(subscript)
+                    << " expected exactly 2 element types but found "
+                    << subscript.subscript_exprs().size();
+              }
+              auto key_type =
+                  parseTypeFromExpr(subscript.subscript_exprs()[0]);
+              auto value_type =
+                  parseTypeFromExpr(subscript.subscript_exprs()[1]);
+              return DictType::create(key_type, value_type);
+            }},
       };
   return map;
 }

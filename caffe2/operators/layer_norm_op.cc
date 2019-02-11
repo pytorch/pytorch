@@ -1,8 +1,9 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <ATen/core/opschema/layer_norm.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include <ATen/core/dispatch/KernelRegistration.h>
 #include <c10/core/Tensor.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
 
@@ -25,16 +26,6 @@ void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
   EigenVectorArrayMap<T>(bias, N) =
       -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
 }
-
-template <>
-LayerNormOp<CPUContext>::LayerNormOp(
-    const c10::FunctionSchema& f,
-    const std::vector<c10::IValue>& i,
-    const std::vector<c10::IValue*>& o)
-    : Operator<CPUContext>(f, i, o),
-      axis_(static_cast<int>(this->GetSingleArgument<int>("axis", 1))),
-      epsilon_(static_cast<float>(
-          this->GetSingleArgument<float>("epsilon", 1e-5f))) {}
 
 template <>
 template <typename T>
@@ -191,56 +182,18 @@ to the end.)
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
-REGISTER_FUNCTION_SCHEMA_OPERATOR(
-    LayerNorm,
-    (std::vector<c10::Argument>{c10::Argument("input_0"),
-                                c10::Argument("axis", IntType::get()),
-                                c10::Argument("epsilon", FloatType::get())}),
-    (std::vector<c10::Argument>{c10::Argument("output_0"),
-                                c10::Argument("output_1"),
-                                c10::Argument("output_2")}),
-    LayerNormOp<CPUContext>);
-
 } // namespace caffe2
 
-// Register layer norm with c10
-namespace {
-template <class DataType>
-c10::IValue layer_norm_c10(c10::ArrayRef<c10::IValue> inputs) {
-  caffe2::Tensor X{c10::C10Tensor(inputs[0].toTensor())};
-  caffe2::Tensor Y{c10::C10Tensor(inputs[1].toTensor())};
-  caffe2::Tensor mean{c10::C10Tensor(inputs[2].toTensor())};
-  caffe2::Tensor sig{c10::C10Tensor(inputs[3].toTensor())};
-  int64_t axis = inputs[4].toInt();
-  float epsilon = inputs[5].toDouble();
-  caffe2::CPUContext context;
-  c10::core::opschema::LayerNorm::Cache* cache = inputs[6].toBlob()->GetMutable<c10::core::opschema::LayerNorm::Cache>();
-  if (!cache->scale.has_value()) {
-    cache->scale = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
-  }
-  if (!cache->bias.has_value()) {
-    cache->bias = at::Tensor(c10::C10Tensor(caffe2::Tensor{caffe2::CPU}));
-  }
-  caffe2::Tensor scale(*cache->scale);
-  caffe2::Tensor bias(*cache->bias);
-
-  const int canonical_axis = X.canonical_axis_index(axis);
-  std::vector<int64_t> moments_dims(
-      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
-  moments_dims.push_back(1);
-  mean.Resize(moments_dims);
-  sig.Resize(moments_dims);
-  caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
-    X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(&context)
-  );
-  return c10::IValue();
-}
-}
-namespace c10 {
-C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
-    .kernel<&layer_norm_c10<float>>()
-    .dispatchKey(c10::DispatchKey<1>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()}});
-} // namespace c10
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+  LayerNorm,
+  (std::vector<c10::Argument>{
+    c10::Argument("input"),
+    c10::Argument("axis", c10::IntType::get()),
+    c10::Argument("epsilon", c10::FloatType::get())
+  }), (std::vector<c10::Argument>{
+    c10::Argument("output"),
+    c10::Argument("mean"),
+    c10::Argument("stdev")
+  }),
+  caffe2::LayerNormOp<caffe2::CPUContext>
+)

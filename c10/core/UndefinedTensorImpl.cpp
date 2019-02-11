@@ -8,7 +8,7 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 : TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is variable */ false) {
 }
 
-IntList UndefinedTensorImpl::sizes() const {
+IntArrayRef UndefinedTensorImpl::sizes() const {
   AT_ERROR("sizes() called on undefined Tensor");
 }
 
@@ -32,7 +32,7 @@ int64_t UndefinedTensorImpl::storage_offset() const {
   AT_ERROR("storage_offset() called on an undefined Tensor");
 }
 
-IntList UndefinedTensorImpl::strides() const {
+IntArrayRef UndefinedTensorImpl::strides() const {
   AT_ERROR("strides() called on undefined Tensor");
 }
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;

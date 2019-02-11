@@ -25,9 +25,10 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
-C10_CUDA_API Allocator* get();
-// Invariant: &raw_delete == get()->raw_deleter()
+C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void raw_delete(void* ptr);
+
+C10_CUDA_API Allocator* get();
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);

@@ -228,7 +228,6 @@ class TestCheckpoint(TestCase):
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_checkpoint_rng_cuda(self):
         for i in range(5):
             inp = torch.randn(20000, device='cuda').requires_grad_()

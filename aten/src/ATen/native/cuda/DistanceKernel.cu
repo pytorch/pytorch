@@ -79,6 +79,29 @@ struct dists {
 };
 
 template <typename scalar_t, typename F>
+__device__ static inline scalar_t reduce_agg(scalar_t agg) {
+  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
+  }
+
+  __shared__ scalar_t shared[forward_threads];
+  int lane = threadIdx.x % warpSize;
+  int warp_id = threadIdx.x / warpSize;
+  if (lane == 0) {
+    shared[warp_id] = agg;
+  }
+
+  __syncthreads();
+  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
+  if (warp_id == 0) {
+    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
+      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
+    }
+  }
+  return agg;
+}
+
+template <typename scalar_t, typename F>
 __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
                                               const double n2, const double n2_squared_minus_1) {
   const int k = blockIdx.x;
@@ -97,28 +120,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
     F::inc(agg, std::abs(*a - *b), p);
   }
 
-  // Reduce warps
-  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-  }
-
-  // Reduce block
-  // This shared memory is significantly larger than necessary, but the
-  // assumption is that it's not a bottleneck, and this is simple
-  __shared__ scalar_t shared[forward_threads];
-  int lane = threadIdx.x % warpSize;
-  int warp_id = threadIdx.x / warpSize;
-  if (lane == 0) {
-    shared[warp_id] = agg;
-  }
-  __syncthreads();
-  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
-  if (warp_id == 0) {
-    // Only reduce theads with nonzero data
-    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
-      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-    }
-  }
+  agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[k] = F::finish(agg, p);
   }
@@ -155,6 +157,50 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
     *buff_i = res;
     *buff_j = -res;
   }
+}
+
+template <typename scalar_t, typename F>
+__global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2, const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m) {
+  const int k = blockIdx.x;
+  const int64_t i = k / r2;
+  const int64_t j = k % r2;
+  const int stride = blockDim.x;
+
+  const scalar_t * const start = x1 + i * m;
+  const scalar_t * const end = start + m;
+  const scalar_t * a = start + threadIdx.x;
+  const scalar_t * b = x2 + j * m + threadIdx.x;
+
+  scalar_t agg = 0.0;
+  for (; a < end; a += stride, b += stride) {
+    F::inc(agg, std::abs(*a - *b), p);
+  }
+  agg = reduce_agg<scalar_t, F>(agg);
+  if (threadIdx.x == 0) {
+    result[k] = F::finish(agg, p);
+  }
+}
+
+void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, double p) {
+  int64_t r1 = x1.size(-2);
+  int64_t r2 = x2.size(-2);
+  int64_t m = x1.size(-1);
+  const dim3 grid(r1*r2);
+  const dim3 block(forward_threads);
+
+  AT_DISPATCH_FLOATING_TYPES(x1.type(), "cdist_cuda", [&] {
+    if (p == 0.0) {
+      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+    } else if (p == 1.0) {
+      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+    } else if (p == 2.0) {
+      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+    } else if (std::isinf(p)) {
+      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+    } else {
+      cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
+    }
+  });
 }
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
@@ -228,5 +274,6 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 
 }} // at::native

@@ -13,6 +13,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
+    import torch_test_cpp_extension.msnpu as msnpu_extension
 except ImportError:
     warnings.warn(
         "test_cpp_extensions.py cannot be invoked directly. Run "
@@ -620,6 +621,51 @@ class TestCppExtension(common.TestCase):
             self.assertEqual(module.get().dtype, torch.float16)
         finally:
             torch.set_default_dtype(initial_default)
+
+
+class TestMSNPUTensor(common.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        msnpu_extension.init_msnpu_extension()
+
+    def test_unregistered(self):
+        a = torch.empty(5, 5, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, "No function registered"):
+            b = torch.empty(5, 5, device='msnpu')
+
+    def test_zeros(self):
+        a = torch.zeros(5, 5, device='cpu')
+        self.assertEqual(a.device, torch.device('cpu'))
+        self.assertEqual(a.sum(), 0)
+
+        b = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+    def test_add(self):
+        a = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+        b = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+        c = torch.add(a, b)
+        self.assertEqual(msnpu_extension.get_test_int(), 1)
+
+    def test_backwards(self):
+        a = torch.zeros(5, 5, device='msnpu', requires_grad=True)
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+        b = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+        c = torch.kl_div(a, b)
+        self.assertEqual(msnpu_extension.get_test_int(), 3)
+
+        d = c.sum()
+        self.assertEqual(msnpu_extension.get_test_int(), 2)
+
+        d.backward()
+        self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 #pragma once
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -72,6 +73,10 @@ struct Method {
       stack.emplace_back(*tp);
     }
     get_executor().run(stack);
+  }
+
+  void run(Stack&& stack) {
+    run(stack);
   }
 
   IValue operator()(std::vector<IValue> stack) {
@@ -268,12 +273,8 @@ struct Method {
     for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
       const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
-        // XXX - this fails to handle generic aggregates
-        // and should be replaced with a function isSubvalueOf(ivalue, type)
-        // That asks if the specific value is a valid instance of type.
-        const TypePtr inputType = incompleteInferTypeFrom(inputs[pos]);
-        AT_CHECK(
-            inputType->isSubtypeOf(argument.type()),
+        if (!isSubvalueOf(inputs[pos], argument.type())) {
+          AT_ERROR(
             "Expected value of type ",
             *argument.type(),
             " for argument '",
@@ -281,9 +282,10 @@ struct Method {
             "' in position ",
             pos,
             ", but instead got value of type ",
-            *inputType,
+            attemptToRecoverType(inputs[pos])->str(),
             ". Declaration: ",
             schema);
+        }
       } else if (argument.default_value()) {
         inputs.push_back(*argument.default_value());
       } else {
@@ -483,6 +485,26 @@ struct Module {
       submod.value().module->apply(fn);
     }
     fn(*this);
+  }
+  /// Enables "training" mode.
+  void train(bool on = true) {
+    for (auto& submod : get_modules()) {
+      submod->module->train(on);
+    }
+    register_parameter("training", torch::tensor(on ? 1 : 0, at::kLong), /*is_buffer=*/true);
+  }
+  /// Calls train(false) to enable "eval" mode.
+  /// Do not override this method, override `train()` instead.
+  void eval() {
+    train(/*on=*/false);
+  }
+  /// True if the module is in training mode.
+  bool is_training() {
+    if (auto p = find_parameter("training")) {
+      return p->slot()->item<int64_t>() == 1;
+    }
+    // We are in training mode by default
+    return true;
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

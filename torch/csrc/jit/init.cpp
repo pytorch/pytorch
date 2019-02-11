@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -35,6 +36,7 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
@@ -60,11 +62,6 @@ using ::c10::Argument;
 using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
-
-// TODO: make a fake future for python
-namespace detail {
-class Future {};
-} // namespace detail
 
 namespace {
 
@@ -156,6 +153,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
+      .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -379,16 +377,78 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<detail::Future>(m, "Future");
+  struct PythonFutureWrapper {
+    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+        : fut(std::move(fut)) {}
 
-  m.def("fork", [](script::Module& sm, py::args args) {
-    // TODO: this is a fake stub
-    return detail::Future();
+    c10::intrusive_ptr<c10::ivalue::Future> fut;
+  };
+
+  py::class_<PythonFutureWrapper>(m, "Future");
+
+  m.def("fork", [](py::args args) {
+    AT_ASSERT(args.size() >= 1);
+
+    py::function f = py::cast<py::function>(args[0]);
+    py::tuple args_tup(args.size() - 1);
+
+    for (size_t i = 1; i < args.size(); ++i) {
+      args_tup[i - 1] = args[i];
+    }
+
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto body_block = fork_node->addBlock();
+
+      Value* node_output;
+      py::object py_func_output;
+      auto retval = c10::make_intrusive<c10::ivalue::Future>();
+      // Insert new trace ops into the fork op's sub-block
+      WithInsertPoint guard(body_block);
+      IValue output_ivalue;
+      {
+        tracer::WithNestedTracingFrame env_guard;
+
+        // Run the user-supplied function
+        py_func_output = f(*args_tup);
+
+        // Convert the output of the user-supplied funciton to IValue. The type
+        // information of this IValue is used both to record the correct type in
+        // the trace.
+        output_ivalue = toIValue(py_func_output);
+        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        body_block->registerOutput(out_val);
+        node_output =
+            fork_node->output()->setType(FutureType::create(out_val->type()));
+
+        // Lambda lift into a Subgraph attribute
+        torch::jit::script::lambdaLiftFork(fork_node);
+      }
+
+      // Record the ivalue in the tracer
+      jit::tracer::setValueTrace(retval, node_output);
+
+      // stuff the ivalue output in the Future
+      retval->markCompleted(output_ivalue);
+
+      return PythonFutureWrapper(retval);
+    } else {
+      auto retval = c10::make_intrusive<c10::ivalue::Future>();
+      retval->markCompleted(toIValue(f(*args_tup)));
+      return PythonFutureWrapper(retval);
+    }
   });
 
-  m.def("wait", [](detail::Future& fut) {
-    // TODO: this is a fake stub
+  m.def("wait", [](PythonFutureWrapper& fut) {
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut.fut->value(), output);
+    }
+    return fut.fut->value();
   });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {

@@ -50,6 +50,13 @@ signature.
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s.)
+  `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
+  In general annotations can be defined via the following four situtations
+  `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
+  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
+  For more details on when and why this needs to happen, please see the section on annotations.
 - Tensors of specific types.  At the moment, valid type names are:
     - `IntegerTensor` (a.k.a. `LongTensor`)
     - `BoolTensor` (a.k.a. `ByteTensor`)
@@ -70,9 +77,7 @@ signature.
   to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
   `float` and `int` argument types should suffice for most algorithms.
 - `Generator?`, the state for a random number generator,
-- `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
-  this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
-  argument parser both in ATen and in PyTorch.)
+- `bool[N]` (where N is `1-4`).
 - `TensorOptions`.  Tensor options provide information about how a
   tensor should be constructed; it is most useful when you are writing a
   factory function, where you have no `Tensor` inputs and thus
@@ -104,9 +109,7 @@ factory while another is not.
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
-include the result Tensor, you need to call the argument `Tensor result`. And if there are more
-than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
+least). For more details please see the section on `variants`.
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -185,6 +188,51 @@ When should you also generate a method variant? Tensor operations as methods
 are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
+
+As we progress along our schema unification of the `func` schema with the JIT
+signatue schema, we must introduce features that allow us to increase compliance.
+One of these features are Tensor annotations. As of now we use naming conventions
+to indicate whether an argument of a function is going to be mutated and returned.
+
+### `annotations`
+
+There are two typical situations in which we mutate the memory of an argument in the Python
+frontend:
+a) For an inplace operations such as `self.abs_()`
+b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
+
+In order to provide implementations for these Python functions the legacy schema
+requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`, 
+`abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
+
+Now, as we move towards the unification, we start to use a different syntax to represent
+this by using annotations. In the end we still translate to the legacy schema for the downstream
+consumers such as the C++ code generation, but this will soon change.
+
+If two Tensors carry the same annotation, they both *may* represent the same memory.
+A write annotation, as indicated by an exclamation mark, indicates that they both *may*
+also be written to.
+
+Let's revisit the previous native function declarations and see the conventions of adding annotations.
+  - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
+  - `abs_(Tensor(a!) self) -> Tensor(a!)`
+    `self` may be written to and returned. Further, the annotation indicates that the return value
+    may alias the input. This indicates an inplace function and by convention ends in a single '\_'.
+  - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
+    In the Python frontend `out` can be passed as a keyword argument and may be written to. 
+    In this case it indicates the schema for a function that must accept `out` as this does not
+    provide a default argument. The idea behind representing this as a optional argument is to
+    document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
+    As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
+    `Tensor out1` in the context of multiple arguments.
+
+There is also another situtation in which we use annotations, namely views.
+  - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
+    An alias to the memory represented by `self` may be also returned, however it is not mutated.
+
+We have some asserts to check whether a developer uses these annotations correctly and throw asserts
+if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
+ If this causes a lot of confusion please add @cpuhrsch to your PR.
 
 ### `dispatch`
 
