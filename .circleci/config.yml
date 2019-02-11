@@ -154,7 +154,8 @@ setup_ci_environment: &setup_ci_environment
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 
     sudo apt-get -qq update
-    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic docker-ce
+    sudo apt-get -qq install docker-ce=18.06.1~ce~3-0~ubuntu  # Pin docker-ce to the version expected by nvidia-docker2
     sudo apt-get -qq install \
       linux-headers-$(uname -r) \
       linux-image-generic \
