@@ -12,7 +12,7 @@ docker_config_defaults: &docker_config_defaults
 
 # This system setup script is meant to run before the CI-related scripts, e.g.,
 # installing Git client, checking out code, setting up CI env, and
-# buiilding/testing.
+# building/testing.
 setup_linux_system_environment: &setup_linux_system_environment
   name: Set Up System Environment
   no_output_timeout: "1h"
