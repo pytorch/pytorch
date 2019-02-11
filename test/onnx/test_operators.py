@@ -129,6 +129,15 @@ class TestOperators(TestCase):
         x = torch.tensor([0.0], requires_grad=True)
         self.assertONNX(lambda x: x.view(1, 1), x)
 
+    def test_reshape(self):
+        x = torch.tensor([0.0], requires_grad=True)
+        self.assertONNX(lambda x: x.reshape(1, 1), x)
+
+    def test_reshape_as(self):
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(3, 1, 2, 1, requires_grad=True)
+        self.assertONNX(lambda x: x.reshape_as(y), x)
+
     def test_index(self):
         x = torch.tensor([[0.0]], requires_grad=True)
         self.assertONNX(lambda x: x[0], x)
