@@ -203,7 +203,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // FinishDeviceComputation must be called on the same cpu thread as
   // SwitchToDevice()
   void FinishDeviceComputation() override {
-    cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_));
+    CUDA_ENFORCE(cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_)));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
       CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
@@ -390,7 +390,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       if (err == cudaErrorInvalidValue) {
         free(data);
         // Calling cudaGetLastError will reset the cuda error.
-        cudaGetLastError();
+        cudaError_t _err = cudaGetLastError();
       } else {
         // For all other errors, still do a cuda check.
         CUDA_ENFORCE(err);
