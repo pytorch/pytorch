@@ -80,16 +80,9 @@ inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
 
 inline void checkTupleNames(const py::tuple& tuple, const std::vector<std::string> &names) {
   auto type = tuple.attr("__class__");
-  if (!py::hasattr(type, "_fields"))
+  if (!py::hasattr(type, "_fields") ||
+      py::cast<std::vector<std::string>>(type.attr("_fields")) != names)
     throw py::cast_error();
-  auto fields = type.attr("_fields").cast<py::tuple>();
-  if (py::len(fields) != names.size())
-    throw py::cast_error();
-  for (int i = 0; i < names.size(); i++) {
-    auto field = fields[i].cast<std::string>();
-    if (field != names[i])
-      throw py::cast_error();
-  }
 }
 } // namespace detail
 
