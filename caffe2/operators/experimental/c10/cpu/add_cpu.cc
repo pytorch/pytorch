@@ -15,7 +15,7 @@ void add_op_cpu_impl(
     const at::Tensor& B_,
     const at::Tensor& C_,
     bool legacy_broadcast,
-    int axis) {
+    int64_t axis) {
   Tensor A{C10Tensor(A_)};
   Tensor B{C10Tensor(B_)};
   Tensor C{C10Tensor(C_)};
@@ -74,13 +74,6 @@ void add_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Add)
-    .kernel<&caffe2::add_op_cpu_impl<float>>()
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .kernel<decltype(caffe2::add_op_cpu_impl<float>), &caffe2::add_op_cpu_impl<float>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

@@ -8,7 +8,7 @@ namespace at {
 struct CAFFE2_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
-  explicit TensorGeometry(IntList sizes)
+  explicit TensorGeometry(IntArrayRef sizes)
     : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
@@ -35,12 +35,12 @@ struct CAFFE2_API TensorGeometry {
     dim = maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
-  IntList sizes() const { return IntList{ sizes_ }; }
+  IntArrayRef sizes() const { return IntArrayRef{ sizes_ }; }
   int64_t stride(int64_t dim) const {
     dim = maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
   }
-  IntList strides() const { return IntList{ strides_ }; }
+  IntArrayRef strides() const { return IntArrayRef{ strides_ }; }
   int64_t storage_offset() const { return storage_offset_; }
   int64_t numel() const { return numel_; }
 

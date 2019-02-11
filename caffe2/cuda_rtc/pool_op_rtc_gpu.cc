@@ -196,8 +196,8 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
   bool RunOnDeviceWithOrderNCHW() override {
     auto& X = Input(0);
-    auto output_sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, X.dim32(1));
-    auto* Y = Output(0, output_sizes, at::dtype<float>());
+    auto* Y = Output(0);
+    ConvPoolOpBase::SetOutputSize(X, Y, X.dim32(1));
 
     if (input_dims_ != X.sizes()) {
       // recompile

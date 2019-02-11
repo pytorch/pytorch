@@ -1,10 +1,7 @@
 #pragma once
-#include <c10/macros/Macros.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <c10/util/Exception.h>
 #include <ATen/core/interned_strings.h>
-
-#include <memory>
+#include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {

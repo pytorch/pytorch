@@ -135,7 +135,6 @@ template <typename T>
 bool CudnnConvTransposeOp<T>::RunOnDevice() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  auto* Y = Output(0);
   int C = 0;
   switch (order_) {
     case StorageOrder::NHWC:
@@ -147,7 +146,8 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
   }
-  ConvTransposeUnpoolBase<CUDAContext>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<CUDAContext>::GetOutputSize(X, C);
+  auto* Y = Output(0, sizes, at::dtype<T>());
 
   int N = 0, M = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {

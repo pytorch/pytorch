@@ -102,6 +102,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
+    The minimum cuda capability that we support is 3.5.
     """
 
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
@@ -221,7 +222,7 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx is -1:
+        if self.idx == -1:
             return
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:
