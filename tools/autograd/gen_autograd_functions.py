@@ -140,12 +140,7 @@ def process_function(func):
             release_variables.append('{}_.reset_data();'.format(name))
             release_variables.append('{}_.reset_grad_function();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
-            variable_name = name
-            # name of arguments and name of return variables sometimes have collision
-            # in this case, we rename the return variable name to <name>_return.
-            if is_output and name in argument_names:
-                variable_name = name + '_return'
-            unpack.append('auto {} = {}_.unpack({});'.format(variable_name, name, ptr))
+            unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
             release_variables.append('{}_.clear();'.format(name))
