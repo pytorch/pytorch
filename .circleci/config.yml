@@ -30,8 +30,12 @@ install_official_git_client: &install_official_git_client
   command: |
     set -e
 
-    sudo apt-get -qq update
-    sudo apt-get -qq install openssh-client git
+    retry () {
+      $* || (sleep 1 && $*) || (sleep 2 && $*)
+    }
+
+    retry sudo apt-get -qq update
+    retry sudo apt-get -qq install openssh-client git
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
