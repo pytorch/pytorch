@@ -1371,10 +1371,10 @@ RegisterOperators reg2({
           listSlice<Shared<c_type>, c_type::ElemType>),                             \
       Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
       Operator(                                                                     \
-          "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
+          "aten::mul(" decl_type "[](a) l, int n) -> " decl_type "[](a)",           \
           listMulIntLeft<Shared<c_type>, c_type::ElemType>),                        \
       Operator(                                                                     \
-          "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
+          "aten::mul(int n, " decl_type "[](a) l) -> " decl_type "[](a)",           \
           listMulIntRight<Shared<c_type>, c_type::ElemType>)
 
 
