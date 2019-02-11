@@ -1721,8 +1721,8 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
 
 @weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
-             reduction='mean'):
-    # type: (Tensor, Tensor, Tensor, Tensor, int, str) -> Tensor
+             reduction='mean', zero_infinity=False):
+    # type: (Tensor, Tensor, Tensor, Tensor, int, str, bool) -> Tensor
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1747,6 +1747,11 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Example::
 
@@ -1757,7 +1762,8 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
-    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
+    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction),
+                          zero_infinity)
 
 
 @weak_script

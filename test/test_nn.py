@@ -4259,6 +4259,29 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_zero_infinity(self):
+        target_lengths = [60, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                           reduction='sum', zero_infinity=True)
+        with torch.backends.cudnn.flags(enabled=False):
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths,
+                                                reduction='sum', zero_infinity=True)
+        res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
+                                               reduction='sum', zero_infinity=True)
+
+        self.assertAlmostEqual(res2, res, delta=1e-4)
+        self.assertAlmostEqual(res_cpu, res.cpu(), delta=1e-4)
+        g1, = torch.autograd.grad(res, log_probs)
+        g2, = torch.autograd.grad(res2, log_probs)
+        g3, = torch.autograd.grad(res_cpu, log_probs)
+        self.assertAlmostEqual(g2, g3, delta=1e-4)
+        self.assertAlmostEqual(g1, g2, delta=1e-4)
+        self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
