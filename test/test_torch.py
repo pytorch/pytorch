@@ -6413,15 +6413,13 @@ class _TestTorchMixin(object):
 
         # test invalid index fails
         reference = conv_fn(torch.empty(10))
-        # can't test cuda because it is a device assert
-        if not reference.is_cuda:
-            for err_idx in (10, -11):
-                with self.assertRaisesRegex(IndexError, r'out of'):
-                    reference[err_idx]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
-                    reference[conv_fn(torch.LongTensor([err_idx]))]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
-                    reference[[err_idx]]
+        for err_idx in (10, -11):
+            with self.assertRaisesRegex(IndexError, r'out of'):
+                reference[err_idx]
+            with self.assertRaisesRegex(IndexError, r'out of'):
+                reference[conv_fn(torch.LongTensor([err_idx]))]
+            with self.assertRaisesRegex(IndexError, r'out of'):
+                reference[[err_idx]]
 
         if TEST_NUMPY:
             # we use numpy to compare against, to verify that our advanced

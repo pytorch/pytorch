@@ -8,6 +8,34 @@
 
 namespace at { namespace native {
 
+
+typedef struct {
+  int err;
+  int64_t index;
+  int64_t axis;
+  int64_t size;
+} status_t;
+
+static status_t* make_device_status() {
+  cudaError_t err;
+  status_t* status;
+  AT_CUDA_CHECK(cudaMalloc(&status, sizeof *status));
+  err = cudaMemset(status, 0, sizeof *status);
+  if (err != cudaSuccess) {
+    AT_CUDA_CHECK(cudaFree(status));
+    AT_CUDA_CHECK(err);
+    return NULL; // Not reached.
+  }
+  return status;
+}
+
+static void move_status_to_host(status_t *host_status, status_t *device_status) {
+  cudaError_t err;
+  err = cudaMemcpy(host_status, device_status, sizeof *host_status, cudaMemcpyDeviceToHost);
+  AT_CUDA_CHECK(cudaFree(device_status));
+  AT_CUDA_CHECK(err);
+}
+
 template <int N>
 static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& iter) {
   AT_ASSERT(N <= iter.ntensors());
@@ -41,6 +69,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* in_ptr = (char*)iter.data_ptr(1);
 
   auto offset_calc = index_make_offset_calculator<3>(iter);
+  status_t *ds = make_device_status();
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
@@ -50,7 +79,18 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     #pragma unroll
     for (int i = 0; i < num_indices; i++) {
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
-      assert(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
+
+      if (index < -sizes[i] || index >= sizes[i]) {
+        if (atomicExch(&ds->err, 1) == 0) {
+          // Only the first thread that encounters an error records the set of values
+          // for the error message.
+          ds->index = index;
+          ds->axis = i;
+          ds->size = sizes[i];
+        }
+        return;
+      }
+
       if (index < 0) {
         index += sizes[i];
       }
@@ -59,6 +99,12 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 
     f(out_data, in_data, offset);
   });
+
+  status_t hs;
+  move_status_to_host(&hs, ds);
+  if (hs.err) {
+    AT_INDEX_ERROR("index ", hs.index, " is out of bounds for dimension ", hs.axis, " with size ", hs.size);
+  }
 }
 
 // The kernels are templated on an opaque, self-aligned type of the correct
