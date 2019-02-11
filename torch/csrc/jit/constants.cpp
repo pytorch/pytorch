@@ -145,7 +145,7 @@ RegisterOperators reg({
               push(stack, d);
               return 0;
             };
-          } else if (node->isNone()) {
+          } else if (node->mustBeNone()) {
             return [](Stack& stack) {
               push(stack, IValue());
               return 0;

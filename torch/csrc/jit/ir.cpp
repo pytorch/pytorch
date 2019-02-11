@@ -637,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->isNone();
+  return node_->mustBeNone();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -755,8 +755,10 @@ bool Node::matches(
   return true;
 }
 
-bool Node::isNone() const {
-  return kind_ == prim::Constant && !this->hasAttributes();
+bool Node::mustBeNone() const {
+  return kind_ == prim::Constant && !this->hasAttributes() &&
+      (output()->type()->cast<OptionalType>() ||
+       output()->type() == NoneType::get());
 }
 
 void Node::dump() const {

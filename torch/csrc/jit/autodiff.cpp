@@ -141,7 +141,7 @@ bool isDifferentiable(Node* n) {
   if (n->matches(
           "aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
     // TODO(asuhan): support weight
-    return n->namedInput(attr::weight)->node()->isNone();
+    return n->namedInput(attr::weight)->node()->mustBeNone();
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
