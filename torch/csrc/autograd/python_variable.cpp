@@ -145,7 +145,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto& data = as_variable_ref(r.tensor(1)).data();
+  auto data = as_variable_ref(r.tensor(1));
   auto var = make_variable(data, r.toBool(2));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
@@ -158,7 +158,7 @@ PyObject *THPVariable_get_cdata(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyLong_FromVoidPtr(var.data().unsafeGetTensorImpl());
+  return PyLong_FromVoidPtr(var.unsafeGetTensorImpl());
   END_HANDLE_TH_ERRORS
 }
 
@@ -208,7 +208,7 @@ static PyObject * THPVariable_get_data(THPVariable *self)
   /// make such changes explicitly illegal, in order to prevent users from changing
   /// metadata of the `.data` tensor and expecting the original tensor to also
   /// be updated.
-  auto var = make_variable(self->cdata.data(), /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+  auto var = make_variable(self->cdata, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -219,7 +219,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
-  self->cdata.set_data(THPVariable_UnpackData(data));
+  self->cdata.set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

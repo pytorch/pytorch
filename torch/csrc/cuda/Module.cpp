@@ -141,7 +141,7 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   Variable var = torch::empty(0, at::device(at::kCPU).dtype(at::kByte));
-  THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
+  THCRandom_getRNGState(state, (THByteTensor*)(var.unsafeGetTensorImpl()));
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }

@@ -20,7 +20,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           if (tensor.requires_grad()) {
             throw std::runtime_error("Autograd not yet supported for c10 ops.");
           }
-          *iter = torch::autograd::Variable(std::move(tensor)).data();
+          *iter = std::move(tensor);
         }
       }
 

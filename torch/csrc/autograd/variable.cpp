@@ -21,87 +21,18 @@
 
 namespace torch {
 namespace autograd {
-Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> autograd_meta, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
-      data_(std::move(data)) {
-  autograd_meta->grad_fn_ = std::move(gradient_edge.function);
-  autograd_meta->requires_grad_ = false;
-  autograd_meta->is_view_ = false;
-  autograd_meta->output_nr_ = gradient_edge.input_nr;
-  autograd_meta->pyobj_ = nullptr;
+Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
+  grad_fn_ = std::move(gradient_edge.function);
+  requires_grad_ = false;
+  is_view_ = false;
+  output_nr_ = gradient_edge.input_nr;
+  pyobj_ = nullptr;
 
   // set_requires_grad also checks error conditions.
-  autograd_meta->set_requires_grad(requires_grad, this);
+  set_requires_grad(requires_grad, self_impl);
   AT_CHECK(
-      !autograd_meta->grad_fn_ || !autograd_meta->requires_grad_,
+      !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
-  if (!data_.defined()) {
-    throw std::runtime_error("data is undefined");
-  }
-
-  set_autograd_meta(std::move(autograd_meta));
-}
-
-Variable::Impl::~Impl() = default;
-
-int64_t Variable::Impl::numel() const {
-  return data_.numel();
-}
-
-IntArrayRef Variable::Impl::sizes() const {
-  return data_.sizes();
-}
-
-IntArrayRef Variable::Impl::strides() const {
-  return data_.strides();
-}
-
-bool Variable::Impl::is_contiguous() const {
-  return data_.is_contiguous();
-}
-
-int64_t Variable::Impl::dim() const {
-  return data_.dim();
-}
-
-int64_t Variable::Impl::size(int64_t d) const {
-  return data_.size(d);
-}
-
-int64_t Variable::Impl::stride(int64_t d) const {
-  return data_.stride(d);
-}
-
-void Variable::Impl::resize_dim(int64_t ndim) {
-  AT_ERROR("variable impl does not have resize_dim");
-}
-
-void Variable::Impl::set_size(int64_t dim, int64_t new_size) {
-  AT_ERROR("variable impl does not have set_size");
-}
-
-void Variable::Impl::set_stride(int64_t dim, int64_t new_stride) {
-  AT_ERROR("variable impl does not have set_stride");
-}
-
-void Variable::Impl::set_storage_offset(int64_t storage_offset) {
-  AT_ERROR("variable impl does not have set_storage_offset");
-}
-
-void* Variable::Impl::slow_data() const {
-  return data_.unsafeGetTensorImpl()->slow_data();
-}
-
-const at::Storage& Variable::Impl::storage() const {
-  return data_.storage();
-}
-
-int64_t Variable::Impl::storage_offset() const {
-  return data_.storage_offset();
-}
-
-int64_t Variable::Impl::get_device_slow() const {
-  return data_.get_device();
 }
 
 std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -121,7 +52,7 @@ std::shared_ptr<Function> Variable::grad_accumulator() const {
     return result;
 
   c10::raw::intrusive_ptr::incref(unsafeGetTensorImpl());
-  auto intrusive_from_this = c10::intrusive_ptr<Variable::Impl>::reclaim(static_cast<Variable::Impl*>(unsafeGetTensorImpl()));
+  auto intrusive_from_this = c10::intrusive_ptr<at::TensorImpl>::reclaim(unsafeGetTensorImpl());
   result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
   autograd_meta->grad_accumulator_ = result;
   return result;
@@ -147,13 +78,13 @@ void Variable::backward(
 
   std::vector<Variable> inputs;
   if (!gradient.has_value()) {
-    gradient = make_variable(at::ones_like(data()), /*requires_grad=*/false);
+    gradient = make_variable(at::ones_like(*this), /*requires_grad=*/false);
   }
   inputs.push_back(std::move(as_variable_ref(*gradient)));
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::Impl::set_data(Tensor new_data) {
+void Variable::set_data(Tensor new_data) const {
   // Resets gradient accumulator if metadata is out of date
   auto autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
@@ -162,36 +93,30 @@ void Variable::Impl::set_data(Tensor new_data) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
     const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
 
-    if (new_data.type() != data_.type() || prior_device != new_device) {
+    if (new_data.type() != type() || prior_device != new_device) {
       autograd_meta->grad_accumulator_.reset();
     }
   }
 
-  // Updates metadata
-  data_type_ = new_data.type().typeMeta();
-  type_id_ = new_data.type().type_id();
-  is_variable_ = true;
-
-  auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  data_ = std::move(new_data_copy);
+  auto autograd_meta_detached = get()->detach_autograd_meta();
+  // yf225 TODO: potential cause of bug
+  // impl_.swap(new_data.getIntrusivePtr()->shallow_copy_and_detach());
+  const_cast<c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>&>(impl_) = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  // set_impl(new_data.getIntrusivePtr()->shallow_copy_and_detach());
+  get()->set_autograd_meta(std::move(autograd_meta_detached));
+  get()->set_is_variable(true);
 }
 
-void Variable::Impl::release_resources() {
-  autograd_meta_.reset();
-  data_.reset();
-}
-
-Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tensor data, Edge gradient_edge, std::unique_ptr<Variable::DifferentiableViewMeta> autograd_meta)
-    : Variable::Impl(std::move(data), std::move(autograd_meta), false, std::move(gradient_edge)) {
-  auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
-  diff_view_meta->base_ = std::move(base);
-  AT_CHECK(diff_view_meta->base_.defined(), "base is undefined");
-  if (diff_view_meta->base_.is_view()) {
-    diff_view_meta->base_ = diff_view_meta->base_.base();
+Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
+    : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
+  base_ = std::move(base);
+  AT_CHECK(base_.defined(), "base is undefined");
+  if (base_.is_view()) {
+    base_ = base_.base();
   }
-  diff_view_meta->is_view_ = true;
-  diff_view_meta->version_counter_ = diff_view_meta->base_.version_counter();
-  diff_view_meta->attr_version = diff_view_meta->version_counter_.current_version();
+  is_view_ = true;
+  version_counter_ = base_.version_counter();
+  attr_version = version_counter_.current_version();
 }
 
 const std::shared_ptr<Function>& Variable::grad_fn() const {
@@ -208,7 +133,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = sizes().vec();
       fn->stride = strides().vec();
-      fn->storage_offset = data().storage_offset();
+      fn->storage_offset = storage_offset();
       fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
         diff_view_meta->base_.type()
@@ -223,12 +148,6 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
   }
 }
 
-void Variable::DifferentiableViewImpl::release_resources() {
-  auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
-  diff_view_meta->base_.reset();
-  Variable::Impl::release_resources();
-}
-
 void Variable::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
@@ -240,7 +159,7 @@ void Variable::rebase_history(Edge gradient_edge) {
         "Functions which modify views in-place must return a single Variable");
     diff_view_meta->output_nr_ = gradient_edge.input_nr;
     auto copy_slices = std::make_shared<CopySlices>(
-        diff_view_meta->base_, at::TensorGeometry(data()), std::move(gradient_edge.function));
+        diff_view_meta->base_, at::TensorGeometry(*this), std::move(gradient_edge.function));
     diff_view_meta->base_.set_gradient_edge({std::move(copy_slices), 0});
     grad_fn(); // trigger an update to the view's grad_fn
   } else {

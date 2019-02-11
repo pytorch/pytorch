@@ -429,12 +429,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * the amount of code we have to write for add, when actually
    * a Tensor-Scalar addition is really just a Tensor-Tensor
    * addition when the RHS is 0-dim (except for promotion behavior.)
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   bool is_wrapped_number() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     return is_wrapped_number_;
   }
 
@@ -442,12 +438,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether or not a tensor was auto-wrapped from a C++ or Python
    * number.  You probably don't want to call this, unless you are
    * writing binding code.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_wrapped_number(bool value) {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
@@ -458,36 +450,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // Note [Tensor versus Variable in C++]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Autograd methods are only valid for the Variable::Impl subclass
-  // of Tensor.  This is due to some questionable life choices, where
-  // a Variable has a Tensor (so they are not the same thing), but
-  // a Variable is a Tensor (they are subclassed, so that you can write
-  // code on Tensor that works both with Variables and Tensors.  Poor
-  // man's polymorphism).  Variable does NOT satisfy the Liskov Substitution
-  // Principle for Tensor; generally you want to work with all Variables,
-  // or all Tensors, but not a mix of both.  We intend to fix this in
-  // the future.
-  //
-  // Note [We regret making Variable hold a Tensor]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Tensor has a bunch of fields in it.  Are those fields always valid?
-  // Not necessarily: the Variable::Impl subclass of a tensor doesn't use these
-  // fields; instead, it *forwards* them to a contained, inner tensor
-  // (the 'data' tensor).  It doesn't even bother keeping the fields on the
-  // outer tensor up-to-date, because an end user could grab the inner
-  // tensor and directly, e.g., resize it (making any outer fields we track
-  // stale).
-  //
-  // As you might imagine, this is a TERRIBLE state of affairs to be in.
-  // It makes implementing everything on TensorImpl complicated: if
-  // you directly access a field on TensorImpl, you must *virtualize*
-  // the function, if you want it to work correctly when called from
-  // Variable (because we need to override the method to avoid looking
-  // in our fields, and look in the data tensor's fields.)  Anything that
-  // isn't virtualized, won't work if called on a variable.
-  //
-  // The way to fix this is to make Variable::Impl stop holding a tensor;
-  // instead, it should just *be* a tensor.
+  // Autograd methods are only valid for Variables (i.e. Tensors that contain
+  // autograd metadata).
 
   /**
    * Set whether or not a tensor requires gradient.
@@ -551,13 +515,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * performing index calculations to determine the location of elements in
    * the tensor.  We recommend using 'TensorAccessor' to handle this computation
    * for you; this class is available from 'Tensor'.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   template <typename T>
   inline T * data() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -583,12 +543,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: The data pointed to by this tensor may not contiguous; do NOT
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   inline void* data() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERT(storage_initialized());
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
@@ -597,20 +553,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * This is just like data(), except it works with Variables.
-   * This function will go away once Variable and Tensor are merged.
-   * See Note [We regret making Variable hold a Tensor]
-   */
-  virtual void* slow_data() const {
-    return data();
-  }
-
-  /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   template <typename T>
   inline T * unsafe_data() const {
@@ -718,13 +662,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function does not check if the requested
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
@@ -743,13 +683,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function does not check if the requested
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
     AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -802,6 +738,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+  /**
+   * Set whether a tensor is a variable.  See Note [Tensor versus Variable in C++]
+   */
+  void set_is_variable(bool value) {
+    is_variable_ = value;
+  }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
@@ -873,7 +816,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
   DeviceType device_type() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     return storage_.device_type();
   }
 
@@ -1334,7 +1276,6 @@ protected:
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
    */
   void refresh_numel() {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     numel_ = compute_numel();
   }
 
@@ -1343,7 +1284,6 @@ protected:
    * or strides.
    */
   void refresh_contiguous() {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     is_contiguous_ = compute_contiguous();
   }
 

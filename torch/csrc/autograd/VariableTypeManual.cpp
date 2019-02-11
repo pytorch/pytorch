@@ -192,16 +192,17 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
   return as_variable_ref(t);
 }
 
+// yf225 TODO: rename unpack() to something else, and change gen_variable_type.py
 const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos));
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -222,7 +223,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }

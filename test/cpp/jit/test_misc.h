@@ -759,7 +759,7 @@ variable_list grad(
 }
 
 void testADFormulas() {
-  const auto unwrap = [](const Variable& v) { return v.data(); };
+  const auto unwrap = [](const Variable& v) { return static_cast<at::Tensor>(v); };
 
   using VL = variable_list;
   const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
@@ -1087,8 +1087,8 @@ void testGraphExecutor() {
   ASSERT_EQ(stack.size(), 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  ASSERT_TRUE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
-  ASSERT_TRUE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
+  ASSERT_TRUE(almostEqual(stack[0].toTensor(), r0));
+  ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
 }
 
 void testBlocks(std::ostream& out = std::cout) {
