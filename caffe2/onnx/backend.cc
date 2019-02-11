@@ -555,46 +555,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
   bool padding = false;
   const std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
   const auto pad_input = dummy_->NewDummyName();
-/*
-  if (attributes.HasAttribute("count_include_pad") &&
-      attributes.HasAttribute(pad_name)) {
-    auto count_include_pad = attributes.get<int64_t>("count_include_pad", 0L);
-    ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
-    pads =
-        attributes
-            .get<::google::protobuf::RepeatedField<::google::protobuf::int64>>(
-                pad_name);
 
-    if (count_include_pad == 1 && pads.size() == 4 &&
-        !(pads.Get(0) == 0 && pads.Get(1) == 0 && pads.Get(2) == 0 &&
-          pads.Get(3) == 0)) {
-      padding = true;
-      attributes.remove(pad_name);
-      caffe2::Argument arg_pads;
-      arg_pads.add_ints(pads.Get(0));
-      arg_pads.add_ints(pads.Get(1));
-      arg_pads.add_ints(pads.Get(2));
-      arg_pads.add_ints(pads.Get(3));
-      arg_pads.set_name("pads");
-      auto* c2_op = ret.ops.Add();
-      BuildOperator(
-          c2_op, "PadImage", {node.input(0)}, {pad_input}, {arg_pads});
-    } else if (count_include_pad == 1) {
-      std::string str;
-      bool pads_flag = false;
-      str += "[";
-      for (const auto& i : pads) {
-        str += c10::to_string(i) + ",";
-        pads_flag = pads_flag || i > 0;
-      }
-      str += "]";
-      if (pads_flag == true) {
-        CAFFE_THROW(
-            "Caffe2 only supports padding 2D Tensor, whereas padding is ", str);
-      }
-    }
-  }
-*/
   // Pool
   auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, ctx);
   auto* pool_op = c2_ops.ops.Mutable(0);
