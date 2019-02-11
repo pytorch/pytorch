@@ -696,7 +696,7 @@ struct Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || !v.is_variable());
+    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(
         name, std::forward<TensorAttr::ConstructorType>(v));
   }
@@ -706,7 +706,7 @@ struct Node {
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
     for (const at::Tensor& t : v) {
-      AT_ASSERT(!t.defined() || !t.is_variable());
+      AT_ASSERT(!t.defined() || t.is_variable());
     }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
@@ -1042,7 +1042,7 @@ struct Graph {
   TORCH_API Node* createUndefined();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
-  TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
+  TORCH_API Node* createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names=c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
@@ -1195,7 +1195,7 @@ inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
       unique_(node_->graph_->next_unique_++),
-      type_(DynamicType::get()) {
+      type_(TensorType::get()) {
   node_->graph_->all_values.emplace(this);
 }
 

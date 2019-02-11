@@ -158,7 +158,7 @@ struct SchemaParser {
       value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
-      value = DynamicType::get();
+      value = TensorType::get();
       alias_info = parseAliasAnnotation();
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
       L.next();
@@ -214,11 +214,11 @@ struct SchemaParser {
       alias_info = std::move(container);
     }
     if (is_return) {
-      // optionally named return values
+      // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
         name = L.next().text();
       } else {
-        name = "ret" + std::to_string(idx);
+        name = "";
       }
     } else {
       name = L.expect(TK_IDENT).text();
@@ -314,7 +314,7 @@ struct SchemaParser {
       c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
-      case TypeKind::DynamicType:
+      case TypeKind::TensorType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       } break;

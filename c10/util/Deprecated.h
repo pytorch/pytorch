@@ -38,6 +38,14 @@
 
 #if defined(__cplusplus) && __cplusplus > 201402L
 # define C10_DEPRECATED_USING [[deprecated]]
+#elif defined(_MSC_VER) && defined(__CUDACC__)
+// Apparently, [[deprecated]] doesn't work on nvcc on Windows;
+// you get the error:
+//
+//    error: attribute does not apply to any entity
+//
+// So we just turn the macro off in this case.
+# define C10_DEPRECATED_USING
 #elif defined(_MSC_VER)
 // __declspec(deprecated) does not work in using declarations:
 //  https://godbolt.org/z/lOwe1h

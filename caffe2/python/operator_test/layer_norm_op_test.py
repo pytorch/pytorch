@@ -112,7 +112,6 @@ class TestLayerNormOp(serial.SerializedTestCase):
         )
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
-    @unittest.skip("Tensor interop enforcement needs fixing")
     def test_layer_norm_op_c10(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
@@ -137,13 +136,35 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    def test_layer_norm_op_c10_preallocated_outputs(self, X, gc, dc):
+        # This test case ensures that it works correctly when output tensors are preallocated.
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+        self.ws.create_blob('input').feed(X)
+        m = ModelHelper(name="test")
+        m.net.C10LayerNorm_DontUseThisOpYet(["input"], ["output", "mean", "stdev"], axis=axis, epsilon=epsilon)
+        self.ws.create_net(m.param_init_net).run()
+        net = self.ws.create_net(m.net)
+        net.run()
+        net.run() # run two times to be extra sure that the outputs are preallocated
+
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
+        actual_norm = self.ws.fetch_blob('output')
+        actual_mean = self.ws.fetch_blob('mean')
+        actual_stdev = self.ws.fetch_blob('stdev')
+
+        torch.testing.assert_allclose(expected_norm, actual_norm)
+        torch.testing.assert_allclose(expected_mean, actual_mean)
+        torch.testing.assert_allclose(expected_stdev, actual_stdev)
+
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_pytorch(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
 
         expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
-        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), axis, epsilon)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X), axis, epsilon)
 
         torch.testing.assert_allclose(expected_norm, actual_norm)
         torch.testing.assert_allclose(expected_mean, actual_mean)
@@ -154,7 +175,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         @torch.jit.script
         def jit_layer_norm(tensor, axis, epsilon):
             # type: (Tensor, int, float) -> Tuple[Tensor, Tensor, Tensor]
-            norm, mean, stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(tensor, axis, epsilon)
+            norm, mean, stdev = torch.ops._caffe2.LayerNorm(tensor, axis, epsilon)
             return norm, mean, stdev
 
         axis = np.random.randint(0, len(X.shape))

@@ -3,17 +3,18 @@
 namespace at {
 
 std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
-  auto dimsA = a.size();
-  auto dimsB = b.size();
-  ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
+  size_t dimsA = a.size();
+  size_t dimsB = b.size();
+  size_t ndim = dimsA > dimsB ? dimsA : dimsB;
   std::vector<int64_t> expandedSizes(ndim);
 
-  for (long i = ndim - 1; i >= 0; --i) {
-    long offset = ndim - 1 - i;
-    long dimA = dimsA - 1 - offset;
-    long dimB = dimsB - 1 - offset;
-    long sizeA = (dimA >= 0) ? a[dimA] : 1;
-    long sizeB = (dimB >= 0) ? b[dimB] : 1;
+  // Use ptrdiff_t to ensure signed comparison.
+  for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
+    ptrdiff_t offset = ndim - 1 - i;
+    ptrdiff_t dimA = dimsA - 1 - offset;
+    ptrdiff_t dimB = dimsB - 1 - offset;
+    int64_t sizeA = (dimA >= 0) ? a[dimA] : 1;
+    int64_t sizeB = (dimB >= 0) ? b[dimB] : 1;
 
     AT_CHECK(
         sizeA == sizeB || sizeA == 1 || sizeB == 1,
