@@ -175,7 +175,10 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  std::tie(solution, lu) = at::_gesv_helper(self, A);
+  Tensor solution_tmp, lu_tmp;
+  std::tie(solution_tmp, lu_tmp) = at::_gesv_helper(self, A);
+  solution.resize_as_(solution_tmp).copy_(solution_tmp);
+  lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
