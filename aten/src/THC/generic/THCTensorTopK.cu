@@ -140,12 +140,7 @@ void THCTensor_(topk)(THCState* state,
   if (sorted) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
-#ifdef __HIP_PLATFORM_HCC__
-    // TODO bitonicSortKVInPlace hangs on ROCm currently.
-    if (0) {
-#else
     if (sliceSize <= 2048) {
-#endif
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
