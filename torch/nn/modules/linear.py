@@ -75,9 +75,7 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        std = 1 / self.in_features ** 0.5
-        bound = std * 3 ** 0.5
-        init.uniform_(self.weight, -bound, bound)
+        init.kaiming_uniform_(self.weight, nonlinearity='linear')
         if self.bias is not None:
             init.constant_(self.bias, 0)
 
