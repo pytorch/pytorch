@@ -2,8 +2,6 @@
 
 #include <torch/csrc/jit/netdef_converter.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/utils/memory.h"
 
 #include <sstream>
 #include <string>
