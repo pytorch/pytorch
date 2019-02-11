@@ -121,9 +121,8 @@ if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_n
 
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
-for (Tensor tensor : ${tensorlist_name})
-  ${tensorlist_name}_impl_saved.push_back(
-    tensor.defined() ? tensor.getIntrusivePtr() : UndefinedTensorImpl::singleton());
+for (size_t i=0; i<${tensorlist_name}.size(); i++)
+  if (${tensorlist_name}[i].defined()) ${tensorlist_name}_impl_saved[i] = ${tensorlist_name}[i].getIntrusivePtr();
 """)
 
 ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
