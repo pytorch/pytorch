@@ -49,12 +49,15 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   for (const auto& op : net.op()) {
     VLOG(1) << op.type();
     if (op.type() == "SparseLengthsSum" ||
-        op.type() == "SparseLengthsSumFused8BitRowwise") {
+        op.type() == "SparseLengthsSumFused8BitRowwise" ||
+        op.type() == "SparseLengthsWeightedSum") {
       InferSparseLengthsSum(op);
     } else if (op.type() == "FC" || op.type() == "FCTransposed") {
       InferFC(op);
     } else if (op.type() == "Concat") {
       InferConcat(op);
+    } else if (op.type() == "LengthsRangeFill") {
+      InferLengthsRangeFill(op);
     } else {
       InferCommonOp(op);
     }
@@ -120,8 +123,26 @@ std::vector<TensorShape> InferOutput(
   return schema->InferTensor(op, input_shapes);
 }
 
+void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, "LengthsRangeFill must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, "LengthsRangeFill must have 1 output");
+  // Both input and ouptut of LengthsRangeFill is int32:
+  // https://fburl.com/fhwb5666
+  CheckAndSetTensorShapeAndType(
+      op.input(0),
+      ShapeInfo::DimType::BATCH,
+      {spec_.max_batch_size},
+      TensorProto_DataType_INT32);
+  CheckAndSetTensorShapeAndType(
+      op.output(0),
+      ShapeInfo::DimType::SEQ,
+      {spec_.max_seq_size},
+      TensorProto_DataType_INT32);
+}
+
 void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
-  CAFFE_ENFORCE_EQ(op.input_size(), 3, "SparseLengthsSum has to have 3 inputs");
+  CAFFE_ENFORCE_GE(
+      op.input_size(), 3, op.type(), " must have at least 3 inputs");
   const auto it = shape_info_.find(op.input(0));
   CAFFE_ENFORCE(
       it != shape_info_.end(),
@@ -135,14 +156,25 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.input(0),
       "needs to be 2D");
 
+  int weight = (op.type() == "SparseLengthsWeightedSum") ? 1 : 0;
+  if (weight) {
+    CAFFE_ENFORCE_EQ(
+        op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
+    CheckAndSetTensorShapeAndType(
+        op.input(weight),
+        ShapeInfo::DimType::SEQ,
+        {spec_.max_seq_size},
+        TensorProto_DataType_FLOAT);
+  }
+
   // Bound inputs
   CheckAndSetTensorShapeAndType(
-      op.input(1),
+      op.input(1 + weight),
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
       TensorProto_DataType_INT64);
   CheckAndSetTensorShapeAndType(
-      op.input(2),
+      op.input(2 + weight),
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size},
       TensorProto_DataType_INT32);
@@ -298,8 +330,11 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   std::vector<TensorShape> input_shapes;
   for (const auto& input : op.input()) {
     const auto it = shape_info_.find(input);
-    CAFFE_ENFORCE(
-        it != shape_info_.end(), "Cannot find shape info for ", input);
+    if (it == shape_info_.end()) {
+      LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
+                   << op.type();
+      return;
+    }
     input_shapes.emplace_back(it->second.shape);
   }
 
