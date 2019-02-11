@@ -99,6 +99,7 @@ namespace {
     cudnnDirectionMode_t bidirectional;
     cudnnRNNMode_t mode;
     cudnnDataType_t datatype;
+    cudnnDataType_t input_datatype;
     cudnnRNNAlgo_t algo = CUDNN_RNN_ALGO_STANDARD;
     cudnnRNNInputMode_t input_mode = CUDNN_LINEAR_INPUT;
 
@@ -137,18 +138,19 @@ namespace {
       this->algo = algo;
     }
 
-    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype) {
+    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
       this->set_mode(mode);
       this->hidden_size = hidden_size;
       this->num_layers = num_layers;
       this->set_bidirectional(bidirectional);
       this->datatype = datatype;
+      this->input_datatype = input_datatype;
     }
 
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
-      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, algo);
+      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo);
       return rnn_desc;
     }
 
@@ -602,6 +604,8 @@ namespace {
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
 #if CUDNN_VERSION != 7103
+// CUDNN 7.1.3 enforces RNN descriptor type to be identical to input/weight. This check throws an error for type
+// promotion. The check has since been removed.
     if (dtype == CUDNN_DATA_HALF) {
       return CUDNN_DATA_FLOAT;
     }
@@ -630,7 +634,7 @@ Tensor _cudnn_rnn_flatten_weight(
   auto datatype = getCudnnDataType(any_param);
 
   RNNDescriptorParams rnn;
-  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype));
+  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 
   auto handle = getCudnnHandle();
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
@@ -690,7 +694,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype));
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -829,7 +833,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto output = output_r;
 
   RNNParams fn;
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(getCudnnDataType(input)));
+  auto datatype = getCudnnDataType(input);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -952,7 +957,8 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto output = output_r;
 
   RNNParams fn;
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(getCudnnDataType(input)));
+  auto datatype = getCudnnDataType(input);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -1173,7 +1179,7 @@ Tensor try_get_weight_buf(
   auto datatype = getCudnnDataType(input);
 
   RNNDescriptorParams rnn;
-  rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype));
+  rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
   TensorGeometry x_geom ({1, input.size(-1)});
