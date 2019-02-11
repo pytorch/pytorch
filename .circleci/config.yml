@@ -3088,9 +3088,10 @@ workflows:
       - binary_linux_conda_2.7_cpu_test:
           requires:
             - binary_linux_conda_2.7_cpu_build
-      - binary_linux_conda_3.6_cu90_test:
-          requires:
-            - binary_linux_conda_3.6_cu90_build
+      # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
+      # - binary_linux_conda_3.6_cu90_test:
+      #     requires:
+      #       - binary_linux_conda_3.6_cu90_build
 
 ##############################################################################
 # Daily smoke test trigger
