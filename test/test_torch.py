@@ -8868,6 +8868,52 @@ class _TestTorchMixin(object):
         self.assertEqual(bools.size(), 4)
         self.assertEqual(bools.tolist(), [False, True, True, True])
 
+    def test_storage_casts(self):
+        storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.IntStorage')
+
+        storage = storage.float()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.FloatStorage')
+
+        storage = storage.half()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.HalfStorage')
+
+        storage = storage.long()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.LongStorage')
+
+        storage = storage.short()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.ShortStorage')
+
+        storage = storage.bool()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [True, False, True, True, True, True])
+        self.assertEqual(storage.type(), 'torch.BoolStorage')
+
+        storage = storage.double()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [1.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(storage.type(), 'torch.DoubleStorage')
+
+        storage = storage.char()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [1.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(storage.type(), 'torch.CharStorage')
+
+        storage = storage.byte()
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [1.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(storage.type(), 'torch.ByteStorage')
+
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
@@ -8909,7 +8955,10 @@ class _TestTorchMixin(object):
         for t in torch._storage_classes:
             if t.is_cuda and not torch.cuda.is_available():
                 continue
-            obj = t(100).fill_(1)
+            if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
+                obj = t(100).fill_(True)
+            else:
+                obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
 

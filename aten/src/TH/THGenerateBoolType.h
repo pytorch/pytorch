@@ -4,7 +4,7 @@
 
 // TODO: define accreal type once the correct value is known.
 #define scalar_t bool
-#define ureal uint8_t
+#define ureal bool
 #define Real Bool
 #define TH_CONVERT_ACCREAL_TO_REAL(_val) (scalar_t)(_val)
 #define TH_REAL_IS_BOOL
