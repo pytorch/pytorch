@@ -522,7 +522,7 @@ class LSTM(RNNBase):
 
     @weak_script_method
     def forward_tensor(self, input, hx=None):
-        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]]
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         batch_sizes = None
         max_batch_size = input.size(0) if self.batch_first else input.size(1)
         sorted_indices = None

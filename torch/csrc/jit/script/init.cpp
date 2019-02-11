@@ -242,7 +242,7 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   ConstantParameterList(std::shared_ptr<Module> module, std::vector<at::Tensor*> slots)
-      : module_(module), slots_(slots) {}
+      : module_(std::move(module)), slots_(std::move(slots)) {}
 
   std::string kind() const override {
     return "constant parameter list";
