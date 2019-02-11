@@ -7051,16 +7051,25 @@ class _TestTorchMixin(object):
         def _test_abs(tensors_dict):
             for category, tensors in tensors_dict.items():
                 for data in tensors:
-                    switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
-                    res = torch.mul(data, switch)
-                    self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+                    _test_abs_single(data)
 
-        max_val = 1000
-        _test_abs(self._make_tensors((3, 4), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
-        _test_abs(self._make_tensors((10, 10, 10), val_range=(0, max_val)))
+        def _test_abs_single(data):
+            switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
+            res = torch.mul(data, switch)
+            self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+
+        shapes = [(3, 4), (3, 5, 7), (2, 2, 5, 8, 2, 3), (1000,), (10, 10, 10)]
+
+        for shape in shapes:
+            # Test all except char/byte
+            _test_abs(self._make_tensors(shape, val_range=(0, 1000)))
+
+            # Test char
+            _test_abs_single(torch.CharTensor(*shape).random_(0, 100))
+
+            # Test byte
+            byte_tensor = torch.ByteTensor(*shape).random_(0, 100)
+            self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
