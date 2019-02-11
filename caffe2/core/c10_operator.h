@@ -8,13 +8,26 @@
 namespace caffe2 {
 namespace detail {
 
-template<class Caffe2Operator> const c10::OperatorHandle& c10_op_handle_for_c2_op();
-template <class Caffe2Operator>
-void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TODO Pass in correct cache type
-  // precondition: on the stack, there's an IValue for each input and an IValue for each output.
+using _CallCaffe2OpFunc = void(const c10::FunctionSchema& schema, std::vector<c10::IValue>& inputs, std::vector<c10::IValue*>& outputs);
+
+template<class Caffe2Operator>
+inline void _call_caffe2_op(const c10::FunctionSchema& schema, std::vector<c10::IValue>& inputs, std::vector<c10::IValue*>& outputs) {
+  Caffe2Operator(schema, std::move(inputs), std::move(outputs)).Run();
+}
+
+// This function is inline in the hope that compilers optimizing for speed will
+// inline it into call_caffe2_op_from_c10, allowing call_op to be inlined and
+// avoiding the function pointer indirection, while compilers optimizing for
+// binary size will keep it a separate function instead of inlining it into
+// a template and will reuse the binary code of this function between ops.
+// We measured and confirmed that binary size off the instagram ios app is
+// reduced when having _call_caffe2_op_from_c10 separate from the templated
+// call_caffe2_op_from_c10.
+inline void _call_caffe2_op_from_c10(c10::Stack* stack, const c10::FunctionSchema& schema, _CallCaffe2OpFunc* call_op) {
+  // precondition: on the stack, there's an IValue for each caffe2 input and an IValue for each caffe2 output.
+  // (note: in the jit schema, these caffe2 outputs are explicitly listed as additional inputs).
   // The output ones could either be a preallocated tensor or ivalue::None.
 
-  const auto& schema = c10_op_handle_for_c2_op<Caffe2Operator>().schema();
   const size_t num_outputs = schema.returns().size();
   const size_t total_num_arguments = schema.arguments().size();
   const size_t num_inputs = total_num_arguments - num_outputs;
@@ -37,7 +50,7 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TO
     outputPtrs.push_back(&output);
   }
 
-  Caffe2Operator(schema, std::move(inputs), std::move(outputPtrs)).Run();
+  (*call_op)(schema, inputs, outputPtrs);
 
   for (auto& output: outputs) {
     torch::jit::push(*stack, std::move(output));
@@ -46,6 +59,12 @@ void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TO
   // postcondition: All inputs are cleared from the stack, there's now one
   //                IValue for each output which holds the result. This
   //                might reuse one of the preallocated tensors but doesn't have to.
+}
+
+template<class Caffe2Operator> const c10::OperatorHandle& c10_op_handle_for_c2_op();
+template <class Caffe2Operator>
+void call_caffe2_op_from_c10(c10::Stack* stack, c10::KernelCache* cache) { // TODO Pass in correct cache type
+  _call_caffe2_op_from_c10(stack, c10_op_handle_for_c2_op<Caffe2Operator>().schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
 inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
