@@ -555,6 +555,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
   bool padding = false;
   const std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
   const auto pad_input = dummy_->NewDummyName();
+/*
   if (attributes.HasAttribute("count_include_pad") &&
       attributes.HasAttribute(pad_name)) {
     auto count_include_pad = attributes.get<int64_t>("count_include_pad", 0L);
@@ -563,6 +564,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
         attributes
             .get<::google::protobuf::RepeatedField<::google::protobuf::int64>>(
                 pad_name);
+
     if (count_include_pad == 1 && pads.size() == 4 &&
         !(pads.Get(0) == 0 && pads.Get(1) == 0 && pads.Get(2) == 0 &&
           pads.Get(3) == 0)) {
@@ -592,6 +594,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
       }
     }
   }
+*/
   // Pool
   auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, ctx);
   auto* pool_op = c2_ops.ops.Mutable(0);
