@@ -9,6 +9,7 @@
 #include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/net_utils.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
@@ -1629,11 +1630,10 @@ void addGlobalMethods(py::module& m) {
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
         Workspace* curr_ws = GetCurrentWorkspace();
-        auto weight_names = curr_ws->Blobs();
+        auto weight_names = DeriveWeightNames(pred_net, external_inputs);
         ts.Transform(
             curr_ws,
             &pred_net,
-            external_inputs,
             weight_names,
             tensor_shapes,
             std::unordered_set<int>());

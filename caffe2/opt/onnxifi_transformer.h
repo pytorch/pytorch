@@ -41,8 +41,7 @@ class CAFFE2_API OnnxifiTransformer final {
   void Transform(
       Workspace* ws,
       NetDef* pred_net,
-      const std::vector<std::string>& external_inputs,
-      const std::vector<std::string>& weight_names,
+      const std::unordered_set<std::string>& weight_names,
       const std::unordered_map<std::string, TensorShape>& shape_hints,
       const std::unordered_set<int>& blacklisted_ops);
 
