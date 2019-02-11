@@ -91,11 +91,18 @@ def get_cmake_version(run_lambda):
 
 
 def get_nvidia_driver_version(run_lambda):
+    if get_platform() == 'darwin':
+        cmd = 'kextstat | grep -i cuda'
+        return run_and_parse_first_match(run_lambda, cmd, r'com[.]nvidia[.]CUDA [(](.*?)[)]')
     smi = get_nvidia_smi()
     return run_and_parse_first_match(run_lambda, smi, r'Driver Version: (.*?) ')
 
 
 def get_gpu_info(run_lambda):
+    if get_platform() == 'darwin':
+        if TORCH_AVAILABLE:
+            return torch.cuda.get_device_name(None)
+        return 'N/A on Darwin'
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
@@ -111,8 +118,14 @@ def get_running_cuda_version(run_lambda):
 
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
-    if get_platform() == 'win32':
+    platform = get_platform()
+    if platform == 'win32':
         cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
+    elif platform == 'darwin':
+        l = os.environ.get('CUDNN_LIBRARY','')
+        if os.path.isfile(l):
+            return os.path.realpath(l)
+        cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
     else:
         cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
@@ -137,8 +150,12 @@ def get_cudnn_version(run_lambda):
 
 
 def get_nvidia_smi():
+    platform = get_platform()
+    if platform == 'darwin':
+        # nvidia-smi is available only on Windows and Linux
+        return None
     smi = 'nvidia-smi'
-    if get_platform() == 'win32':
+    if platform == 'win32':
         smi = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\%s"' % smi
     return smi
 
