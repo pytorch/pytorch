@@ -3696,11 +3696,10 @@ a")
     @unittest.skipIf(PY2, "Requires python 3")
     def test_stack(self):
         @torch.jit.script
-        def func(x, y: int): # noqa: E999
-            return torch.stack((x, x), y)
+        def func(x):
+            return torch.stack((x, x), dim=1)
         x = torch.rand(10, 10)
-        y = 1
-        self.assertEqual(func(x, y), torch.stack((x, x), dim=y))
+        self.assertEqual(func(x), torch.stack((x, x), dim=1))
 
         @torch.jit.script
         def func2(x, y):
