@@ -394,7 +394,7 @@ tests = [
     ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False, skipIfRocm),
+    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False),
     ('put_', new_t(2, 3), lambda t: [long_type(t)([]), t([])], 'empty'),
     ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
     ('prod', small_2d_oneish, lambda t: []),
