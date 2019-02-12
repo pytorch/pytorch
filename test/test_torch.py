@@ -4151,12 +4151,9 @@ class _TestTorchMixin(object):
                             self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
 
                         # any 3-dimensional tensor should be fine
-                        if len(shape) <= 3 or s == -2:
+                        if len(shape) <= 3 or s == -2 or s < -3:
                             self.assertFalse(x_nc.is_contiguous(),
                                              "x_nc should remain non-contiguous")
-                        elif s < -3:
-                            self.assertTrue(x_nc.is_contiguous(),
-                                            "x_nc should become contiguous")
 
                     # expanded tensors
                     expanded_size = (x.size(0),) + x.size()

@@ -505,10 +505,9 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  tril_cuda_out(self_c, self_c, k);
-  self.unsafeGetTensorImpl()->set_storage(self_c.storage());
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(self_c.sizes(), self_c.strides());
+  Tensor result = at::empty_like(self);
+  tril_cuda_out(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
+  self.resize_as_(result).copy_(result);
   return self;
 }
 
@@ -524,10 +523,9 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  triu_cuda_out(self_c, self_c, k);
-  self.unsafeGetTensorImpl()->set_storage(self_c.storage());
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(self_c.sizes(), self_c.strides());
+  Tensor result = at::empty_like(self);
+  triu_cuda_out(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
+  self.resize_as_(result).copy_(result);
   return self;
 }
 

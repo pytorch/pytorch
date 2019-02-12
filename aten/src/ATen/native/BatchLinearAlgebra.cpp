@@ -471,12 +471,11 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor result = at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
-    apply_triu_tril<scalar_t, true, false>(self_c, self_c, k);
+    apply_triu_tril<scalar_t, false, false>(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
   });
-  self.unsafeGetTensorImpl()->set_storage(self_c.storage());
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(self_c.sizes(), self_c.strides());
+  self.resize_as_(result).copy_(result);
   return self;
 }
 
@@ -504,12 +503,11 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor result = at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true, true>(self_c, self_c, k);
+    apply_triu_tril<scalar_t, false, true>(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
   });
-  self.unsafeGetTensorImpl()->set_storage(self_c.storage());
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(self_c.sizes(), self_c.strides());
+  self.resize_as_(result).copy_(result);
   return self;
 }
 
