@@ -372,8 +372,7 @@ def bce_with_logistic_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
-        pickle=False,
-        decorator=skipIfRocm
+        pickle=False
     )
 
 
@@ -1255,8 +1254,6 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1307,8 +1304,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='strided',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1316,8 +1311,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='padding',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1338,14 +1331,11 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1656,8 +1646,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1666,8 +1654,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='sum',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1683,8 +1669,6 @@ new_module_tests = [
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         jacobian_input=False,
         check_gradgrad=False,
-        decorator=skipIfRocm,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
