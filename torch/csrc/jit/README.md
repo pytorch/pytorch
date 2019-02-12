@@ -369,6 +369,7 @@ Executing Programs
 
 TorchScript is executed using a interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
 
+
 ### Evaluation Semantics ###
 
 TorchScript programs implement a very small subset of Python of that is necessary to run models. 
@@ -489,6 +490,60 @@ However, we do need to ensure that values are destructed immediately after their
 
 All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the Graph or subcomponents of it off to an interpreter to actually run.
 
+
+In this section, we use a running example program that computs one step of a LSTM to show how the graph is transformed:
+
+This section will use an example this LSTM program:
+
+```
+@torch.jit.script
+def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+    gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
+    ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
+    cy = (forgetgate * cx) + (ingate * cellgate)
+    hy = outgate * torch.tanh(cy)
+    return hy, cy
+```
+
+After going through the the frontend, we get start with this unoptimized graph:
+
+```
+graph(%x : Tensor
+      %hx : Tensor
+      %cx : Tensor
+      %w_ih : Tensor
+      %w_hh : Tensor
+      %b_ih : Tensor
+      %b_hh : Tensor) {
+  %7 : int = prim::Constant[value=4]()
+  %8 : int = prim::Constant[value=1]()
+  %9 : Tensor = aten::t(%w_ih)
+  %10 : Tensor = aten::mm(%x, %9)
+  %11 : Tensor = aten::t(%w_hh)
+  %12 : Tensor = aten::mm(%hx, %11)
+  %13 : Tensor = aten::add(%10, %12, %8)
+  %14 : Tensor = aten::add(%13, %b_ih, %8)
+  %gates : Tensor = aten::add(%14, %b_hh, %8)
+  %16 : Tensor[] = aten::chunk(%gates, %7, %8)
+  %ingate.1 : Tensor, %forgetgate.1 : Tensor, %cellgate.1 : Tensor, %outgate.1 : Tensor = prim::ListUnpack(%16)
+  %ingate : Tensor = aten::sigmoid(%ingate.1)
+  %forgetgate : Tensor = aten::sigmoid(%forgetgate.1)
+  %cellgate : Tensor = aten::tanh(%cellgate.1)
+  %outgate : Tensor = aten::sigmoid(%outgate.1)
+  %25 : Tensor = aten::mul(%forgetgate, %cx)
+  %26 : Tensor = aten::mul(%ingate, %cellgate)
+  %cy : Tensor = aten::add(%25, %26, %8)
+  %28 : Tensor = aten::tanh(%cy)
+  %hy : Tensor = aten::mul(%outgate, %28)
+  %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+```
+
 Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs. 
 
 *Specialization* The executor *specializes* the Graph for the particular set of inputs. Specialization is handled by the `ArgumentSpec` object which extracts a "signature" composed of all the properties being specialized. We only specialize to the properties of Tensors. The ArgumentSpec only records properties for Tensors that either appear directly in the inputs to the graph or inside Tuples that are inputs to the Graph. The properties recorded are currently:
@@ -501,21 +556,121 @@ Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs.
 
 The ArgumentSpec object is used as a key into a cache that holds pre-optimized Code objects (held in an ExecutionPlan object). On a cache hit, an InterpreterState is created and the Code in the cache is run.
 
-*Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get replaced with their DimensionedTensorType equivalents. It then runs "required passes", which are graph transformations necessary to generate legal graphs for the interpreter. (Some passes such as differentiation will introduce Nodes that are not defined by operators and require passes to clean up. The combination of `specializeUndef` and `LowerGradOf` clean up these operations.) These passes also remove broadcasting "expand" nodes that get implicitly inserted by the tracer but are not valid for all sizes. 
+
+*Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get replaced with their DimensionedTensorType equivalents. 
+
+```
+# post specialization, inputs are now specialized types
+graph(%x : Float(*, *)
+      %hx : Float(*, *)
+      %cx : Float(*, *)
+      %w_ih : Float(*, *)
+      %w_hh : Float(*, *)
+      %b_ih : Float(*)
+      %b_hh : Float(*)) {
+  %7 : int = prim::Constant[value=4]()
+  %8 : int = prim::Constant[value=1]()
+  %9 : Tensor = aten::t(%w_ih)
+  %10 : Tensor = aten::mm(%x, %9)
+  %11 : Tensor = aten::t(%w_hh)
+  %12 : Tensor = aten::mm(%hx, %11)
+  %13 : Tensor = aten::add(%10, %12, %8)
+  %14 : Tensor = aten::add(%13, %b_ih, %8)
+  %gates : Tensor = aten::add(%14, %b_hh, %8)
+  %16 : Tensor[] = aten::chunk(%gates, %7, %8)
+  %ingate.1 : Tensor, %forgetgate.1 : Tensor, %cellgate.1 : Tensor, %outgate.1 : Tensor = prim::ListUnpack(%16)
+  %ingate : Tensor = aten::sigmoid(%ingate.1)
+  %forgetgate : Tensor = aten::sigmoid(%forgetgate.1)
+  %cellgate : Tensor = aten::tanh(%cellgate.1)
+  %outgate : Tensor = aten::sigmoid(%outgate.1)
+  %25 : Tensor = aten::mul(%forgetgate, %cx)
+  %26 : Tensor = aten::mul(%ingate, %cellgate)
+  %cy : Tensor = aten::add(%25, %26, %8)
+  %28 : Tensor = aten::tanh(%cy)
+  %hy : Tensor = aten::mul(%outgate, %28)
+  %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+```
+
+It then runs "required passes", which are graph transformations necessary to generate legal graphs for the interpreter. (Some passes such as differentiation will introduce Nodes that are not defined by operators and require passes to clean up. The combination of `specializeUndef` and `LowerGradOf` clean up these operations.) These passes also remove broadcasting "expand" nodes that get implicitly inserted by the tracer but are not valid for all sizes. 
 
 It then runs inference passes to calculate properties of the graph given this particular specialization:
 
 * It propagates constants, pre-computing as much as possible
 * It propagates the input ranks, dtypes, devices, and requires_grad information to the rest of the graph where possible.
 
+```
+graph(%x : Float(*, *)
+      %hx : Float(*, *)
+      %cx : Float(*, *)
+      %w_ih : Float(*, *)
+      %w_hh : Float(*, *)
+      %b_ih : Float(*)
+      %b_hh : Float(*)) {
+  %8 : int = prim::Constant[value=1]()
+  %9 : Float(*, *) = aten::t(%w_ih)
+  %10 : Float(*, *) = aten::mm(%x, %9)
+  %11 : Float(*, *) = aten::t(%w_hh)
+  %12 : Float(*, *) = aten::mm(%hx, %11)
+  %13 : Float(*, *) = aten::add(%10, %12, %8)
+  %14 : Float(*, *) = aten::add(%13, %b_ih, %8)
+  %gates : Float(*, *) = aten::add(%14, %b_hh, %8)
+  %31 : Float(*, *), %32 : Float(*, *), %33 : Float(*, *), %34 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%gates)
+  %ingate : Float(*, *) = aten::sigmoid(%31)
+  %forgetgate : Float(*, *) = aten::sigmoid(%32)
+  %cellgate : Float(*, *) = aten::tanh(%33)
+  %outgate : Float(*, *) = aten::sigmoid(%34)
+  %25 : Float(*, *) = aten::mul(%forgetgate, %cx)
+  %26 : Float(*, *) = aten::mul(%ingate, %cellgate)
+  %cy : Float(*, *) = aten::add(%25, %26, %8)
+  %28 : Float(*, *) = aten::tanh(%cy)
+  %hy : Float(*, *) = aten::mul(%outgate, %28)
+  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+```
+
+
 It then runs a number of *derivative preserving* optimization passes. If a computation the graph `requires_grad` and it is valid to compute its derivative, then these passes are only allow to replace that computation with another computation that is also differentiable. In other words, these passes cannot break the ability for autograd to work correctly. Algebraic rewrites and peephole optimizations are generally derivative preserving but something that generates code, like pointwise fusion, is not. Currently the passes:
 
 * Eliminating dead code
 * Eliminating common subexpressions
-* Cool redundant constants into single values
+* Pooling redundant constants into single values
 * Peephole optimizations, including some algebraic rewrites into simpler operations
 * Unrolling small loops.
 * Batching matrix multiplications that result from unrolling loops.
+
+```
+graph(%x : Float(*, *)
+      %hx : Float(*, *)
+      %cx : Float(*, *)
+      %w_ih : Float(*, *)
+      %w_hh : Float(*, *)
+      %b_ih : Float(*)
+      %b_hh : Float(*)) {
+  %8 : int = prim::Constant[value=1]()
+  %9 : Float(*, *) = aten::t(%w_ih)
+  %10 : Float(*, *) = aten::mm(%x, %9)
+  %11 : Float(*, *) = aten::t(%w_hh)
+  %12 : Float(*, *) = aten::mm(%hx, %11)
+  %13 : Float(*, *) = aten::add(%10, %12, %8)
+  %14 : Float(*, *) = aten::add(%13, %b_ih, %8)
+  %gates : Float(*, *) = aten::add(%14, %b_hh, %8)
+  %31 : Float(*, *), %32 : Float(*, *), %33 : Float(*, *), %34 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%gates)
+  %ingate : Float(*, *) = aten::sigmoid(%31)
+  %forgetgate : Float(*, *) = aten::sigmoid(%32)
+  %cellgate : Float(*, *) = aten::tanh(%33)
+  %outgate : Float(*, *) = aten::sigmoid(%34)
+  %25 : Float(*, *) = aten::mul(%forgetgate, %cx)
+  %26 : Float(*, *) = aten::mul(%ingate, %cellgate)
+  %cy : Float(*, *) = aten::add(%25, %26, %8)
+  %28 : Float(*, *) = aten::tanh(%cy)
+  %hy : Float(*, *) = aten::mul(%outgate, %28)
+  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+```
 
 *Post-derivative optimization* The next optimization depends on whether any part of the graph actual requires a gradient to be calculated, which is determined by `needsGradient`. In the case where no gradients are required (i.e. for inference graphs), then we can directly apply optimizations that generate graphs that may not have valid gradients defined. For now this is the `FuseGraph` pass, which looks for adjacent point-wise operations along with reviewing operations such as `split` and `concat`, and creates `prim::FusionGroup` Nodes in the graph to replace these operations. The Operator registered to execute `prim:FusionGroup` nodes will generate a new CUDA kernel for each unique Node, which replaces the original separate execution. 
 
