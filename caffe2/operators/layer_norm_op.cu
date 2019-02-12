@@ -268,4 +268,6 @@ REGISTER_CUDA_OPERATOR(LayerNormGradient, LayerNormGradientOp<CUDAContext>);
 
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(LayerNorm, caffe2::LayerNormOp<caffe2::CUDAContext>)
+C10_REGISTER_CAFFE2_OPERATOR_CUDA(
+    LayerNorm,
+    caffe2::LayerNormOp<caffe2::CUDAContext>)
