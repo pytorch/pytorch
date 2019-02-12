@@ -489,15 +489,16 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // We already have all the ops and external inputs and outputs!
   NetDef onnxifi_net(net);
 
-  // Remove the second output of Concat from external_output. In addition, we
-  // remove those outputs from the Onnxifi op too.
+  // Remove the second output of Concat/Reshape from external_output. In
+  // addition, we remove those outputs from the Onnxifi op too.
   // TODO: This approach is a bit hacky as we assume that the second output is
   // never used. A more appropriate approach can be learned from the ONNX path,
   // where we statically computes the split_info given input shape and insert a
   // GivenTensorIntFill op
   std::unordered_set<std::string> split_infos;
   for (auto& op : *onnxifi_net.mutable_op()) {
-    if (op.type() == "Concat" && op.output_size() == 2) {
+    if ((op.type() == "Concat" || op.type() == "Reshape") &&
+        op.output_size() == 2) {
       split_infos.emplace(op.output(1));
     }
   }
@@ -802,8 +803,9 @@ NetDef OnnxifiTransformer::TransformViaC2(
       for (const auto& o : op.output()) {
         net.add_external_output(o);
       }
-      // Remove the second output of Concat from the external_output
-      if (op.type() == "Concat" && op.output_size() == 2) {
+      // Remove the second output of Concat/Reshape from the external_output
+      if ((op.type() == "Concat" || op.type() == "Reshape") &&
+          op.output_size() == 2) {
         net.mutable_external_output()->RemoveLast();
       }
 
