@@ -120,7 +120,7 @@ THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t siz
       size,
       std::move(data),
       allocator,
-      true).release();
+      allocator != nullptr).release();
   return storage;
 }
 
