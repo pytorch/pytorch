@@ -17,6 +17,7 @@
 #include <ATen/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -1003,6 +1004,20 @@ Operation listAppend(const Node* node) {
   };
 }
 
+template <typename TList>
+Operation listReverse(const Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    pop(stack, a);
+
+    auto& elements = a->elements();
+    std::reverse(elements.begin(), elements.end());
+    push(stack, a);
+
+    return 0;
+  };
+}
+
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1287,6 +1302,9 @@ RegisterOperators reg2({
           "(c) el) -> " decl_type "[](a!)",                                 \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
+          "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
+          listReverse<Shared<c_type>>),                                     \
+      Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
           " el) -> " decl_type "[](a!)",                                    \
           listSetItem<Shared<c_type>, c_type::ElemType>)
@@ -1303,6 +1321,9 @@ RegisterOperators reg2({
           " el) -> " decl_type "[](a!)",                               \
           listAppend<Shared<c_type>, c_type::ElemType>),               \
       Operator(                                                        \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",             \
+          listReverse<Shared<c_type>>),                                \
+      Operator(                                                        \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
           " el) -> " decl_type "[](a!)",                               \
           listSetItem<Shared<c_type>, c_type::ElemType>)
@@ -1316,7 +1337,7 @@ RegisterOperators reg2({
     CREATE_MUTABLE_LIST_OPS("t", GenericList),
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
