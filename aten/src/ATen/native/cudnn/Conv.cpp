@@ -457,7 +457,7 @@ size_t getMaxWorkspaceSize(
 }
 
 template<typename perf_t>
-perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo, bool strided = false) {
+perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo, bool blacklist = false) {
   using search = algorithm_search<perf_t>;
   int best_algo_idx;
   if (args.params.deterministic) {
@@ -476,7 +476,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
   }
 
   // See Note [blacklist fft algorithms for strided dgrad]
-  if (strided && (perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
+  if (blacklist && (perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
                   || perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
     perfResults[best_algo_idx].algo = search::DEFAULT_ALGO;
     if (args.params.dataType == CUDNN_DATA_HALF) {
@@ -606,15 +606,15 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     
     // See Note [blacklist fft algorithms for strided dgrad]
     int stride_dim = args.input.dim() - 2;
-    bool strided = false;
+    bool blacklist = false;
     for (int i = 0; i< stride_dim; i++) {
       if (args.params.stride[i] != 1) {
-          strided = true;
+          blacklist = true;
           break;
       }
     }
 
-    return getBestAlgorithm<perf_t>(perf_results.get(), args, perf_count, strided);
+    return getBestAlgorithm<perf_t>(perf_results.get(), args, perf_count, blacklist);
   }
 
   static void getWorkspaceSize(
