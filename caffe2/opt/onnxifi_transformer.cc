@@ -285,10 +285,10 @@ int64_t GetBlob1stDimSize(
   return shape_info.shape.dims(0);
 }
 
-// Generates AdjustBatchOps for external inputs / outputs with type BATCH or
+// Generates AdjustBatchOps for external inputs/outputs with type BATCH or
 // SEQ and adds them to input_ops and output_ops.
-// Meanwhile, modifies inputs / outputs of corresponding operators in the
-// onnxifi_net to use the new inputs / outputs of AdjustBatchOps.
+// Meanwhile, modifies inputs/outputs of corresponding operators in the
+// onnxifi_net to use the new inputs/outputs of AdjustBatchOps.
 std::unordered_map<std::string, std::string> AddAdjustBatchOps(
     const ShapeInfoMap& shape_hints,
     NetDef* onnxifi_net,
@@ -979,7 +979,8 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
             net, weights, ws, &exporter2, shape_hints, &shape_hints_onnx);
       };
 
-  return opt::OptimizeForBackend(*pred_net, onnx_supports, onnx_converter);
+  return opt::OptimizeForBackend(
+      *pred_net, onnx_supports, onnx_converter, opts_.debug);
 }
 
 // Cutting off the runnable part and replace with ONNXIFI ops. Asssume the nets
