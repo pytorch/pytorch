@@ -3972,6 +3972,22 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return a == []
+        self.checkScript(test_clear_empty, ())
+
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return a == []
+        self.checkScript(test_clear, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
