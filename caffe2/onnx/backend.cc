@@ -548,8 +548,6 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
 Caffe2Ops Caffe2Backend::CreatePadPool(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
-  auto& node = onnx_node->node;
-  auto& attributes = onnx_node->attributes;
   Caffe2Ops ret;
   // Pad
   bool padding = false;
