@@ -262,6 +262,19 @@ namespace {
     return output;
   }
 
+  Tensor adaptive_avg_pool2d(  
+    at::Tensor const& input,
+    IntArrayRef output_size){
+    if (output_size[0] == 1 && output_size[1] == 1) {
+//in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
+       int64_t mean_size = input.size(-1) * input.size(-2);
+       Tensor out = input.view({-1, mean_size}).mean(-1);
+       return input.ndimension() == 3 ? out.view({input.size(0), 1, 1}) : out.view({input.size(0), input.size(1), 1, 1});
+    } else {
+       return _adaptive_avg_pool2d(input, output_size);
+    }
+  }
+
   Tensor& adaptive_avg_pool2d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,

@@ -1061,8 +1061,8 @@
 - name: upsample_nearest3d(Tensor self, IntArrayRef output_size)
   self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
-- name: adaptive_avg_pool2d(Tensor self, IntArrayRef output_size)
-  self: adaptive_avg_pool2d_backward(grad, self)
+- name: _adaptive_avg_pool2d(Tensor self, IntArrayRef output_size)
+  self: _adaptive_avg_pool2d_backward(grad, self)
 
 - name: adaptive_avg_pool3d(Tensor self, IntArrayRef output_size)
   self: adaptive_avg_pool3d_backward(grad, self)
@@ -1148,8 +1148,8 @@
 
 # NN double backwards support
 
-- name: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
-  grad_output: adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+- name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
+  grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
 - name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self)
