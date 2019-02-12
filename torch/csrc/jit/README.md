@@ -367,6 +367,201 @@ A set of special SugaredValues are used to translate between objects in the Pyth
 Executing Programs
 ------------------
 
+TorchScript is executed using a interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
+
+### Evaluation Semantics ###
+
+TorchScript programs implement a very small subset of Python of that is necessary to run models. 
+
+TorchScript includes immutable value types:
+* int
+* float
+* Tuple[T0, T1, ...]
+
+As well as mutable reference types:
+* Tensor
+* List[T]
+* Dict[K, V]
+
+A value of a reference type points to an underlying memory location where the data for the reference type is stored, and variable assignment for a reference type can cause multiple values to point to the same underlying data. This is similar to Python's class model. 
+
+It is important to remember that TorchScript uses these semantics for Tensors so not all computation on Tensor is pure. Individual Tensors may be *views* of the same underlying data. Views are established by special view creating operations, such as indexing into a tensor:
+
+```
+t = torch.rand(3, 4)
+t2 =  t[0] # view of one slice of t
+```
+
+Some builtin operators also mutably write to the underlying tensor. In the standard library these operators are always named with a training underscore, or take a named `out` tensor where the result is written:
+
+```
+t2.relu_() # inplace relu operator, note t is modified as well!
+torch.add(t, t, out=t) # update t, without using temporary memory if possible
+```
+
+The combination of reference semantics and mutable operators can be more difficult to optimize, but it gives program writers powerful control of the memory usage of their programs. For instance, DenseNets use a concat operation instead of the the addition found in a ResNet. Rather than compute a concat of existing tensors, many implementations use Tensor indexing and `out` keywords to avoid allocating addition memory for the activations. Ideally a compiler would always be able to do these optimizations, but in practice new ideas are tried all the time that exist outside what compiler writers expect and these manual operators allows users to get decent behavior before the compilers catch up.
+
+In addition to being mutable, tensors also have a set of dynamically determined properties (i.e. properties that can vary from run to run) this includes:
+
+* dtype - their data type int, float, double, etc.
+* device - where the tensor lives, e.g. the cpu, or cuda gpu 0
+* rank - the number of dimensions that the tensor has
+* size - the precise size of the tensor
+* requires_grad - whether the tensor is recording its gradient with autograd
+
+Changes in these properties change how operators on tensor will evaluate and would make certain optimization invalid. For instance, if we have fuser capable of generating new cuda kernels but not cpu kernels, it is only valid to fuse operations where the inputs are known to run only on CUDA devices. The GraphExecutor's job is to still enable optimization even when certains combinations of properties prevent optimizations for occurring.
+
+Nodes in a graph are executed *serially* in the order they appear in a block. Nodes may be reordered either during optimization or by the interpreter itself if it can be proven that 
+it is not distinguishable from the original serial execution order. These semantics are necessary since the combination of mutable tensors an potential alias between tensors makes it unsafe to perform arbitrary reordering otherwise. However, the AliasInfo object can accurately track how alias propagate through builtin operators so optimization passes can query when certain reorders or optimizations are safe. 
+
+We also provide user-accessible parallel execution through the `fork` and `wait` primitives. The `fork` primitive begins execution of `fn` in parallel with the current thread of execution, immediately returning a Future object that will hold the result of the forked function. The `wait` method of the future then causes the invoking task to wait for the value being computed on the forked task.
+
+```
+def fn(arg0, arg1, ...):
+  ...
+  return v
+
+fut = torch.jit._fork(fn, arg0, arg1, ...)
+...
+v = fut.wait()
+
+```
+
+Currently, the user is responsible for avoiding racing immutable operations between tasks. We encourage users to not write to tensors visible from other threads, and may enforce this more strictly in the future.
+
+Optimization passes that wish to exploit multi-threaded execution may automatically convert serial Blocks into parallel execution by inserting extra fork and wait events. This design enables our users to manually specify parallelism while also allowing optimization passes to exploit it when safe and profitable.
+
+
+### IValue ###
+
+All evaluation involves computation using IValues, a 16-byte tagged union that can hold the concrete representation of any type in TorchScript. TorchScript is statically typed, so it would be possible to operate on unboxed primitive types, but the interface between interpreter, builtin-ops and user functions would be significantly more complicated. A single tagged union keeps these interfaces simple and since more objects are Tensors anyway, the overhead of storing a tag is small compared to the data stored in the tensors.
+
+IValue contains methods to check the type `isTensor` and to convert to particular to type `toTensor`. We do not publicly expose the type tag and force clients to use the `isX` methods. This enables us to change the underlying implementation of IValue later, e.g. to use an 8-byte value with NaN-boxing. Most operators work on a specific static type, so dynamic dispatch on the tag is not frequently required. 
+
+### Operation ###
+
+All builtin operators are represented using a stack machine concept. An operator pops its arguments off the top of the stack and pushes its result to the stack:
+
+```
+using Stack = std::vector<IValue>;
+using Operation = std::function<int(Stack&)>;
+
+// schema: example_add(Tensor a, Tensor b) -> Tensor
+int example_add(Stack& stack) {
+	Tensor a, b;
+	// stack before: ? ? ? a b <- back
+	pop(stack, a, b); //Templated helper function 
+	                  // that pops a, b and converts them to tensor
+    push(stack, a + b); 
+    // stack after:
+    // ? ? ? c <- back
+    return 0; // goto the next instruction
+}
+```
+
+Most operations, apart from some vararg primitive operators like prim::Unpack, have an associated FunctionSchema that describes how many inputs will be popped and how many will be pushed.
+
+The stack concept makes it easy to define operators with variable numbers of inputs and outputs without the need to allocate vectors of inputs and outputs for each individual operator.
+
+In practice, the interpreter will allocate one Stack, and it will eventually reach a sufficient size such that no more stack-related memory allocations will occur.
+
+Operations also return a jump offset relative to the address of the next operator in the program to for dynamic control flow. Except for special Operations in the interpreter that handle control-flow all Operations should return 0 here. It is a bit weird to force all Operations to return 0, but it avoids having to have another level of indirection to wrap void functions in something that returns 0.
+
+### Operator ###
+
+The Operator object represents a single registered operator in the system. It combines a FunctionSchema that describes how an Operation executes with a method to lookup the corresponding Operation given the Node representing the operator in a Graph.  Most Operators are defined by providing a FunctionSchema and an Operation function. However, primitives like prim::Unpack require knowledge of their Node to know how to operate (e.g. how many elements to unpack). These Operators have a function that takes a Node* and returns an operation.
+
+
+### Interpreter ###
+
+The interpreter is responsible for the straightforward execution of Graphs without any optimization. It is composed of two objects: Code and InterpreterState. Code is a linearized representation of the Graph into simple stack-machine Instructions. Code is shared among all the executions of the Graph and will include caches for certain operations like the generated CUDA code of FusionGroups. 
+
+The InterpreterState is unique to each execution of the Graph. It holds a list registers with the intermediate IValues used in the execution, the Stack being used by each Operation, and the program counter tracking the position in the instructions. The information represents the complete state of the interpreter. `wait` instructions can cause the interpreter to suspend, and the InterpreterState is used to resume execution where the `wait` occurred, potentially on a different thread.
+
+Instructions in the interpreter have three parts: a list of registers from which to gather IValues onto the stack before the instruction, the Operation to run, and a list of registers in which to store the results of the Operation. Alternatively, we could have used individual instructions to load/store values from the stack to registers, but this design was easier to implement, requires fewer instructions since each instruction does more things, and has not yet been a performance bottleneck. Each Operation returns a potential relative jump to compute the next program counter.
+
+Unlike typical interpreters, we not attempt to do careful register allocation. Since Tensors are reference types, saving registers would only save a few hundred bytes of space in typical applications by cutting down on the number of places a reference could be saved. The data in single a Tensor is likely significantly bigger than that, so we forgo register allocation to make debugging easier.
+
+However, we do need to ensure that values are destructed immediately after their last use. Because Torch reference counts Tensors, they will be deallocated immediately when their last reference is gone. To ensure we use a minimum amount of memory we want to ensure that the interpreter releases the reference as soon as it is no longer used. To do this, each Instruction also has set of flags which indicate the inputs to the operation which will no longer be used after the operation. For these inputs, the IValue is moved rather than copied from the register file, ensuring the reference will go dead as soon as the Operation no longer needs it.  extra instructions may be inserted into the program to explicitly drop references for values whose last use depends on the control flow of the program.
+
+
+### Graph Executor ###
+
+All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the Graph or subcomponents of it off to an interpreter to actually run.
+
+Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs. 
+
+*Specialization* The executor *specializes* the Graph for the particular set of inputs. Specialization is handled by the `ArgumentSpec` object which extracts a "signature" composed of all the properties being specialized. We only specialize to the properties of Tensors. The ArgumentSpec only records properties for Tensors that either appear directly in the inputs to the graph or inside Tuples that are inputs to the Graph. The properties recorded are currently:
+
+* dtype
+* rank, but not size
+* requires_grad
+* device type (cpu, cuda)
+* defined - whether the Tensor exists or is a placeholder
+
+The ArgumentSpec object is used as a key into a cache that holds pre-optimized Code objects (held in an ExecutionPlan object). On a cache hit, an InterpreterState is created and the Code in the cache is run.
+
+*Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get replaced with their DimensionedTensorType equivalents. It then runs "required passes", which are graph transformations necessary to generate legal graphs for the interpreter. (Some passes such as differentiation will introduce Nodes that are not defined by operators and require passes to clean up. The combination of `specializeUndef` and `LowerGradOf` clean up these operations.) These passes also remove broadcasting "expand" nodes that get implicitly inserted by the tracer but are not valid for all sizes. 
+
+It then runs inference passes to calculate properties of the graph given this particular specialization:
+
+* It propagates constants, pre-computing as much as possible
+* It propagates the input ranks, dtypes, devices, and requires_grad information to the rest of the graph where possible.
+
+It then runs a number of *derivative preserving* optimization passes. If a computation the graph `requires_grad` and it is valid to compute its derivative, then these passes are only allow to replace that computation with another computation that is also differentiable. In other words, these passes cannot break the ability for autograd to work correctly. Algebraic rewrites and peephole optimizations are generally derivative preserving but something that generates code, like pointwise fusion, is not. Currently the passes:
+
+* Eliminating dead code
+* Eliminating common subexpressions
+* Cool redundant constants into single values
+* Peephole optimizations, including some algebraic rewrites into simpler operations
+* Unrolling small loops.
+* Batching matrix multiplications that result from unrolling loops.
+
+*Post-derivative optimization* The next optimization depends on whether any part of the graph actual requires a gradient to be calculated, which is determined by `needsGradient`. In the case where no gradients are required (i.e. for inference graphs), then we can directly apply optimizations that generate graphs that may not have valid gradients defined. For now this is the `FuseGraph` pass, which looks for adjacent point-wise operations along with reviewing operations such as `split` and `concat`, and creates `prim::FusionGroup` Nodes in the graph to replace these operations. The Operator registered to execute `prim:FusionGroup` nodes will generate a new CUDA kernel for each unique Node, which replaces the original separate execution. 
+
+Note the two phases for compilation of fusion groups: First, the `FuseGraph` pass splits the Graph into fusible sub-Graphs and returns the resulting Graph to the graph executor. Second, when the Graph is turned into Code, the Operation for the FusionGroup node will be looked up and a new CUDA kernel generated for the body. Other compilers should work in a similar way by first introducing a new operator into the Graph where the compiled code should run, and then registering an Operator that implements that Node which performs the actual compilation.
+
+In the case where no gradients are required, the optimization process is finished, a Code object is constructed from the Graph, it is added to the code cache, and then an InterpreterState is constructed and run.
+
+*Derivate Splitting* Many Graphs will require gradients (i.e. one of the inputs will have a `requires_grad`) property set. In this case, it is unsafe to run post-derivative optimizations directly on the Graph. Instead, our approach is to first *split* the Graph into sub-Graphs where symbolic gradient formulas are known and produce an explicit Graph for the forward pass along with a complementary Graph that implements the backwards pass using some of the values computed in the forward pass. We can then apply post-derivative optimization to the forward graph. The "gradOutputs" for the backwards graph are only known when the backward pass runs, so we cannot fully optimize it at this time. For instance, we do not know if some of those gradOutputs will also `require_grad` meaning that a gradient-of-gradient situation exists. Instead the backward pass will use a new GraphExecutor object to run and optimize its execution. In this way, we can handle an indefinite number of recursive gradient calculations.
+
+The creating of derivative subgraphs is done using a similar approach to finding fusion groups: adjacent operations with known gradient formulas are grouped together into `prim::DifferentiableGraph` nodes. We only generate these nodes if we can find a large enough subgraph where optimization is likely to be profitable since there is some overhead involved in entering and exiting a differentiable subgraph.
+
+### DifferentiableGraphOp ###
+
+A DifferentiableGraphOp combines an explicit forward Graph `f` with a paired backward graph `df`. When it runs, the input Tensors to `f` are detached from the autograd, the body of `f` is run, and then the autograd graph for the outputs of `f` are hooked up to the `df` function. The `df` function's outputs are also hooked up to the autograd graph. 
+
+<diagram>
+ 
+### FusionGroup ###
+
+
+- specialization guard lookup
+- specialization of graph
+    * static propagation of properties (i.e. shape analysis)
+- pre-differentiation optimizations: any rewrites that replace differentiable ops
+      with still differentiable ops
+- if derivatives are need, create autodiff subgraphs: graphs where we will replace autograd with symbolically differentiated code. Inside these subgraphs we can do rewrites that replace differentiable ops with non-differentiable ops.    
+- run post-differentiation optimizations
+  * if a graph doesn't require grad then these just run on the entire graph
+  * graph fusion, broadcasting issues
+- convert Graph -> Code object for interpreter
+
+### Interpreter ###
+
+* Code
+* InterpreterState and interpreter design
+* Fork/Wait
+
+### FusionGroup ###
+
+* inserted by passes
+
+### Handling Mutability ###
+
+TODO
+
+
 TODO: Graph executor, optimization passes, specialization, differentiation, symbolic autograd,
 fusion, operators
 
