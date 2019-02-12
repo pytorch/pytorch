@@ -279,7 +279,7 @@ int64_t GetBlob1stDimSize(
   CAFFE_ENFORCE(
       shape_info.shape.dims_size() > 0 && shape_info.shape.dims(0) > 0,
       "Tensor " + blob_name +
-          " is type BATCH / SEQ, however the batch_size is unknown. " +
+          " is type BATCH/SEQ, however the batch_size is unknown. " +
           "Dims size: " + to_string(shape_info.shape.dims_size()) +
           ", dim[0] = " + to_string(shape_info.shape.dims(0)));
   return shape_info.shape.dims(0);
@@ -298,12 +298,14 @@ std::unordered_map<std::string, std::string> AddAdjustBatchOps(
   const auto external_inputs = ToHashSet(onnxifi_net->external_input());
   const auto external_outputs = ToHashSet(onnxifi_net->external_output());
   std::unordered_set<std::string> real_batch_size_blobs;
+  std::unordered_set<std::string> post_adjust_inputs;
 
   for (auto& op : *(onnxifi_net->mutable_op())) {
     // Add AdjustBatchOp for all external inputs with type BATCH or SEQ.
     // This will adjust the batch/seq size to the batch/seq size inferred by
     // bound_shape_inference. Note that we only produce real batch size tensor
-    // once to avoid data race
+    // once to avoid data race. In addition, for each input we only create one
+    // AdjustBatch op for the same reason.
     for (auto& input_blob : *(op.mutable_input())) {
       if (external_inputs.count(input_blob)) {
         auto shape_info_it = shape_hints.find(input_blob);
@@ -322,19 +324,27 @@ std::unordered_map<std::string, std::string> AddAdjustBatchOps(
         }
         auto output_blob = MakeOutputForAdjustBatchOp(input_blob);
         auto ret = real_batch_size_blobs.emplace(real_batch_size_blob);
-        input_ops->push_back(MakeAdjustBatchOp(
-            input_blob,
-            output_blob,
-            GetBlob1stDimSize(shape_info_it->second, input_blob),
-            ret.second ? real_batch_size_blob : "",
-            true /* adjust_to_max_batch_size */));
+        if (post_adjust_inputs.emplace(output_blob).second) {
+          input_ops->push_back(MakeAdjustBatchOp(
+              input_blob,
+              output_blob,
+              GetBlob1stDimSize(shape_info_it->second, input_blob),
+              ret.second ? real_batch_size_blob : "",
+              true /* adjust_to_max_batch_size */));
+        }
         renaming_map[input_blob] = output_blob;
         input_blob = output_blob;
+      } else if (renaming_map.count(input_blob)) {
+        // It is possible that input of a certain op is the output of its
+        // predecessor op, which happens to be an external_output. In this case,
+        // the tensor would have been renamed to X_pre_batch_adjust. Therefore,
+        // we need to rename input X to X_pre_batch_adjust too.
+        input_blob = renaming_map[input_blob];
       }
     }
     // Add AdjustBatchOp for all external outputs with type BATCH if the real
-    // batch size is presented. This will adjust the batch size to the original
-    // batch size.
+    // batch size is presented. This will adjust the batch size to the
+    // original batch size.
     for (auto& output_blob : *(op.mutable_output())) {
       if (external_outputs.count(output_blob)) {
         auto shape_info_it = shape_hints.find(output_blob);
