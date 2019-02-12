@@ -435,6 +435,8 @@ Optimization passes that wish to exploit multi-threaded execution may automatica
 
 ### IValue ###
 
+[ivalue.h](../../include/ATen/core/ivalue.h)
+
 All evaluation involves computation using IValues, a 16-byte tagged union that can hold the concrete representation of any type in TorchScript. TorchScript is statically typed, so it would be possible to operate on unboxed primitive types, but the interface between interpreter, builtin-ops and user functions would be significantly more complicated. A single tagged union keeps these interfaces simple and since more objects are Tensors anyway, the overhead of storing a tag is small compared to the data stored in the tensors.
 
 IValue contains methods to check the type `isTensor` and to convert to particular to type `toTensor`. We do not publicly expose the type tag and force clients to use the `isX` methods. This enables us to change the underlying implementation of IValue later, e.g. to use an 8-byte value with NaN-boxing. Most operators work on a specific static type, so dynamic dispatch on the tag is not frequently required. 
@@ -470,10 +472,14 @@ Operations also return a jump offset relative to the address of the next operato
 
 ### Operator ###
 
+[operator.h](operator.h)
+
 The Operator object represents a single registered operator in the system. It combines a FunctionSchema that describes how an Operation executes with a method to lookup the corresponding Operation given the Node representing the operator in a Graph.  Most Operators are defined by providing a FunctionSchema and an Operation function. However, primitives like prim::Unpack require knowledge of their Node to know how to operate (e.g. how many elements to unpack). These Operators have a function that takes a Node* and returns an operation.
 
 
 ### Interpreter ###
+
+[interpreter.cpp](interpreter.cpp)
 
 The interpreter is responsible for the straightforward execution of Graphs without any optimization. It is composed of two objects: Code and InterpreterState. Code is a linearized representation of the Graph into simple stack-machine Instructions. Code is shared among all the executions of the Graph and will include caches for certain operations like the generated CUDA code of FusionGroups. 
 
@@ -485,8 +491,66 @@ Unlike typical interpreters, we not attempt to do careful register allocation. S
 
 However, we do need to ensure that values are destructed immediately after their last use. Because Torch reference counts Tensors, they will be deallocated immediately when their last reference is gone. To ensure we use a minimum amount of memory we want to ensure that the interpreter releases the reference as soon as it is no longer used. To do this, each Instruction also has set of flags which indicate the inputs to the operation which will no longer be used after the operation. For these inputs, the IValue is moved rather than copied from the register file, ensuring the reference will go dead as soon as the Operation no longer needs it.  extra instructions may be inserted into the program to explicitly drop references for values whose last use depends on the control flow of the program.
 
+```
+graph(%x : Tensor
+      %hx : Tensor
+      %cx : Tensor
+      %w_ih : Tensor
+      %w_hh : Tensor
+      %b_ih : Tensor
+      %b_hh : Tensor) {
+  %7 : int = prim::Constant[value=4]()
+  %8 : int = prim::Constant[value=1]()
+  %9 : Tensor = aten::t(%w_ih)
+  %10 : Tensor = aten::mm(%x, %9)
+  %11 : Tensor = aten::t(%w_hh)
+  %12 : Tensor = aten::mm(%hx, %11)
+  %13 : Tensor = aten::add(%10, %12, %8)
+  %14 : Tensor = aten::add(%13, %b_ih, %8)
+  %gates : Tensor = aten::add(%14, %b_hh, %8)
+  %16 : Tensor[] = aten::chunk(%gates, %7, %8)
+  %ingate.1 : Tensor, %forgetgate.1 : Tensor, %cellgate.1 : Tensor, %outgate.1 : Tensor = prim::ListUnpack(%16)
+  %ingate : Tensor = aten::sigmoid(%ingate.1)
+  %forgetgate : Tensor = aten::sigmoid(%forgetgate.1)
+  %cellgate : Tensor = aten::tanh(%cellgate.1)
+  %outgate : Tensor = aten::sigmoid(%outgate.1)
+  %25 : Tensor = aten::mul(%forgetgate, %cx)
+  %26 : Tensor = aten::mul(%ingate, %cellgate)
+  %cy : Tensor = aten::add(%25, %26, %8)
+  %28 : Tensor = aten::tanh(%cy)
+  %hy : Tensor = aten::mul(%outgate, %28)
+  %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+```
+
+```
+0, 1, 2, 3, 4, 5, 6 = Load
+7 = Constant
+8 = t move(3)
+9 = mm move(0), move(8)
+10 = t move(4)
+11 = mm move(1), move(10)
+12 = add move(9), move(11), 7
+13 = add move(12), move(5), 7
+14 = add move(13), move(6), 7
+15, 16, 17, 18 = ConstantChunk move(14)
+19 = sigmoid move(15)
+20 = sigmoid move(16)
+21 = tanh move(17)
+22 = sigmoid move(18)
+23 = mul move(20), move(2)
+24 = mul move(19), move(21)
+25 = add move(23), move(24), move(7)
+26 = tanh 25
+27 = mul move(22), move(26)
+28 = TupleConstruct move(27), move(25)
+ = Store move(28)
+```
 
 ### Graph Executor ###
+
+[graph_executor.cpp](graph_executor.cpp)
 
 All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the Graph or subcomponents of it off to an interpreter to actually run.
 
@@ -781,24 +845,14 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
 
 ### DifferentiableGraphOp ###
 
+[graph_executor.cpp](graph_executor.cpp)
+
+
+
 A DifferentiableGraphOp combines an explicit forward Graph `f` with a paired backward graph `df`. When it runs, the input Tensors to `f` are detached from the autograd, the body of `f` is run, and then the autograd graph for the outputs of `f` are hooked up to the `df` function. The `df` function's outputs are also hooked up to the autograd graph. 
 
 <diagram>
  
-### FusionGroup ###
-
-
-- specialization guard lookup
-- specialization of graph
-    * static propagation of properties (i.e. shape analysis)
-- pre-differentiation optimizations: any rewrites that replace differentiable ops
-      with still differentiable ops
-- if derivatives are need, create autodiff subgraphs: graphs where we will replace autograd with symbolically differentiated code. Inside these subgraphs we can do rewrites that replace differentiable ops with non-differentiable ops.    
-- run post-differentiation optimizations
-  * if a graph doesn't require grad then these just run on the entire graph
-  * graph fusion, broadcasting issues
-- convert Graph -> Code object for interpreter
-
 ### Interpreter ###
 
 * Code
