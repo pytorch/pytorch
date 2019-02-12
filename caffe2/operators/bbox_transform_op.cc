@@ -187,3 +187,27 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using BBoxTransformOpFloatCPU = caffe2::BBoxTransformOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BBoxTransform,
+    (std::vector<c10::Argument>{
+        c10::Argument("rois"),
+        c10::Argument("deltas"),
+        c10::Argument("im_info"),
+        c10::Argument("weights", ListType::create(FloatType::get())),
+        c10::Argument("apply_scale", BoolType::get()),
+        c10::Argument("correct_transform_coords", BoolType::get()),
+        c10::Argument("rotated", BoolType::get()),
+        c10::Argument("angle_bound_on", BoolType::get()),
+        c10::Argument("angle_bound_lo", IntType::get()),
+        c10::Argument("angle_bound_hi", IntType::get()),
+        c10::Argument("clip_angle_thresh", FloatType::get()),
+    }),
+    (std::vector<c10::Argument>{
+        c10::Argument("output_0"),
+        c10::Argument("output_1"),
+    }),
+    BBoxTransformOpFloatCPU
+);

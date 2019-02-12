@@ -128,12 +128,16 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
 
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net) {
+    caffe2::NetDef* pred_net,
+    const std::unordered_set<string>& exceptions) {
   std::unordered_map<std::string, std::string> input_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
 #define REWRITE_EXTERNAL_IO(net, name)                 \
   for (auto& name : *net->mutable_external_##name()) { \
+    if (exceptions.count(name)) {                      \
+      continue;                                        \
+    }                                                  \
     auto version = blob_versions.at(name);             \
     auto new_##name = SsaName(name, version);          \
     name##_mapping.emplace(new_##name, name);          \
@@ -149,9 +153,15 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       op.set_output(0, SsaName(output, 0));
     }
     for (const auto& input : init_net->external_input()) {
+      if (exceptions.count(input)) {
+        continue;
+      }
       blob_versions.emplace(input, 0);
     }
     for (const auto& output : init_net->external_output()) {
+      if (exceptions.count(output)) {
+        continue;
+      }
       blob_versions.emplace(output, 0);
     }
     REWRITE_EXTERNAL_IO(init_net, input);
@@ -160,11 +170,17 @@ std::unordered_map<std::string, std::string> SsaRewrite(
 
   if (pred_net) {
     for (const auto& input : pred_net->external_input()) {
+      if (exceptions.count(input)) {
+        continue;
+      }
       blob_versions.emplace(input, 0);
     }
     REWRITE_EXTERNAL_IO(pred_net, input);
     for (auto& op : *pred_net->mutable_op()) {
       for (auto& input : *op.mutable_input()) {
+        if (exceptions.count(input)) {
+          continue;
+        }
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
           input = SsaName(input, it->second);
@@ -174,6 +190,9 @@ std::unordered_map<std::string, std::string> SsaRewrite(
         }
       }
       for (auto& output : *op.mutable_output()) {
+        if (exceptions.count(output)) {
+          continue;
+        }
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
           it->second += 1;
@@ -192,6 +211,9 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     }
     for (auto& op : *pred_net->mutable_op()) {
       for (auto& output : *op.mutable_output()) {
+        if (exceptions.count(output)) {
+          continue;
+        }
         auto pos = output.find_last_of('_');
         CAFFE_ENFORCE_NE(pos, 0);
         auto basename = output.substr(0, pos);
