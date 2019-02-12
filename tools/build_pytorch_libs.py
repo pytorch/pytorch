@@ -165,7 +165,7 @@ def run_cmake(version,
         ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
-        USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
+        USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM') or android_abi),
         USE_NUMPY=USE_NUMPY,
         NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
@@ -201,10 +201,10 @@ def run_cmake(version,
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
     if android_abi is not None:
-        android_ndk_dir = os.getenv('ANDROID_NDK') # or pass as argument?
+        android_ndk_dir = os.getenv('ANDROID_NDK')  # or pass as argument?
         assert android_ndk_dir, "Please set the environment variable ANDROID_NDK"
         cmake_defines(cmake_args,
-                      CAFFE2_CUSTOM_PROTOC_EXECUTABLE=os.path.join(build_dir, "../build_host_protoc/bin/protoc"),
+                      CAFFE2_CUSTOM_PROTOC_EXECUTABLE=os.path.join(base_dir, "build_host_protoc/bin/protoc"),
                       CMAKE_TOOLCHAIN_FILE=os.path.join(android_ndk_dir, "build/cmake/android.toolchain.cmake"),
                       ANDROID_TOOLCHAIN="clang",
                       USE_OPENMP="OFF",
@@ -214,7 +214,7 @@ def run_cmake(version,
                       ANDROID_CPP_FEATURES="rtti exceptions",
                       USE_MOBILE_OPENGL="OFF",
                       USE_MKL="OFF",
-                      DBUILD_TORCH_MOBILE="ON",
+                      BUILD_TORCH_MOBILE="ON",
                       protobuf_BUILD_PROTOC_BINARIES="OFF",
                       BUILD_PYTHON="OFF",
                       BUILD_SHARED_LIBS="OFF",
