@@ -2461,6 +2461,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_dist(self, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_geqrf(self):
+        _TestTorchMixin._test_geqrf(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_trtrs(self):
         _TestTorchMixin._test_trtrs(self, lambda t: t.cuda())
 
