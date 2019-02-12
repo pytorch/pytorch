@@ -101,9 +101,9 @@ def get_nvidia_driver_version(run_lambda):
 
 def get_gpu_info(run_lambda):
     if get_platform() == 'darwin':
-        if TORCH_AVAILABLE:
+        if TORCH_AVAILABLE and torch.cuda.is_available():
             return torch.cuda.get_device_name(None)
-        return 'N/A on Darwin'
+        return None
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
