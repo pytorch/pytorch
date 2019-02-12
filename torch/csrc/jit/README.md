@@ -678,9 +678,106 @@ Note the two phases for compilation of fusion groups: First, the `FuseGraph` pas
 
 In the case where no gradients are required, the optimization process is finished, a Code object is constructed from the Graph, it is added to the code cache, and then an InterpreterState is constructed and run.
 
+```
+graph(%x : Float(*, *)
+      %hx : Float(*, *)
+      %cx : Float(*, *)
+      %w_ih : Float(*, *)
+      %w_hh : Float(*, *)
+      %b_ih : Float(*)
+      %b_hh : Float(*)) {
+  %9 : Float(*, *) = aten::t(%w_ih)
+  %10 : Float(*, *) = aten::mm(%x, %9)
+  %11 : Float(*, *) = aten::t(%w_hh)
+  %12 : Float(*, *) = aten::mm(%hx, %11)
+  %77 : Tensor[] = prim::ListConstruct(%b_hh, %b_ih, %10, %12)
+  %78 : Tensor[] = aten::broadcast_tensors(%77)
+  %79 : Tensor, %80 : Tensor, %81 : Tensor, %82 : Tensor = prim::ListUnpack(%78)
+  %hy : Float(*, *), %cy : Float(*, *) = prim::FusionGroup_0(%cx, %82, %81, %80, %79)
+  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+with prim::FusionGroup_0 = graph(%13 : Float(*, *)
+      %71 : Tensor
+      %76 : Tensor
+      %81 : Tensor
+      %86 : Tensor) {
+  %87 : Float(*, *), %88 : Float(*, *), %89 : Float(*, *), %90 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%86)
+  %82 : Float(*, *), %83 : Float(*, *), %84 : Float(*, *), %85 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%81)
+  %77 : Float(*, *), %78 : Float(*, *), %79 : Float(*, *), %80 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%76)
+  %72 : Float(*, *), %73 : Float(*, *), %74 : Float(*, *), %75 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%71)
+  %69 : int = prim::Constant[value=1]()
+  %70 : Float(*, *) = aten::add(%77, %72, %69)
+  %66 : Float(*, *) = aten::add(%78, %73, %69)
+  %62 : Float(*, *) = aten::add(%79, %74, %69)
+  %58 : Float(*, *) = aten::add(%80, %75, %69)
+  %54 : Float(*, *) = aten::add(%70, %82, %69)
+  %50 : Float(*, *) = aten::add(%66, %83, %69)
+  %46 : Float(*, *) = aten::add(%62, %84, %69)
+  %42 : Float(*, *) = aten::add(%58, %85, %69)
+  %38 : Float(*, *) = aten::add(%54, %87, %69)
+  %34 : Float(*, *) = aten::add(%50, %88, %69)
+  %30 : Float(*, *) = aten::add(%46, %89, %69)
+  %26 : Float(*, *) = aten::add(%42, %90, %69)
+  %ingate : Float(*, *) = aten::sigmoid(%38)
+  %forgetgate : Float(*, *) = aten::sigmoid(%34)
+  %cellgate : Float(*, *) = aten::tanh(%30)
+  %outgate : Float(*, *) = aten::sigmoid(%26)
+  %14 : Float(*, *) = aten::mul(%forgetgate, %13)
+  %11 : Float(*, *) = aten::mul(%ingate, %cellgate)
+  %cy : Float(*, *) = aten::add(%14, %11, %69)
+  %4 : Float(*, *) = aten::tanh(%cy)
+  %hy : Float(*, *) = aten::mul(%outgate, %4)
+  return (%hy, %cy);
+}
+```
+
+
 *Derivate Splitting* Many Graphs will require gradients (i.e. one of the inputs will have a `requires_grad`) property set. In this case, it is unsafe to run post-derivative optimizations directly on the Graph. Instead, our approach is to first *split* the Graph into sub-Graphs where symbolic gradient formulas are known and produce an explicit Graph for the forward pass along with a complementary Graph that implements the backwards pass using some of the values computed in the forward pass. We can then apply post-derivative optimization to the forward graph. The "gradOutputs" for the backwards graph are only known when the backward pass runs, so we cannot fully optimize it at this time. For instance, we do not know if some of those gradOutputs will also `require_grad` meaning that a gradient-of-gradient situation exists. Instead the backward pass will use a new GraphExecutor object to run and optimize its execution. In this way, we can handle an indefinite number of recursive gradient calculations.
 
 The creating of derivative subgraphs is done using a similar approach to finding fusion groups: adjacent operations with known gradient formulas are grouped together into `prim::DifferentiableGraph` nodes. We only generate these nodes if we can find a large enough subgraph where optimization is likely to be profitable since there is some overhead involved in entering and exiting a differentiable subgraph.
+
+```
+graph(%x : Float(*, *)
+      %hx : Float(*, *)
+      %cx : Float(*, *)
+      %w_ih : Float(*, *)
+      %w_hh : Float(*, *)
+      %b_ih : Float(*)
+      %b_hh : Float(*)) {
+  %8 : int = prim::Constant[value=1]()
+  %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
+  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%30);
+}
+with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
+      %29 : Float(*)
+      %33 : Float(*)
+      %40 : Float(*, *)
+      %43 : Float(*, *)
+      %45 : Float(*, *)
+      %48 : Float(*, *)) {
+  %49 : Float(*, *) = aten::t(%48)
+  %47 : Float(*, *) = aten::mm(%45, %49)
+  %44 : Float(*, *) = aten::t(%43)
+  %42 : Float(*, *) = aten::mm(%40, %44)
+  %38 : int = prim::Constant[value=1]()
+  %39 : Float(*, *) = aten::add(%47, %42, %38)
+  %35 : Float(*, *) = aten::add(%39, %33, %38)
+  %gates : Float(*, *) = aten::add(%35, %29, %38)
+  %24 : Float(*, *), %25 : Float(*, *), %26 : Float(*, *), %27 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%gates)
+  %ingate : Float(*, *) = aten::sigmoid(%24)
+  %forgetgate : Float(*, *) = aten::sigmoid(%25)
+  %cellgate : Float(*, *) = aten::tanh(%26)
+  %outgate : Float(*, *) = aten::sigmoid(%27)
+  %14 : Float(*, *) = aten::mul(%forgetgate, %13)
+  %11 : Float(*, *) = aten::mul(%ingate, %cellgate)
+  %cy : Float(*, *) = aten::add(%14, %11, %38)
+  %4 : Float(*, *) = aten::tanh(%cy)
+  %hy : Float(*, *) = aten::mul(%outgate, %4)
+  return (%hy, %cy);
+}
+```
 
 ### DifferentiableGraphOp ###
 
