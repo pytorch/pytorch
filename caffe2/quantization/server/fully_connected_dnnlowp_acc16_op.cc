@@ -114,6 +114,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
     this->row_offsets_.resize(row_offset_size_per_thread);
     this->X_pack_buf_.resize(x_pack_buf_size_per_thread);
 
+    // TODO: use PackAMatrix if in_qparams_[1].zero_point == 0
     PackAWithRowOffset<uint8_t, int16_t> packA(
         matrix_op_t::NoTranspose,
         M,
@@ -130,10 +131,10 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           doNothingObj,
           &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
-          in_qparams_[0].zero_point,
+          column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
           &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
-          column_offsets_->data(),
+          column_offsets_->empty() ? nullptr : column_offsets_->data(),
           this->b_quantized_data_,
           N); // ncols per quant group
 
@@ -170,10 +171,10 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           doNothingObj,
           in_qparams_[0].scale,
           &in_qparams_[1].scale,
-          in_qparams_[0].zero_point,
+          column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
           &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
-          column_offsets_->data(),
+          column_offsets_->empty() ? nullptr : column_offsets_->data(),
           this->b_dequantized_data_,
           N); // ncols per quant group
 
@@ -222,8 +223,11 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
-          Y_int32_[i * N + j] -=
-              in_qparams_[0].zero_point * (*column_offsets_)[j] + row_offset;
+          Y_int32_[i * N + j] -= row_offset;
+          if (!column_offsets_->empty()) {
+            Y_int32_[i * N + j] -=
+                in_qparams_[0].zero_point * (*column_offsets_)[j];
+          }
           Ydata_float[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
                   in_qparams_[1].scale +
               b_dequantized_data_[j];
@@ -246,10 +250,10 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
             Ydata + i * N,
             &requantization_params_.real_multiplier,
             out_qparams_.zero_point,
-            in_qparams_[0].zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
             &in_qparams_[1].zero_point,
             &row_offset,
-            column_offsets_->data(),
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_->data(),
             N); // ncols per quant group
       }
