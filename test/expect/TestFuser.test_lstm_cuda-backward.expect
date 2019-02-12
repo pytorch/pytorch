@@ -1,29 +1,29 @@
-graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : UndefinedTensor
-      %3 : UndefinedTensor
-      %4 : UndefinedTensor
-      %5 : UndefinedTensor
-      %6 : UndefinedTensor
-      %7 : UndefinedTensor
-      %8 : UndefinedTensor
-      %9 : Float(*, *)
-      %10 : Float(*, *)
-      %11 : Float(*, *)
-      %12 : Float(*, *)
-      %13 : Float(*, *)
-      %14 : int[]
-      %15 : int[]
-      %16 : int[]
-      %17 : int[]
-      %18 : int[]
-      %19 : int[]
-      %ingate : Float(*, *)
-      %forgetgate : Float(*, *)
-      %cellgate : Float(*, *)
-      %outgate : Float(*, *)
-      %24 : int[]
-      %25 : int[]
+graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : UndefinedTensor,
+      %3 : UndefinedTensor,
+      %4 : UndefinedTensor,
+      %5 : UndefinedTensor,
+      %6 : UndefinedTensor,
+      %7 : UndefinedTensor,
+      %8 : UndefinedTensor,
+      %9 : Float(*, *),
+      %10 : Float(*, *),
+      %11 : Float(*, *),
+      %12 : Float(*, *),
+      %13 : Float(*, *),
+      %14 : int[],
+      %15 : int[],
+      %16 : int[],
+      %17 : int[],
+      %18 : int[],
+      %19 : int[],
+      %ingate : Float(*, *),
+      %forgetgate : Float(*, *),
+      %cellgate : Float(*, *),
+      %outgate : Float(*, *),
+      %24 : int[],
+      %25 : int[],
       %26 : Float(*, *)):
   %27 : int = prim::Constant[value=1]()
   %28 : int[] = aten::size(%outgate)
@@ -51,9 +51,9 @@ graph(%0 : Float(*, *)
   %53 : Float(*, *) = aten::mm(%52, %43)
   %54 : Float(*, *) = aten::t(%53)
   return (%grad_other.5, %41, %42, %46, %49, %51, %54)
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : Float(*, *)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : Float(*, *),
       %3 : int[]):
   %4 : int = prim::Constant[value=1]()
   %5 : Float(*, *) = aten::mul(%1, %2)
@@ -63,20 +63,20 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %9 : Float(*, *) = aten::mul(%8, %0)
   %10 : Tensor = aten::mul(%9, %grad_self.1)
   return (%10)
-with prim::FusionGroup_1 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : Float(*, *)
-      %3 : Float(*, *)
-      %4 : Float(*, *)
-      %5 : Float(*, *)
-      %6 : Float(*, *)
-      %7 : Float(*, *)
-      %8 : int[]
-      %9 : int[]
-      %10 : int[]
-      %11 : int[]
-      %12 : int[]
-      %13 : int[]
+with prim::FusionGroup_1 = graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : Float(*, *),
+      %3 : Float(*, *),
+      %4 : Float(*, *),
+      %5 : Float(*, *),
+      %6 : Float(*, *),
+      %7 : Float(*, *),
+      %8 : int[],
+      %9 : int[],
+      %10 : int[],
+      %11 : int[],
+      %12 : int[],
+      %13 : int[],
       %14 : int[]):
   %15 : int = prim::Constant[value=1]()
   %16 : Float(*, *) = aten::neg(%0)

@@ -1,8 +1,8 @@
-graph(%x.1_data : Tensor
-      %x.1_mask : Tensor
-      %x.1_dims : Tensor
-      %y_data : Tensor
-      %y_mask : Tensor
+graph(%x.1_data : Tensor,
+      %x.1_mask : Tensor,
+      %x.1_dims : Tensor,
+      %y_data : Tensor,
+      %y_mask : Tensor,
       %y_dims : Tensor):
   %6 : int = prim::Constant[value=1]()
   %7 : bool = prim::Constant[value=1]()

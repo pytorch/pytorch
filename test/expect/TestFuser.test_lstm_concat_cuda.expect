@@ -1,9 +1,9 @@
-graph(%input : Float(*, *)
-      %input0 : Float(*, *)
-      %cx : Float(*, *)
-      %weight : Float(*, *)
-      %weight0 : Float(*, *)
-      %bias : Float(*)
+graph(%input : Float(*, *),
+      %input0 : Float(*, *),
+      %cx : Float(*, *),
+      %weight : Float(*, *),
+      %weight0 : Float(*, *),
+      %bias : Float(*),
       %bias0 : Float(*)):
   %7 : Float(*, *) = aten::t(%weight)
   %8 : Float(*, *) = aten::mm(%input, %7)
@@ -14,10 +14,10 @@ graph(%input : Float(*, *)
   %13 : Tensor, %14 : Tensor, %15 : Tensor, %16 : Tensor = prim::ListUnpack(%12)
   %17 : Float(*, *) = prim::FusionGroup_0(%cx, %16, %15, %14, %13)
   return (%17)
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Tensor
-      %2 : Tensor
-      %3 : Tensor
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Tensor,
+      %2 : Tensor,
+      %3 : Tensor,
       %4 : Tensor):
   %5 : Float(*, *), %6 : Float(*, *), %7 : Float(*, *), %8 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%4)
   %9 : Float(*, *), %10 : Float(*, *), %11 : Float(*, *), %12 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%3)

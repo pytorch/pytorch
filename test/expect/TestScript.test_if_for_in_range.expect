@@ -1,4 +1,4 @@
-graph(%a.1 : Dynamic
+graph(%a.1 : Dynamic,
       %b.1 : Dynamic):
   %d.1 : Long() = prim::Constant[value={3}]()
   %3 : Long() = prim::Constant[value={20}]()

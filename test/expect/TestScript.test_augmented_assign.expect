@@ -1,4 +1,4 @@
-graph(%a.1 : Tensor
+graph(%a.1 : Tensor,
       %b : Tensor):
   %2 : int = prim::Constant[value=1]()
   %a.2 : Tensor = aten::add_(%a.1, %b, %2)

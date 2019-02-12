@@ -1,7 +1,7 @@
-graph(%mat : Tensor
-      %mat1 : Tensor
-      %mat2 : Tensor
-      %alpha : Tensor
+graph(%mat : Tensor,
+      %mat1 : Tensor,
+      %mat2 : Tensor,
+      %alpha : Tensor,
       %beta : Tensor):
   %5 : int = prim::Constant[value=1]()
   %6 : float = prim::Constant[value=4.2]()

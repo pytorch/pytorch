@@ -1,4 +1,4 @@
-graph(%input : Tensor
+graph(%input : Tensor,
       %opt.1 : Tensor?):
   %2 : None = prim::None()
   %3 : int = prim::Constant[value=1]()

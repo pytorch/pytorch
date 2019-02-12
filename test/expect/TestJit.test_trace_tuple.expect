@@ -1,4 +1,4 @@
-graph(%x : Double(2, 2)
+graph(%x : Double(2, 2),
       %1 : (Double(2, 2), Double(2, 2))):
   %2 : Double(2, 2), %3 : Double(2, 2) = prim::TupleUnpack(%1)
   %4 : Double(2, 2) = aten::mul(%x, %3)

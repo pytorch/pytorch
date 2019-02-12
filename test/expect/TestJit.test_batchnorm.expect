@@ -1,8 +1,8 @@
-graph(%input : Double(2, 2, 2, 2)
-      %1 : Double(2)
-      %2 : Double(2)
-      %3 : Double(2)
-      %4 : Double(2)
+graph(%input : Double(2, 2, 2, 2),
+      %1 : Double(2),
+      %2 : Double(2),
+      %3 : Double(2),
+      %4 : Double(2),
       %5 : Long()):
   %6 : bool = prim::Constant[value=1](), scope: BatchNorm2d
   %7 : float = prim::Constant[value=0.1](), scope: BatchNorm2d

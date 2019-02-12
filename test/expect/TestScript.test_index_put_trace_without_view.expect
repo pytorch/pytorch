@@ -1,5 +1,5 @@
-graph(%target : Double(100)
-      %indices.1 : Long(4)
+graph(%target : Double(100),
+      %indices.1 : Long(4),
       %rhs : Double(4)):
   %3 : int = prim::Constant[value=4]()
   %4 : int = prim::Constant[value=0]()
