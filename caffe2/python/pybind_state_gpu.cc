@@ -111,7 +111,10 @@ void addCUDAGlobalMethods(py::module& m) {
             verbosity,
             debug_builder,
             build_serializable_op);
-        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        ts.Transform(
+            GlobalWorkspaceUtil::get().currentWorkspace(),
+            &pred_net,
+            tensor_shapes);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);

@@ -3,6 +3,7 @@
 #include <unordered_map>
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/global_workspace.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/memonger.h"
@@ -48,9 +49,6 @@ namespace py = pybind11;
 void addGlobalMethods(pybind11::module& m);
 // Expose Workspace, Net, Blob
 void addObjectMethods(pybind11::module& m);
-
-// Get current workspace
-Workspace* GetCurrentWorkspace();
 
 class C10_EXPORT BlobFetcherBase {
  public:
