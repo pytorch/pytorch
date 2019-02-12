@@ -1,6 +1,20 @@
 import torch.cuda.comm as comm
-import torch.jit
 from torch.cuda._utils import _get_device_index
+
+
+def _is_script_module(module):
+    import torch.jit
+    return isinstance(module, torch.jit.ScriptModule)
+
+
+def _init_script_module():
+    import torch.jit
+    return torch.jit.ScriptModule()
+
+
+def _is_jit_enabled():
+    import torch.jit
+    return torch.jit._enabled
 
 
 # Check if we can safely replicate the module.
@@ -13,25 +27,21 @@ from torch.cuda._utils import _get_device_index
 # any ScriptModule contains python module (type 1 above)
 def _replicatable_module(module, memo=None):
 
-    def legal_submodule(m):
-        # weak modules are ScriptModule as well.
-        return isinstance(m, torch.jit.ScriptModule)
-
     # module.modules() contains module itself as the first element
     def descendant_modules(module):
         gen = module.modules()
         next(gen)
         return gen
 
-    if not torch.jit._enabled:
+    if not _is_jit_enabled():
         return True
     if memo is None:
         memo = set()
 
     memo.add(module)
-    if isinstance(module, torch.jit.ScriptModule):
+    if _is_script_module(module):
         memo.update(descendant_modules(module))
-        return all(legal_submodule(descendant) for
+        return all(_is_script_module(descendant) for
                    descendant in descendant_modules(module))
 
     for child in module.children():
@@ -46,7 +56,7 @@ def _replicatable_module(module, memo=None):
 def _build_param_dict(modules, module_copies, module_indices):
     param_dict = {}
     for module in modules:
-        if not isinstance(module, torch.jit.ScriptModule):
+        if not _is_script_module(module):
             continue
         replica = module_copies[module_indices[module]]
         for name, param in module.named_parameters(recurse=False):
@@ -59,7 +69,7 @@ def _build_param_dict(modules, module_copies, module_indices):
 def _copy_scriptmodule_methods(modules, module_copies, module_indices):
     param_dict = _build_param_dict(modules, module_copies, module_indices)
     for i, module in enumerate(modules):
-        if not isinstance(module, torch.jit.ScriptModule):
+        if not _is_script_module(module):
             continue
         replica = module_copies[i]
         for method_name in module._method_names():
@@ -99,10 +109,10 @@ def replicate(network, devices, detach=False):
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            if isinstance(module, torch.jit.ScriptModule):
+            if _is_script_module(module):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
-                replica = torch.jit.ScriptModule()
+                replica = _init_script_module()
                 keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
                 for key in keys:
                     replica.__dict__[key] = module.__dict__[key]
