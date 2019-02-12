@@ -89,7 +89,6 @@ class CAFFE2_API BoundShapeInferencer {
   ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::UNKNOWN};
   int64_t current_max_batch_size_{0};
   std::unordered_map<std::string, ShapeInfo> shape_info_;
-  std::unordered_set<std::string> visited_tensors_;
 };
 
 } // namespace caffe2
