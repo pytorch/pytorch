@@ -158,8 +158,10 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   uint8_t* src = (uint8_t*) buffer.buf;
   THWStorage* storage = THWStorage_(newWithSize)(count);
 
-#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR) || defined(TH_REAL_IS_BOOL)
+#if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
   memcpy(THWStorage_(data)(storage), src + offset, count);
+#elif defined(TH_REAL_IS_BOOL)
+  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
   THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
