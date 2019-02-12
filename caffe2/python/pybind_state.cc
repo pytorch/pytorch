@@ -1628,10 +1628,13 @@ void addGlobalMethods(py::module& m) {
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
+        Workspace* curr_ws = GetCurrentWorkspace();
+        auto weight_names = curr_ws->Blobs();
         ts.Transform(
-            GetCurrentWorkspace(),
+            curr_ws,
             &pred_net,
             external_inputs,
+            weight_names,
             tensor_shapes,
             std::unordered_set<int>());
         std::string pred_net_str2;

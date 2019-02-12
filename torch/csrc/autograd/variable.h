@@ -407,6 +407,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
+  bool has_storage() const override;
   const at::Storage& storage() const override;
   void* slow_data() const override;
 

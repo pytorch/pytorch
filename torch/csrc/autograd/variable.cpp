@@ -92,6 +92,10 @@ void* Variable::Impl::slow_data() const {
   return data_.unsafeGetTensorImpl()->slow_data();
 }
 
+bool Variable::Impl::has_storage() const {
+  return data_.has_storage();
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }

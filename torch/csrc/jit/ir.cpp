@@ -1195,9 +1195,9 @@ Node* Graph::createFusionGroup() {
   return n;
 }
 
-Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+Node* Graph::createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types));
+  auto tt = TupleType::create(std::move(types), std::move(field_names));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
