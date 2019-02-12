@@ -125,11 +125,11 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
+inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     return type().${api_name}(${method_actuals});
 }
 """)
@@ -485,7 +485,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'cimpls': List[Any],
     'cname': str,
     'condition': str,
-    'const_mark': str,
     'device_guard': bool,
     'device_guard_declaration': str,
     'with_gil': bool,
@@ -832,8 +831,6 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = option['formals']
         option['type_method_actuals'] = option['actuals']
 
-        option['const_mark'] = '' if option['inplace'] else ' const'
-
         is_method = 'method' in option['variants']
         is_function = 'function' in option['variants']
         dispatch_tensor = find_dispatch_tensor(formals)
@@ -1076,8 +1073,6 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
         option['native_actuals'] = [f['name'] for f in formals]
-
-        option['const_mark'] = '' if option['inplace'] else ' const'
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
