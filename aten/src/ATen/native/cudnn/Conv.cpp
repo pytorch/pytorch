@@ -479,9 +479,9 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
                   || perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
     perfResults[best_algo_idx].algo = search::DEFAULT_ALGO;
     if (args.params.dataType == CUDNN_DATA_HALF) {
-      perfResults.mathType = CUDNN_TENSOR_OP_MATH;
+      perfResults[best_algo_idx].mathType = CUDNN_TENSOR_OP_MATH;
     } else {
-      perfResults.mathType = CUDNN_DEFAULT_MATH;
+      perfResults[best_algo_idx].mathType = CUDNN_DEFAULT_MATH;
     }
   }
 
