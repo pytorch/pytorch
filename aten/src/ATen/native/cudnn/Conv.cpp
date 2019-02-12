@@ -458,6 +458,7 @@ size_t getMaxWorkspaceSize(
 
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo, bool strided = false) {
+  using search = algorithm_search<perf_t>;
   int best_algo_idx;
   if (args.params.deterministic) {
     // iterate over perf results of all algorithms and find the best deterministic algo
