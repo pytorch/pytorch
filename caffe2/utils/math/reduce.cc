@@ -8,7 +8,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
 namespace math {

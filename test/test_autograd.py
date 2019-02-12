@@ -204,6 +204,26 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
+    def test_slogdet_sign(self):
+        a = torch.randn(3, 3, requires_grad=True)
+        s, logdet = a.slogdet()
+
+        # test that sign should not require grad
+        self.assertFalse(s.requires_grad)
+
+        # test that backward through computation involving sign works
+        def sign_mul_logdet(mat):
+            s, logdet = mat.slogdet()
+            return s * logdet
+
+        u, s, v = a.detach().svd()
+        s.abs_().clamp_(0.0001)
+        for sign in (-1, 1):
+            s[-1] = sign
+            mat = torch.chain_matmul(u, s.diag(), v.t()).requires_grad_()
+            gradcheck(sign_mul_logdet, mat)
+            gradgradcheck(sign_mul_logdet, mat)
+
     def test_sum_to_with_empty_dim_grad(self):
         a = torch.rand(4, 0, requires_grad=True)
         b = torch.rand(4, 1, requires_grad=True)

@@ -23,7 +23,7 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
     error << "Input list to torch.tensor must be of ints, floats, or bools, " <<
       "got " << elem_type->str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(DynamicType::get())) {
+    if (elem_type->isSubtypeOf(TensorType::get())) {
       auto input = node->inputs().at(0);
       if (input->node()->kind() == prim::ListConstruct && input->node()->inputs().size() == 0) {
         error << "\n(Note: empty lists are constructed as Tensor[]; \n"
@@ -125,7 +125,7 @@ void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::Ar
       data += strides[dim] * elementSize;
     }
   } else {
-    JIT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
+    AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
       storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, obj.toIntListRef());
     } else if (obj.isDoubleList()){
@@ -168,7 +168,7 @@ RegisterOperators reg({
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
 
-          JIT_ASSERT(defaults.size() > list.size());
+          AT_ASSERT(defaults.size() > list.size());
 
           // TODO: allow list of optionals to be filled in with defaults
           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]

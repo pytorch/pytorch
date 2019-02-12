@@ -1,6 +1,6 @@
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
-#include "caffe2/operators/spatial_batch_norm_op_gpu_impl.cuh"
+#include "caffe2/operators/spatial_batch_norm_op_impl.cuh"
 
 namespace caffe2 {
 

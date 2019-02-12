@@ -19,7 +19,7 @@ else
   # directory in cwd
   python_installation="$(dirname $(dirname $(cd /usr && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
   caffe2_pypath="$python_installation/caffe2"
-  cpp_test_dir="$python_installation/caffe2/cpp_test"
+  cpp_test_dir="$python_installation/torch/test"
   ld_library_path="$python_installation/torch/lib"
 fi
 
@@ -91,10 +91,8 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Currently these tests are failing on ROCM platform:
 
   # Unknown reasons, need to debug
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/arg_ops_test.py")
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/softmax_ops_test.py")
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/unique_ops_test.py")
 
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl

@@ -18,7 +18,7 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
@@ -532,7 +532,6 @@ template <typename T, class Context>
 bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -553,7 +552,8 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         "bias dimension must be equal to output channel number");
   }
 
-  ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const int outputH = Y->dim32(2);
   const int outputW = Y->dim32(3);

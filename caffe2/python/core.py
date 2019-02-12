@@ -239,6 +239,9 @@ class BlobReference(object):
     def GetNameScope(self):
         return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
 
+    def GetUnscopedName(self):
+        return self._name[self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1:]
+
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
         network's __getattr__ function.
