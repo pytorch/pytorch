@@ -715,11 +715,23 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
+    const std::unordered_set<std::string>& weights,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
+  // Make sure weights do not contain output of any op.
+  for (const auto& op : pred_net->op()) {
+    for (const auto& output : op.output()) {
+      CAFFE_ENFORCE_EQ(weights.count(output), 0);
+    }
+  }
+  input_mapping_ = onnx::SsaRewrite(nullptr, pred_net, weights);
   // Annote the ops with net position
   AnnotateOpIndex(pred_net);
   std::vector<std::string> external_inputs;
+  // Need to add mapping for weights. This will be used to create new workspace
+  // with mapped weights.
+  for (const auto& w : weights) {
+    input_mapping_.emplace(w, w);
+  }
   for (const auto kv : input_mapping_) {
     reverse_input_mapping_.emplace(kv.second, kv.first);
     if (!ws->HasBlob(kv.second)) {
@@ -792,14 +804,22 @@ NetDef OnnxifiTransformer::TransformViaC2(
       auto* shape_arg = net.add_arg();
       shape_arg->set_name("input_shape_info");
       for (const auto& i : op.input()) {
+        const auto it = shape_hints.find(i);
+        if (it == shape_hints.end()) {
+          return false;
+        }
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, it->second));
       }
       shape_arg = net.add_arg();
       shape_arg->set_name("output_shape_info");
       for (const auto& i : op.output()) {
+        const auto it = shape_hints.find(i);
+        if (it == shape_hints.end()) {
+          return false;
+        }
         shape_arg->mutable_tensors()->Add()->CopyFrom(
-            WrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
+            WrapShapeInfoIntoTensorProto(i, it->second));
       }
 
       std::string c2_model_str;
@@ -958,6 +978,7 @@ void OnnxifiTransformer::Transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& external_inputs,
+    const std::vector<std::string>& weight_names,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
@@ -967,9 +988,12 @@ void OnnxifiTransformer::Transform(
   model_id_ = GetModelId(*pred_net);
   onnxifi_op_id_ = 0;
 
+  std::unordered_set<std::string> weights(
+      weight_names.begin(), weight_names.end());
+
   // SSA Rewrite the net
   auto shape_hints_ordered =
-      SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+      SsaRewriteAndMapNames(ws, pred_net, weights, input_shape_hints);
 
   // Populate shape info
   Workspace mapped_ws(ws, input_mapping_);
@@ -979,22 +1003,6 @@ void OnnxifiTransformer::Transform(
       &shape_hints_ordered,
       opts_.infer_shapes,
       opts_.bound_shape_spec);
-
-  // Figure out what are the weights
-  std::unordered_set<std::string> weights;
-  std::unordered_set<std::string> input_set;
-  for (const auto& i : external_inputs) {
-    const auto it = reverse_input_mapping_.find(i);
-    if (it != reverse_input_mapping_.end()) {
-      input_set.emplace(it->second);
-    }
-  }
-  const std::vector<string>& ws_blobs = mapped_ws.Blobs();
-  for (const auto& s : ws_blobs) {
-    if (!input_set.count(s)) {
-      weights.emplace(s);
-    }
-  }
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx

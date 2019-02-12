@@ -195,5 +195,5 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
     c10::Argument("mean"),
     c10::Argument("stdev")
   }),
-  caffe2::LayerNormOp
+  caffe2::LayerNormOp<caffe2::CPUContext>
 )

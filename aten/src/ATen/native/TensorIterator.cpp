@@ -95,20 +95,21 @@ void TensorIterator::compute_types() {
   if (missing_dtypes || compute_common_dtype_) {
     auto& type = compute_common_type();
     for (auto& op : operands_) {
+      auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.type().scalarType());
       if (!op.type) {
         op.type = &type;
       } else if (compute_common_dtype_ && op.type != &type) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            type.device_type() == kCUDA && op.tensor.type().device_type() == kCPU) {
+            type.device_type() == kCUDA && op_tensor_type.device_type() == kCPU) {
           // don't cast CPU scalars in CUDA ops that directly support them
-          op.type = &op.tensor.type();
+          op.type = &op_tensor_type;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
-            !op.is_output && op.tensor.type().scalarType() == kHalf &&
+            !op.is_output && op_tensor_type.scalarType() == kHalf &&
             type.scalarType() == kFloat && type.device_type() == kCUDA &&
-            op.tensor.type().device_type() == kCUDA) {
+            op_tensor_type.device_type() == kCUDA) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU
-          op.type = &op.tensor.type();
+          op.type = &op_tensor_type;
         } else {
           op.type = &type;
         }
@@ -117,15 +118,16 @@ void TensorIterator::compute_types() {
   }
 
   for (auto& op : operands_) {
-    if (op.tensor.defined() && op.tensor.type() != *op.type) {
+    auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.type().scalarType());
+    if (op.tensor.defined() && op_tensor_type != *op.type) {
       if (op.is_output) {
-        AT_ERROR("output with type ", op.tensor.type().toString(),
+        AT_ERROR("output with type ", op_tensor_type.toString(),
                  " doesn't match the desired type ", op.type->toString());
       } else if (op.tensor.dim() == 0) {
         op.tensor = op.tensor.to(*op.type);
       } else {
         AT_ERROR("expected type ", op.type->toString(), " but got ",
-            op.tensor.type().toString());
+            op_tensor_type.toString());
       }
     }
   }

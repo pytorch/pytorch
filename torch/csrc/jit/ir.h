@@ -1042,7 +1042,7 @@ struct Graph {
   TORCH_API Node* createUndefined();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
-  TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
+  TORCH_API Node* createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names=c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
