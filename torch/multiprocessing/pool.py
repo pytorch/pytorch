@@ -20,8 +20,12 @@ class Pool(multiprocessing.pool.Pool):
     serializing the underlying data."""
 
     def _setup_queues(self):
-        self._inqueue = SimpleQueue()
-        self._outqueue = SimpleQueue()
+        if hasattr(self, "_ctx"):
+            self._inqueue = self._ctx.SimpleQueue()
+            self._outqueue = self._ctx.SimpleQueue()
+        else:
+            self._inqueue = SimpleQueue()
+            self._outqueue = SimpleQueue()
         self._quick_put = self._inqueue._writer.send
         self._quick_get = self._outqueue._reader.recv
 
