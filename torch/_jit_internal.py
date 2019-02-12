@@ -162,7 +162,7 @@ def ignore(fn):
 
 try:
     import typing
-    from typing import Tuple, List
+    from typing import Tuple, List, Dict
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -174,6 +174,11 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.List or
              getattr(ann, '__origin__', None) is list)
+
+    def is_dict(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Dict or
+             getattr(ann, '__origin__', None) is dict)
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -196,14 +201,26 @@ except ImportError:
         def __getitem__(self, types):
             return TupleInstance(types)
 
+    class DictInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class DictCls(object):
+        def __getitem__(self, types):
+            return DictInstance(types)
+
     Tuple = TupleCls()
     List = ListCls()
+    Dict = DictCls()
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
 
     def is_list(ann):
         return isinstance(ann, ListInstance)
+
+    def is_dict(ann):
+        return isinstance(ann, DictInstance)
 
 
 # allows BroadcastingList instance to be subscriptable
