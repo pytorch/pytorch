@@ -377,7 +377,7 @@ tests = [
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
     ('std', small_3d, lambda t: []),
-    ('std', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('std', small_3d, lambda t: [1], 'dim', types, False),
     ('std', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
     ('var', small_3d, lambda t: []),
     ('var', small_3d, lambda t: [1], 'dim'),
