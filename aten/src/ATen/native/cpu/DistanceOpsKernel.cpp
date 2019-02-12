@@ -11,7 +11,7 @@
 namespace at { namespace native { namespace {
 
 template<typename scalar_t>
-struct PDist {
+struct Dist {
   using Vec = vec256::Vec256<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
@@ -295,7 +295,7 @@ struct PDist {
     const scalar_t * const dist_start = dist.data<scalar_t>();
     const scalar_t * const t1_start = t1.data<scalar_t>();
     const scalar_t * const t2_start = t2.data<scalar_t>();
-    scalar_t * const res_start = result.data<scalar_t>();;
+    scalar_t * const res_start = result.data<scalar_t>();
 
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {
       const Vec pvec(p);
@@ -337,25 +337,25 @@ struct PDist {
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
-    PDist<scalar_t>::apply_pdist(result, self, p);
+    Dist<scalar_t>::apply_pdist(result, self, p);
   });
 }
 
 static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
-    PDist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
+    Dist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
   });
 }
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
   AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
-    PDist<scalar_t>::apply_cdist(result, x1, x2, p);
+    Dist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }
 
 static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist_backward", [&] {
-    PDist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
+    Dist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
   });
 }
 
