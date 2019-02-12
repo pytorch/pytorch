@@ -112,6 +112,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 // the best algo and the updated descriptor. If we don't update the descriptor but just run
 // with the best algo, under the hood, cudnn will run with the slower kernel 
 // since it sees fastest algorithm combination with a sub optimal mathType.
+
+// Note [blacklist fft algorithms for strided dgrad]
+// This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution 
+// gradient setups. Check Issue #16610 for bug details.
+
 namespace at { namespace native {
 
 // TODO: Go through all the checking code again and make sure
@@ -686,6 +691,16 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
     return;
   }
 
+  // See Note [blacklist fft algorithms for strided dgrad]
+  int stride_dim = args.input.dim() - 2;
+  bool strided = false;
+  for (int i = 0; i< stride_dim; i++) {
+    if (args.params.stride[i] != 1) {
+        strided = true;
+        break;
+    }
+  }
+
   if (benchmark) {
     if (cache.find(args.params, algoPerf)) {
       // re-check cache since another thread may have benchmarked the algorithm
@@ -698,6 +713,17 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
   // deterministic algo
   if (perfResults.status == CUDNN_STATUS_SUCCESS &&
       !(args.params.deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
+      
+      // See Note [blacklist fft algorithms for strided dgrad]
+      if (strided && (perfResults.algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
+                      || perfResults.algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
+        perfResults.algo = search::DEFAULT_ALGO;
+        if (dataType == CUDNN_DATA_HALF) {
+          perfResults.mathType = CUDNN_TENSOR_OP_MATH;
+        } else {
+          perfResults.mathType = CUDNN_DEFAULT_MATH;
+        }
+      }
       
       // if benchmarking, map the original params with the found algo+math type for re-use
       if (benchmark) {
