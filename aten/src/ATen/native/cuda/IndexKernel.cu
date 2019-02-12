@@ -6,6 +6,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/Array.h>
 
+#include <c10/cuda/CUDACachingAllocator.h>
+
 namespace at { namespace native {
 
 
@@ -19,10 +21,10 @@ typedef struct {
 static status_t* make_device_status() {
   cudaError_t err;
   status_t* status;
-  AT_CUDA_CHECK(cudaMalloc(&status, sizeof *status));
+  status = (status_t *)cuda::CUDACachingAllocator::raw_alloc(sizeof *status);
   err = cudaMemset(status, 0, sizeof *status);
   if (err != cudaSuccess) {
-    AT_CUDA_CHECK(cudaFree(status));
+    cuda::CUDACachingAllocator::raw_delete(status);
     AT_CUDA_CHECK(err);
     return NULL; // Not reached.
   }
@@ -32,7 +34,7 @@ static status_t* make_device_status() {
 static void move_status_to_host(status_t *host_status, status_t *device_status) {
   cudaError_t err;
   err = cudaMemcpy(host_status, device_status, sizeof *host_status, cudaMemcpyDeviceToHost);
-  AT_CUDA_CHECK(cudaFree(device_status));
+  cuda::CUDACachingAllocator::raw_delete(device_status);
   AT_CUDA_CHECK(err);
 }
 
@@ -87,6 +89,8 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
           ds->index = index;
           ds->axis = i;
           ds->size = sizes[i];
+          __threadfence_system();
+          assert(0);
         }
         return;
       }
@@ -100,10 +104,17 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     f(out_data, in_data, offset);
   });
 
-  status_t hs;
-  move_status_to_host(&hs, ds);
-  if (hs.err) {
-    AT_INDEX_ERROR("index ", hs.index, " is out of bounds for dimension ", hs.axis, " with size ", hs.size);
+  if (cudaPeekAtLastError() != cudaSuccess) {
+    // Only do the expensive device -> host copy if the assert() was triggered.
+    status_t hs;
+    move_status_to_host(&hs, ds);
+    if (hs.err) {
+      AT_INDEX_ERROR("index ", hs.index, " is out of bounds for dimension ", hs.axis, " with size ", hs.size);
+    }
+    // else: this is another launch error that will be handled later as usual.
+  }
+  else {
+    cuda::CUDACachingAllocator::raw_delete(ds);
   }
 }
 
