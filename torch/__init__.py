@@ -256,6 +256,13 @@ for name in dir(_C._VariableFunctions):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
 
+################################################################################
+# Import interface functions defined in Python
+################################################################################
+
+# needs to be after the above ATen bindings so we can overwrite from Python side
+from .functional import *
+
 
 ################################################################################
 # Remove unnecessary members
@@ -269,12 +276,6 @@ del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
 
-################################################################################
-# Import interface functions defined in Python
-################################################################################
-
-# needs to be after the above ATen bindings so we can overwrite from Python side
-from .functional import *
 ################################################################################
 # Import most common subpackages
 ################################################################################
