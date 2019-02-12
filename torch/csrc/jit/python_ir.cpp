@@ -622,6 +622,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &TensorType::get);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
+  py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
+      .def_static("get", &StringType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
@@ -638,6 +640,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);
+  py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
+      .def(py::init([](TypePtr key, TypePtr value) {
+        return DictType::create(key, value);
+      }));
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
