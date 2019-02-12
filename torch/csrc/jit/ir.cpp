@@ -78,23 +78,18 @@ std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
 
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
-  bool use_newlines;
+  std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      bool use_newlines = false)
-      : values(values), use_newlines(use_newlines) {}
+      const std::string& delim = ", ")
+      : values(values), delim(delim) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
-      if (l.use_newlines) {
-        // TODO: Indent here is hard-coded for "graph(": un-hard-code it
-        out << "\n      ";
-      } else {
-        out << ", ";
-      }
+      out << l.delim;
     }
     printValueRef(out, n);
     out << " : ";
@@ -253,7 +248,7 @@ std::ostream& Node::print(
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
-                           << const_value_list_with_types(b->inputs(), false)
+                           << const_value_list_with_types(b->inputs())
                            << "):\n";
     for (auto nested : b->nodes()) {
       nested->print(out, level + 2, groups);
@@ -268,7 +263,8 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), true) << "):\n";
+  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+      << "):\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
     n->print(out, 1, &groups);
