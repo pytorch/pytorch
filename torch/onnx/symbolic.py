@@ -587,7 +587,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     padding_ceil = [0
                     if (stride[i] == 1)
                     else
-                    (kernel_size[i] - ( dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1 )))
+                    (kernel_size[i] - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1)))
                     for i in range(0, len(padding))]
     # ensure padding is not > kernel_size
     padding_ceil = [(padding_ceil[i] if padding_ceil[i] < kernel_size[i] - 1 else kernel_size[i] - 1)
@@ -606,7 +606,7 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
-    padding = tuple(_single(padding))    
+    padding = tuple(_single(padding))
     if ceil_mode:
         padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         padding = padding + tuple(numpy.add(padding_ceil, padding))
@@ -651,7 +651,7 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     padding = tuple(_triple(padding))
     if ceil_mode:
         padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil,padding))
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
     r = g.op("MaxPool", input,
@@ -678,7 +678,7 @@ def _avg_pool(name, tuple_fn):
                          value_f=0.)
             padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(numpy.add(padding_ceil,padding))
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
             padding = padding * 2
         output = g.op("AveragePool", input,
