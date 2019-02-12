@@ -2,14 +2,7 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
-from torch.nn.parameter import Parameter
-from torch.nn.modules import Module, ModuleList, ParameterList, Sequential
-from torch.nn.functional import _no_grad_embedding_renorm_ as functional__no_grad_embedding_renorm_
-from torch.nn.functional import interpolate as functional_interpolate
-from torch.nn.functional import upsample_nearest as functional_upsample_nearest
-from torch.nn.functional import upsample as functional_upsample
-from torch.nn.functional import upsample_bilinear as functional_upsample_bilinear
-from torch.nn.functional import assert_int_or_pair as functional_assert_int_or_pair
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
@@ -1324,7 +1317,7 @@ def _make_fail(name):
     return fail
 
 
-for name, method in _get_methods(Module):
+for name, method in _get_methods(torch.nn.Module):
     if name.startswith('__'):
         continue
     if name not in ScriptModule.__dict__ and name not in _compiled_methods_whitelist:
@@ -1476,14 +1469,14 @@ def _get_builtin_table():
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
     _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
     _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
-    _builtin_table[id(functional__no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
 
     _builtin_table[id(math.floor)] = "aten::floor"
-    _builtin_table[id(functional_interpolate)] = "aten::__interpolate"
-    _builtin_table[id(functional_upsample_nearest)] = "aten::__upsample_nearest"
-    _builtin_table[id(functional_upsample)] = "aten::__upsample"
-    _builtin_table[id(functional_upsample_bilinear)] = "aten::__upsample_bilinear"
-    _builtin_table[id(functional_assert_int_or_pair)] = "aten::_assert_int_or_pair"
+    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
+    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
+    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
+    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
+    _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
 
     return _builtin_table
 
