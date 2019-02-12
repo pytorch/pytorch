@@ -183,6 +183,7 @@ struct C10_API InefficientStdFunctionContext {
 
 } // namespace c10
 
+// TODO: move to c10
 namespace caffe2 {
 
 /** Set the allocator for DeviceType `t`. The passed in allocator pointer is
