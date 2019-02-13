@@ -979,6 +979,7 @@ def create_generic(top_env, declarations):
                     'IndexTensor': 'const Tensor &' if const else 'Tensor &',
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
+                    'TensorList': 'TensorList',
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():

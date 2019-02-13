@@ -37,6 +37,7 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/quantize_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/relu_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_dnnlowp_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/spatial_batch_norm_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/tanh_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/utility_dnnlowp_ops.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/dynamic_histogram.cc"

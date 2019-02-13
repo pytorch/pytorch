@@ -64,13 +64,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    function get_exit_code() {
-      set +e
-      "$@"
-      retcode=$?
-      set -e
-      return $retcode
-    }
     (cd test && python -c "import torch")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
@@ -188,27 +181,22 @@ test_xla() {
   assert_git_not_dirty
 }
 
-if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-    test_torchvision
-    test_xla
-  else
-    test_torchvision
-    test_python_nn
-    test_python_all_except_nn
-    test_aten
-    test_libtorch
-    test_custom_script_ops
-  fi
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+  test_torchvision
+  test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+  test_torchvision
+  test_python_nn
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+  test_python_all_except_nn
+  test_aten
+  test_libtorch
+  test_custom_script_ops
 else
-  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
-    test_torchvision
-    test_python_nn
-  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
-    test_torchvision
-    test_python_all_except_nn
-    test_aten
-    test_libtorch
-    test_custom_script_ops
-  fi
+  test_torchvision
+  test_python_nn
+  test_python_all_except_nn
+  test_aten
+  test_libtorch
+  test_custom_script_ops
 fi

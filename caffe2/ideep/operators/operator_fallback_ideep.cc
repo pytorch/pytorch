@@ -19,7 +19,6 @@
 #include <caffe2/operators/elementwise_mul_op.h>
 #include <caffe2/operators/elementwise_ops.h>
 #include <caffe2/operators/expand_op.h>
-#include <caffe2/operators/expand_squeeze_dims_op.h>
 #include <caffe2/operators/filler_op.h>
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/gather_op.h>
@@ -207,7 +206,6 @@ REGISTER_IDEEP_OPERATOR(
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Gather, IDEEPFallbackOp<GatherOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(ExpandDims, IDEEPFallbackOp<ExpandDimsOp<CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     ReduceL2,

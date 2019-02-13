@@ -18,7 +18,7 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 

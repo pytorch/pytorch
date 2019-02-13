@@ -99,7 +99,7 @@ class ThreadsafeOperatorTable_ final {
    }
 
    static std::string dispatch_key_to_string(TensorTypeId id) {
-     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + guts::to_string(id) + "]";
+     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + toString(id) + "]";
    }
 
    LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
@@ -174,7 +174,7 @@ class DispatchTable final {
  private:
   static size_t get_index_of_first_tensor_arg_(const FunctionSchema& schema) {
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
-      if (schema.arguments()[i].type()->isSubtypeOf(DynamicType::get())) {  // DynamicType means it's a tensor
+      if (schema.arguments()[i].type()->isSubtypeOf(TensorType::get())) {
         return i;
       }
     }
