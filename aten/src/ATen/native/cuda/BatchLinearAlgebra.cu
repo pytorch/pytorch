@@ -505,9 +505,13 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  Tensor result = at::empty_like(self);
-  tril_cuda_out(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
-  self.resize_as_(result).copy_(result);
+  if (checkTrilTriuBatchContiguous(self)) {
+    tril_cuda_out(self, self, k);
+  } else {
+    Tensor result = at::empty_like(self);
+    tril_cuda_out(result, self.contiguous(), k);
+    self.copy_(result);
+  }
   return self;
 }
 
@@ -523,9 +527,13 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  Tensor result = at::empty_like(self);
-  triu_cuda_out(result, checkTrilTriuBatchContiguous(self) ? self : self.contiguous(), k);
-  self.resize_as_(result).copy_(result);
+  if (checkTrilTriuBatchContiguous(self)) {
+    triu_cuda_out(self, self, k);
+  } else {
+    Tensor result = at::empty_like(self);
+    triu_cuda_out(result, self.contiguous(), k);
+    self.copy_(result);
+  }
   return self;
 }
 
