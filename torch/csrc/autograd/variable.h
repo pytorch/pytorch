@@ -396,8 +396,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   ~Impl() override;
 
   int64_t numel() const override;
-  at::IntList sizes() const override;
-  at::IntList strides() const override;
+  at::IntArrayRef sizes() const override;
+  at::IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
@@ -407,6 +407,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
+  bool has_storage() const override;
   const at::Storage& storage() const override;
   void* slow_data() const override;
 

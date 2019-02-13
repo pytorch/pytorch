@@ -302,7 +302,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
     if (T.dim() == canonical_axis) {
-      CAFFE_ENFORCE_EQ(T.size(), N);
+      CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
       CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
@@ -524,7 +524,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
     if (T.dim() == canonical_axis) {
-      CAFFE_ENFORCE_EQ(T.size(), N);
+      CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
       CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
@@ -537,7 +537,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
       // Copy softmax probabilities into dX
       if (!only_loss_) {
         context_.CopySameDevice<float>(
-            P.size(), P.data<float>(), dX->template mutable_data<float>());
+            P.numel(), P.data<float>(), dX->template mutable_data<float>());
       }
       LabelCrossEntropyGradientKernel<<<
           CAFFE_GET_BLOCKS(N),
@@ -592,14 +592,14 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
     math::Scale<float, float, CUDAContext>(
-        dX->size(),
+        dX->numel(),
         scale_ / total_weight,
         dX->data<float>(),
         dX->template mutable_data<float>(),
         &context_);
   }
   math::Scale<float, float, CUDAContext>(
-      dX->size(),
+      dX->numel(),
       d_avg_loss.data<float>(),
       dX->data<float>(),
       dX->template mutable_data<float>(),
@@ -654,7 +654,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   // Copy softmax probabilities into dX. All but the neuron
   // corresponding to the correct label has gradient equaling e(x_j)
   // which is the probability under softmax.
-  context_.CopySameDevice<float>(P.size(), Pdata, dX_data);
+  context_.CopySameDevice<float>(P.numel(), Pdata, dX_data);
 
   math::Set<float, CUDAContext>(
       1, 0.0f, total_weight_ptr_.mutable_data<float>(), &context_);
@@ -685,14 +685,14 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
   // Final scaling
   if (h_total_weight > 0) {
     math::Scale<float, float, CUDAContext>(
-        dX->size(),
+        dX->numel(),
         scale_ / h_total_weight,
         dX->data<float>(),
         dX->template mutable_data<float>(),
         &context_);
   }
   math::Scale<float, float, CUDAContext>(
-      dX->size(),
+      dX->numel(),
       d_avg_loss.data<float>(),
       dX->data<float>(),
       dX->template mutable_data<float>(),

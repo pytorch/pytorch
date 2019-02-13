@@ -70,7 +70,7 @@ static bool gather_impl_cuda(
   // would have data dimension size of 0.
   // This *must* be done AFTER output->raw_mutable_data() above as that has
   // important allocation side effect that we must see.
-  if (output->size() == 0) {
+  if (output->numel() == 0) {
     return true;
   }
 
@@ -83,7 +83,7 @@ static bool gather_impl_cuda(
   const int src_indexing_axis_dim = data.size(axis);
   // Treat indices as a single block even if they have multiple dimensions.
   // The "gathered batch" is a cumulative result combining indexed blocks.
-  const int N = indices.size();
+  const int N = indices.numel();
   auto gathered_batch_size = N * block_size;
   const auto src_batch_size = data.size_from_dim(axis);
 

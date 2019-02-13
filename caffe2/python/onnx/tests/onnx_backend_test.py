@@ -1,4 +1,4 @@
-## @package onnx
+# @package onnx
 # Module caffe2.python.onnx.tests.onnx_backend_test
 
 from __future__ import absolute_import

@@ -185,7 +185,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival->toTensor());
-    if (tensor.GetDeviceType() != type) {
+    if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
       tensor = Tensor(type);
       auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
@@ -196,7 +196,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline Tensor
-  XOutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  XOutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
@@ -213,8 +213,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
+  Tensor OutputTensorOrUndefined(int idx) {
+    return BlobGetTensorOrUndefined(*outputs_.at(idx));
+  }
+
   inline Tensor*
-  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE_WITH_CALLER(
           options.device_opt() != c10::nullopt,
@@ -667,7 +671,10 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+  /// XOutput is a modernized version of Output which returns a Tensor
+  /// rather than a Tensor* (the raw pointer in the latter case is
+  /// useless, as Tensor is a pointer type.)
+  Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
@@ -724,7 +731,7 @@ class Operator : public OperatorBase {
   /// helpful, as we may be able to fit the output in the same
   /// space that was previously used.
   ///
-  Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor* Output(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
@@ -733,10 +740,19 @@ class Operator : public OperatorBase {
     return OperatorBase::OutputTensor(idx, dims, options);
   }
 
+  /// Legacy: please consider using the version of Output() which also takes
+  /// dtype and size as arguments.
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
   }
 
+  /// Get the output Tensor of an operator (allocating it if it is not
+  /// already initialized), and copy the contents of src into it.
+  /// You probably don't actually want to use this function (the fact
+  /// that you have a Tensor to copy from is probably a mistake:
+  /// you should have written the output into the output tensor,
+  /// from Output, directly in the first place), but this method
+  /// is situationally useful.
   Tensor* OutputTensorCopyFrom(
       int idx,
       at::TensorOptions options,
@@ -1355,5 +1371,7 @@ CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
+
+#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

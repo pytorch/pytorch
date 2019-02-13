@@ -198,14 +198,14 @@ In-place version of :meth:`~Tensor.add`
 
 add_docstr_all('addbmm',
                r"""
-addbmm(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
+addbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.addbmm`
 """)
 
 add_docstr_all('addbmm_',
                r"""
-addbmm_(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
+addbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
 """)
@@ -240,28 +240,28 @@ In-place version of :meth:`~Tensor.addcmul`
 
 add_docstr_all('addmm',
                r"""
-addmm(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
+addmm(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 See :func:`torch.addmm`
 """)
 
 add_docstr_all('addmm_',
                r"""
-addmm_(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
+addmm_(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
 """)
 
 add_docstr_all('addmv',
                r"""
-addmv(beta=1, tensor, alpha=1, mat, vec) -> Tensor
+addmv(beta=1, alpha=1, mat, vec) -> Tensor
 
 See :func:`torch.addmv`
 """)
 
 add_docstr_all('addmv_',
                r"""
-addmv_(beta=1, tensor, alpha=1, mat, vec) -> Tensor
+addmv_(beta=1, alpha=1, mat, vec) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
 """)
@@ -2541,9 +2541,12 @@ add_docstr_all('to_sparse',
 to_sparse(sparseDims) -> Tensor
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
 :ref:`coordinate format <sparse-docs>`.
+
 Args:
     sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+
 Example::
+
     >>> d = torch.tensor([[0, 0, 0], [9, 0, 10], [0, 0, 0]])
     >>> d
     tensor([[ 0,  0,  0],
@@ -2656,11 +2659,9 @@ type_as(tensor) -> Tensor
 Returns this tensor cast to the type of the given tensor.
 
 This is a no-op if the tensor is already of the correct type. This is
-equivalent to::
+equivalent to ``self.type(tensor.type())``
 
-    self.type(tensor.type())
-
-Params:
+Args:
     tensor (Tensor): the tensor which has the desired type
 """)
 
@@ -2673,11 +2674,11 @@ Returns a tensor which contains all slices of size :attr:`size` from
 
 Step between two slices is given by :attr:`step`.
 
-If `sizedim` is the size of dimension dim for :attr:`self`, the size of
+If `sizedim` is the size of dimension :attr:`dim` for :attr:`self`, the size of
 dimension :attr:`dim` in the returned tensor will be
 `(sizedim - size) / step + 1`.
 
-An additional dimension of size size is appended in the returned tensor.
+An additional dimension of size :attr:`size` is appended in the returned tensor.
 
 Args:
     dim (int): dimension in which unfolding happens
@@ -2960,55 +2961,6 @@ add_docstr_all('pinverse',
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
-""")
-
-add_docstr_all('index_add',
-               r"""
-index_add(dim, index, tensor) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.index_add_`
-""")
-
-add_docstr_all('index_copy',
-               r"""
-index_copy(dim, index, tensor) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.index_copy_`
-""")
-
-add_docstr_all('index_fill',
-               r"""
-index_fill(dim, index, value) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.index_fill_`
-""")
-
-add_docstr_all('scatter',
-               r"""
-scatter(dim, index, source) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.scatter_`
-""")
-
-add_docstr_all('scatter_add',
-               r"""
-scatter_add(dim, index, source) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.scatter_add_`
-""")
-
-add_docstr_all('masked_scatter',
-               r"""
-masked_scatter(mask, tensor) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
-""")
-
-add_docstr_all('masked_fill',
-               r"""
-masked_fill(mask, value) -> Tensor
-
-Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
 add_docstr_all('grad',

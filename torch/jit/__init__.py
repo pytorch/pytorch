@@ -16,6 +16,7 @@ import torch.testing
 
 import math
 from collections import defaultdict, OrderedDict, namedtuple
+import textwrap
 import sys
 import warnings
 import itertools
@@ -917,13 +918,13 @@ def _get_valid_constant(attr, v):
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(
-        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
-        "is not a valid constant.\n" +
-        "Valid constants are:\n" +
-        "  1. a nn.ModuleList\n" +
-        "  2. a value of type {{{}}}\n".format(constants) +
-        "  3. a list or tuple of (2)\n")
+    raise TypeError(textwrap.dedent("""
+        '{}' object for attribute '{}' is not a valid constant.
+        Valid constants are:
+          1. a nn.ModuleList
+          2. a value of type {{{}}}
+          3. a list or tuple of (2)
+        """.format(type(v).__name__, attr, constants)))
 
 
 def _create_methods_from_stubs(self, stubs):
@@ -1136,14 +1137,23 @@ if _enabled:
 
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-            if isinstance(value, ModuleList):
+
+            def conv_module_to_const(module_value):
+                if not isinstance(module_value, (ModuleList, Sequential)):
+                    return module_value
+                for i in range(len(module_value)):
+                    module_value[i] = conv_module_to_const(module_value[i])
+                if isinstance(module_value, Sequential):
+                    return _ConstSequential(module_value)
+                else:
+                    return _ConstModuleList(module_value)
+
+            if isinstance(value, (ModuleList, Sequential)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
                 # is set as an attribute of the parent module.
-                super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
-            elif isinstance(value, Sequential):
-                super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
+                super(ScriptModule, self).__setattr__(attr, conv_module_to_const(value))
             else:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
