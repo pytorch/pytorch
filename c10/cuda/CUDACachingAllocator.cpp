@@ -14,6 +14,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <iostream>
+#include <sys/types.h>
+       #include <unistd.h>
 
 namespace c10 {
 namespace cuda {
@@ -515,6 +518,7 @@ struct THCCachingAllocator
 THCCachingAllocator caching_allocator;
 
 static void CudaCachingDeleter(void* ptr) {
+  // std::cout << " CudaCachingDeleter " << ptr << "\n";
   caching_allocator.free(ptr);
 }
 
@@ -648,6 +652,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
       [handle, curr_device](void *ptr) {
         cuda::CUDAGuard device_guard(curr_device);
         std::lock_guard<std::mutex> deleter_lock(IpcMutex);
+        // std::cout << getpid() << " Release mem handle\n";
         C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;
@@ -672,6 +677,7 @@ void* raw_alloc(size_t nbytes) {
 }
 
 void raw_delete(void* ptr) {
+  std::cout << " raw_delete " << ptr << "\n";
   caching_allocator.free(ptr);
 }
 

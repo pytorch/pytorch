@@ -223,7 +223,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   }
 
   at::DeviceGuard device_guard(storage->device());
-  THPObjectPtr tuple(PyTuple_New(6));
+  THPObjectPtr tuple(PyTuple_New(7));
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
@@ -232,10 +232,18 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   THPObjectPtr _ref_counter(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr _ref_counter_offset(PyLong_FromLong(0));
+  THPObjectPtr _event_handle(Py_None);
+  Py_INCREF(Py_None);
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
+
+    // std::cout << "cudaDeviceSynchronize\n";
+    cudaDeviceSynchronize();
+
     size_t base_size;
     void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
     ptrdiff_t offset_bytes = (char*)storage->data<scalar_t>() - (char*)base_ptr;
+
+
 
     cudaIpcMemHandle_t handle;
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
@@ -251,7 +259,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
           ref_counter_handle.c_str(), flags, sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
       torch::CudaIPCCreateRefCounter(ref_counter_handle, torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
     }
-    auto sent_data =torch::GetNewRefCountedSentData();
+    auto sent_data = torch::GetNewRefCountedSentData();
 
     // Put Storage Data behind new ref counting context
     at::DataPtr new_data_ptr = at::DataPtr(
@@ -259,11 +267,20 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     auto old_data_ptr = storage->set_data_ptr(std::move(new_data_ptr));
     std::swap(sent_data->original_ptr_, old_data_ptr);
 
-    _ref_counter = PyBytes_FromString((sent_data->handle).c_str());
-    _ref_counter_offset = PyLong_FromLong(sent_data->offset);
+    cudaIpcEventHandle_t ipc_event_handle;
+    THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+    _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
+
+        // at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(storage->data(), storage->device());
+        // auto old_data_ptr = storage->set_data_ptr(std::move(sent_data_ptr));
+        // auto sent_data  =  static_cast<torch::CudaIPCSentData*>(storage->data_ptr().get_context());
+        // sent_data->set_original_ptr(std::move(old_data_ptr));
+
+    _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
+    _ref_counter_offset = PyLong_FromLong(sent_data->offset());
   }
 
-  if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes) {
+  if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes || !_event_handle) {
     return nullptr;
   }
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
@@ -278,6 +295,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
   PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
   PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
+  PyTuple_SET_ITEM(tuple.get(), 6, _event_handle.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
@@ -285,16 +303,19 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 6, "tuple of 6 items expected");
+  // std::cout << "newSharedCuda\n";
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 7, "tuple of 7 items expected");
   PyObject *_device = PyTuple_GET_ITEM(args, 0);
   PyObject *_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size_bytes = PyTuple_GET_ITEM(args, 2);
   PyObject *_offset_bytes = PyTuple_GET_ITEM(args, 3);
   PyObject *_ref_counter = PyTuple_GET_ITEM(args, 4);
   PyObject *_ref_counter_offset = PyTuple_GET_ITEM(args, 5);
+  PyObject *_event_handle = PyTuple_GET_ITEM(args, 6);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
         (_handle != Py_None && PyBytes_Check(_handle)) &&
         (_ref_counter != Py_None && PyBytes_Check(_ref_counter)) &&
+        (_event_handle != Py_None && PyBytes_Check(_event_handle)) &&
         THPUtils_checkLong(_offset_bytes) &&
         THPUtils_checkLong(_ref_counter_offset))) {
     THPUtils_invalidArguments(
@@ -302,9 +323,58 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         nullptr,
         "_new_shared in CUDA mode",
         1,
-        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset)");
+        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset, bytes event_handle)");
     return nullptr;
   }
+// std::cout << "newSharedCuda 1\n";
+  {
+    char* buffer;
+    Py_ssize_t handle_size;
+    if (PyBytes_AsStringAndSize(_event_handle, &buffer, &handle_size) == -1) {
+      return nullptr;
+    }
+    THPUtils_assert(
+        handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect event handle size");
+    std::string s_handle = std::string(buffer, handle_size);
+// std::cout << "newSharedCuda 1.2\n";
+    auto ipc_event_handle =
+        reinterpret_cast<const cudaIpcEventHandle_t*>(s_handle.c_str());
+    cudaEvent_t event;
+    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
+
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    auto stream = c10::cuda::getCurrentCUDAStream(device);
+
+// std::cout << "newSharedCuda 1.3\n";
+    // std::cout << " stream " << stream << " event " << event << "\n"
+              // << s_handle << "\n";
+               cudaEventSynchronize(event);
+
+// std::cout << "newSharedCuda 1.4\n";
+
+cudaError_t err = cudaEventQuery(event);
+
+// std::cout << "newSharedCuda 1.5\n";
+    if (err == cudaErrorNotReady) {
+      static bool once = true;
+      // if (once) {
+        // std::cout << "Event " <<event << " not ready waitintg on device " << device << "\n";
+        once = false;
+      // }
+
+      // cudaStreamWaitEvent(stream, event, 0);
+    } else if (err != cudaSuccess) {
+      C10_CUDA_CHECK(err);
+    } else if (err == cudaSuccess) {
+      // std::cout << " event cudaSuccess "                << "\n";
+    }
+
+
+// std::cout << "newSharedCuda 1.6\n";
+
+  }
+  // std::cout << "newSharedCuda 2\n";
 
   // Storage constructor requires size in numel.
   size_t storage_size = (size_t)THPUtils_unpackLong(_size_bytes) / sizeof(scalar_t);
@@ -333,12 +403,23 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
   auto c = new torch::CudaIPCReceivedData(std::move(basePtr));
   auto sp = std::shared_ptr<void>((void*)c, [ref_counter_handle, ref_counter_offset](void* ptr) {
+
+    delete static_cast<torch::CudaIPCReceivedData*>(ptr);
+
+    // Sync steam to make sure all operations related to the storage is finished
+    // (otherwise another process may reuse memory and corrupt data)
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    // TODO: Instead of cudaStreamSynchronize it is possibble to add Stream Callback and release counter inside of it
+    cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));
+
     int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_NOCREATE;
     auto sptr = THRefcountedMapAllocator::makeDataPtr(
         ref_counter_handle.c_str(), flags, sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-      delete static_cast<torch::CudaIPCReceivedData*>(ptr);
   });
+
+  // std::cout << "newSharedCuda 4\n";
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE
@@ -346,6 +427,8 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
       storage_size, /* allocator */ nullptr));
   base->set_resizable(false);
   base->set_received_cuda(true);
+
+// std::cout << "newSharedCuda 5\n";
 
   return THPStorage_(New)(base.release());
   END_HANDLE_TH_ERRORS

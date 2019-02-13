@@ -349,6 +349,12 @@ def synchronize():
     return torch._C._cuda_synchronize()
 
 
+def ipc_collect():
+    r"""TODO: Description"""
+    _lazy_init()
+    return torch._C._cuda_ipc_collect()
+
+
 def current_stream(device=None):
     r"""Returns the currently selected :class:`Stream` for a given device.
 
