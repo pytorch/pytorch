@@ -7168,11 +7168,9 @@ class _TestTorchMixin(object):
         ret = a.geqrf()
         self.assertEqual(ret.a, ret[0])
         self.assertEqual(ret.tau, ret[1])
-        # FIXME: geqrf with out argument has a bug of producing
-        # crashing by signal SIGSEGV (Address boundary error)
-        # ret1 = torch.geqrf(a, out=tuple(ret))
-        # self.assertEqual(ret1.a, ret1[0])
-        # self.assertEqual(ret1.tau, ret1[1])
+        ret1 = torch.geqrf(a, out=tuple(ret))
+        self.assertEqual(ret1.a, ret1[0])
+        self.assertEqual(ret1.tau, ret1[1])
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
