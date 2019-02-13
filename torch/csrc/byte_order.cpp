@@ -143,7 +143,7 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    dst[i] = (int)src[i] != 0 ? 1 : 0;
+    dst[i] = (int)src[i] != 0 ? true : false;
   }
 }
 
