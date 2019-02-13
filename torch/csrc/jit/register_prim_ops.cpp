@@ -1004,16 +1004,14 @@ Operation listAppend(const Node* node) {
 }
 
 template <typename TList>
-Operation listClear(const Node* node) {
-  return [](Stack& stack) {
-    TList a;
-    pop(stack, a);
+int listClear(Stack& stack) {
+  TList a;
+  pop(stack, a);
 
-    a->elements().clear();
-    push(stack, a);
+  a->elements().clear();
+  push(stack, a);
 
-    return 0;
-  };
+  return 0;
 }
 
 template <typename T>
