@@ -445,7 +445,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * writing binding code.
    */
   void set_wrapped_number(bool value) {
-    std::cout << "dim(): " << dim() << "\n";
     AT_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
@@ -809,7 +808,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     set_storage(impl->storage());
     set_sizes_and_strides(impl->sizes(), impl->strides());
     set_storage_offset(impl->storage_offset());
-    set_wrapped_number(impl->is_wrapped_number());
+    is_wrapped_number_ = impl->is_wrapped_number_;
     reserved_ = impl->reserved_;
     refresh_numel();
     refresh_contiguous();
