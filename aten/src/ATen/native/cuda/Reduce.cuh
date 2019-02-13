@@ -25,6 +25,7 @@ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
+// returns round down to the closest integer of log2(n)
 static inline int last_pow2(int n) {
   n |= (n >>  1);
   n |= (n >>  2);
@@ -560,7 +561,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  //if (config.values_per_thread() >= block_height * 16) {
   if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
