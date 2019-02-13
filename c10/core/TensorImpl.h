@@ -445,6 +445,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * writing binding code.
    */
   void set_wrapped_number(bool value) {
+    std::cout << "dim(): " << dim() << "\n";
     AT_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
