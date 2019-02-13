@@ -9933,16 +9933,17 @@ a")
 
         self.checkScript(list_of_dicts, ())
 
-    def test_nested_tuple_len(self):
+    def test_tuple_to_list(self):
         @torch.jit.script
         def fn(x):
             # type: (Tuple[int, int, int]) -> List[int]
             return list(x)
 
-        tup = (1, 2, 3)
-        print(fn.graph)
-        print(fn(tup))
+        out = fn((1, 2, 3))
+        self.assertEqual([1, 2, 3], out)
+        self.assertTrue(isinstance(out, list))
 
+    def test_nested_tuple_len(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
@@ -9954,9 +9955,7 @@ a")
 
         m = M()
         input = ((2, 3), (2, 3))
-        print(m.graph)
-        print(m(input))
-        # self.assertEqual(m(input), 2)
+        self.assertEqual(m(input), 2)
 
 
 class MnistNet(nn.Module):

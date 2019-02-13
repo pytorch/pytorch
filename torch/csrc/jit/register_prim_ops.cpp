@@ -1334,24 +1334,13 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
 
-    // NB: these must come after the schema-tized versions so they
-    // get matched correctly
-    // Operator(aten::list, [](const Node* node) {
-    //   AT_ASSERT(node->inputs().size() == 1);
-    //   auto tuple = node->inputs().at(0)->type()->expect<TupleType>();
-    //   return [](Stack& stack) {
-    //     auto tup = pop(stack).toTuple();
-    //     push(stack, tup->elements());
-    //     return 0;
-    //   };
-    // }),
-    Operator(aten::len, [](const Node* node) {
+    // NB: this must come after the other aten::len schemas so that they get
+    // correctly matched
+    Operator("aten::len(...) -> int", [](const Node* node) {
       AT_ASSERT(node->inputs().size() == 1);
       auto tuple = node->inputs().at(0)->type()->expect<TupleType>();
-      std::cout << "running len1!\n";
       auto len = int64_t(tuple->containedTypes().size());
       return [=](Stack& stack) {
-        std::cout << "running len!\n";
         auto tup = pop(stack).toTuple();
         push(stack, len);
         return 0;
