@@ -120,18 +120,11 @@ process. In other words, the ``device_ids`` needs to be ``[args.local_rank]``,
 and ``output_device`` needs to be ``args.local_rank`` in order to use this
 utility
 
-5. This module provide fetching ``local_rank`` by environment variable
-``LOCAL_RANK``, which can be achieve by launching the script with
-``--use_env=True``. All above examples are same by replacing
-``args.local_rank`` to ``os.environ['LOCAL_RANK']. ``--local_rank`` would not
-be passed in this usage.
-
-Fetching the ``os.environ['LOCAL_RANK']`` environment variable
-
-::
-
-    >>> import os
-    >>> os.environ['LOCAL_RANK']
+5. Another way to pass ``local_rank`` to the subprocesses via environment variable
+``LOCAL_RANK``. This behavior is enabled when you launch the script with
+``--use_env=True``. You must adjust the subprocess example above to replace
+``args.local_rank`` with ``os.environ['LOCAL_RANK']``; the launcher
+will not pass ``--local_rank`` when you specify this flag.
 
 .. warning::
 
@@ -184,10 +177,10 @@ def parse_args():
                              "be used for communciation during distributed "
                              "training")
     parser.add_argument("--use_env", default=False, action="store_true",
-                        help="Use enviroentment variable to pass "
-                             "'local rank'. The default value is False. "
+                        help="Use environment variable to pass "
+                             "'local rank'. For legacy reasons, the default value is False. "
                              "If set to True, the script will not pass "
-                             "--local_rank as argument")
+                             "--local_rank as argument, and will instead set LOCAL_RANK.")
 
     # positional
     parser.add_argument("training_script", type=str,
