@@ -4713,26 +4713,48 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_ormqr(self):
-        mat1 = torch.randn(10, 10)
-        mat2 = torch.randn(10, 10)
+        mat1 = torch.randn(7, 7)
+        mat2 = torch.randn(7, 7)
         q, r = torch.qr(mat1)
         m, tau = torch.geqrf(mat1)
+        out_holder = torch.empty_like(mat1)
 
         res1 = torch.mm(q, mat2)
-        res2 = torch.ormqr(m, tau, mat2)
+        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=False)
+        torch.ormqr(m, tau, mat2, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(mat2, q)
-        res2 = torch.ormqr(m, tau, mat2, False)
+        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=False)
+        torch.ormqr(m, tau, mat2, left=False, transpose=False, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(q.t(), mat2)
-        res2 = torch.ormqr(m, tau, mat2, True, True)
+        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=True)
+        torch.ormqr(m, tau, mat2, left=True, transpose=True, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(mat2, q.t())
-        res2 = torch.ormqr(m, tau, mat2, False, True)
+        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=True)
+        torch.ormqr(m, tau, mat2, left=False, transpose=True, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
+
+    @staticmethod
+    def _test_geqrf(self, cast):
+        a = cast(torch.randn(5, 5))
+        b, c = torch.geqrf(a)
+        b_placeholder, c_placeholder = torch.empty_like(b), torch.empty_like(c)
+        torch.geqrf(a, out=(b_placeholder, c_placeholder))
+        self.assertEqual(b, b_placeholder)
+        self.assertEqual(c, c_placeholder)
+
+    @skipIfNoLapack
+    def test_geqrf(self):
+        self._test_geqrf(self, lambda t: t)
 
     @staticmethod
     def _test_trtrs(self, cast):
@@ -6418,9 +6440,9 @@ class _TestTorchMixin(object):
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[err_idx]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[conv_fn(torch.LongTensor([err_idx]))]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[[err_idx]]
 
         if TEST_NUMPY:
@@ -8915,6 +8937,16 @@ class _TestTorchMixin(object):
         x = torch.tensor([1e28, 1e-28])
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([1.0000e+28, 1.0000e-28])''')
+
+        # test scientific notation using set_printoptions
+        x = torch.tensor([1e2, 1e-2])
+        torch.set_printoptions(sci_mode=True)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
+        torch.set_printoptions(sci_mode=False)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        torch.set_printoptions(sci_mode=None)  # reset to the default value
 
         # test no leading space if all elements positive
         x = torch.tensor([1, 2])

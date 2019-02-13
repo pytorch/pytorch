@@ -241,15 +241,6 @@ def _reshape_from_tensor(g, input, shape):
     return g.op('Reshape', input, shape)
 
 
-def reshape(g, self, shape):
-    return view(g, self, shape)
-
-
-def reshape_as(g, self, other):
-    shape = g.op('Shape', other)
-    return reshape(g, self, shape)
-
-
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:

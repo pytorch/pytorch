@@ -6,6 +6,7 @@
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <numeric>
 #include <unordered_set>
 
 namespace caffe2 {
@@ -128,12 +129,16 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
 
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net) {
+    caffe2::NetDef* pred_net,
+    const std::unordered_set<string>& exceptions) {
   std::unordered_map<std::string, std::string> input_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
 #define REWRITE_EXTERNAL_IO(net, name)                 \
   for (auto& name : *net->mutable_external_##name()) { \
+    if (exceptions.count(name)) {                      \
+      continue;                                        \
+    }                                                  \
     auto version = blob_versions.at(name);             \
     auto new_##name = SsaName(name, version);          \
     name##_mapping.emplace(new_##name, name);          \
@@ -149,9 +154,15 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       op.set_output(0, SsaName(output, 0));
     }
     for (const auto& input : init_net->external_input()) {
+      if (exceptions.count(input)) {
+        continue;
+      }
       blob_versions.emplace(input, 0);
     }
     for (const auto& output : init_net->external_output()) {
+      if (exceptions.count(output)) {
+        continue;
+      }
       blob_versions.emplace(output, 0);
     }
     REWRITE_EXTERNAL_IO(init_net, input);
@@ -160,11 +171,17 @@ std::unordered_map<std::string, std::string> SsaRewrite(
 
   if (pred_net) {
     for (const auto& input : pred_net->external_input()) {
+      if (exceptions.count(input)) {
+        continue;
+      }
       blob_versions.emplace(input, 0);
     }
     REWRITE_EXTERNAL_IO(pred_net, input);
     for (auto& op : *pred_net->mutable_op()) {
       for (auto& input : *op.mutable_input()) {
+        if (exceptions.count(input)) {
+          continue;
+        }
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
           input = SsaName(input, it->second);
@@ -174,6 +191,9 @@ std::unordered_map<std::string, std::string> SsaRewrite(
         }
       }
       for (auto& output : *op.mutable_output()) {
+        if (exceptions.count(output)) {
+          continue;
+        }
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
           it->second += 1;
@@ -192,6 +212,9 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     }
     for (auto& op : *pred_net->mutable_op()) {
       for (auto& output : *op.mutable_output()) {
+        if (exceptions.count(output)) {
+          continue;
+        }
         auto pos = output.find_last_of('_');
         CAFFE_ENFORCE_NE(pos, 0);
         auto basename = output.substr(0, pos);
@@ -279,6 +302,9 @@ OnnxExporter::get_special_operators() const {
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
           {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ReduceMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceFrontMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceBackMean", &OnnxExporter::CreateReduceMeanNodes},
           {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
@@ -766,6 +792,73 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
       "Reshape", {transpose_output, const_tensors.back().name()}, {y}));
 
   return result;
+}
+
+ConvertedResult OnnxExporter::CreateReduceMeanNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+    CAFFE_ENFORCE_GE(def.input_size(), 1);
+    CAFFE_ENFORCE_LE(def.input_size(), 2);
+    CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
+    CAFFE_ENFORCE_GE(def.output_size(), 1);
+    const auto& x = def.input(0);
+    const auto& y = def.output(0);
+    const auto& dims = shapes.at(x).dims();
+
+    ConvertedResult result;
+    auto& nodes = result.first;
+    auto& const_tensors = result.second;
+    std::unordered_map<std::string, const caffe2::Argument*> args;
+    for (const auto& a : def.arg()) {
+        args.emplace(a.name(), &a);
+    }
+
+    std::vector<int64_t> axes;
+    int64_t keepdims = 1;
+
+    if (def.type() == "ReduceMean") {
+        // axes
+        auto it = args.find("axes");
+        if (it == args.end()) {
+            axes.resize(dims.size());
+            std::iota(axes.begin(), axes.end(), 0);
+        } else {
+            axes.assign(it->second->ints().begin(), it->second->ints().end());
+        }
+
+        // keepdims
+        it = args.find("keepdims");
+        if (it != args.end()) {
+            keepdims = it->second->i();
+        }
+    } else {
+        // num_reduce_dim
+        auto it = args.find("num_reduce_dim");
+        const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
+        CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
+        axes.resize(num_reduce_dim);
+
+        int64_t start_dim = 0;
+        if (def.type() == "ReduceFrontMean") {
+            start_dim = 0;
+        } else if (def.type() == "ReduceBackMean") {
+            start_dim = dims.size() - axes.size();
+        }
+        std::iota(axes.begin(), axes.end(), start_dim);
+
+        keepdims = 0;
+    }
+
+    nodes.emplace_back(MakeNode("ReduceMean",
+                { x },
+                { y },
+                {
+                    MakeAttribute("axes", axes),
+                    MakeAttribute("keepdims", keepdims),
+                },
+                def.name()));
+
+    return result;
 }
 
 ConvertedResult OnnxExporter::CreateUpsampleNodes(

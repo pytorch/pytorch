@@ -37,7 +37,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic) -> (Tensor, Tensor)
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -709,20 +709,20 @@
 - func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
 
 # convenience function that converts to intlists for you
-- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
 
-- func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0) -> (Tensor, Tensor)
+- func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
     CPU:  ctc_loss_cpu
     CUDA: ctc_loss_gpu
 
-- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank) -> Tensor
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
   dispatch:
     CPU: ctc_loss_backward_cpu
