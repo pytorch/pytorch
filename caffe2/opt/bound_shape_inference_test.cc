@@ -110,6 +110,46 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
 }
 
+TEST(BoundShapeInference, Reshape) {
+  NetDef net;
+  std::vector<int> new_shape{-1, 8};
+  std::vector<int> new_shape2{2, 8};
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"X1"}, {}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Reshape",
+      "",
+      {"X1"},
+      {"Y1", "old_shape"},
+      {MakeArgument<std::vector<int>>("shape", new_shape)}));
+
+  // Cannot infer shape for this one because input/output shape doesn't match
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Reshape",
+      "",
+      {"X1"},
+      {"Y2", "old_shape2"},
+      {MakeArgument<std::vector<int>>("shape", new_shape2)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1024}));
+  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+  verifyShapeInfo(
+      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+  verifyShapeInfo(
+      out_shape,
+      "Y1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size * 16 / 8, 8});
+  EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
+}
+
 TEST(BoundShapeInference, ConcatMissingInput) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(

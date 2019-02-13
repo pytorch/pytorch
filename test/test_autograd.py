@@ -817,6 +817,35 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @unittest.skipIf(not TEST_CUDA, "need CUDA memory stats")
+    def test_free_unneeded_tensor(self):
+        x = torch.randn(2, 3, 10, 10, device='cuda', requires_grad=True)
+        m = torch.randn(1, 3, 1, 1, device='cuda')
+
+        z = x.sum()
+        base_mem = torch.cuda.memory_allocated()
+        z = ((x + 2) * m).sum()
+        end_mem = torch.cuda.memory_allocated()
+
+        # In the end the memory usage should remain equal, because neither of
+        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
+        # previous allocation of z had the same size as the current one.
+        self.assertEqual(base_mem, end_mem)
+
+    def test_no_unnecessary_save(self):
+        # If we kept x in the derivative Function of x * 2 we would
+        # get an error in the backward that would complain that we've
+        # modified x, which was needed for gradient computation.
+        # Since we should elide unnecessary saves, this test should pass.
+        mu = torch.ones(1, requires_grad=True)
+        x = torch.empty(1)
+        loss = 0
+        for i in range(3):
+            x.detach_()
+            x.copy_(mu + i)
+            loss += (x * torch.tensor([float(i)])).sum()
+        loss.backward()
+
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
