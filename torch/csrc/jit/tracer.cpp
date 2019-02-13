@@ -430,6 +430,14 @@ void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+template<typename T>
+void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<T>& value) {
+  AT_ERROR("Tracing generic lists currently not supported!");
+}
+
 void addOutput(Node* node, const at::Tensor& output) {
   setOutput(node->addOutput(), output);
 }

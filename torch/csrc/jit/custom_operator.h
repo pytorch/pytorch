@@ -120,6 +120,7 @@ void callOperatorWithTuple(
     Stack& stack,
     std::tuple<Types...>& arguments,
     Indices<Is...>) {
+  std::cout << "Call operator\n";
   AT_ASSERT(stack.size() == sizeof...(Is));
 
   // Pop values from the stack into the elements of the tuple.
@@ -128,6 +129,7 @@ void callOperatorWithTuple(
   Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     node = getTracedNode<Is...>(schema, arguments);
+    std::cout << "Got traced node\n";
   }
 
   // Call into the actual, original, user-supplied function.
