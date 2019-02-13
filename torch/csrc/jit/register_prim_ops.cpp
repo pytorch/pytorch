@@ -1337,8 +1337,13 @@ RegisterOperators reg2({
     // NB: this must come after the other aten::len schemas so that they get
     // correctly matched
     Operator("aten::len(...) -> int", [](const Node* node) {
-      AT_ASSERT(node->inputs().size() == 1);
-      auto tuple = node->inputs().at(0)->type()->expect<TupleType>();
+      if (node->inputs().size() != 1) {
+        AT_ERROR("len() requires 1 input");
+      }
+      auto tuple = node->inputs().at(0)->type()->cast<TupleType>();
+      if (!tuple) {
+        AT_ERROR("len() requires input to be a tuple");
+      }
       auto len = int64_t(tuple->containedTypes().size());
       return [=](Stack& stack) {
         auto tup = pop(stack).toTuple();
