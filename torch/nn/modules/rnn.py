@@ -10,7 +10,7 @@ from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
 from .. import _VF
 from ..._jit_internal import weak_module, weak_script_method, weak_script, \
-    parameter_list
+    _parameter_list
 
 _rnn_impls = {
     'GRU': _VF.gru,
@@ -133,7 +133,7 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    @parameter_list
+    @_parameter_list
     def get_flat_weights(self):
         return self._flat_weights
 

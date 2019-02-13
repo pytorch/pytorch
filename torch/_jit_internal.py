@@ -165,7 +165,11 @@ def ignore(fn):
     return fn
 
 
-def parameter_list(fn):
+def _parameter_list(fn):
+    """
+    Decorator to denote that a function returns a list of all the parameters
+    in a module
+    """
     fn._is_parameter_list = True
     return fn
 

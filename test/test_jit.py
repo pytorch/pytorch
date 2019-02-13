@@ -9809,12 +9809,7 @@ a")
         eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
         script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]
 
-        # jit returns a regular tuple instead of a PackedSequence namedtuple,
-        # so compare the elements directly
-        self.assertEqual(eager_out[0], script_out[0])
-        self.assertEqual(eager_out[1], script_out[1])
-        self.assertEqual(eager_out[2], script_out[2])
-        self.assertEqual(eager_out[3], script_out[3])
+        self.assertEqual(eager_out, script_out)
 
     def test_list_python_op(self):
         def python_list_op(lst):

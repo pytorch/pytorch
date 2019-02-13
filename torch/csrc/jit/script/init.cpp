@@ -258,8 +258,9 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     std::vector<Value*> params;
     const auto& param_list = module_->get_parameters().items();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-      if (!(*it)->is_buffer) {
-        params.push_back(caller.get_or_add_parameter((*it)->slot()));
+      auto& param = *it;
+      if (!param->is_buffer) {
+        params.push_back(caller.get_or_add_parameter(param->slot()));
       }
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
