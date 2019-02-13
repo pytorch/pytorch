@@ -92,6 +92,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         # Pull Docker image and run build
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
+        unset AWS_ACCESS_KEY_ID
+        unset AWS_SECRET_ACCESS_KEY
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
         git submodule sync && git submodule update -q --init
@@ -121,6 +123,8 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+        unset AWS_ACCESS_KEY_ID
+        unset AWS_SECRET_ACCESS_KEY
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
@@ -194,6 +198,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
+        unset AWS_ACCESS_KEY_ID
+        unset AWS_SECRET_ACCESS_KEY
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -270,6 +276,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+        unset AWS_ACCESS_KEY_ID
+        unset AWS_SECRET_ACCESS_KEY
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
@@ -603,6 +611,8 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          unset AWS_ACCESS_KEY_ID
+          unset AWS_SECRET_ACCESS_KEY
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
@@ -635,6 +645,8 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          unset AWS_ACCESS_KEY_ID
+          unset AWS_SECRET_ACCESS_KEY
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           cat >/home/circleci/project/doc_push_script.sh <<EOL
