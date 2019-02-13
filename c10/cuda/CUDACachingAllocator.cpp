@@ -479,7 +479,7 @@ struct THCCachingAllocator
       cuda_events.emplace_back(event, block);
     }
 
-    cudaSetDevice(prev_device);
+    C10_CUDA_CHECK(cudaSetDevice(prev_device));
   }
 
   void process_events()

@@ -8,6 +8,8 @@
 #include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
+#include <c10/util/Optional.h>
+
 #include <memory>
 #include <iostream>
 #include <type_traits>
@@ -629,10 +631,11 @@ private:
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
+using OptNameList = c10::optional<std::vector<std::string>>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types) {
-    return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
+  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(names))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
@@ -641,13 +644,25 @@ struct CAFFE2_API TupleType : public Type {
   bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const TypePtr a, const TypePtr b) {
       return *a == *b;
-    });
+    }) && names_ == rhs.expect<TupleType>()->names_;
+    // `compare` guarantees that rhs is always a TupleType, so the
+    // dynamic_cast above always success.
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
+  bool isSubtypeOf(const TypePtr rhs_) const override {
+    if (Type::isSubtypeOf(rhs_))
+      return true;
+    auto rhs = rhs_->cast<TupleType>();
+    if (!rhs)
+      return false;
+    // unnamed tuple is not a subtype of nametuple
+    if (!hasNames() && rhs->hasNames())
+      return false;
+    // namedtuple may be a subtype of unnamed tuple
+    bool names_match = !rhs->hasNames() || names() == rhs->names();
     // co-variant rules for tuples
-    return compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
-    }) || Type::isSubtypeOf(rhs);
+    });
   }
   bool requires_grad() const override {
     return std::any_of(elements_.begin(), elements_.end(),
@@ -678,6 +693,12 @@ struct CAFFE2_API TupleType : public Type {
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
+  bool hasNames() const {
+    return names_.has_value();
+  }
+  const std::vector<std::string> &names() const {
+    return names_.value();
+  }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
@@ -688,9 +709,10 @@ struct CAFFE2_API TupleType : public Type {
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_)
+  TupleType(std::vector<TypePtr> elements_, OptNameList names)
   : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_)) {
+  , elements_(std::move(elements_))
+  , names_(std::move(names)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
@@ -710,8 +732,10 @@ private:
     }
     return true;
   }
+
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
+  OptNameList names_;
 };
 
 struct NumberType;

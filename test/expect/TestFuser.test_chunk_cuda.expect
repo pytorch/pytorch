@@ -1,11 +1,9 @@
-graph(%x : Float(*, *)) {
+graph(%x : Float(*, *)):
   %1 : Float(*, *) = prim::FusionGroup_0(%x)
-  return (%1);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)) {
+  return (%1)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *)):
   %1 : Float(*, *), %2 : Float(*, *), %3 : Float(*, *) = prim::ConstantChunk[chunks=3, dim=1](%0)
   %4 : int = prim::Constant[value=1]()
   %5 : Float(*, *) = aten::mul(%1, %2)
   %6 : Float(*, *) = aten::add(%5, %3, %4)
-  return (%6);
-}
+  return (%6)
