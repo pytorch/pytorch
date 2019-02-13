@@ -5462,6 +5462,12 @@ class TestNN(NNTestCase):
             self.assertEqual(cudnn_output, thnn_output)
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_large_batch(self):
+        bn = nn.BatchNorm1d(1).cuda()
+        data = torch.rand(131072, 1, device="cuda", dtype=torch.float)
+        out = bn(data).sum().backward()
+
     def _test_batchnorm_update_stats(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
 
