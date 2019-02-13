@@ -574,8 +574,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
 
   // Debugging stuff
   if (opts_.debug) {
-    WriteProtoToTextFile(onnxifi_net, "debug_onnxifi_net.pb_txt");
-    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt");
+    WriteProtoToTextFile(
+        onnxifi_net,
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+    WriteProtoToTextFile(
+        net_opt,
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
   }
   return net_opt;
 }
@@ -728,7 +732,12 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
   // Make sure weights do not contain output of any op.
   for (const auto& op : pred_net->op()) {
     for (const auto& output : op.output()) {
-      CAFFE_ENFORCE_EQ(weights.count(output), 0);
+      CAFFE_ENFORCE_EQ(
+          weights.count(output),
+          0,
+          "Weight ",
+          output,
+          " shouldn't appear in the output");
     }
   }
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net, weights);
