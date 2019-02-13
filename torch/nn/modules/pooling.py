@@ -656,7 +656,7 @@ class FractionalMaxPool2d(Module):
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh ,kw)`
+                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
                      Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1037,7 +1037,9 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H. H and W can be either a ``int``, or ``None`` which means the size will be the same as that of the input.
+                     Can be a tuple (H, W) or a single H for a square image H x H. 
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
 
     Examples:
         >>> # target output size of 5x7
@@ -1069,7 +1071,8 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D. D, H and W can be either a ``int``, or ``None`` which means the size will
+                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
+                     D, H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Examples:
