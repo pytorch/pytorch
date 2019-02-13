@@ -111,7 +111,7 @@ def weak_script_method(fn):
     return fn
 
 
-def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
+def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
@@ -144,6 +144,11 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     else:
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
+
+    if module_name is not None:
+        fn.__module__ = module_name
+    if func_name is not None:
+        fn.__name__ = func_name
 
     boolean_dispatched[fn] = {
         "if_true": if_true,

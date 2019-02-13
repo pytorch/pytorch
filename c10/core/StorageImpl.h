@@ -53,7 +53,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
             data_type,
             0,
             at::DataPtr(nullptr, device),
-            caffe2::GetAllocator(device.type()),
+            GetAllocator(device.type()),
             true) {}
 
   StorageImpl& operator=(StorageImpl&& other) = default;

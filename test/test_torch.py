@@ -4713,26 +4713,48 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_ormqr(self):
-        mat1 = torch.randn(10, 10)
-        mat2 = torch.randn(10, 10)
+        mat1 = torch.randn(7, 7)
+        mat2 = torch.randn(7, 7)
         q, r = torch.qr(mat1)
         m, tau = torch.geqrf(mat1)
+        out_holder = torch.empty_like(mat1)
 
         res1 = torch.mm(q, mat2)
-        res2 = torch.ormqr(m, tau, mat2)
+        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=False)
+        torch.ormqr(m, tau, mat2, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(mat2, q)
-        res2 = torch.ormqr(m, tau, mat2, False)
+        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=False)
+        torch.ormqr(m, tau, mat2, left=False, transpose=False, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(q.t(), mat2)
-        res2 = torch.ormqr(m, tau, mat2, True, True)
+        res2 = torch.ormqr(m, tau, mat2, left=True, transpose=True)
+        torch.ormqr(m, tau, mat2, left=True, transpose=True, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
 
         res1 = torch.mm(mat2, q.t())
-        res2 = torch.ormqr(m, tau, mat2, False, True)
+        res2 = torch.ormqr(m, tau, mat2, left=False, transpose=True)
+        torch.ormqr(m, tau, mat2, left=False, transpose=True, out=out_holder)
         self.assertEqual(res1, res2)
+        self.assertEqual(res2, out_holder)
+
+    @staticmethod
+    def _test_geqrf(self, cast):
+        a = cast(torch.randn(5, 5))
+        b, c = torch.geqrf(a)
+        b_placeholder, c_placeholder = torch.empty_like(b), torch.empty_like(c)
+        torch.geqrf(a, out=(b_placeholder, c_placeholder))
+        self.assertEqual(b, b_placeholder)
+        self.assertEqual(c, c_placeholder)
+
+    @skipIfNoLapack
+    def test_geqrf(self):
+        self._test_geqrf(self, lambda t: t)
 
     @staticmethod
     def _test_trtrs(self, cast):
