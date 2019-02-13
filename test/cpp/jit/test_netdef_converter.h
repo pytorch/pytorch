@@ -36,27 +36,27 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     AT_ASSERT(net.external_input().size() == 2);
     AT_ASSERT(net.external_output().size() == 2);
 
-    const caffe2::OperatorDef& MulOp = net.op()[0];
+    const caffe2::OperatorDef& MulOp = net.op().Get(0);
     AT_ASSERT(MulOp.input().size() == 2);
-    AT_ASSERT(MulOp.input()[0] == net.external_input()[0]);
-    AT_ASSERT(MulOp.input()[1] == net.external_input()[1]);
+    AT_ASSERT(MulOp.input().Get(0) == net.external_input().Get(0));
+    AT_ASSERT(MulOp.input().Get(1) == net.external_input().Get(1));
     AT_ASSERT(MulOp.output().size() == 1);
 
-    const caffe2::OperatorDef& ConstNode = net.op()[1];
+    const caffe2::OperatorDef& ConstNode = net.op().Get(1);
     AT_ASSERT(ConstNode.input().size() == 0);
     AT_ASSERT(ConstNode.output().size() == 1);
     AT_ASSERT(ConstNode.arg().size() == 1);
-    AT_ASSERT(ConstNode.arg()[0].name() == "value");
-    AT_ASSERT(ConstNode.arg()[0].i() == 1);
+    AT_ASSERT(ConstNode.arg().Get(0).name() == "value");
+    AT_ASSERT(ConstNode.arg().Get(0).i() == 1);
 
-    const caffe2::OperatorDef& AddOp = net.op()[2];
+    const caffe2::OperatorDef& AddOp = net.op().Get(2);
     AT_ASSERT(AddOp.input().size() == 3);
-    AT_ASSERT(AddOp.input()[0] == net.external_input()[0]);
-    AT_ASSERT(AddOp.input()[1] == MulOp.output()[0]);
-    AT_ASSERT(AddOp.input()[2] == ConstNode.output()[0]);
+    AT_ASSERT(AddOp.input().Get(0) == net.external_input().Get(0));
+    AT_ASSERT(AddOp.input().Get(1) == MulOp.output().Get(0));
+    AT_ASSERT(AddOp.input().Get(2) == ConstNode.output().Get(0));
 
-    AT_ASSERT(net.external_output()[0] == MulOp.output()[0]);
-    AT_ASSERT(net.external_output()[1] == AddOp.output()[0]);
+    AT_ASSERT(net.external_output().Get(0) == MulOp.output().Get(0));
+    AT_ASSERT(net.external_output().Get(1) == AddOp.output().Get(0));
 
     // Convert NetDef back to IR and check if we get the original.
     Graph graph2;
@@ -95,30 +95,30 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     // Convert it to netdef and check the result
     caffe2::NetDef net;
     convertIRToNetDef(&net, *graph);
-    const caffe2::OperatorDef& Op = net.op()[0];
-    AT_ASSERT(Op.arg()[0].name() == "i_attr");
-    AT_ASSERT(Op.arg()[0].i() == 42);
-    AT_ASSERT(Op.arg()[1].name() == "f_attr");
-    AT_ASSERT(Op.arg()[1].f() == 3.0);
-    AT_ASSERT(Op.arg()[2].name() == "s_attr");
-    AT_ASSERT(Op.arg()[2].s() == "Hello!");
+    const caffe2::OperatorDef& Op = net.op().Get(0);
+    AT_ASSERT(Op.arg().Get(0).name() == "i_attr");
+    AT_ASSERT(Op.arg().Get(0).i() == 42);
+    AT_ASSERT(Op.arg().Get(1).name() == "f_attr");
+    AT_ASSERT(Op.arg().Get(1).f() == 3.0);
+    AT_ASSERT(Op.arg().Get(2).name() == "s_attr");
+    AT_ASSERT(Op.arg().Get(2).s() == "Hello!");
 
-    AT_ASSERT(Op.arg()[3].name() == "is_attr");
-    AT_ASSERT(Op.arg()[3].ints().size() == 3);
-    AT_ASSERT(Op.arg()[3].ints()[0] == 14);
-    AT_ASSERT(Op.arg()[3].ints()[1] == 18);
-    AT_ASSERT(Op.arg()[3].ints()[2] == 7);
+    AT_ASSERT(Op.arg().Get(3).name() == "is_attr");
+    AT_ASSERT(Op.arg().Get(3).ints().size() == 3);
+    AT_ASSERT(Op.arg().Get(3).ints().Get(0) == 14);
+    AT_ASSERT(Op.arg().Get(3).ints().Get(1) == 18);
+    AT_ASSERT(Op.arg().Get(3).ints().Get(2) == 7);
 
-    AT_ASSERT(Op.arg()[4].name() == "fs_attr");
-    AT_ASSERT(Op.arg()[4].floats().size() == 2);
-    AT_ASSERT(abs(Op.arg()[4].floats()[0] - 2.72) < 0.0001);
+    AT_ASSERT(Op.arg().Get(4).name() == "fs_attr");
+    AT_ASSERT(Op.arg().Get(4).floats().size() == 2);
+    AT_ASSERT(abs(Op.arg().Get(4).floats().Get(0) - 2.72) < 0.0001);
 
-    AT_ASSERT(Op.arg()[5].name() == "ss_attr");
-    AT_ASSERT(Op.arg()[5].strings().size() == 2);
-    AT_ASSERT(Op.arg()[5].strings()[1] == "Summer");
+    AT_ASSERT(Op.arg().Get(5).name() == "ss_attr");
+    AT_ASSERT(Op.arg().Get(5).strings().size() == 2);
+    AT_ASSERT(Op.arg().Get(5).strings().Get(1) == "Summer");
 
-    AT_ASSERT(net.external_output()[0] == Op.output()[0]);
-    AT_ASSERT(net.external_output()[1] == Op.output()[1]);
+    AT_ASSERT(net.external_output().Get(0) == Op.output().Get(0));
+    AT_ASSERT(net.external_output().Get(1) == Op.output().Get(1));
 
     // Convert NetDef back to IR and check if we get the original.
     Graph graph2;
