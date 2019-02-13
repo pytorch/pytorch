@@ -11820,10 +11820,9 @@ class TestCustomOperators(JitTestCase):
         input = torch.ones(5, 5)
         trace = torch.jit.trace(torch.ops.aten.relu, [input])
         self.assertExpectedInline(canonical(trace.graph), '''\
-graph(%0 : Double(5, 5)) {
+graph(%0 : Double(5, 5)):
   %1 : Double(5, 5) = aten::relu(%0)
-  return (%1);
-}
+  return (%1)
 ''')
 
     def test_script_graph_contains_custom_op(self):
@@ -11831,10 +11830,9 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : Tensor = aten::relu(%x)
-  return (%1);
-}
+  return (%1)
 ''')
 
 

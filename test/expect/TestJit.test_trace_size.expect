@@ -1,4 +1,4 @@
-graph(%0 : Double(5, 2, 4)) {
+graph(%0 : Double(5, 2, 4)):
   %1 : int = prim::Constant[value=1]()
   %2 : int = aten::size(%0, %1)
   %3 : Long() = prim::NumToTensor(%2)
@@ -12,5 +12,4 @@ graph(%0 : Double(5, 2, 4)) {
   %11 : int = prim::Constant[value=2]()
   %12 : int[] = prim::ListConstruct(%6, %10, %11)
   %13 : Double(4, 5, 2) = aten::view(%0, %12)
-  return (%13);
-}
+  return (%13)

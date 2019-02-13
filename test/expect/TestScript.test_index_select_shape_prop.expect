@@ -1,6 +1,5 @@
-graph(%x : Double(2, 2)
-      %y : Long(4)) {
+graph(%x : Double(2, 2),
+      %y : Long(4)):
   %2 : int = prim::Constant[value=1]()
   %3 : Double(2, 4) = aten::index_select(%x, %2, %y)
-  return (%3);
-}
+  return (%3)
