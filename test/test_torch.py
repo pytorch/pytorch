@@ -4152,7 +4152,7 @@ class _TestTorchMixin(object):
                             self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
 
                         self.assertTrue(x_nc.is_contiguous() == x_nc_is_contiguous,
-                                         "contiguity of x_nc should not be changed")
+                                        "contiguity of x_nc should not be changed")
 
                     # expanded tensors
                     expanded_size = (x.size(0),) + x.size()
