@@ -124,12 +124,12 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sW,)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padW,)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups: split input into groups, :math:`\text{out\_channels}` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple ``(dW,)``. Default: 1
@@ -157,13 +157,13 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
       Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups: split input into groups, :math:`\text{out\_channels}` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple ``(dH, dW)``. Default: 1
@@ -192,13 +192,13 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sT, sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padT, padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple
       ``(out_padT, out_padH, out_padW)``. Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups: split input into groups, :math:`\text{out\_channels}` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
@@ -245,8 +245,9 @@ Args:
         averaging calculation. Default: ``True``
 
 Examples::
+
     >>> # pool of square window of size=3, stride=2
-    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> input = torch.tensor([[[1.,2,3,4,5,6,7]]])
     >>> F.avg_pool1d(input, kernel_size=3, stride=2)
     tensor([[[ 2.,  4.,  6.]]])
 
