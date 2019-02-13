@@ -665,11 +665,11 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d(self):
-        model = nn.AvgPool2d(5, padding=(2))
+        model = nn.AvgPool2d(5, padding=(2), count_include_pad=True)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d_count_include_pad(self):
-        model = nn.AvgPool2d(5, padding=(2), count_include_pad=True)
+        model = nn.AvgPool2d(5, padding=(2), count_include_pad=False)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d_no_padding(self):

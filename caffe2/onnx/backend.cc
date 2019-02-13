@@ -343,8 +343,8 @@ Caffe2Backend::get_special_operators() const {
               {"Constant", &Caffe2Backend::CreateConstant},
               {"ConstantOfShape", &Caffe2Backend::CreateConstantOfShape},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
-              {"AveragePool", &Caffe2Backend::CreatePadPool},
-              {"GlobalAveragePool", &Caffe2Backend::CreatePadPool},
+              {"AveragePool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"GlobalAveragePool", &Caffe2Backend::CreateConvPoolOpBase},
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
@@ -543,27 +543,6 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
   }
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
-}
-
-Caffe2Ops Caffe2Backend::CreatePadPool(
-    OnnxNode* onnx_node,
-    const ConversionContext& ctx) {
-  Caffe2Ops ret;
-  // Pad
-  bool padding = false;
-  const std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
-  const auto pad_input = dummy_->NewDummyName();
-
-  // Pool
-  auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, ctx);
-  auto* pool_op = c2_ops.ops.Mutable(0);
-  if (padding) {
-    pool_op->set_input(0, pad_input);
-  }
-  auto* c2_op = ret.ops.Add();
-  c2_op->CopyFrom(*pool_op);
-
-  return ret;
 }
 
 Caffe2Ops Caffe2Backend::CreateReshape(
