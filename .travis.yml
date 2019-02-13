@@ -12,27 +12,31 @@ sudo: false
 matrix:
     fast_finish: true
     include:
-      - env: LINT_CHECK
+      - name: "Ensure consistent CircleCI YAML"
+        python: "3.6"
+        dist: xenial
+        script: cd .circleci && ./ensure-consistency.sh
+      - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
         script: flake8
-      - env: LINT_CHECK
+      - name: "Python 3.7 Lint"
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
         sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
         install: pip install flake8
         script: flake8
-      - env: MYPY_TYPE_CHECK
+      - name: "MyPy typecheck"
         python: "3.6"
         install: pip install mypy mypy-extensions
         script: mypy @mypy-files.txt
-      - env: CPP_DOC_CHECK
+      - name: "CPP doc check"
         python: "3.6"
         install:
           - sudo apt-get install -y doxygen
           - pip install -r requirements.txt
         script: cd docs/cpp/source && ./check-doxygen.sh
-      - env: CLANG_TIDY
+      - name: "clang tidy"
         python: "3.6"
         script: tools/run-clang-tidy-in-ci.sh
 
