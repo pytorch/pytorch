@@ -1,4 +1,4 @@
-graph(%a : Tensor) {
+graph(%a : Tensor):
   %1 : Long() = prim::Constant[value={7}]()
   %2 : Long() = prim::Constant[value={1}]()
   %3 : Long() = prim::Constant[value={3}]()
@@ -6,5 +6,4 @@ graph(%a : Tensor) {
   %b : Long() = aten::add(%4, %3)
   %c.1 : Tensor = aten::add(%a, %b, %2)
   %c : Tensor = aten::add(%c.1, %b, %2)
-  return (%c);
-}
+  return (%c)

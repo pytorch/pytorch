@@ -6,6 +6,7 @@
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <numeric>
 #include <unordered_set>
 
 namespace caffe2 {
@@ -301,6 +302,9 @@ OnnxExporter::get_special_operators() const {
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
           {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ReduceMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceFrontMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceBackMean", &OnnxExporter::CreateReduceMeanNodes},
           {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
@@ -788,6 +792,73 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
       "Reshape", {transpose_output, const_tensors.back().name()}, {y}));
 
   return result;
+}
+
+ConvertedResult OnnxExporter::CreateReduceMeanNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+    CAFFE_ENFORCE_GE(def.input_size(), 1);
+    CAFFE_ENFORCE_LE(def.input_size(), 2);
+    CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
+    CAFFE_ENFORCE_GE(def.output_size(), 1);
+    const auto& x = def.input(0);
+    const auto& y = def.output(0);
+    const auto& dims = shapes.at(x).dims();
+
+    ConvertedResult result;
+    auto& nodes = result.first;
+    auto& const_tensors = result.second;
+    std::unordered_map<std::string, const caffe2::Argument*> args;
+    for (const auto& a : def.arg()) {
+        args.emplace(a.name(), &a);
+    }
+
+    std::vector<int64_t> axes;
+    int64_t keepdims = 1;
+
+    if (def.type() == "ReduceMean") {
+        // axes
+        auto it = args.find("axes");
+        if (it == args.end()) {
+            axes.resize(dims.size());
+            std::iota(axes.begin(), axes.end(), 0);
+        } else {
+            axes.assign(it->second->ints().begin(), it->second->ints().end());
+        }
+
+        // keepdims
+        it = args.find("keepdims");
+        if (it != args.end()) {
+            keepdims = it->second->i();
+        }
+    } else {
+        // num_reduce_dim
+        auto it = args.find("num_reduce_dim");
+        const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
+        CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
+        axes.resize(num_reduce_dim);
+
+        int64_t start_dim = 0;
+        if (def.type() == "ReduceFrontMean") {
+            start_dim = 0;
+        } else if (def.type() == "ReduceBackMean") {
+            start_dim = dims.size() - axes.size();
+        }
+        std::iota(axes.begin(), axes.end(), start_dim);
+
+        keepdims = 0;
+    }
+
+    nodes.emplace_back(MakeNode("ReduceMean",
+                { x },
+                { y },
+                {
+                    MakeAttribute("axes", axes),
+                    MakeAttribute("keepdims", keepdims),
+                },
+                def.name()));
+
+    return result;
 }
 
 ConvertedResult OnnxExporter::CreateUpsampleNodes(
