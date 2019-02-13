@@ -97,12 +97,9 @@ ShapeInfoMap InferShapes(
     // Populate shapes from workplace
     const std::vector<std::string> ws_blobs = ws->Blobs();
     for (const auto& s : ws_blobs) {
-      auto shape = GetTensorShapeOfBlob(ws->GetBlob(s));
-      if (!shape.unknown_shape()) {
-        shape_map.emplace(
-            std::piecewise_construct,
-            std::forward_as_tuple(s),
-            std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, shape));
+      auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
+      if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+        shape_map[s] = shape_info;
       }
     }
     for (const auto& kv : *shape_hints_ordered) {
