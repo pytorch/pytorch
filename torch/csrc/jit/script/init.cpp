@@ -239,7 +239,7 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 };
 
-
+// Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   ConstantParameterList(std::shared_ptr<Module> module)
       : module_(std::move(module)) {}
@@ -254,17 +254,18 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-        std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters().items();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          if (!(*it)->is_buffer) {
-            params.push_back(caller.get_or_add_parameter((*it)->slot()));
-          }
-        }
-        auto list = caller.graph()->createList(TensorType::get(), params);
-        caller.graph()->insertNode(list);
-        return toSimple(list->output());
+    // Add all module parameters as inputs to the graph
+    std::vector<Value*> params;
+    const auto& param_list = module_->get_parameters().items();
+    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
+      if (!(*it)->is_buffer) {
+        params.push_back(caller.get_or_add_parameter((*it)->slot()));
       }
+    }
+    auto list = caller.graph()->createList(TensorType::get(), params);
+    caller.graph()->insertNode(list);
+    return toSimple(list->output());
+  }
 
  private:
   std::shared_ptr<Module> module_;
@@ -282,24 +283,6 @@ struct ModuleValue : public SugaredValue {
 
   std::string kind() const override {
     return "module";
-  }
-
-  bool is_list_of_all_parameters(const py::object& list) {
-    bool is_parameter_list = true;
-    for (auto item : list) {
-      // py::module::import("torch.jit").attr("inspector")(item);
-      if (!py::isinstance(item, py::module::import("torch.nn").attr("Parameter"))) {
-        is_parameter_list = false;
-        break;
-      }
-    }
-    size_t num_params = 0;
-    for (auto& item : module->get_parameters()) {
-      if (!item.value().is_buffer) {
-        num_params++;
-      }
-    }
-    return is_parameter_list && num_params == py::len(list);
   }
 
   // select an attribute on it, e.g. `this.field`
@@ -332,14 +315,13 @@ struct ModuleValue : public SugaredValue {
     } else if (NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
-
-
-
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
-      if (py::cast<bool>(py::module::import("torch.jit").attr("_try_get_params_list")(attr))) {
+      if (py::isinstance<py::function>(attr) &&
+          py::hasattr(attr, "_is_parameter_list") &&
+          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
         return std::make_shared<ConstantParameterList>(module);
       }
       if (py::isinstance<py::function>(attr) ||

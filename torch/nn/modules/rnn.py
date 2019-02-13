@@ -9,7 +9,8 @@ from ..parameter import Parameter
 from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
 from .. import _VF
-from ..._jit_internal import weak_module, weak_script_method, weak_script, all_params
+from ..._jit_internal import weak_module, weak_script_method, weak_script, \
+    parameter_list
 
 _rnn_impls = {
     'GRU': _VF.gru,
@@ -87,8 +88,6 @@ class RNNBase(Module):
                     setattr(self, name, param)
                 self._all_weights.append(param_names)
 
-        self._flat_parameters = self._flat_weights
-
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -133,6 +132,10 @@ class RNNBase(Module):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
+
+    @parameter_list
+    def get_flat_weights(self):
+        return self._flat_weights
 
     @weak_script_method
     def check_input(self, input, batch_sizes):
@@ -200,10 +203,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flat_parameters, self.bias, self.num_layers,
+            result = _impl(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flat_parameters, self.bias,
+            result = _impl(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -494,10 +497,6 @@ class LSTM(RNNBase):
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
-    @all_params
-    def params_list(self):
-        return self._flat_weights
-
     @weak_script_method
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
@@ -514,10 +513,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self.params_list(), self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self.params_list(), self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]

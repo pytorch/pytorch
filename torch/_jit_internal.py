@@ -28,9 +28,6 @@ boolean_dispatched = weakref.WeakKeyDictionary()
 # with an operator that always throws an error
 ignored_fns = weakref.WeakSet()
 
-# Functions that return a list of all the parameters in a module
-all_params_fns = weakref.WeakSet()
-
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -168,8 +165,8 @@ def ignore(fn):
     return fn
 
 
-def all_params(fn):
-    all_params_fns.add(fn)
+def parameter_list(fn):
+    fn._is_parameter_list = True
     return fn
 
 
