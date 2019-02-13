@@ -11,6 +11,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <list>
 #include <memory>
@@ -85,8 +86,11 @@ void Variable::backward(
 }
 
 void Variable::set_data(Tensor new_data) const {
+  uint64_t before_0 = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(0);
+  uint64_t before_1 = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(1);
+
   // Resets gradient accumulator if metadata is out of date
-  auto autograd_meta = get_autograd_meta();
+  Variable::AutogradMeta* autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
@@ -98,13 +102,18 @@ void Variable::set_data(Tensor new_data) const {
     }
   }
 
-  auto autograd_meta_detached = get()->detach_autograd_meta();
   // yf225 TODO: potential cause of bug
   // impl_.swap(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  const_cast<c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>&>(impl_) = new_data.getIntrusivePtr()->shallow_copy_and_detach();
-  // set_impl(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  get()->set_autograd_meta(std::move(autograd_meta_detached));
+  // const_cast<c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>&>(impl_) = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  get()->shallow_copy_from(new_data.unsafeGetTensorImpl());
+  get()->set_autograd_meta(std::move(get()->detach_autograd_meta()));
   get()->set_is_variable(true);
+
+  uint64_t after_0 = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(0);
+  uint64_t after_1 = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(1);
+
+  std::cout << "device 0 leak: " << after_0 - before_0 << "\n";
+  std::cout << "device 1 leak: " << after_1 - before_1 << "\n";
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)

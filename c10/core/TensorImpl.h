@@ -803,6 +803,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
+  // yf225 TODO: add comment for why we need this
+  virtual void shallow_copy_from(TensorImpl* impl) {
+    set_storage(impl->storage());
+    set_sizes_and_strides(impl->sizes(), impl->strides());
+    set_storage_offset(impl->storage_offset());
+    set_wrapped_number(impl->is_wrapped_number());
+    reserved_ = impl->reserved_;
+    refresh_numel();
+    refresh_contiguous();
+  }
+
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
