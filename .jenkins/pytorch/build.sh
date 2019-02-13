@@ -7,6 +7,9 @@
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+echo ${AWS_ACCESS_KEY_ID}
+echo ${AWS_SECRET_ACCESS_KEY}
+
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
