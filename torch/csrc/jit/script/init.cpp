@@ -172,14 +172,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     }
   }
 
-  virtual Node* getPythonOp(
-      const std::shared_ptr<Graph>& graph,
-      THPObjectPtr func_ptr,
-      std::string& cconv) const {
-    return graph->insertNode(
-        graph->createPythonOp(std::move(func_ptr), cconv, {}));
-  }
-
   py::object self;
 };
 
