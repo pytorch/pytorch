@@ -1188,7 +1188,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // know how to reallocate it. However, in order to preserve legacy C2
       // behavior, we allow reallocating the memory using default allocator.
       if (allocator == nullptr) {
-        allocator = caffe2::GetAllocator(storage_.device_type());
+        allocator = GetAllocator(storage_.device_type());
       }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as
