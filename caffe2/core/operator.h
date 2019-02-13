@@ -671,6 +671,9 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
+  /// XOutput is a modernized version of Output which returns a Tensor
+  /// rather than a Tensor* (the raw pointer in the latter case is
+  /// useless, as Tensor is a pointer type.)
   Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
@@ -737,10 +740,19 @@ class Operator : public OperatorBase {
     return OperatorBase::OutputTensor(idx, dims, options);
   }
 
+  /// Legacy: please consider using the version of Output() which also takes
+  /// dtype and size as arguments.
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
   }
 
+  /// Get the output Tensor of an operator (allocating it if it is not
+  /// already initialized), and copy the contents of src into it.
+  /// You probably don't actually want to use this function (the fact
+  /// that you have a Tensor to copy from is probably a mistake:
+  /// you should have written the output into the output tensor,
+  /// from Output, directly in the first place), but this method
+  /// is situationally useful.
   Tensor* OutputTensorCopyFrom(
       int idx,
       at::TensorOptions options,
