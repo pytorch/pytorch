@@ -389,7 +389,7 @@ class DistributedDataParallel(Module):
                                          self.broadcast_bucket_size)
             for tensors, module_params_data in zip(result[1:], self.modules_params_data[1:]):
                 for tensor, param_data in zip(tensors, module_params_data):
-                    param_data.set_(tensor)
+                    param_data.copy_(tensor)
 
         # module buffer sync
         if self.broadcast_buffers:
@@ -437,7 +437,6 @@ class DistributedDataParallel(Module):
             # We can flush these and save memory for replicas
             if device_idx > 0:
                 param.grad = None
-                param.data.set_()
 
             # Current device's bucket is full
             if self.buckets_ready_size[bucket_idx][device_idx] == self.bucket_sizes[bucket_idx]:

@@ -265,6 +265,7 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @skip_if_small_worldsize
     def test_get_backend(self):
         if dist.get_world_size() > 2:
             group = [1, 2]
@@ -296,6 +297,7 @@ class _DistTestBase(object):
             dist.Backend(["gloo"])
 
     # Test destroy
+    @skip_if_small_worldsize
     def test_destroy_group(self):
         if dist.get_world_size() > 2:
             group = [1, 2]
@@ -306,6 +308,7 @@ class _DistTestBase(object):
         dist.destroy_process_group(group_id)
 
     # Test get rank and size of group
+    @skip_if_small_worldsize
     def test_get_rank_size_group(self):
         if dist.get_world_size() > 2:
             group = [1, 2]

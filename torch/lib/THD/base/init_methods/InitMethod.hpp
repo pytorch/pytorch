@@ -44,8 +44,8 @@ struct InitMethod {
       if (rank >= world_size || rank == -1)
         throw std::logic_error("rank was not set in config");
 
-      if (public_address == "")
-        throw std::logic_error("public_address was not set in config");
+      if (public_address == "" && world_size > 1)
+        throw std::logic_error("public_address was not set in config and world_size is larger than 1");
 
       if (rank == 0) {
         if (master.listen_socket < 0)

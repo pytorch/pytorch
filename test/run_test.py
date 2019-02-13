@@ -38,6 +38,7 @@ TESTS = [
     'nn',
     'numba_integration',
     'optim',
+    'smallworld_distributed',
     'sparse',
     'thd_distributed',
     'torch',
@@ -66,6 +67,10 @@ DISTRIBUTED_TESTS_CONFIG = {
     },
 }
 
+# Support running tests in "small world" mode where only 1 process is available.
+# On test machines with only 2 GPUs, this will help exercise corner cases where
+# DistributedDataParallel has multiple devices assigned to the same process.
+SMALLWORLD_DISTRIBUTED_TESTS_CONFIG = {}
 
 if dist.is_available():
     if dist.is_mpi_available():
@@ -76,7 +81,9 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-
+        SMALLWORLD_DISTRIBUTED_TESTS_CONFIG['nccl'] = {
+            'WORLD_SIZE': '1'
+        }
 
 THD_DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {
@@ -209,6 +216,10 @@ def test_distributed(executable, test_module, test_directory, options):
     config = DISTRIBUTED_TESTS_CONFIG
     if test_module == "test_thd_distributed":
         config = THD_DISTRIBUTED_TESTS_CONFIG
+    elif test_module == 'test_smallworld_distributed':
+        # alias these tests to the regular distributed tests
+        test_module = 'test_distributed'
+        config = SMALLWORLD_DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
@@ -257,6 +268,7 @@ CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
     'thd_distributed': test_distributed,
+    'smallworld_distributed': test_distributed,
 }
 
 
