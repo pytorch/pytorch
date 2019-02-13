@@ -56,6 +56,8 @@ void BoundShapeInferencer::InferBoundShapeAndType(
       InferFC(op);
     } else if (op.type() == "Concat") {
       InferConcat(op);
+    } else if (op.type() == "Reshape") {
+      InferReshape(op);
     } else if (op.type() == "LengthsRangeFill") {
       InferLengthsRangeFill(op);
     } else {
@@ -198,6 +200,13 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       TensorProto_DataType_FLOAT);
 }
 
+void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
+  InferCommonOp(op);
+  // old_shape should be a constant
+  if (op.output_size() > 1 && shape_info_.count(op.output(1))) {
+    shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
+  }
+}
 // For concat net, if some inputs are missing and we have add_axis argument, it
 // means that all the inputs should be of the same dimension. In this case, we
 // can infer the shape of the missing inputs
@@ -253,7 +262,7 @@ void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
   }
   InferCommonOp(op);
   // split_info should be a constant
-  if (op.output_size() > 1) {
+  if (op.output_size() > 1 && shape_info_.count(op.output(1))) {
     shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
   }
 }
@@ -345,7 +354,12 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
 
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
   CAFFE_ENFORCE(schema);
-  auto output_shapes = schema->InferTensor(op, input_shapes);
+  std::vector<TensorShape> output_shapes;
+  try {
+    output_shapes = schema->InferTensor(op, input_shapes);
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Caught exception while inferring shapes for " << op.type();
+  }
   int i = 0;
   for (const auto& shape : output_shapes) {
     if (shape.unknown_shape()) {
