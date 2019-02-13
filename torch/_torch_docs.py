@@ -2994,8 +2994,9 @@ add_docstr(torch.mode,
            r"""
 mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the mode value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the mode value
+Returns a mode value of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`, i.e. a value which appears most often
+in that row. Also returns an index location of the returned mode value
 as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
@@ -3016,14 +3017,12 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 5)
+    >>> a = torch.randint(10, (5,))
     >>> a
-    tensor([[-1.2808, -1.0966, -1.5946, -0.1148,  0.3631],
-            [ 1.1395,  1.1452, -0.6383,  0.3667,  0.4545],
-            [-0.4061, -0.3074,  0.4579, -1.3514,  1.2729],
-            [-1.0130,  0.3546, -1.4689, -0.1254,  0.0473]])
-    >>> torch.mode(a, 1)
-    (tensor([-1.5946, -0.6383, -1.3514, -1.4689]), tensor([ 2,  2,  3,  2]))
+    tensor([6, 5, 1, 0, 2])
+    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> torch.mode(b, 0)
+    (tensor([6, 5, 1, 0, 2]), tensor([2, 2, 2, 2, 2]))
 """)
 
 add_docstr(torch.mul,
