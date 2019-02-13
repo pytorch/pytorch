@@ -241,30 +241,33 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 
 
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
-  ConstantParameterList(std::shared_ptr<Module> module, std::vector<at::Tensor*> slots)
-      : module_(std::move(module)), slots_(std::move(slots)) {}
+  ConstantParameterList(std::shared_ptr<Module> module)
+      : module_(std::move(module)) {}
 
   std::string kind() const override {
     return "constant parameter list";
   }
 
-  Value* asValue(const SourceRange& loc, Method& m) override {
-    std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters().items();
-    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-      if (!(*it)->is_buffer) {
-        params.push_back(m.get_or_add_parameter((*it)->slot()));
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+        std::vector<Value*> params;
+        const auto& param_list = module_->get_parameters().items();
+        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
+          if (!(*it)->is_buffer) {
+            params.push_back(caller.get_or_add_parameter((*it)->slot()));
+          }
+        }
+        auto list = caller.graph()->createList(TensorType::get(), params);
+        caller.graph()->insertNode(list);
+        return toSimple(list->output());
       }
-      // params.push_back(m.get_or_add_parameter(*it));
-    }
-    auto list = m.graph()->createList(TensorType::get(), params);
-    m.graph()->insertNode(list);
-    return list->output();
-  }
 
  private:
   std::shared_ptr<Module> module_;
-  std::vector<at::Tensor*> slots_;
 };
 
 // defines how modules/methods behave inside the script subset.
@@ -329,19 +332,19 @@ struct ModuleValue : public SugaredValue {
     } else if (NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
+
+
+
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
+      if (py::cast<bool>(py::module::import("torch.jit").attr("_try_get_params_list")(attr))) {
+        return std::make_shared<ConstantParameterList>(module);
+      }
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
-        if (py::isinstance<py::list>(attr)) {
-          if (is_list_of_all_parameters(attr)) {
-            std::vector<at::Tensor*> params;
-            return std::make_shared<ConstantParameterList>(module, params);
-          }
-        }
         return toSugaredValue(attr, m, loc, true);
       } else {
         throw ErrorReport(loc)

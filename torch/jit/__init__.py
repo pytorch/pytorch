@@ -664,6 +664,12 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
+def _try_get_params_list(fn):
+    if not callable(fn) or not hasattr(fn, '__func__'):
+        return None
+    return fn.__func__ in _jit_internal.all_params_fns
+
+
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
         return None
