@@ -298,6 +298,7 @@ OnnxExporter::get_special_operators() const {
           {"AveragePool", &OnnxExporter::CreateConvPoolNodes},
           {"FC", &OnnxExporter::CreateGemmNodes},
           {"Concat", &OnnxExporter::CreateConcatNodes},
+          {"MergeDim", &OnnxExporter::CreateMergeDimNodes},
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
@@ -743,6 +744,40 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
     cnode.add_attribute()->CopyFrom(MakeAttribute("value", split_info_tensor));
     nodes.emplace_back(std::move(cnode));
   }
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateMergeDimNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  const auto& x = def.input(0);
+  const auto& y = def.output(0);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+
+  {
+    const auto ndim = shapes.at(x).dims().size();
+    CAFFE_ENFORCE_GE(ndim, 2, "No enough dims to merge.");
+    std::vector<int64_t> dims(ndim);
+    dims[0] = 1;
+    dims[1] = -1;
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+  }
+
+  const auto reshaped = dummy_->NewDummyName();
+  nodes.emplace_back(MakeNode("Reshape",
+              { x, const_tensors.back().name() },
+              { reshaped }));
+
+  nodes.emplace_back(MakeNode("Squeeze",
+              { reshaped },
+              { y },
+              std::vector<AttributeProto>{
+                  MakeAttribute("axes", std::vector<int64_t>{ 0 }),
+              }));
+
   return result;
 }
 
