@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-struct ParsedValue;
+struct VarWithType;
 struct ParsedLiteral;
 
 class IRParser {
@@ -18,23 +18,24 @@ class IRParser {
   IRParser(const std::string& str, torch::jit::Graph* graph)
       : L(str), g(graph) {}
 
-  ParsedValue parseParameter();
+  std::string parseVar();
+  VarWithType parseVarWithType();
   ParsedLiteral parseScalarLiteral(Node* n);
 
   void parse();
   void parseGraphInputs();
-  void parseReturnStmt();
+  void parseReturnOperator();
 
   void parseBlocks(Node* parentNode);
   void parseBlock(Node* parentNode);
   void parseBlockInputs(Block* b);
   void parseBlockOutputs(Block* b);
 
-  void parseStmtsList(Block* b);
-  void parseStmt(Block* b);
-  void parseStmtOutputs(std::vector<ParsedValue>* outs);
-  std::string parseStmtName();
-  void parseStmtInputs(Node* n);
+  void parseOperatorsList(Block* b);
+  void parseOperator(Block* b);
+  void parseOperatorOutputs(std::vector<VarWithType>* outs);
+  std::string parseOperatorName();
+  void parseOperatorInputs(Node* n);
   void parseAttrs(Node* n);
   void parseAttr(Node* n);
 
@@ -60,8 +61,8 @@ struct ParsedLiteral {
   std::vector<double> fs;
 };
 
-struct ParsedValue {
-  ParsedValue(){};
+struct VarWithType {
+  VarWithType(){};
   std::string name;
   std::string type;
 };
@@ -85,13 +86,12 @@ TypePtr parseType(const std::string& s) {
     return StringType::get();
   }
   // TODO: Support other types.
-  std::cerr << "ERROR: type '" << s << "' not supported by parser" << std::endl;
-  abort();
+  AT_ASSERTM(false, "Type not supported by parser:", s);
 }
 
-ParsedValue IRParser::parseParameter() {
+VarWithType IRParser::parseVarWithType() {
   L.expect('%');
-  ParsedValue r;
+  VarWithType r;
   if (L.cur().kind == TK_IDENT) {
     r.name = L.expect(TK_IDENT).text();
   } else {
@@ -104,12 +104,21 @@ ParsedValue IRParser::parseParameter() {
   return r;
 }
 
-void IRParser::parseStmtOutputs(std::vector<ParsedValue>* outs) {
+std::string IRParser::parseVar() {
+  L.expect('%');
+  if (L.cur().kind == TK_IDENT) {
+    return L.expect(TK_IDENT).text();
+  }
+  return L.expect(TK_NUMBER).text();
+}
+
+void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
   if (L.cur().kind != '%') {
     return;
   }
-  parseList(
-      TK_NOTHING, ',', TK_NOTHING, [&] { outs->push_back(parseParameter()); });
+  parseList(TK_NOTHING, ',', TK_NOTHING, [&] {
+    outs->push_back(parseVarWithType());
+  });
   L.expect('=');
 }
 
@@ -235,17 +244,14 @@ void IRParser::parseAttrs(Node* n) {
   parseList('[', ',', ']', [&] { parseAttr(n); });
 }
 
-void IRParser::parseStmtInputs(Node* n) {
+void IRParser::parseOperatorInputs(Node* n) {
   if (L.cur().kind == '[') {
     parseAttrs(n);
   }
   parseList('(', ',', ')', [&] {
-    ParsedValue i = parseParameter();
-    if (!vmap.count(i.name)) {
-      vmap[i.name] = g->addInput(); // XXX: Or should we fail here?
-      vmap[i.name]->setType(parseType(i.type));
-    }
-    n->addInput(vmap[i.name]);
+    std::string var_name = parseVar();
+    AT_ASSERT(vmap.count(var_name));
+    n->addInput(vmap[var_name]);
   });
 }
 
@@ -258,16 +264,24 @@ void IRParser::parseBlocks(Node* parentNode) {
 }
 
 void IRParser::parseBlockInputs(Block* b) {
-  L.expect('(');
-  // TODO: Actually parse inputs.
-  L.expect(')');
+  parseList('(', ',', ')', [&] {
+    VarWithType v = parseVarWithType();
+    // If the name is a number, don't use it
+    std::string uniq_name = v.name;
+    if (uniq_name.find_first_not_of("0123456789") == std::string::npos) {
+      uniq_name = "";
+    }
+    vmap[v.name] = b->addInput(uniq_name);
+    vmap[v.name]->setType(parseType(v.type));
+  });
 }
 
 void IRParser::parseBlockOutputs(Block* b) {
   L.expect(TK_ARROW);
   parseList('(', ',', ')', [&] {
-    ParsedValue o = parseParameter();
-    b->registerOutput(vmap[o.name]);
+    std::string var_name = parseVar();
+    AT_ASSERT(vmap.count(var_name));
+    b->registerOutput(vmap[var_name]);
   });
   L.expect(TK_NEWLINE);
   L.expect(TK_DEDENT);
@@ -277,18 +291,18 @@ void IRParser::parseBlockOutputs(Block* b) {
  *
  * It should look like the following:
  * blockName(input1, input2, input3, ...):
- *   stmt1
- *   stmt2
+ *   op1
+ *   op2
  *   ...
- *   stmtN
+ *   opN
  *   -> (output1, output2, output3, ...)
  */
 void IRParser::parseBlock(Node* parentNode) {
   Block* b = parentNode->addBlock();
-  L.expect(TK_IDENT).text(); // TODO: Do we need the block name anywhere?
+  L.expect(TK_IDENT).text(); // Block name is not used anywhere.
   parseBlockInputs(b);
   L.expect(':');
-  parseStmtsList(b);
+  parseOperatorsList(b);
   parseBlockOutputs(b);
 }
 
@@ -297,14 +311,14 @@ void IRParser::parseBlock(Node* parentNode) {
  * It is expected to be delimited by TK_NEWLINE and end with TK_RETURN or
  * TK_ARROW.
  */
-void IRParser::parseStmtsList(Block* b = nullptr) {
+void IRParser::parseOperatorsList(Block* b) {
   L.expect(TK_INDENT);
   while (L.cur().kind != TK_ARROW && L.cur().kind != TK_RETURN) {
-    parseStmt(b);
+    parseOperator(b);
   }
 }
 
-std::string IRParser::parseStmtName() {
+std::string IRParser::parseOperatorName() {
   std::string name = L.expect(TK_IDENT).text();
   L.expect(':');
   L.expect(':');
@@ -319,32 +333,27 @@ std::string IRParser::parseStmtName() {
  *     <blocks>
  * Outputs, blocks and attributes are optional.
  */
-void IRParser::parseStmt(Block* b) {
+void IRParser::parseOperator(Block* b) {
   // Parse lefthand side.
-  std::vector<ParsedValue> outs;
-  parseStmtOutputs(&outs);
+  std::vector<VarWithType> outs;
+  parseOperatorOutputs(&outs);
 
   // Parse the name and create the corresponding node in the graph.
-  std::string name = parseStmtName();
+  std::string name = parseOperatorName();
   Node* n = g->create(Symbol::fromQualString(name), {}, outs.size());
 
   // Parse attributes and inputs.
-  parseStmtInputs(n);
+  parseOperatorInputs(n);
 
   // Register outputs.
   int idx = 0;
-  for (const ParsedValue& o : outs) {
-    vmap[o.name] = n->outputs()[idx++];
-    vmap[o.name]->setType(parseType(o.type));
+  for (const VarWithType& v : outs) {
+    vmap[v.name] = n->outputs()[idx++];
+    vmap[v.name]->setType(parseType(v.type));
   }
 
-  // Insert the new node into block B if we're inside it or into the graph
-  // directly if we are not inside a block.
-  if (b) {
-    b->appendNode(n);
-  } else {
-    g->insertNode(n);
-  }
+  // Insert the new node into block B.
+  b->appendNode(n);
 
   // If the statement has nested blocks, parse them:
   if (L.cur().kind == TK_INDENT) {
@@ -355,9 +364,14 @@ void IRParser::parseStmt(Block* b) {
 
 void IRParser::parseGraphInputs() {
   parseList('(', ',', ')', [&] {
-    ParsedValue v = parseParameter();
-    // TODO: Do we need to do anything with the type here?
-    vmap[v.name] = g->addInput();
+    VarWithType v = parseVarWithType();
+    // If the name is a number, don't use it
+    std::string uniq_name = v.name;
+    if (uniq_name.find_first_not_of("0123456789") == std::string::npos) {
+      uniq_name = "";
+    }
+    vmap[v.name] = g->addInput(uniq_name);
+    vmap[v.name]->setType(parseType(v.type));
   });
 }
 
@@ -366,16 +380,16 @@ void IRParser::parseGraphInputs() {
  * It should look like the following:
  *   return (x : TypeX, y : TypeY, z, ...)
  */
-void IRParser::parseReturnStmt() {
+void IRParser::parseReturnOperator() {
   L.expect(TK_RETURN);
 
   // Parse output names and types
   parseList('(', ',', ')', [&] {
-    ParsedValue o = parseParameter();
+    std::string var_name = parseVar();
     // Outputs should already be in VMAP, otherwise we're trying to return
     // undefined value.
-    AT_ASSERT(vmap.count(o.name));
-    g->registerOutput(vmap.at(o.name));
+    AT_ASSERT(vmap.count(var_name));
+    g->registerOutput(vmap.at(var_name));
   });
 
   // Consume ending tokens
@@ -389,10 +403,10 @@ void IRParser::parseReturnStmt() {
  *
  * It should look like the following:
  *   graphName (input1, input2, ... inputN):
- *     stmt1
- *     stmt2
+ *     op1
+ *     op2
  *     ...
- *     stmtN
+ *     opN
  *     return (output1, output2, ... outputN)
  */
 void IRParser::parse() {
@@ -403,10 +417,10 @@ void IRParser::parse() {
   L.expect(':');
 
   // After the definition we should have a list of statements, parse it:
-  parseStmtsList();
+  parseOperatorsList(g->block());
 
   // The last statement should be return, which specifies graph outputs
-  parseReturnStmt();
+  parseReturnOperator();
 }
 
 void IRParser::parseList(
