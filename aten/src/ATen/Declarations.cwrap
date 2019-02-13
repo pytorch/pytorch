@@ -910,11 +910,6 @@
 [[
   name: _th_abs
   cname: abs
-  types:
-    - floating_point
-    - Long
-    - Int
-    - Short
   backends:
     - CPU
     - CUDA

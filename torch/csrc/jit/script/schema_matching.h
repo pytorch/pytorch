@@ -18,6 +18,7 @@ namespace script {
 struct MatchedSchema {
   std::vector<Value*> inputs;
   std::vector<TypePtr> return_types;
+  c10::OptNameList return_field_names;
 };
 
 TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
