@@ -1066,7 +1066,7 @@ int listPop<Shared<BoolList>>(Stack& stack) {
     AT_ERROR("pop from empty list");
   }
 
-  push(stack, std::move(getBoolItem(elements, idx)));
+  push(stack, getBoolItem(elements, idx));
   elements.erase(elements.begin() + normalized_idx);
 
   return 0;
