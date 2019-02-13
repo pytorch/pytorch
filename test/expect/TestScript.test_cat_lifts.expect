@@ -1,18 +1,15 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : int = prim::Constant[value=1]()
   %2 : Tensor[] = prim::ListConstruct(%x, %x)
   %3 : Tensor = aten::cat(%2, %1)
-  return (%3);
-}
-graph(%x : Tensor) {
+  return (%3)
+graph(%x : Tensor):
   %1 : int = prim::Constant[value=1]()
   %2 : Tensor[] = prim::ListConstruct()
   %3 : Tensor = aten::cat(%2, %1)
-  return (%3);
-}
-graph(%x : Tensor) {
+  return (%3)
+graph(%x : Tensor):
   %1 : int = prim::Constant[value=1]()
   %2 : Tensor[] = prim::ListConstruct(%x)
   %3 : Tensor = aten::cat(%2, %1)
-  return (%3);
-}
+  return (%3)
