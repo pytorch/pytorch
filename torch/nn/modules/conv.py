@@ -150,7 +150,8 @@ class Conv1d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`. The values of these weights are sampled from
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
+            The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
             :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
@@ -278,7 +279,8 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -408,7 +410,8 @@ class Conv3d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
@@ -583,7 +586,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}}, \text{kernel\_size})`. The values of these weights are sampled from
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size})`. The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
@@ -700,7 +704,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}}, \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -849,7 +854,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}}, \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
