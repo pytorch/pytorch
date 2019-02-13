@@ -8,7 +8,35 @@ namespace jit {
 
 // Returns true iff `v` is present in the alias set tracker.
 bool AliasTracker::contains(const Value* v) const {
-  return map_.count(v);
+  return isWildcard(v) || map_.count(v);
+}
+
+bool AliasTracker::mayAlias(const Value* a, const Value* b) const {
+  if (isWildcard(a) || isWildcard(b)) {
+    return true;
+  }
+
+  if (!map_.count(a) || !map_.count(b)) {
+    return false;
+  }
+
+  const auto aEl = map_.at(a);
+  const auto bEl = map_.at(b);
+
+  const auto aMemLoc = aEl->getMemoryLocations();
+  const auto bMemLoc = bEl->getMemoryLocations();
+
+  // XXX: This could be more efficiently done as a bitwise AND on two bitfields
+  // that represent memory location membership. If these comparisons end up
+  // being a bottleneck, consider implementing it that way.
+  for (const auto aLoc : aMemLoc) {
+    for (const auto bLoc : bMemLoc) {
+      if (aLoc == bLoc) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 bool AliasTracker::writesTo(Node* n, const Value* v) const {
@@ -16,29 +44,18 @@ bool AliasTracker::writesTo(Node* n, const Value* v) const {
     return wildcardWriters_.count(n);
   }
 
-  if (!map_.count(v)) {
+  if (!map_.count(v) || !writeIndex_.count(n)) {
     return false;
   }
 
-  return map_.at(v)->writers.count(n);
-}
-
-// Whether `a` *may* point to `b`
-bool AliasTracker::pointsTo(const Value* a, const Value* b) const {
-  if (!map_.count(a)) {
-    return false;
-  }
-  if (isWildcard(a) || isWildcard(b)) {
+  // Can short-circuit if we know this node writes directly to `v`
+  if (writeIndex_.at(n).count(v)) {
     return true;
   }
 
-  // BFS the subtree where the root is `a`s element and the branches are the
-  // `pointsTo` relationships.
-  const auto root = map_.at(a);
-  return root->bfs(
-      [&](const Element* el) { return el->value == b; },
-      BfsDirection::POINTS_TO,
-      /*shortCircuit=*/true);
+  // Otherwise, check if `v` may alias any of written-to values in `n`
+  const auto vSet = ValueSet{v};
+  return mayAlias(vSet, writeIndex_.at(n));
 }
 
 // Make `v` point at `to`.
@@ -99,64 +116,9 @@ void AliasTracker::registerWrite(const Value* v, Node* n) {
   }
 
   AT_ASSERT(map_.count(v));
-  map_.at(v)->writers.insert(n);
+  writeIndex_[n].insert(v);
 }
 
-// Return all aliases of `v`. This is the full set of any other value that
-// *may* represent the same memory location.
-// NOTE: this does not consider wildcard values
-std::unordered_set<const Value*> AliasTracker::getAliases(
-    const Value* v) const {
-  std::unordered_set<const Value*> ret;
-  if (!map_.count(v)) {
-    return ret;
-  }
-
-  const auto root = map_.at(v);
-
-  root->bfs(
-      [&](const Element* el) {
-        ret.insert(el->value);
-        return false; // fn has to return bool but we don't use the result
-      },
-      BfsDirection::BOTH);
-  return ret;
-}
-
-// Get all nodes that write to `v` or a value that may alias `v`.
-std::unordered_set<Node*> AliasTracker::getWrites(const Value* v) const {
-  std::unordered_set<Node*> ret;
-  if (!map_.count(v)) {
-    return ret;
-  }
-
-  // Any write to a wilcard may write to `v`.
-  for (auto writer : wildcardWriters_) {
-    ret.insert(writer);
-  }
-
-  if (useCache_) {
-    for (auto writer : getWritersCached(v)) {
-      ret.insert(writer);
-    }
-    return ret;
-  }
-
-  const auto root = map_.at(v);
-  root->bfs(
-      [&](const Element* el) {
-        for (auto writer : el->writers) {
-          ret.insert(writer);
-        }
-        return false; // fn has to return bool but we don't use the result
-      },
-      BfsDirection::BOTH);
-
-  return ret;
-}
-
-// Functionally equivalent to getWrites().size() > 0, but with a
-// short-circuiting implementation to be faster.
 bool AliasTracker::hasWriters(const Value* v) const {
   if (!map_.count(v)) {
     return false;
@@ -174,15 +136,30 @@ bool AliasTracker::hasWriters(const Value* v) const {
     return true;
   }
 
-  if (useCache_) {
-    return hasWritersCached(v);
+  if (isWriteCacheStale_) {
+    rebuildWriteCache();
   }
 
-  const auto root = map_.at(v);
-  return root->bfs(
-      [&](const Element* el) { return el->writers.size() > 0; },
-      BfsDirection::BOTH,
-      /*shortCircuit=*/true);
+  for (const auto loc : map_.at(v)->getMemoryLocations()) {
+    if (writeCache_.count(loc)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void AliasTracker::rebuildWriteCache() const {
+  for (const auto& pr : writeIndex_) {
+    const auto& writtenValues = pr.second;
+
+    for (const auto value : writtenValues) {
+      for (const auto loc : map_.at(value)->getMemoryLocations()) {
+        writeCache_.insert(loc);
+      }
+    }
+  }
+  isWriteCacheStale_ = false;
 }
 
 void AliasTracker::dump() const {
@@ -205,15 +182,30 @@ void AliasTracker::dump() const {
   std::cout << "\n";
 }
 
+std::unordered_set<const AliasTracker::Element*> AliasTracker::Element::
+    getMemoryLocations() const {
+  if (!cachedMemoryLocations_.empty()) {
+    return cachedMemoryLocations_;
+  }
+
+  // Do a BFS in the `points-to` direction, collecting all memory locations
+  std::unordered_set<const Element*> ret;
+  this->bfs(
+      [&](const Element* el) {
+        if (el->pointsTo.empty()) {
+          ret.insert(el);
+        }
+      },
+      BfsDirection::POINTS_TO);
+
+  cachedMemoryLocations_ = ret;
+  return ret;
+}
+
 // Do a breadth-first search over the graph, starting at `this` and
 // traversing in the direction `dir`.`fn` will be run on each element.
-//
-// If `shortCircuit` is set, then if `fn` evaluates to true the search will
-// short-circuit and return true. You can use this to do existence checks
-// on the graph or whatever.
 template <typename Fn>
-bool AliasTracker::Element::bfs(Fn fn, BfsDirection dir, bool shortCircuit)
-    const {
+bool AliasTracker::Element::bfs(Fn fn, BfsDirection dir) const {
   std::queue<const Element*> queue;
   std::unordered_set<const Element*> seen;
 
@@ -223,9 +215,7 @@ bool AliasTracker::Element::bfs(Fn fn, BfsDirection dir, bool shortCircuit)
     queue.pop();
     seen.insert(el);
 
-    if (fn(el) && shortCircuit) {
-      return true;
-    }
+    fn(el);
 
     switch (dir) {
       case BfsDirection::POINTS_TO: {
@@ -243,76 +233,21 @@ bool AliasTracker::Element::bfs(Fn fn, BfsDirection dir, bool shortCircuit)
           }
         }
       } break;
-
-      case BfsDirection::BOTH: {
-        for (auto ptr : el->pointsTo) {
-          if (!seen.count(ptr)) {
-            queue.push(ptr);
-          }
-        }
-        for (auto ptr : el->pointedFrom) {
-          if (!seen.count(ptr)) {
-            queue.push(ptr);
-          }
-        }
-      } break;
-    }
-  }
-  return false;
-}
-// Cache results in a way to make common queries constant time.
-void AliasTracker::cache() const {
-  if (!cacheStale_) {
-    return;
-  }
-
-  for (const auto& pr : elements_) {
-    const auto el = pr.first;
-    // For each value that does point to anything, assign a fresh set.
-    if (el->pointsTo.size() == 0) {
-      const auto id = getFreshId();
-      assignSet(el, id);
-
-      // Propagate this set to every element that points to `el`
-      el->bfs(
-          [&](const Element* pointerTo) { return assignSet(pointerTo, id); },
-          BfsDirection::POINTED_FROM);
-    }
-  }
-
-  cacheStale_ = false;
-}
-
-bool AliasTracker::hasWritersCached(const Value* v) const {
-  cache();
-  for (const auto& set : elementToSet_.at(map_.at(v))) {
-    if (setToWrites_.count(set) && setToWrites_.at(set).size() > 0) {
-      return true;
     }
   }
   return false;
 }
 
-std::unordered_set<Node*> AliasTracker::getWritersCached(const Value* v) const {
-  cache();
-  std::unordered_set<Node*> ret;
-  for (const auto& set : elementToSet_.at(map_.at(v))) {
-    if (setToWrites_.count(set) > 0) {
-      for (auto write : setToWrites_.at(set)) {
-        ret.insert(write);
-      }
-    }
+ValueSet AliasTracker::getMemoryLocations(const Value* v) const {
+  ValueSet ret;
+  if (!map_.count(v)) {
+    return ret;
+  }
+
+  for (const auto el : map_.at(v)->getMemoryLocations()) {
+    ret.insert(el->value);
   }
   return ret;
 }
-
-bool AliasTracker::assignSet(const Element* el, set_id_t id) const {
-  elementToSet_[el].insert(id);
-  for (auto write : el->writers) {
-    setToWrites_[id].insert(write);
-  }
-  return true;
-}
-
 } // namespace jit
 } // namespace torch

@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import brew, core
+from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -58,11 +58,8 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
 
 
 class TestLayerNormOp(serial.SerializedTestCase):
-    @serial.given(X=hu.tensors(n=1), **hu.gcs)
+    @serial.given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_grad_op(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -89,11 +86,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -117,12 +111,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs_cpu_only)
-    @unittest.skip("Tensor interop enforcement needs fixing")
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     def test_layer_norm_op_c10(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
         op = core.CreateOperator(
@@ -146,32 +136,63 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
-    def test_layer_norm_op_pytorch(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    def test_layer_norm_op_c10_preallocated_outputs(self, X, gc, dc):
+        # This test case ensures that it works correctly when output tensors are preallocated.
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
+        self.ws.create_blob('input').feed(X)
+        m = ModelHelper(name="test")
+        m.net.C10LayerNorm_DontUseThisOpYet(["input"], ["output", "mean", "stdev"], axis=axis, epsilon=epsilon)
+        self.ws.create_net(m.param_init_net).run()
+        net = self.ws.create_net(m.net)
+        net.run()
+        net.run() # run two times to be extra sure that the outputs are preallocated
 
         expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
-        actual_norm, actual_mean, actual_stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(torch.tensor(X), axis, epsilon)
+        actual_norm = self.ws.fetch_blob('output')
+        actual_mean = self.ws.fetch_blob('mean')
+        actual_stdev = self.ws.fetch_blob('stdev')
 
         torch.testing.assert_allclose(expected_norm, actual_norm)
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
+    def test_layer_norm_op_pytorch(self, X, gc, dc):
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X), axis, epsilon)
+
+        torch.testing.assert_allclose(expected_norm, actual_norm)
+        torch.testing.assert_allclose(expected_mean, actual_mean)
+        torch.testing.assert_allclose(expected_stdev, actual_stdev)
+
+    # Test case is using workspace.has_cuda_support and not workspace.has_gpu_support
+    # to exclude it from HIP because tensor interop doesn't work for HIP tensors yet
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    @given(X=hu.tensor(min_dim=2))
+    def test_layer_norm_op_pytorch_cuda(self, X):
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X).cuda(), axis, epsilon)
+
+        torch.testing.assert_allclose(expected_norm, actual_norm.cpu())
+        torch.testing.assert_allclose(expected_mean, actual_mean.cpu())
+        torch.testing.assert_allclose(expected_stdev, actual_stdev.cpu())
+
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_jit(self, X, gc, dc):
         @torch.jit.script
         def jit_layer_norm(tensor, axis, epsilon):
             # type: (Tensor, int, float) -> Tuple[Tensor, Tensor, Tensor]
-            norm, mean, stdev = torch.ops.caffe2.layer_norm_dont_use_this_op_yet(tensor, axis, epsilon)
+            norm, mean, stdev = torch.ops._caffe2.LayerNorm(tensor, axis, epsilon)
             return norm, mean, stdev
 
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
 
@@ -182,11 +203,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
 
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
-        X = X[0]
-        if len(X.shape) == 1:
-            X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
         scale_dim = [1] * np.ndim(X)
         scale_dim[axis] = X.shape[axis]

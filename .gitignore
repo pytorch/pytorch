@@ -28,12 +28,14 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
 test/.coverage
+test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
 test/data/gpu_tensors.pt
 test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
 test/data/linear.pt
+dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
@@ -74,6 +76,7 @@ torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/site-packages/
 torch/lib/python*
+torch/lib64
 torch/include/
 torch/share/
 torch/test/

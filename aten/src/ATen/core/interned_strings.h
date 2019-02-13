@@ -41,6 +41,7 @@ namespace c10 {
   _(prim, Placeholder) /* debug */ \
   _(prim, Print)                   \
   _(prim, PythonOp)                \
+  _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
@@ -90,6 +91,7 @@ namespace c10 {
   _(aten, index_put_)              \
   _(aten, device)                  \
   _(aten, len)                     \
+  _(aten, list)                    \
   _(aten, wait)                    \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \

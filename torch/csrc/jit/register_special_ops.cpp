@@ -23,7 +23,7 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
     error << "Input list to torch.tensor must be of ints, floats, or bools, " <<
       "got " << elem_type->str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(DynamicType::get())) {
+    if (elem_type->isSubtypeOf(TensorType::get())) {
       auto input = node->inputs().at(0);
       if (input->node()->kind() == prim::ListConstruct && input->node()->inputs().size() == 0) {
         error << "\n(Note: empty lists are constructed as Tensor[]; \n"

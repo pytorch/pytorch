@@ -23,11 +23,33 @@ def parse_kwargs(desc):
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+def merge_dicts(*dicts):
+    return {x: d[x] for d in dicts for x in d}
+
+
 reduceops_common_args = parse_kwargs("""
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         If specified, the input tensor is casted to :attr:`dtype` before the operation
         is performed. This is useful for preventing data type overflows. Default: None.
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
 """)
+
+multi_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
+    dim (int or tuple of ints): the dimension or dimensions to reduce
+"""), {'keepdim_details': """
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+"""})
+
+single_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
+    dim (int): the dimension to reduce
+"""), {'keepdim_details': """If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
+the output tensor having 1 fewer dimension than :attr:`input`."""})
+
 
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
@@ -197,7 +219,7 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
-    out = \beta\ \text{mat} + \alpha\ (\sum_{i=0}^{b} \text{batch1}_i \mathbin{@} \text{batch2}_i)
+    out = \beta\ \text{mat} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
@@ -2487,17 +2509,14 @@ stabilized.
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
     .. math::
-        \text{logsumexp}(x)_{i} = \log \sum_j \exp(x_{ij})
+        \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     out (Tensor, optional): the output tensor
 
 
@@ -2505,7 +2524,7 @@ Example::
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
     tensor([ 0.8442,  1.4322,  0.8711])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.lt,
            r"""
@@ -2730,15 +2749,12 @@ Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     out (Tensor): the output tensor
 
 Example::
@@ -2756,7 +2772,7 @@ Example::
             [-0.5085],
             [-0.4599],
             [ 0.1807]])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.median,
            r"""
@@ -3582,15 +3598,12 @@ Example::
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     {dtype}
 
 Example::
@@ -3603,7 +3616,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""".format(**reduceops_common_args))
+""".format(**single_dim_common))
 
 add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
@@ -4461,18 +4474,15 @@ Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
 via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor
 
@@ -4486,7 +4496,7 @@ Example::
             [ 0.1264, -0.5080,  1.6420,  0.1992]])
     >>> torch.std(a, dim=1)
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.sum,
            r"""
@@ -4512,15 +4522,12 @@ Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     {dtype}
 
 Example::
@@ -4536,7 +4543,7 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""".format(**reduceops_common_args))
+""".format(**multi_dim_common))
 
 add_docstr(torch.svd,
            r"""
@@ -5300,18 +5307,15 @@ Example::
 Returns the variance of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the outputs tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 If :attr:`unbiased` is ``False``, then the variance will be calculated via the
 biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor
 
@@ -5325,7 +5329,7 @@ Example::
             [-0.7700,  0.6074, -0.1469,  0.7777]])
     >>> torch.var(a, 1)
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.zeros,
            r"""
@@ -5732,7 +5736,7 @@ Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \sum_{n_1=0}^{N_1-1} \dots \sum_{n_d=0}^{N_d-1} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -5835,7 +5839,7 @@ expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1-1} \dots \sum_{n_d=0}^{N_d-1} x[n_1, \dots, n_d]
          e^{\ j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the

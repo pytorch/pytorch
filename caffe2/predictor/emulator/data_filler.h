@@ -36,7 +36,7 @@ class Filler {
     return bytes;
   }
 
-  std::vector<std::string> get_input_names() const {
+  const std::vector<std::string>& get_input_names() const {
     CAFFE_ENFORCE(!input_names_.empty(), "input names is not initialized");
     return input_names_;
   }

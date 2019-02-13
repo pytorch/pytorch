@@ -133,7 +133,7 @@ void ToBatch::visitTensorToNum(Node* n, Block* block, Block* res_block) {
 void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block) {
   auto res_graph = res_block->owningGraph();
   if (n->inputs()[0]->type() ==
-      DynamicType::get()) { // TensorList: expand directly
+      TensorType::get()) { // TensorList: expand directly
     std::vector<Value*> inputs;
     for (Value* input : n->inputs()) {
       auto res = batch_map.at(input);

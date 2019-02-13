@@ -8,7 +8,6 @@ from collections import Iterable
 from torch._utils import annotate
 from itertools import product
 import math
-from typing import Optional, Tuple, List, Union
 import warnings
 
 __all__ = [
@@ -290,7 +289,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length-1}}%
                             \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
                             \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
@@ -681,7 +680,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         >>> torch.norm(a, float('inf'))
         tensor(4.)
         >>> torch.norm(b, float('inf'))
-        tensor([4., 3., 4.])
+        tensor(4.)
         >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])

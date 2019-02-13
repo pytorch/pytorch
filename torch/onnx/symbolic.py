@@ -143,7 +143,7 @@ def _if_scalar_type_as(g, self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    elif tensor.type().kind() == "TensorType" or tensor.type().kind() == "CompleteTensorType":
+    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
     else:
@@ -230,7 +230,7 @@ _onnx_opset_version = 9
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("prim::Undefined")
+    return g.op("prim::None")
 
 
 def _shape_as_tensor(g, input):
@@ -791,7 +791,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "prim::Undefined" and bias.type().dim() == 1:
+    if bias.node().kind() != "prim::None" and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -812,7 +812,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "prim::Undefined" and bias.type().dim() != 1:
+    if bias.node().kind() != "prim::None" and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -825,12 +825,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().kind() == "prim::Undefined":
+    if weight is None or weight.node().kind() == "prim::None":
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::Undefined":
+    if bias is None or bias.node().kind() == "prim::None":
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -857,12 +857,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().kind() == "prim::Undefined":
+    if weight is None or weight.node().kind() == "prim::None":
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::Undefined":
+    if bias is None or bias.node().kind() == "prim::None":
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')

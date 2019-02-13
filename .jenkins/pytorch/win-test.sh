@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-test
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -75,7 +75,7 @@ set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
     python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
-    :: 7z: `-aos` skips if exists because this .bat can be called multiple times
+    :: 7z: -aos skips if exists because this .bat can be called multiple times
     7z x %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z -aos
     cd %WORKING_DIR%
 ) else (
@@ -148,15 +148,15 @@ test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
-    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+    if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
         $TMP_DIR/ci_scripts/test_python_nn.bat && \
         $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
         $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
         $TMP_DIR/ci_scripts/test_libtorch.bat
     else
-        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
-        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+        elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat

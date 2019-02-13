@@ -819,6 +819,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -1194,9 +1195,9 @@ Node* Graph::createFusionGroup() {
   return n;
 }
 
-Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+Node* Graph::createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types));
+  auto tt = TupleType::create(std::move(types), std::move(field_names));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1359,7 +1360,7 @@ void Graph::freeBlock(Block* b) {
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
-  // small peephole optimization to ensure IntList attributes can still turn
+  // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
   if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();

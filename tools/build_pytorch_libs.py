@@ -71,7 +71,7 @@ def cmake_defines(lst, **kwargs):
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = which('ninja') is not None
+USE_NINJA = not check_negative_env_flag('USE_NINJA') and (which('ninja') is not None)
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 install_dir = base_dir + "/torch"

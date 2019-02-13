@@ -496,6 +496,7 @@ struct CAFFE2_API IValue final {
   template<typename T>
   T to() const &;
 
+  // ToOptional: convert a IValue to the Optional obj that accepts both T and None
   template<typename T>
   optional<T> toOptional();
 
