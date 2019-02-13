@@ -474,6 +474,33 @@ class TestCaffe2Basic(DownloadingTestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
+    def test_mergedim(self):
+        X = np.random.randn(2, 3, 1, 5).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-mergedim-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'MergeDim',
+                inputs=['X'],
+                outputs=['Y'],
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_tensor_filling_ops(self):
         for dtype in [
                 onnx.TensorProto.FLOAT,
