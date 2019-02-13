@@ -215,6 +215,45 @@ const std::vector<std::string> functions = {
 
             return torch.t(self), backward
 
+        def to_0(self,
+                 device: Optional[Device],
+                 dtype: Optional[int],
+                 non_blocking: bool=False,
+                 copy: bool=False):
+            self_device = self.device
+            self_dtype = self.dtype
+            if device is not None:
+                result = self.to(device, dtype=dtype, non_blocking=non_blocking, copy=copy)
+            else:
+                result = self.to(dtype, non_blocking=non_blocking, copy=copy)
+            def backward(grad_output):
+                grad_self = grad_output.to(self_device, dtype=self_dtype, non_blocking=non_blocking, copy=copy)
+                return grad_self, None, None, None, None
+
+            return result, backward
+
+
+        def to_1(self,
+                 dtype: int,
+                 non_blocking: bool=False,
+                 copy: bool=False):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                grad_self = grad_output.to(self_dtype, non_blocking, copy)
+                return grad_self, None, None, None
+
+            return self.to(dtype=dtype, non_blocking=non_blocking, copy=copy), backward
+
+        def to_2(self,
+                 other,
+                 non_blocking: bool=False,
+                 copy: bool=False):
+            def backward(grad_output):
+                grad_self = grad_output.to(self, non_blocking, copy)
+                return grad_self, None, None, None
+
+            return self.to(other, non_blocking=non_blocking, copy=copy), backward
+
         def topk(self,
                  k,
                  dim: int = -1,
