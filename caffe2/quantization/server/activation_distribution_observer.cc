@@ -285,10 +285,12 @@ HistogramNetObserver::HistogramNetObserver(
     NetBase* subject,
     const string& out_file_name,
     int nbins,
-    int dump_freq)
+    int dump_freq,
+    bool mul_nets)
     : NetObserver(subject),
       dump_freq_(dump_freq),
       cnt_(0),
+      mul_nets_(mul_nets),
       out_file_name_(out_file_name) {
   hist_infos_.resize(subject->GetOperators().size());
 
@@ -313,9 +315,15 @@ HistogramNetObserver::HistogramNetObserver(
 void HistogramNetObserver::DumpAndReset_(
     const string& out_file_name,
     bool print_total_min_max) {
-  ofstream f(out_file_name);
+  stringstream file_name;
+  file_name << out_file_name;
+  if (mul_nets_) {
+    file_name << ".";
+    file_name << this;
+  }
+  ofstream f(file_name.str());
   if (!f) {
-    LOG(WARNING) << this << ": can't open " << out_file_name;
+    LOG(WARNING) << this << ": can't open " << file_name.str();
   }
 
   for (int op_index = 0; op_index < hist_infos_.size(); ++op_index) {

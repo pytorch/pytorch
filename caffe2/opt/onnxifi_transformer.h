@@ -42,6 +42,7 @@ class CAFFE2_API OnnxifiTransformer final {
       Workspace* ws,
       NetDef* pred_net,
       const std::vector<std::string>& external_inputs,
+      const std::vector<std::string>& weight_names,
       const std::unordered_map<std::string, TensorShape>& shape_hints,
       const std::unordered_set<int>& blacklisted_ops);
 
@@ -79,11 +80,13 @@ class CAFFE2_API OnnxifiTransformer final {
       const std::string& onnx_model_str,
       const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
-      const caffe2::NetDef& net);
+      const std::vector<std::string>& external_inputs,
+      const std::vector<std::string>& external_outputs);
 
   CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
+      const std::unordered_set<std::string>& weights,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
 
   // Transform by passing C2 proto to backend

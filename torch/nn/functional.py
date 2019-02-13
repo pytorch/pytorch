@@ -361,7 +361,9 @@ fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=4,
     default=False,
     if_true=fractional_max_pool2d_with_indices,
-    if_false=_fractional_max_pool2d)
+    if_false=_fractional_max_pool2d,
+    module_name=__name__,
+    func_name='fractional_max_pool2d')
 
 
 @weak_script
@@ -427,7 +429,9 @@ fractional_max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_index=4,
     default=False,
     if_true=fractional_max_pool3d_with_indices,
-    if_false=_fractional_max_pool3d)
+    if_false=_fractional_max_pool3d,
+    module_name=__name__,
+    func_name='fractional_max_pool3d')
 
 
 @weak_script
@@ -457,7 +461,9 @@ max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool1d_with_indices,
-    if_false=_max_pool1d)
+    if_false=_max_pool1d,
+    module_name=__name__,
+    func_name='max_pool1d')
 
 
 @weak_script
@@ -486,7 +492,9 @@ max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool2d_with_indices,
-    if_false=_max_pool2d)
+    if_false=_max_pool2d,
+    module_name=__name__,
+    func_name='max_pool2d')
 
 
 @weak_script
@@ -516,7 +524,9 @@ max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool3d_with_indices,
-    if_false=_max_pool3d)
+    if_false=_max_pool3d,
+    module_name=__name__,
+    func_name='max_pool3d')
 
 
 @weak_script
@@ -672,7 +682,9 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool1d_with_indices,
-    if_false=_adaptive_max_pool1d)
+    if_false=_adaptive_max_pool1d,
+    module_name=__name__,
+    func_name='adaptive_max_pool1d')
 
 
 @weak_script
@@ -702,7 +714,9 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool2d_with_indices,
-    if_false=_adaptive_max_pool2d)
+    if_false=_adaptive_max_pool2d,
+    module_name=__name__,
+    func_name='adaptive_max_pool2d')
 
 
 @weak_script
@@ -732,7 +746,9 @@ adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool3d_with_indices,
-    if_false=_adaptive_max_pool3d)
+    if_false=_adaptive_max_pool3d,
+    module_name=__name__,
+    func_name='adaptive_max_pool3d')
 
 
 adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
@@ -1623,7 +1639,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 @weak_script
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    # type: (Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
@@ -1721,8 +1737,8 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
 
 @weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
-             reduction='mean'):
-    # type: (Tensor, Tensor, Tensor, Tensor, int, str) -> Tensor
+             reduction='mean', zero_infinity=False):
+    # type: (Tensor, Tensor, Tensor, Tensor, int, str, bool) -> Tensor
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1747,6 +1763,11 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Example::
 
@@ -1757,7 +1778,8 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
-    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
+    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction),
+                          zero_infinity)
 
 
 @weak_script
