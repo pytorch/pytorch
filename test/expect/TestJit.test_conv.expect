@@ -1,5 +1,5 @@
-graph(%0 : Double(20, 16, 50, 40)
-      %1 : Double(13, 16, 3, 3)) {
+graph(%0 : Double(20, 16, 50, 40),
+      %1 : Double(13, 16, 3, 3)):
   %2 : Tensor? = prim::None(), scope: Conv2d
   %3 : int = prim::Constant[value=1](), scope: Conv2d
   %4 : int = prim::Constant[value=1](), scope: Conv2d
@@ -19,5 +19,4 @@ graph(%0 : Double(20, 16, 50, 40)
   %18 : bool = prim::Constant[value=0](), scope: Conv2d
   %19 : bool = prim::Constant[value=1](), scope: Conv2d
   %20 : Double(20, 13, 48, 38) = aten::_convolution(%0, %1, %2, %5, %8, %11, %12, %15, %16, %17, %18, %19), scope: Conv2d
-  return (%20);
-}
+  return (%20)
