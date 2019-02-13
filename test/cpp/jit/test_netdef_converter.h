@@ -111,7 +111,7 @@ void testNetDefConverter(std::ostream& out = std::cout) {
 
     AT_ASSERT(Op.arg().Get(4).name() == "fs_attr");
     AT_ASSERT(Op.arg().Get(4).floats().size() == 2);
-    AT_ASSERT(abs(Op.arg().Get(4).floats().Get(0) - 2.72) < 0.0001);
+    AT_ASSERT(fabs(Op.arg().Get(4).floats().Get(0) - 2.72) < 0.001);
 
     AT_ASSERT(Op.arg().Get(5).name() == "ss_attr");
     AT_ASSERT(Op.arg().Get(5).strings().size() == 2);
@@ -134,9 +134,9 @@ void testNetDefConverter(std::ostream& out = std::cout) {
         n->is(Symbol::fromQualString("attr::is_attr")) ==
         std::vector<long>({14, 18, 7}));
     AT_ASSERT(
-        abs(n->fs(Symbol::fromQualString("attr::fs_attr"))[0] - 2.72) < 0.0001);
+        fabs(n->fs(Symbol::fromQualString("attr::fs_attr"))[0] - 2.72) < 0.001);
     AT_ASSERT(
-        abs(n->fs(Symbol::fromQualString("attr::fs_attr"))[1] - 3.14) < 0.0001);
+        fabs(n->fs(Symbol::fromQualString("attr::fs_attr"))[1] - 3.14) < 0.001);
     AT_ASSERT(
         n->ss(Symbol::fromQualString("attr::ss_attr")) ==
         std::vector<std::string>({"Winter", "Summer"}));
