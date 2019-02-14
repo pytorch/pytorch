@@ -83,10 +83,10 @@ size_t assertFind(
     const SourceRange& search_range,
     const std::string& sub,
     const Check& check) {
-  auto pos = search_range.file().find(sub, search_range.start());
+  auto pos = search_range.file_ptr()->find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
     auto range = SourceRange(
-        std::make_shared<std::string>(search_range.file()),
+        std::make_shared<std::string>(search_range.file_ptr()),
         search_range.start(),
         sub.size());
     std::stringstream ss;
@@ -112,10 +112,10 @@ void assertNotFind(
     const SourceRange& range,
     const std::string& sub,
     const Check& check) {
-  auto pos = range.file().find(sub, range.start());
+  auto pos = range.file_ptr()->find(sub, range.start());
   if (pos != std::string::npos && (pos + sub.size()) <= range.end()) {
     auto found_range = SourceRange(
-        std::make_shared<std::string>(range.file()), pos, sub.size() + pos);
+        std::make_shared<std::string>(range.file_ptr()), pos, sub.size() + pos);
     std::stringstream ss;
     ss << "Expected to not find ";
     printQuotedString(ss, sub);
@@ -243,10 +243,10 @@ struct FileCheckImpl {
         start_range = group_start_range;
       } break;
       case CHECK_DAG: {
-        AT_ASSERT(false);
+        AT_ERROR();
       } break;
       case CHECK_NOT: {
-        AT_ASSERT(false);
+        AT_ERROR();
       } break;
     }
     return SourceRange(test_file, start_range, end_range);
