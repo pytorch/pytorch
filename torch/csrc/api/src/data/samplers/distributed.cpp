@@ -11,21 +11,6 @@ namespace torch {
 namespace data {
 namespace samplers {
 
-DistributedSampler::DistributedSampler(
-    size_t size,
-    size_t num_replicas,
-    size_t rank,
-    bool allow_duplicates)
-    : size_(size),
-      num_replicas_(num_replicas),
-      rank_(rank),
-      allow_duplicates_(allow_duplicates),
-      epoch_(0) {}
-
-void DistributedSampler::set_epoch(size_t epoch) {
-  epoch_ = epoch;
-}
-
 DistributedRandomSampler::DistributedRandomSampler(
     size_t size,
     size_t num_replicas,
@@ -63,47 +48,36 @@ void DistributedRandomSampler::reset(optional<size_t> new_size) {
     size_ = size;
     populate_indices();
   }
-  std::minstd_rand rand(epoch_);
+  std::mt19937 rand(epoch_);
   std::shuffle(all_indices_.begin(), all_indices_.end(), rand);
   sample_index_ = begin_index_;
 }
 
 void DistributedRandomSampler::populate_indices() {
-  size_t local_sample_count;
-  if (allow_duplicates_) {
-    local_sample_count = (size_ + num_replicas_ - 1) / num_replicas_;
-  } else {
-    local_sample_count = size_ / num_replicas_;
-  }
   size_t sample_count =
-      num_replicas_ == 1 ? size_ : local_sample_count * num_replicas_;
+      num_replicas_ == 1 ? size_ : local_sample_count() * num_replicas_;
   all_indices_.resize(sample_count);
   std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
-  if (num_replicas_ > 1 && sample_count > size_) {
-    for (size_t i = size_; i < sample_count; ++i) {
-      all_indices_[i] =
-          i % size_; // we may have added duplicate samples to make all
-                     // replicas to have the same number of samples.
-    }
+  for (size_t i = size_; i < sample_count; ++i) {
+    // we may have added duplicate samples to make all
+    // replicas to have the same number of samples.
+    all_indices_[i] = i % size_;
   }
-  begin_index_ = rank_ * local_sample_count;
-  end_index_ = begin_index_ + local_sample_count;
+  begin_index_ = rank_ * local_sample_count();
+  end_index_ = begin_index_ + local_sample_count();
   sample_index_ = begin_index_;
 }
 
 void DistributedRandomSampler::save(serialize::OutputArchive& archive) const {
   archive.write(
       "sample_index_",
-      torch::tensor(static_cast<int64_t>(sample_index_), torch::kInt64),
+      torch::tensor(static_cast<int64_t>(sample_index_)),
       /*is_buffer=*/true);
 }
 
 void DistributedRandomSampler::load(serialize::InputArchive& archive) {
   auto tensor = torch::empty(1, torch::kInt64);
-  archive.read(
-      "sample_index_",
-      tensor,
-      /*is_buffer=*/true);
+  archive.read("sample_index_", tensor, /*is_buffer=*/true);
   sample_index_ = tensor.item<int64_t>();
 }
 
@@ -156,14 +130,8 @@ void DistributedSequentialSampler::reset(optional<size_t> new_size) {
 }
 
 void DistributedSequentialSampler::populate_indices() {
-  size_t local_sample_count_;
-  if (allow_duplicates_) {
-    local_sample_count_ = (size_ + num_replicas_ - 1) / num_replicas_;
-  } else {
-    local_sample_count_ = size_ / num_replicas_;
-  }
-  begin_index_ = rank_ * local_sample_count_;
-  end_index_ = begin_index_ + local_sample_count_;
+  begin_index_ = rank_ * local_sample_count();
+  end_index_ = begin_index_ + local_sample_count();
   sample_index_ = begin_index_;
 }
 
@@ -171,16 +139,13 @@ void DistributedSequentialSampler::save(
     serialize::OutputArchive& archive) const {
   archive.write(
       "sample_index_",
-      torch::tensor(static_cast<int64_t>(sample_index_), torch::kInt64),
+      torch::tensor(static_cast<int64_t>(sample_index_)),
       /*is_buffer=*/true);
 }
 
 void DistributedSequentialSampler::load(serialize::InputArchive& archive) {
   auto tensor = torch::empty(1, torch::kInt64);
-  archive.read(
-      "sample_index_",
-      tensor,
-      /*is_buffer=*/true);
+  archive.read("sample_index_", tensor, /*is_buffer=*/true);
   sample_index_ = tensor.item<int64_t>();
 }
 
