@@ -1,6 +1,5 @@
-graph(%x : Double(3, 4)
-      %w : Double(4, 5)) {
+graph(%x : Double(3, 4),
+      %w : Double(4, 5)):
   %y : Double(3, 5) = aten::matmul(%x, %w)
   %3 : Double(3, 5) = aten::detach(%y)
-  return (%3);
-}
+  return (%3)

@@ -1404,9 +1404,13 @@ LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* int64_t only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
+#endif /* for byte, identity due to it being unsigned */
 
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)

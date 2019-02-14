@@ -143,7 +143,9 @@
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
-from distutils import dir_util
+from distutils import core, dir_util
+from distutils.core import Distribution
+from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
 import setuptools.command.install
 import distutils.command.clean
@@ -716,6 +718,18 @@ def print_box(msg):
     print('-' * (size + 2))
 
 if __name__ == '__main__':
+    # Parse the command line and check the arguments
+    # before we proceed with building deps and setup
+    dist = Distribution()
+    dist.script_name = sys.argv[0]
+    dist.script_args = sys.argv[1:]
+    try:
+        ok = dist.parse_command_line()
+    except DistutilsArgError as msg:
+        raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
+    if not ok:
+        sys.exit()
+
     if RUN_BUILD_DEPS:
         build_deps()
     setup(
@@ -778,12 +792,15 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
                 'include/torch/csrc/autograd/*.h',
+                'include/torch/csrc/autograd/functions/*.h',
                 'include/torch/csrc/autograd/generated/*.h',
+                'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
                 'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
