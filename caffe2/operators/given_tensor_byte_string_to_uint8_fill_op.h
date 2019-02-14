@@ -13,10 +13,9 @@ template <class Context>
 class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GivenTensorByteStringToUInt8FillOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit GivenTensorByteStringToUInt8FillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {
     const ArgumentHelper helper(operator_def);
     if (!helper.HasArgument("dtype")) {
       Extract();

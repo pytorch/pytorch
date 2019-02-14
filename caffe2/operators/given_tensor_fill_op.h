@@ -13,8 +13,9 @@ template <typename T, class Context>
 class GivenTensorFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit GivenTensorFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {
     const ArgumentHelper helper(operator_def);
     // GivenTensorFillOp can be provided with a "dtype" arg if float is
     // is specified as T. Otherwise, "dtype" is ignored.
