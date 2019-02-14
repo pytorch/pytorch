@@ -5,67 +5,65 @@
 
 namespace torch {
 
-struct Fia {
+void BadIPCPatternError() {
+  static bool warned = false;
+  if (not warned) {
+    std::cerr
+        << "Producer process has been terminated before all shared CUDA tensors released.\n";
+    warned = true;
+  }
+}
+
+struct CudaIPCGlobalEntities {
   std::mutex mutex;
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  ~Fia() {
-    std::cout << "Fia destroy\n";
+  ~CudaIPCGlobalEntities() {
+    CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
+    if (next_available_ref_counters_file_ != nullptr) {
+      BadIPCPatternError();
+    }
   };
   void safe_clean_current_file() {
     std::lock_guard<std::mutex> lock(mutex);
-    std::cout << "clean_all_files\n";
-    if (next_available_ref_counters_file_ != nullptr) {
-      if (next_available_ref_counters_file_->used_slots_ == 0) {
-        ref_counters_files_.erase(next_available_ref_counters_file_->handle_);
-        next_available_ref_counters_file_ = nullptr;
-      } else {
-        std::cout << "cat delete " << next_available_ref_counters_file_->handle_
-                  << " with " << next_available_ref_counters_file_->used_slots_
-                  << " slots \n";
-      }
+    if (next_available_ref_counters_file_ != nullptr &&
+        next_available_ref_counters_file_->offsets_in_use() == 0) {
+      ref_counters_files_.erase(next_available_ref_counters_file_->handle());
+      next_available_ref_counters_file_ = nullptr;
     }
   }
 };
 
-Fia fia;
+CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 void CudaIPCCollect() {
-  std::cout << "CudaIPCCollect " << fia.CudaIPCSentDataLimbo_.size() << "\n";
-  fia.CudaIPCSentDataLimbo_.collect();
-  if (fia.CudaIPCSentDataLimbo_.size() == 0) {
-    fia.safe_clean_current_file();
+  cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
+  if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
+    cuda_ipc_global_entities.safe_clean_current_file();
   }
-  std::cout << "CudaIPCCollect done\n";
 }
 
 CudaIPCReceivedData::CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
     : shared_ptr_(std::move(shared_ptr)) {}
 
-int64_t CudaIPCSentData::get() {
+int64_t CudaIPCSentData::counter_value() {
   return *counter_ptr_;
 }
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
-  std::cout << "Destroy LIMBO\n";
   collect();
-
   if (shared_blocks_.size() > 0) {
-    std::cerr
-        << "Producer process has been terminated before all shared CUDA tensors released.\n";
+    BadIPCPatternError();
   }
-
-  fia.safe_clean_current_file();
 }
 
 void CudaIPCSentDataLimbo::collect() {
-  // std::cout << "Collecting LIMBO\n";
   std::vector<std::unique_ptr<CudaIPCSentData>> kept_blocks;
   for (auto& sd : shared_blocks_) {
-    if (sd->get() > 0) {
+    if (sd->counter_value() > 0) {
       kept_blocks.push_back(std::move(sd));
     } else {
       sd.reset();
@@ -75,9 +73,8 @@ void CudaIPCSentDataLimbo::collect() {
 }
 
 CudaIPCSentData::~CudaIPCSentData() {
-  // std::cout << "SentData datele ptr" << original_ptr_.get() << "\n";
   ReturnRefCounter(handle_, offset_);
-  cudaEventDestroy(event_); // TODO: Trap errors!
+  cudaEventDestroy(event_); // TODO: Add error checking and error log spam
 }
 
 void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
@@ -96,27 +93,24 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
 void CudaIPCSentDataDelete(void* ptr) {
   std::unique_ptr<CudaIPCSentData> sent_data(
       static_cast<CudaIPCSentData*>(ptr));
-  if (sent_data->get() > 0) {
-    // TODO: As alternative we can lock current process until resource get
-    // released and cerr to console.
-    fia.CudaIPCSentDataLimbo_.add(std::move(sent_data));
+  if (sent_data->counter_value() > 0) {
+    cuda_ipc_global_entities.CudaIPCSentDataLimbo_.add(std::move(sent_data));
   }
-  fia.CudaIPCSentDataLimbo_.collect();
+  cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
 }
 
 void ReturnRefCounter(std::string handle, uint64_t offset /* unused */) {
-  std::lock_guard<std::mutex> lock(fia.mutex);
-  fia.ref_counters_files_[handle]->used_slots_--;
-  if (fia.ref_counters_files_[handle]->used_slots_ == 0 &&
-      fia.ref_counters_files_[handle]->next_offset_ ==
-          fia.ref_counters_files_[handle]->size_) {
-    fia.ref_counters_files_.erase(handle);
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);
+  if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() == 0 &&
+      !cuda_ipc_global_entities.ref_counters_files_[handle]->have_offsets()) {
+    cuda_ipc_global_entities.ref_counters_files_.erase(handle);
   }
 }
 
 bool CudaIPCHaveRefCounter() {
-  std::lock_guard<std::mutex> lock(fia.mutex);
-  return fia.next_available_ref_counters_file_ != nullptr;
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  return cuda_ipc_global_entities.next_available_ref_counters_file_ != nullptr;
 }
 
 void CudaIPCCreateRefCounter(
@@ -125,55 +119,29 @@ void CudaIPCCreateRefCounter(
     at::DataPtr data_ptr) {
   auto rc = std::make_shared<CudaIPCRefCountersFile>(
       handle, size, std::move(data_ptr));
-  std::lock_guard<std::mutex> lock(fia.mutex);
-  fia.ref_counters_files_[handle] = rc;
-  fia.next_available_ref_counters_file_ = rc;
-}
-
-CudaIPCSentData* GetNewRefCountedSentData() {
-  if (!CudaIPCHaveRefCounter()) {
-    AT_ERROR("CudaIPCSentData() requires initialised RefCounter");
-  }
-
-  auto sent_data = new CudaIPCSentData(
-      fia.next_available_ref_counters_file_->handle_,
-      fia.next_available_ref_counters_file_->next_offset_,
-      fia.next_available_ref_counters_file_->counter_ptr());
-
-  *fia.next_available_ref_counters_file_->counter_ptr() = 1;
-  fia.next_available_ref_counters_file_->next_offset_++;
-  fia.next_available_ref_counters_file_->used_slots_++;
-  if (fia.next_available_ref_counters_file_->next_offset_ ==
-      fia.next_available_ref_counters_file_->size_) {
-    fia.next_available_ref_counters_file_ = nullptr;
-  }
-
-  return sent_data;
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  cuda_ipc_global_entities.ref_counters_files_[handle] = rc;
+  cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
 }
 
 at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   if (!CudaIPCHaveRefCounter()) {
-    AT_ERROR("CudaIPCSentData() requires initialised RefCounter");
+    AT_ERROR("GetNewRefCountedSentData() requires initialised IPCRefCounter");
   }
-
+  cuda_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
   auto sent_data = new CudaIPCSentData(
-      fia.next_available_ref_counters_file_->handle_,
-      fia.next_available_ref_counters_file_->next_offset_,
-      fia.next_available_ref_counters_file_->counter_ptr());
+      cuda_ipc_global_entities.next_available_ref_counters_file_->handle(),
+      cuda_ipc_global_entities.next_available_ref_counters_file_->get_offset(),
+      cuda_ipc_global_entities.next_available_ref_counters_file_->counter_ptr(),
+      device);
 
-  *fia.next_available_ref_counters_file_->counter_ptr() = 1;
-  fia.next_available_ref_counters_file_->next_offset_++;
-  fia.next_available_ref_counters_file_->used_slots_++;
-  if (fia.next_available_ref_counters_file_->next_offset_ ==
-      fia.next_available_ref_counters_file_->size_) {
-    fia.next_available_ref_counters_file_ = nullptr;
+  cuda_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
+  if (!cuda_ipc_global_entities.next_available_ref_counters_file_->have_offsets()) {
+    cuda_ipc_global_entities.next_available_ref_counters_file_ = nullptr;
   }
-
   return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
 
-CudaIPCRefCountersFile::~CudaIPCRefCountersFile() {
-  std::cout << "Deleting ref counter " << handle_ << "\n";
-}
+CudaIPCRefCountersFile::~CudaIPCRefCountersFile() {}
 
 } // namespace torch

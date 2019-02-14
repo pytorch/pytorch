@@ -56,6 +56,14 @@ def send_tensor(queue, event, tp):
     event.wait()
 
 
+def send_and_delete_tensors(queue, event, tp, count):
+    for i in range(5):
+        t = torch.full([5], i).type(tp)
+        queue.put(t)
+        del t
+    event.wait()
+
+
 def call_backward():
     x = torch.randn(3, 3, requires_grad=True)
     x.sum().backward()
@@ -195,7 +203,6 @@ class TestMultiprocessing(TestCase):
 
     def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
         def test_fill():
-            print("test fill")
             x = torch.zeros(5, 5).type(type)
             q = ctx.Queue()
             e = ctx.Event()
@@ -213,7 +220,6 @@ class TestMultiprocessing(TestCase):
             self.assertFalse(p.is_alive())
 
         def test_receive():
-            print("test_receive")
             q = ctx.Queue()
             e = ctx.Event()
             p = ctx.Process(target=send_tensor, args=(q, e, type))
@@ -224,6 +230,7 @@ class TestMultiprocessing(TestCase):
             t2 = q.get()
             self.assertTrue(t1.eq(1).all())
             self.assertTrue(id(t1.storage()) == id(t2.storage()))
+            del t1, t2
             e.set()
             p.join(1)
             self.assertFalse(p.is_alive())
@@ -232,6 +239,8 @@ class TestMultiprocessing(TestCase):
             for _ in range(repeat):
                 test_fill()
                 test_receive()
+            if TEST_CUDA_IPC:
+                torch.cuda.ipc_collect()
 
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
@@ -324,16 +333,31 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(True, "I don't like this test")
-    def test_cuda(self):
+    def test_cuda_simple(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_memory_allocation(self):
+        ctx = mp.get_context('spawn')
+        q = ctx.Queue()
+        e = ctx.Event()
+        p = ctx.Process(target=send_and_delete_tensors, args=(q, e, torch.cuda.IntTensor, 5))
+        p.start()
+        t = []
+        for _ in range(5):
+            t.append(q.get())
+        self.assertEqual(t[0], torch.full([5], 0))
+        del t
+        e.set()
+        p.join(1)
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
-    # @unittest.skipIf(True, "I don't like this test")
     def test_cuda_small_tensors(self):
         with leak_checker(self):
             # Check multiple small tensors which will likely use the same

@@ -106,7 +106,8 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 event_handle)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         else:
-            print("Storage taken from cache, maybe no event sync!")
+            # We already ref counting this Storage, but producer need new refcounters to be released.
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:

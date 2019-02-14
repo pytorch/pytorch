@@ -201,6 +201,8 @@ struct THCCachingAllocator
       block = *it;
       free_blocks.erase(it);
     } else {
+      // TODO: We can check if some blocks become available by calling torch::CudaIPCCollect,
+      // but right now such linking will require lots of code changes.
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
       cudaError_t err = cuda_malloc_retry(device, &ptr, alloc_size);
@@ -482,7 +484,7 @@ struct THCCachingAllocator
       cuda_events.emplace_back(event, block);
     }
 
-    C10_CUDA_CHECK(cudaSetDevice(prev_device));
+    cudaSetDevice(prev_device);
   }
 
   void process_events()
@@ -518,7 +520,6 @@ struct THCCachingAllocator
 THCCachingAllocator caching_allocator;
 
 static void CudaCachingDeleter(void* ptr) {
-  // std::cout << " CudaCachingDeleter " << ptr << "\n";
   caching_allocator.free(ptr);
 }
 
@@ -677,7 +678,6 @@ void* raw_alloc(size_t nbytes) {
 }
 
 void raw_delete(void* ptr) {
-  std::cout << " raw_delete " << ptr << "\n";
   caching_allocator.free(ptr);
 }
 
