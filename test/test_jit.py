@@ -1425,7 +1425,6 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @skipIfRocm
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
 
@@ -1498,7 +1497,6 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
-    @skipIfRocm
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -3972,6 +3970,24 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear_empty, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -4982,8 +4998,40 @@ a")
                     self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32)").dtype)
                     self.assertEqual(b.device, s(b, "t.to(dtype=torch.int32)").device)
 
+        # Test AD: aten::to(Tensor self, int dtype, bool non_blocking, bool copy) -> Tensor
+        t = torch.tensor(5).float().requires_grad_()
+        out_ref = t.to(torch.float32)
+        out = s(t, "t.to(torch.float32)")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Device? device, int? dtype, bool non_blocking, bool copy) -> Tensor
+        out_ref = t.to('cpu')
+        out = s(t, "t.to('cpu')")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Tensor other, bool non_blocking, bool copy) -> Tensor
+        @torch.jit.script
+        def func2(t, t_ref):
+            return t.to(t_ref)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        t_ref = torch.tensor(4).double()
+        out_ref = t.to(t_ref)
+        out = func2(t, t_ref)
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
 
@@ -9933,6 +9981,18 @@ a")
 
         self.checkScript(list_of_dicts, ())
 
+    def dict_to_python(self):
+        def python_lookup(my_dict, keys):
+            # type: (Dict[str, int], List[str]) -> List[int]
+            return [my_dict[k] for k in keys]
+
+        def fn(my_dict, keys):
+            # type: (Dict[str, int], List[str]) -> List[int]
+            return python_lookup(my_dict, keys)
+
+        a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        self.checkScript(fn, (a_dict, ('a', 'c')))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -10024,7 +10084,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -10147,13 +10206,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace
@@ -10301,16 +10358,13 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
                             inputs_require_grads=False, export_import=check_export_import)
 
-    @skipIfRocm
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
     if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
-        @skipIfRocm
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
@@ -10343,11 +10397,9 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
-    @skipIfRocm
     def test_super_resolution(self):
         self._test_super_resolution(self, device='cpu')
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
     def test_super_resolution_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
@@ -10516,7 +10568,6 @@ class TestPytorchExportModes(JitTestCase):
         x = torch.ones(3)
         torch.onnx._export(foo, (x,), f, example_outputs=(x, x))
 
-    @skipIfRocm
     @skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
@@ -10536,7 +10587,6 @@ class TestPytorchExportModes(JitTestCase):
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
     # please contact @Rui.
-    @skipIfRocm
     def test_onnx_aten(self):
         class ModelWithAtenFmod(nn.Module):
             def forward(self, x, y):
@@ -10620,6 +10670,7 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',
@@ -10846,7 +10897,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_arg_configurations_smoke_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
@@ -10975,14 +11025,12 @@ class TestFuser(JitTestCase):
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @skipIfRocm
     @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
     def test_chunk_correctness_cuda(self):
         return self._test_chunk_correctness(self, 'cuda')
 
@@ -11824,10 +11872,9 @@ class TestCustomOperators(JitTestCase):
         input = torch.ones(5, 5)
         trace = torch.jit.trace(torch.ops.aten.relu, [input])
         self.assertExpectedInline(canonical(trace.graph), '''\
-graph(%0 : Double(5, 5)) {
+graph(%0 : Double(5, 5)):
   %1 : Double(5, 5) = aten::relu(%0)
-  return (%1);
-}
+  return (%1)
 ''')
 
     def test_script_graph_contains_custom_op(self):
@@ -11835,10 +11882,9 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : Tensor = aten::relu(%x)
-  return (%1);
-}
+  return (%1)
 ''')
 
 
@@ -12712,6 +12758,51 @@ class TestAsync(JitTestCase):
         # smoke test for ONNX export
         f = io.BytesIO()
         torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
+    def test_save_load_with_extra_files(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return a
+
+        expected_extra_files = torch._C.ExtraFilesMap()
+        expected_extra_files['foo'] = 'bar'
+        m = MyMod()
+
+        # Save to file.
+        with TemporaryFileName() as fname:
+            m.save(fname, _extra_files=expected_extra_files)
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+            # Use torch.jit API
+            torch.jit.save(m, fname, _extra_files=expected_extra_files)
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+        # Save to buffer.
+        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Use torch.jit API
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
+        buffer.seek(0)
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Non-existent file 'bar'
+        with self.assertRaises(RuntimeError):
+            extra_files['bar'] = ''
+            torch.jit.load(buffer, _extra_files=extra_files)
 
 
 for test in autograd_method_tests():

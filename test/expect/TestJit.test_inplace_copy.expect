@@ -1,4 +1,4 @@
-graph(%0 : Double(4, 4)) {
+graph(%0 : Double(4, 4)):
   %1 : int = prim::Constant[value=0]()
   %2 : int = aten::size(%0, %1)
   %3 : Long() = prim::NumToTensor(%2)
@@ -13,5 +13,4 @@ graph(%0 : Double(4, 4)) {
   %12 : Device = prim::Constant[value="cpu"]()
   %13 : Double(4, 4) = aten::zeros(%9, %10, %11, %12)
   %14 : Double(4, 4) = aten::copy_(%13, %0)
-  return (%14);
-}
+  return (%14)

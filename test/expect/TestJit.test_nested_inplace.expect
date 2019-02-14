@@ -1,6 +1,5 @@
-graph(%x : Double(2, 2)) {
+graph(%x : Double(2, 2)):
   %1 : int = prim::Constant[value=0]()
   %2 : int = prim::Constant[value=0]()
   %3 : Double(2, 2) = aten::threshold_(%x, %1, %2)
-  return (%3);
-}
+  return (%3)

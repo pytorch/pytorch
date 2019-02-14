@@ -1,9 +1,9 @@
-graph(%a.1_data : Tensor
-      %a.1_mask : Tensor
-      %a.1_dims : Tensor
-      %b_data : Tensor
-      %b_mask : Tensor
-      %b_dims : Tensor) {
+graph(%a.1_data : Tensor,
+      %a.1_mask : Tensor,
+      %a.1_dims : Tensor,
+      %b_data : Tensor,
+      %b_mask : Tensor,
+      %b_dims : Tensor):
   %6 : int = prim::Constant[value=1]()
   %7 : float = prim::Constant[value=0.1]()
   %8 : Float() = prim::NumToTensor(%7)
@@ -26,25 +26,21 @@ graph(%a.1_data : Tensor
   %25 : int = aten::dim(%data.2)
   %26 : bool = aten::eq(%25, %22)
   %cond_data : Tensor, %cond_mask : Tensor = prim::If(%26)
-    block0() {
+    block0():
       %29 : int = aten::dim(%data.1)
       %30 : int = aten::sub(%29, %22)
       %data.4 : Tensor = prim::Loop(%30, %21, %data.2)
-        block0(%32 : int, %33 : Tensor) {
+        block0(%32 : int, %33 : Tensor):
           %34 : int = aten::dim(%33)
           %data.3 : Tensor = aten::unsqueeze(%33, %34)
           -> (%21, %data.3)
-        }
       %cond_data.1 : Tensor = aten::expand_as(%data.4, %data.1)
       %cond_mask.1 : Tensor = aten::expand_as(%data.4, %mask.1)
       -> (%cond_data.1, %cond_mask.1)
-    }
-    block1() {
+    block1():
       -> (%data.2, %data.2)
-    }
   %res_data : Tensor = aten::where(%cond_data, %data.1, %data)
   %res_mask : Tensor = aten::where(%cond_mask, %mask.1, %mask)
   %res_dims : Tensor = aten::__or__(%dims.1, %dims)
   %41 : (Tensor, Tensor, Tensor) = prim::TupleConstruct(%res_data, %res_mask, %res_dims)
-  return (%41);
-}
+  return (%41)

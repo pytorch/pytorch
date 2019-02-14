@@ -111,7 +111,7 @@ def weak_script_method(fn):
     return fn
 
 
-def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
+def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
@@ -145,6 +145,11 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
 
+    if module_name is not None:
+        fn.__module__ = module_name
+    if func_name is not None:
+        fn.__name__ = func_name
+
     boolean_dispatched[fn] = {
         "if_true": if_true,
         "if_false": if_false,
@@ -162,7 +167,7 @@ def ignore(fn):
 
 try:
     import typing
-    from typing import Tuple, List
+    from typing import Tuple, List, Dict
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -174,6 +179,11 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.List or
              getattr(ann, '__origin__', None) is list)
+
+    def is_dict(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Dict or
+             getattr(ann, '__origin__', None) is dict)
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -196,14 +206,26 @@ except ImportError:
         def __getitem__(self, types):
             return TupleInstance(types)
 
+    class DictInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class DictCls(object):
+        def __getitem__(self, types):
+            return DictInstance(types)
+
     Tuple = TupleCls()
     List = ListCls()
+    Dict = DictCls()
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
 
     def is_list(ann):
         return isinstance(ann, ListInstance)
+
+    def is_dict(ann):
+        return isinstance(ann, DictInstance)
 
 
 # allows BroadcastingList instance to be subscriptable
