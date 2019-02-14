@@ -35,7 +35,7 @@ static void convertArg(const caffe2::Argument& arg, Node* node) {
   AttributeKind kind = getArgKind(arg);
   switch (kind) {
     case AttributeKind::i: {
-      node->i_(attrSymbol, (long)arg.i());
+      node->i_(attrSymbol, (int64_t)arg.i());
       break;
     }
     case AttributeKind::f: {
@@ -47,7 +47,7 @@ static void convertArg(const caffe2::Argument& arg, Node* node) {
       break;
     }
     case AttributeKind::is: {
-      std::vector<long> is(arg.ints().begin(), arg.ints().end());
+      std::vector<int64_t> is(arg.ints().begin(), arg.ints().end());
       node->is_(attrSymbol, is);
       break;
     }
@@ -130,7 +130,7 @@ static void convertAttrToCaffe2Arg(
       break;
     }
     case AttributeKind::is: {
-      for (long i : node->is(name)) {
+      for (int64_t i : node->is(name)) {
         arg->add_ints(i);
       }
       break;

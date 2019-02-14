@@ -132,7 +132,7 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     AT_ASSERT(n->s(Symbol::fromQualString("attr::s_attr")) == "Hello!");
     AT_ASSERT(
         n->is(Symbol::fromQualString("attr::is_attr")) ==
-        std::vector<long>({14, 18, 7}));
+        std::vector<int64_t>({14, 18, 7}));
     AT_ASSERT(
         fabs(n->fs(Symbol::fromQualString("attr::fs_attr"))[0] - 2.72) < 0.001);
     AT_ASSERT(
