@@ -23,9 +23,8 @@ template <class Context>
 class SequenceMaskOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit SequenceMaskOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit SequenceMaskOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         axis_(this->template GetSingleArgument<int>("axis", 1)),
         radius_(this->template GetSingleArgument<int>("radius", 10)),
         grad_(this->template GetSingleArgument<bool>("grad", false)),
