@@ -7149,12 +7149,12 @@ class _TestTorchMixin(object):
             b[i][i] = b[i][i] + 1e-7
         ret = b.pstrf()
         self.assertEqual(ret.u, ret[0])
-        self.assertEqual(ret.piv, ret[1])
+        self.assertEqual(ret.pivot, ret[1])
         ret1 = torch.pstrf(b, out=tuple(ret))
         self.assertEqual(ret1.u, ret1[0])
-        self.assertEqual(ret1.piv, ret1[1])
+        self.assertEqual(ret1.pivot, ret1[1])
         self.assertEqual(ret1.u, ret[0])
-        self.assertEqual(ret1.piv, ret[1])
+        self.assertEqual(ret1.pivot, ret[1])
 
         # test qr
         ret = a.qr()
