@@ -8,8 +8,9 @@ namespace caffe2 {
 
 template <typename T>
 struct TemplatePutOp : public Operator<CPUContext> {
-  TemplatePutOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit TemplatePutOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         given_name_(GetSingleArgument<std::string>(
             "stat_name",
             operator_def.input().Get(0))),

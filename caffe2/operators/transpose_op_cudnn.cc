@@ -17,8 +17,9 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   USE_DISPATCH_HELPER;
 
-  CuDNNTransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNTransposeOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {
     // We will check the legality of axes_: it should be from 0 to axes_.size().
