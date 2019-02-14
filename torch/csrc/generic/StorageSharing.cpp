@@ -5,7 +5,7 @@
 #endif
 
 #ifdef _MSC_VER
-#include <windows>
+#include <windows.h>
 #endif
 
 #include <random>
