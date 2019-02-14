@@ -173,6 +173,28 @@ struct RNNParams {
   TensorDescriptorListParams tensors;
 };
 
+// Layerwise RNN parameters used to compute key of hashes, POD struct
+struct RNNLayerParams {
+  mkldnnRNNMode_t mode;
+  int64_t seq_length;
+  int64_t mini_batch;
+  int64_t input_size;
+  int64_t hidden_size;
+  int64_t train;
+  int64_t reverse;
+};
+
+void setRNNLayerParams(RNNLayerParams* params, const RNNParams& fn, int64_t input_size, bool reverse_) {
+   memset(params, 0, sizeof(RNNLayerParams));
+   params->mode = fn.rnn.mode;
+   params->seq_length = fn.tensors.seq_length;
+   params->mini_batch = fn.tensors.mini_batch;
+   params->input_size = input_size;
+   params->hidden_size = fn.rnn.hidden_size;
+   params->train = static_cast<int64_t>(fn.dropout.train);
+   params->reverse = static_cast<int64_t>(reverse_);
+}
+
 // RNNDescriptor is the descriptor for a single layer uni-directional RNN call
 //
 // Since MKLDNN RNN API lack dropout support, multi-layer and bidirectional
@@ -204,6 +226,7 @@ struct RNNDescriptor {
 
   bool train;
   bool reverse;
+  RNNLayerParams key;
 
   RNNDescriptor(const RNNParams& fn, int64_t input_size, bool reverse_)
       : input_tz{fn.tensors.seq_length, fn.tensors.mini_batch, input_size}
@@ -217,7 +240,8 @@ struct RNNDescriptor {
       , rnn_cell_(fn.rnn.rnn_algorithm, fn.rnn.rnn_activation)
       , rnn_dir(rnn_direction::unidirectional_left2right)
       , train(fn.dropout.train), reverse(reverse_) {
-
+    // set up memory descriptor
+    if (reverse) { rnn_dir = rnn_direction::unidirectional_right2left; }
     input_md = _format_md(input_tz, memory::format::tnc);
     output_md = _format_md(output_tz, memory::format::tnc);
     hidden_md = _generic_md(hidden_tz);
@@ -225,7 +249,7 @@ struct RNNDescriptor {
     weight_hh_md = _generic_md(weight_hh_tz);
     bias_md = _generic_md(bias_tz);
 
-    if (reverse) { rnn_dir = rnn_direction::unidirectional_right2left;}
+    setRNNLayerParams(&key, fn, input_size, reverse_);
   }
 
   rnn_forward::primitive_desc rnn_forward_pd() const {
@@ -252,6 +276,47 @@ struct RNNDescriptor {
   pdesc_t weight_hh_pd() const { return _primitive_md(weight_hh_tz, memory::format::ldigo); }
   pdesc_t bias_pd() const { return _primitive_md(bias_tz, memory::format::ldgo); }
   pdesc_t hidden_pd() const { return _primitive_md(hidden_tz, memory::format::ldsnc); }
+};
+
+struct RNNForwardPrimitive : MKLDNNPrimitive<rnn_forward> {
+  memory src_layer, src_iter, weights_layer, weights_iter, bias, dst_layer, dst_iter, workspace;
+
+  RNNForwardPrimitive(const rnn_forward::primitive_desc& pd, bool train) : MKLDNNPrimitive<rnn_forward>()
+      , MREG(src_layer), MREG(src_iter), MREG(weights_layer), MREG(weights_iter), MREG(bias)
+      , MREG(dst_layer), MREG(dst_iter), ZREG(workspace) {
+    if (train) { workspace = _new_mkldnn_memory(pd.workspace_primitive_desc()); }
+    prim_.reset(new rnn_forward(pd, src_layer, src_iter, weights_layer, weights_iter, bias, dst_layer, dst_iter, workspace));
+  }
+
+  void set(const memory& input, const memory& hidden_x, const memory& weight_ih, const memory& weight_hh,
+      const memory& bias, const memory& output, const memory& hidden_y, const memory& workspace) {
+    _set_memory_handle(src_layer, input, src_iter, hidden_x, weights_layer, weight_ih, weights_iter, weight_hh,
+        this->bias, bias, dst_layer, output, dst_iter, hidden_y, this->workspace, workspace);
+  }
+};
+
+struct RNNBackwardPrimitive : MKLDNNPrimitive<rnn_backward> {
+  memory src_layer, src_iter, weights_layer, weights_iter, bias, dst_layer, dst_iter, diff_src_layer,
+      diff_src_iter, diff_weights_layer, diff_weights_iter, diff_bias, diff_dst_layer, diff_dst_iter, workspace;
+
+  RNNBackwardPrimitive(const rnn_backward::primitive_desc& pd) : MKLDNNPrimitive<rnn_backward>()
+      , MREG(src_layer), MREG(src_iter), MREG(weights_layer), MREG(weights_iter), MREG(bias)
+      , MREG(dst_layer), MREG(dst_iter), MREG(diff_src_layer), MREG(diff_src_iter)
+      , MREG(diff_weights_layer), MREG(diff_weights_iter), MREG(diff_bias)
+      , MREG(diff_dst_layer), MREG(diff_dst_iter), MREG(workspace) {
+    prim_.reset(new rnn_backward(pd, src_layer, src_iter, weights_layer, weights_iter, bias, dst_layer, dst_iter, diff_src_layer,
+        diff_src_iter, diff_weights_layer, diff_weights_iter, diff_bias, diff_dst_layer, diff_dst_iter, workspace));
+  }
+
+  void set(const memory& input, const memory& hidden_x, const memory& weight_ih, const memory& weight_hh,
+      const memory& bias, const memory& output, const memory& hidden_y, const memory& grad_input,
+      const memory& grad_hidden_x, const memory& grad_weight_ih, const memory& grad_weight_hh,
+      const memory& grad_bias, const memory& grad_output, const memory& grad_hidden_y, const memory workspace) {
+    _set_memory_handle(src_layer, input, src_iter, hidden_x, weights_layer, weight_ih, weights_iter, weight_hh,
+        this->bias, bias, dst_layer, output, dst_iter, hidden_y, diff_src_layer, grad_input, diff_src_iter, grad_hidden_x,
+        diff_weights_layer, grad_weight_ih, diff_weights_iter, grad_weight_hh, diff_bias, grad_bias,
+        diff_dst_layer, grad_output, diff_dst_iter, grad_hidden_y, this->workspace, workspace);
+  }
 };
 
 std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
@@ -362,8 +427,14 @@ std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
     workspace_prv = _new_mkldnn_memory(pd, workspace);
   }
 
-  MKLDNN_EXEC(rnn_forward(rnn_pd, input_usr, hidden_x_prv, weight_ih_prv, weight_hh_prv,
-      bias_usr, output_usr, hidden_y_prv, workspace_prv));
+  using prim_handle_t = std::shared_ptr<RNNForwardPrimitive>;
+  static thread_local PrimitiveCache<RNNLayerParams, RNNForwardPrimitive> cache;
+  auto rnn = cache.get(rnn_desc.key,
+    [&](prim_handle_t& _prim) { _prim.reset(new RNNForwardPrimitive(rnn_pd, fn.dropout.train)); },
+    [&](prim_handle_t& _prim) { _prim->set(input_usr, hidden_x_prv, weight_ih_prv,
+        weight_hh_prv, bias_usr, output_usr, hidden_y_prv, workspace_prv); });
+
+  MKLDNN_EXEC(rnn.get_primitive());
 
   _reorder(hidden_y_prv, hidden_y_usr);
 
@@ -441,9 +512,15 @@ Tensor mkldnn_rnn_layer_backward(
   auto grad_weight_ih_prv = _reorder(grad_weight_ih_usr, rnn_pd.diff_weights_layer_primitive_desc());
   auto grad_weight_hh_prv = _reorder(grad_weight_hh_usr, rnn_pd.diff_weights_iter_primitive_desc());
 
-  MKLDNN_EXEC(rnn_backward(rnn_pd, input_usr, hidden_x_prv, weight_ih_prv, weight_hh_prv,
-      bias_usr, output_usr, hidden_y_prv, grad_input_usr, grad_hidden_x_prv, grad_weight_ih_prv,
-      grad_weight_hh_prv, grad_bias_usr, grad_output_usr, grad_hidden_y_prv, workspace_prv));
+  using prim_handle_t = std::shared_ptr<RNNBackwardPrimitive>;
+  static thread_local PrimitiveCache<RNNLayerParams, RNNBackwardPrimitive> cache;
+  auto rnn = cache.get(rnn_desc.key,
+    [&](prim_handle_t& _prim) { _prim.reset(new RNNBackwardPrimitive(rnn_pd)); },
+    [&](prim_handle_t& _prim) { _prim->set(input_usr, hidden_x_prv, weight_ih_prv, weight_hh_prv,
+        bias_usr, output_usr, hidden_y_prv,grad_input_usr, grad_hidden_x_prv, grad_weight_ih_prv,
+        grad_weight_hh_prv, grad_bias_usr, grad_output_usr, grad_hidden_y_prv, workspace_prv); });
+
+  MKLDNN_EXEC(rnn.get_primitive());
 
   _reorder(grad_hidden_x_prv, grad_hidden_x_usr);
   _reorder(grad_weight_ih_prv, grad_weight_ih_usr);
