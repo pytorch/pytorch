@@ -1334,24 +1334,6 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
 
-    // NB: this must come after the other aten::len schemas so that they get
-    // correctly matched
-    Operator("aten::len(...) -> int", [](const Node* node) {
-      if (node->inputs().size() != 1) {
-        AT_ERROR("len() requires 1 input");
-      }
-      auto tuple = node->inputs().at(0)->type()->cast<TupleType>();
-      if (!tuple) {
-        AT_ERROR("len() requires input to be a tuple");
-      }
-      auto len = int64_t(tuple->containedTypes().size());
-      return [=](Stack& stack) {
-        auto tup = pop(stack).toTuple();
-        push(stack, len);
-        return 0;
-      };
-    }),
-
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator(
         "aten::eq(float[] a, float[] b) -> bool",
@@ -1556,6 +1538,24 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
+
+      // NB: this must come after the other aten::len schemas so that they get
+      // correctly matched
+      Operator("aten::len(...) -> int", [](const Node* node) {
+        if (node->inputs().size() != 1) {
+          AT_ERROR("len() requires 1 input");
+        }
+        auto tuple = node->inputs().at(0)->type()->cast<TupleType>();
+        if (!tuple) {
+          AT_ERROR("len() requires input to be a tuple");
+        }
+        auto len = int64_t(tuple->containedTypes().size());
+        return [=](Stack& stack) {
+          auto tup = pop(stack).toTuple();
+          push(stack, len);
+          return 0;
+        };
+      }),
 });
 
 // reference: _output_size in torch/nn/functional.py
