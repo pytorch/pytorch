@@ -55,7 +55,7 @@ struct CudaIPCSentData final {
 #else
     // cuIpcGetEventHandle with HIP is not supported, so we have to sync
     // stream instead of passing event
-    auto stream = c10::cuda::getCurrentCUDAStream(device.index())
+    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
   }
