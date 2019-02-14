@@ -39,6 +39,7 @@ EOL
 
 cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
 
+@echo on
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
@@ -74,14 +75,20 @@ set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
+    echo "about to run Python downloader script..."
     python %TMP_DIR_WIN%\\ci_scripts\\download_image.py %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z
+
+
+    echo "about to unzip archive..."
     :: 7z: -aos skips if exists because this .bat can be called multiple times
     7z x %TMP_DIR_WIN%\\%IMAGE_COMMIT_TAG%.7z -aos
+    echo "unzipped archive."
     cd %WORKING_DIR%
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
 
+echo "Now at the bottom of the script."
 EOL
 
 cat >$TMP_DIR/ci_scripts/test_python_nn.bat <<EOL
@@ -148,15 +155,15 @@ test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
-    if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $TMP_DIR/ci_scripts/test_python_nn.bat && \
         $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
         $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
         $TMP_DIR/ci_scripts/test_libtorch.bat
     else
-        if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
-        elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat
