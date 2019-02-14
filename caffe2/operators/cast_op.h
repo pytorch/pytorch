@@ -15,8 +15,9 @@ class CastOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  CastOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit CastOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     const ArgumentHelper helper(operator_def);
     TensorProto_DataType to = cast::GetCastDataType(helper, "to");
     TensorProto_DataType from = cast::GetCastDataType(helper, "from_type");
