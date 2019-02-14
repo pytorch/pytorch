@@ -1037,7 +1037,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H. 
+                     Can be a tuple (H, W) or a single H for a square image H x H.
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
