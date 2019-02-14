@@ -5668,7 +5668,7 @@ Arguments:
     A (Tensor): The input 2D square tensor
 
 Returns:
-    A namedtuple (sign, log) containing the sign of the determinant, and the log
+    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
     value of the absolute determinant.
 
 Example::
@@ -5683,7 +5683,7 @@ Example::
     >>> torch.logdet(A)
     tensor(nan)
     >>> torch.slogdet(A)
-    torch.return_types.slogdet(sign=tensor(-1.), log=tensor(-0.2776))
+    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 add_docstr(torch.pinverse,

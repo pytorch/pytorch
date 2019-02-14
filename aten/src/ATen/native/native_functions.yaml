@@ -1890,7 +1890,7 @@
   variants: function, method
   device_guard: False
 
-- func: slogdet(Tensor self) -> (Tensor sign, Tensor log)
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   matches_jit_signature: True
   variants: function, method
 

@@ -7143,7 +7143,7 @@ class _TestTorchMixin(object):
         # test slogdet
         ret = a.slogdet()
         self.assertEqual(ret.sign, ret[0])
-        self.assertEqual(ret.log, ret[1])
+        self.assertEqual(ret.logabsdet, ret[1])
 
         # test sort
         ret = a.sort(dim=0)
