@@ -545,6 +545,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     )
 
   set(TORCH_PYTHON_INCLUDE_DIRECTORIES
