@@ -905,7 +905,11 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device, extra_files);
+        auto lookup = [&](const std::vector<std::string>& names) {
+          AutoNoGIL gil;
+          return module_lookup(names);
+        };
+        import_ir_module(lookup, filename, optional_device, extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
