@@ -22,8 +22,6 @@ class OnnxExporter;
 struct OnnxifiTransformerOptions {
   explicit OnnxifiTransformerOptions() : bound_shape_spec(0, 0) {}
 
-  // Run bound shape inference
-  bool infer_shapes{false};
   // Dump onnx model for debugging
   bool debug{false};
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
@@ -41,7 +39,6 @@ class CAFFE2_API OnnxifiTransformer final {
   void Transform(
       Workspace* ws,
       NetDef* pred_net,
-      const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& weight_names,
       const std::unordered_map<std::string, TensorShape>& shape_hints,
       const std::unordered_set<int>& blacklisted_ops);
@@ -83,7 +80,7 @@ class CAFFE2_API OnnxifiTransformer final {
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs);
 
-  CaffeMap<std::string, TensorShape> SsaRewriteAndMapNames(
+  std::unordered_map<std::string, TensorShape> SsaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
