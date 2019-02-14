@@ -1,7 +1,7 @@
 import numbers
 
 import torch
-from torch._C import DynamicType, ListType
+from torch._C import DynamicType, ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -230,7 +230,9 @@ _onnx_opset_version = 9
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("prim::Constant")
+    n = g.op("prim::Constant")
+    n.output().setType(OptionalType.ofTensor())
+    return n
 
 
 def _shape_as_tensor(g, input):

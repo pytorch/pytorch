@@ -670,6 +670,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
       }));
+  py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
+      m, "OptionalType")
+      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
+      .def_static("ofTensor", &OptionalType::ofTensor)
+      .def("getElementType", &OptionalType::getElementType);
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
