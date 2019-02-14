@@ -762,6 +762,17 @@ inline std::vector<Elem> to_list(std::vector<IValue>& list) {
   return std::move(converted_list);
 }
 
+template<typename Elem>
+inline std::vector<Elem> to_list(const std::vector<IValue>& list) {
+  std::vector<Elem> converted_list;
+  std::transform(
+      list.begin(), list.end(), std::back_inserter(converted_list), [
+      ](IValue ivalue) -> Elem {
+        return ivalue.to<Elem>();
+      });
+  return std::move(converted_list);
+}
+
 template<typename T>
 inline T IValue::to() && {
   return std::move(to_list<typename T::value_type>(toGenericListRef()));
