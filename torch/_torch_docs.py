@@ -3623,10 +3623,10 @@ add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`. returns a namedtuple (u, piv) of matrice.
+matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
 
 If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`a = p^T u^T u p`, with `p` the permutation given by `piv`.
+such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
 
 If :attr:`upper` is ``False``, `u` is lower triangular such that
 :math:`a = p^T u u^T p`.
@@ -3634,7 +3634,7 @@ If :attr:`upper` is ``False``, `u` is lower triangular such that
 Args:
     a (Tensor): the input 2-D tensor
     upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (tuple, optional): tuple of `u` and `piv` tensors
+    out (tuple, optional): namedtuple of `u` and `pivot` tensors
 
 Example::
 

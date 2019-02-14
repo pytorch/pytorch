@@ -3583,9 +3583,9 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) piv) ->(Tensor(a!) u, Tensor(b!) piv)
+- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) ->(Tensor(a!) u, Tensor(b!) pivot)
 
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor piv)
+- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   matches_jit_signature: True
   variants: method, function
 
