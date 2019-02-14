@@ -35,6 +35,25 @@ TEST(Caffe2ToPytorch, Simple) {
   }
 }
 
+TEST(Caffe2ToPytorch, ExternalData) {
+  caffe2::Tensor c2_tensor = caffe2::empty({4, 4}, at::kLong);
+  int64_t buf[16];
+  for (int64_t i = 0; i < 16; i++) {
+    buf[i] = i;
+  }
+  c2_tensor.ShareExternalPointer(buf, 16);
+
+  // If the buffer is allocated externally, we can still pass tensor around,
+  // but we can't resize its storage using PT APIs
+  at::Tensor at_tensor(c2_tensor);
+  auto it = at_tensor.data<int64_t>();
+  for (int64_t i = 0; i < 16; i++) {
+    ASSERT_EQ(it[i], i);
+  }
+  ASSERT_FALSE(at_tensor.storage().resizable());
+  ASSERT_ANY_THROW(at_tensor.resize_({7,7}));
+}
+
 TEST(Caffe2ToPytorch, Op) {
   caffe2::Tensor c2_tensor(caffe2::CPU);
   c2_tensor.Resize(3, 3);
@@ -78,6 +97,40 @@ TEST(Caffe2ToPytorch, PartiallyInitialized) {
     c2_tensor.FreeMemory();
     ASSERT_ANY_THROW(at::Tensor at_tensor(c2_tensor));
   }
+}
+
+TEST(Caffe2ToPytorch, MutualResizes) {
+  caffe2::Tensor c2_tensor = caffe2::empty({5, 5}, at::kFloat);
+  auto data = c2_tensor.mutable_data<float>();
+  for (int64_t i = 0; i < 25; i++) {
+    data[i] = 0;
+  }
+
+  at::Tensor at_tensor(c2_tensor);
+
+  // change is visible
+  at_tensor[0][0] = 123;
+  ASSERT_EQ(c2_tensor.mutable_data<float>()[0], 123);
+
+  // resize PT tensor in smaller direction - storage is preserved
+  at_tensor.resize_({4, 4});
+  c2_tensor.mutable_data<float>()[1] = 234;
+  ASSERT_EQ(at_tensor[0][1].item().to<float>(), 234);
+
+  // resize PT tensor in larger direction - storage is preserved
+  at_tensor.resize_({6, 6});
+  c2_tensor.mutable_data<float>()[2] = 345;
+  ASSERT_EQ(at_tensor[0][2].item().to<float>(), 345);
+  ASSERT_EQ(c2_tensor.sizes()[0], 6);
+  ASSERT_EQ(c2_tensor.sizes()[1], 6);
+
+  // resize Caffe2 tensor - semantics are to NOT preserve the data, but the
+  // TensorImpl is still shared
+  c2_tensor.Resize(7, 7);
+  c2_tensor.mutable_data<float>()[3] = 456;
+  ASSERT_EQ(at_tensor[0][3].item().to<float>(), 456);
+  ASSERT_EQ(at_tensor.sizes()[0], 7);
+  ASSERT_EQ(at_tensor.sizes()[1], 7);
 }
 
 TEST(PytorchToCaffe2, Op) {

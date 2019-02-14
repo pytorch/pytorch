@@ -353,8 +353,9 @@ if(USE_CUDA)
       ${CUDA_LIBRARIES})
     set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   else()
+    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
     set(TORCH_CUDA_LIBRARIES
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
+      ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
 
@@ -622,7 +623,8 @@ if (BUILD_PYTHON)
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so)
+      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
   endif()
 
