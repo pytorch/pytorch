@@ -526,6 +526,9 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
 
+    def test_nonzero(self):
+        x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
+        self.assertONNX(lambda x: torch.nonzero(x), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

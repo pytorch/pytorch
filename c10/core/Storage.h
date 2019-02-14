@@ -8,38 +8,22 @@ struct C10_API Storage {
  public:
   Storage() {}
   Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
+
+  // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
       caffe2::TypeMeta data_type,
       size_t size,
       Allocator* allocator,
-      bool resizable = false)
+      bool resizable)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
             data_type,
             size,
             allocator,
             resizable)) {}
 
-  Storage(
-      caffe2::TypeMeta data_type,
-      at::DataPtr data_ptr,
-      size_t size,
-      const std::function<void(void*)>& deleter,
-      bool resizable = false)
-      : storage_impl_(c10::make_intrusive<StorageImpl>(
-            data_type,
-            size,
-            std::move(data_ptr),
-            /* allocator */ nullptr,
-            resizable)) {}
-
-  Storage(at::DeviceType device_type)
-      : storage_impl_(
-            c10::make_intrusive<StorageImpl>(at::Device(device_type))) {}
-  Storage(at::Device device)
-      : storage_impl_(c10::make_intrusive<StorageImpl>(device)) {}
-  Storage(at::Device device, caffe2::TypeMeta data_type)
-      : storage_impl_(c10::make_intrusive<StorageImpl>(device, data_type)) {}
-
+  // Creates storage with pre-allocated memory buffer. Allocator is given for
+  // potential future reallocations, however it can be nullptr if the storage
+  // is non-resizable
   Storage(
       caffe2::TypeMeta data_type,
       int64_t numel,
@@ -52,6 +36,18 @@ struct C10_API Storage {
             std::move(data_ptr),
             allocator,
             resizable)) {}
+
+  // Legacy constructor for partially initialized (dtype or memory) storages
+  // that can be temporarily created with Caffe2 APIs. See the note on top of
+  // TensorImpl.h for details.
+  static Storage create_legacy(at::Device device, caffe2::TypeMeta data_type) {
+    return Storage(c10::make_intrusive<StorageImpl>(
+            data_type,
+            0,
+            at::DataPtr(nullptr, device),
+            GetAllocator(device.type()),
+            true));
+  }
 
   template <typename T>
   inline bool IsType() const {

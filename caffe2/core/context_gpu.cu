@@ -278,6 +278,78 @@ static void Caffe2SetCUDAMemoryPool() {
   }
 }
 
+/**
+ * An allocator that does the CPU memory allocation with pinned memory.
+ *
+ * This is needed because if we want to do any asynchronous cuda memcpy,
+ * the underlying CPU memory also needs to be allocated into pinned memory
+ * space. As a result, whenever Caffe2 is built with GPU and there is
+ * GPU present during runtime, at global initialization time we will set
+ * the CPU memory allocator to allocate pinned memory.
+ *
+ * NB: This behavior is probably too agressive. We should consider asking users
+ * to do on-demand memory pinning (like exposed in PyTorch APIs) instead.
+ */
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
+  PinnedCPUAllocator() {
+    baseAllocator_ = GetDefaultCPUAllocator();
+  }
+  ~PinnedCPUAllocator() override {}
+  at::DataPtr allocate(size_t nbytes) const override {
+    if (nbytes == 0) {
+      // replicate c10::alloc_cpu behavior - return nullptr
+      return {nullptr, nullptr, &Delete, at::Device(CPU)};
+    }
+    void* data;
+    at::DataPtr data_ptr;
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    if (IsNUMAEnabled()) {
+      data_ptr = baseAllocator_->allocate(nbytes);
+      data = data_ptr.get();
+      CAFFE_ENFORCE(data);
+      CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
+    } else {
+      CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
+    }
+    memset(data, 0, nbytes);
+    return data_ptr;
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
+  }
+
+ private:
+  static void Delete(void* data) {
+    if (!data) {
+      return;
+    }
+    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
+    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
+    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
+    // But, if one calls CPUContext::New() before any cuda allocations,
+    // PinnedCPUAllocator can still delete the corresponding memory.
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    if (IsNUMAEnabled()) {
+      CUDA_ENFORCE(cudaHostUnregister(data));
+      GetDefaultCPUAllocator()->raw_deleter()(data);
+    } else {
+      cudaError_t err = cudaFreeHost(data);
+      if (err == cudaErrorInvalidValue) {
+        free(data);
+        // Calling cudaGetLastError will reset the cuda error.
+        cudaError_t _err = cudaGetLastError();
+      } else {
+        // For all other errors, still do a cuda check.
+        CUDA_ENFORCE(err);
+      }
+    }
+  }
+
+  at::Allocator* baseAllocator_;
+};
+
 static PinnedCPUAllocator g_pinned_cpu_alloc;
 
 // An initialization function that sets the CPU side to use pinned cpu
