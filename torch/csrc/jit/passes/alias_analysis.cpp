@@ -239,6 +239,9 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (const auto& pr : tupleTypes) {
     makeAllAlias(pr.second, *aliasTracker_);
   }
+  for (const auto& pr : dictTypes) {
+    makeAllAlias(pr.second, *aliasTracker_);
+  }
   makeAllAlias(tensors, *aliasTracker_);
 
   analyze(graph->block());
