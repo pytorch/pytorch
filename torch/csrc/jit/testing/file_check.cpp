@@ -43,7 +43,7 @@ struct Check {
       std::string str,
       c10::optional<size_t> count = c10::nullopt)
       : type_(type), search_str_(std::move(str)) {
-    count_ = count;
+    count_ = std::move(count);
   };
 
   CheckType type_;
@@ -80,7 +80,7 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
 
 namespace {
 size_t assertFind(
-    SourceRange search_range,
+    const SourceRange& search_range,
     const std::string& sub,
     const Check& check) {
   auto pos = search_range.file().find(sub, search_range.start());
@@ -101,7 +101,7 @@ size_t assertFind(
 }
 
 size_t assertFind(
-    std::shared_ptr<std::string> file,
+    const std::shared_ptr<std::string>& file,
     const std::string& sub,
     size_t start,
     const Check& check) {
@@ -109,7 +109,7 @@ size_t assertFind(
 }
 
 void assertNotFind(
-    SourceRange range,
+    const SourceRange& range,
     const std::string& sub,
     const Check& check) {
   auto pos = range.file().find(sub, range.start());
@@ -128,7 +128,7 @@ void assertNotFind(
 } // namespace
 
 struct FileCheckImpl {
-  TORCH_API explicit FileCheckImpl() {}
+  TORCH_API explicit FileCheckImpl() = default;
 
   TORCH_API void run(const std::string& test_file) {
     has_run = true;
@@ -139,7 +139,7 @@ struct FileCheckImpl {
       CheckType type,
       const std::string& s,
       c10::optional<size_t> count = c10::nullopt) {
-    Check check(type, s, count);
+    Check check(type, s, std::move(count));
 
     // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
     if (groups.size() == 0 || (type != CHECK_NOT && type != CHECK_DAG)) {
@@ -156,14 +156,14 @@ struct FileCheckImpl {
     has_run = false;
   }
 
-  bool has_run;
+  bool has_run = false;
 
  private:
   void doCheckNot(
       const std::vector<Check>& nots,
-      std::shared_ptr<std::string> file,
-      SourceRange prev,
-      SourceRange next) {
+      const std::shared_ptr<std::string>& file,
+      const SourceRange& prev,
+      const SourceRange& next) {
     auto start = prev.end(); // inclusive
     auto end = next.start(); // exclusive
     if (end < start) {
@@ -177,8 +177,8 @@ struct FileCheckImpl {
 
   SourceRange matchDagGroup(
       const std::vector<Check>& group,
-      std::shared_ptr<std::string> test_file,
-      SourceRange prev) {
+      const std::shared_ptr<std::string>& test_file,
+      const SourceRange& prev) {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
 
@@ -195,8 +195,8 @@ struct FileCheckImpl {
 
   SourceRange matchGroup(
       const std::vector<Check>& group,
-      std::shared_ptr<std::string> test_file,
-      SourceRange prev) {
+      const std::shared_ptr<std::string>& test_file,
+      const SourceRange& prev) {
     AT_ASSERT(group.size() != 0);
     CheckType type = group[0].type_;
 
@@ -252,7 +252,7 @@ struct FileCheckImpl {
     return SourceRange(test_file, start_range, end_range);
   }
 
-  void doChecks(std::shared_ptr<std::string> test_file) {
+  void doChecks(const std::shared_ptr<std::string>& test_file) {
     SourceRange prev(test_file, 0, 0);
     for (size_t i = 0; i < groups.size(); i++) {
       const auto& curr_group = groups[i];

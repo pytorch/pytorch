@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
@@ -8,7 +9,7 @@ namespace testing {
 
 struct FileCheckImpl;
 
-struct TORCH_API FileCheck {
+struct FileCheck {
  public:
   TORCH_API explicit FileCheck();
   ~FileCheck();
