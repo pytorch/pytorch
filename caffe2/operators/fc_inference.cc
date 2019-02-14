@@ -13,14 +13,15 @@ std::vector<TensorShape> FCShapeInference(
   auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
   const int canonical_axis_w =
       canonical_axis_index_(axis_w, in[1].dims().size());
-  const int N = pretransposed_weight
+  const int64_t N = pretransposed_weight
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
-  vector<int> y_shape(in[0].dims().begin(), in[0].dims().end());
+  vector<int64_t> y_shape(in[0].dims().begin(), in[0].dims().end());
   CAFFE_ENFORCE_LE(canonical_axis + 1, y_shape.size());
   y_shape.resize(canonical_axis + 1);
   y_shape[canonical_axis] = N;
+
   out[0] = CreateTensorShape(y_shape, in[0].data_type());
   return out;
 }

@@ -74,7 +74,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
       Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
 
@@ -138,7 +138,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     // For ARM NEON, we read in multiples of kNeonNoiseReadSize since
     // the inner loop is vectorized. Round up to the next highest
     // multiple of kNeonNoiseReadSize
-    size = math::roundUp(size, kNeonNoiseReadSize) + size;
+    size = math::RoundUp(size, kNeonNoiseReadSize) + size;
     noise->Resize(size);
 
     math::RandGaussian<float, CPUContext>(
@@ -410,7 +410,7 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
   // Expect this many channels as output
   static constexpr int kOutputChannels = 4;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& mean = Input(1);
 

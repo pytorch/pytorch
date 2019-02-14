@@ -55,6 +55,7 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         0 /* output min */,
         255 /* output max */,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

@@ -19,6 +19,10 @@ _rnn_impls = {
 }
 
 
+def apply_permutation(tensor, permutation, dim=1):
+    return tensor.index_select(dim, permutation)
+
+
 class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
@@ -65,6 +69,8 @@ class RNNBase(Module):
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
                 w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
                 b_ih = Parameter(torch.Tensor(gate_size))
+                # Second bias vector included for CuDNN compatibility. Only one
+                # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
                 layer_params = (w_ih, w_hh, b_ih, b_hh)
 
@@ -156,22 +162,36 @@ class RNNBase(Module):
         else:
             check_hidden_size(hidden, expected_hidden_size)
 
+    def permute_hidden(self, hx, permutation):
+        if permutation is None:
+            return hx
+        if self.mode == 'LSTM':
+            return tuple(apply_permutation(state, permutation) for state in hx)
+        else:
+            return apply_permutation(hx, permutation)
+
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
-            input, batch_sizes = input
+            input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = input.new_zeros(self.num_layers * num_directions,
-                                 max_batch_size, self.hidden_size,
-                                 requires_grad=False)
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
@@ -185,8 +205,8 @@ class RNNBase(Module):
         hidden = result[1:] if self.mode == 'LSTM' else result[1]
 
         if is_packed:
-            output = PackedSequence(output, batch_sizes)
-        return output, hidden
+            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
@@ -223,7 +243,7 @@ class RNNBase(Module):
 
     @property
     def _flat_weights(self):
-        return list(self._parameters.values())
+        return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
@@ -290,6 +310,18 @@ class RNN(RNNBase):
           Like *output*, the layers can be separated using
           ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
 
+    Shape:
+        - Input1: :math:`(L, N, H_{in})` tensor containing input features where
+          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.
+        - Input2: :math:`(S, N, H_{out})` tensor
+          containing the initial hidden state for each element in the batch.
+          :math:`H_{out}=\text{hidden\_size}`
+          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
             of shape `(hidden_size * input_size)` for `k = 0`. Otherwise, the shape is
@@ -345,8 +377,8 @@ class LSTM(RNNBase):
             f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hg} h_{(t-1)} + b_{hg}) \\
             o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
-            c_t = f_t c_{(t-1)} + i_t g_t \\
-            h_t = o_t \tanh(c_t) \\
+            c_t = f_t * c_{(t-1)} + i_t * g_t \\
+            h_t = o_t * \tanh(c_t) \\
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
@@ -451,7 +483,7 @@ class GRU(RNNBase):
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) n_t + z_t h_{(t-1)}
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
@@ -506,6 +538,18 @@ class GRU(RNNBase):
 
           Like *output*, the layers can be separated using
           ``h_n.view(num_layers, num_directions, batch, hidden_size)``.
+
+    Shape:
+        - Input1: :math:`(L, N, H_{in})` tensor containing input features where
+          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.
+        - Input2: :math:`(S, N, H_{out})` tensor
+          containing the initial hidden state for each element in the batch.
+          :math:`H_{out}=\text{hidden\_size}`
+          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -570,7 +614,7 @@ class RNNCellBase(Module):
 
     @weak_script_method
     def check_forward_hidden(self, input, hx, hidden_label=''):
-        # type: (Tensor, Tensor, str)
+        # type: (Tensor, Tensor, str) -> None
         if input.size(0) != hx.size(0):
             raise RuntimeError(
                 "Input batch size {} doesn't match hidden{} batch size {}".format(
@@ -614,6 +658,15 @@ class RNNCell(RNNCellBase):
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
           for each element in the batch
 
+    Shape:
+        - Input1: :math:`(N, H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`
+        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
+          state for each element in the batch where :math:`H_{out}` = `hidden_size`
+          Defaults to zero if not provided.
+        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
             `(hidden_size x input_size)`
@@ -647,19 +700,17 @@ class RNNCell(RNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
             ret = _VF.rnn_tanh_cell(
-                input, _hx,
+                input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
         elif self.nonlinearity == "relu":
             ret = _VF.rnn_relu_cell(
-                input, _hx,
+                input, hx,
                 self.weight_ih, self.weight_hh,
                 self.bias_ih, self.bias_hh,
             )
@@ -682,7 +733,7 @@ class LSTMCell(RNNCellBase):
         g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\
         o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
-        h' = o \tanh(c') \\
+        h' = o * \tanh(c') \\
         \end{array}
 
     where :math:`\sigma` is the sigmoid function.
@@ -741,13 +792,11 @@ class LSTMCell(RNNCellBase):
         self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-            _hx = (zeros, zeros)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx[0], '[0]')
-        self.check_forward_hidden(input, _hx[1], '[1]')
+            hx = (zeros, zeros)
+        self.check_forward_hidden(input, hx[0], '[0]')
+        self.check_forward_hidden(input, hx[1], '[1]')
         return _VF.lstm_cell(
-            input, _hx,
+            input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )
@@ -784,6 +833,15 @@ class GRUCell(RNNCellBase):
         - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
           for each element in the batch
 
+    Shape:
+        - Input1: :math:`(N, H_{in})` tensor containing input features where
+          :math:`H_{in}` = `input_size`
+        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
+          state for each element in the batch where :math:`H_{out}` = `hidden_size`
+          Defaults to zero if not provided.
+        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
+          for each element in the batch
+
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
             `(3*hidden_size x input_size)`
@@ -815,12 +873,10 @@ class GRUCell(RNNCellBase):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
-            _hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        else:
-            _hx = torch.jit._unwrap_optional(hx)
-        self.check_forward_hidden(input, _hx, '')
+            hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
+        self.check_forward_hidden(input, hx, '')
         return _VF.gru_cell(
-            input, _hx,
+            input, hx,
             self.weight_ih, self.weight_hh,
             self.bias_ih, self.bias_hh,
         )

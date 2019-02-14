@@ -26,10 +26,15 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
 
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.
-std::vector<Node*> unmergeSubgraph(Node* subgraphNode);
+void unmergeSubgraph(Node* subgraphNode);
 
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);
+
+std::vector<Value*> inlineGraph(
+    const std::shared_ptr<Graph>& subgraph,
+    at::ArrayRef<Value*> outerInputs,
+    Node* insertBefore);
 
 } // namespace SubgraphUtils
 } // namespace jit

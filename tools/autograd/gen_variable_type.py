@@ -29,7 +29,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 's_copy_', '_s_copy_from'
@@ -80,6 +79,68 @@ DONT_REQUIRE_DERIVATIVE = {
     '_coalesced_',
 }
 
+# NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
+#
+# When a function modifies its input tensors (via inplace or out-variants),
+# it should never change the the input tensors' underlying c10::TensorImpl pointers
+# or c10::Storage pointers.
+#
+# The following code templates implement the checks for this invariant:
+SAVE_TENSOR_STORAGE = CodeTemplate("""\
+c10::optional<Storage> ${tensor_name}_storage_saved =
+  ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
+""")
+
+ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
+if (${tensor_name}_storage_saved.has_value())
+  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${tensor_name}.storage()));
+""")
+
+SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
+std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+for (Tensor tensor : ${tensorlist_name})
+  ${tensorlist_name}_storage_saved.push_back(
+    tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
+""")
+
+ENFORCE_SAME_TENSORLIST_STORAGE = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value())
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(${tensorlist_name}[i].storage()));
+}
+""")
+
+SAVE_TENSOR_IMPL = CodeTemplate("""\
+c10::intrusive_ptr<TensorImpl> ${tensor_name}_impl_saved;
+if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
+""")
+
+ENFORCE_SAME_TENSOR_IMPL = CodeTemplate("""\
+if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
+""")
+
+SAVE_TENSORLIST_IMPL = CodeTemplate("""\
+std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
+for (size_t i=0; i<${tensorlist_name}.size(); i++)
+  if (${tensorlist_name}[i].defined()) ${tensorlist_name}_impl_saved[i] = ${tensorlist_name}[i].getIntrusivePtr();
+""")
+
+ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_impl_saved[i])
+    AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
+}
+""")
+
+# The following list contains functions that we don't enforce the invariant on.
+DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
+    # These functions are expected to change impl or storage of input tensors
+    '_th_set_', '_cudnn_rnn_flatten_weight',
+    # TODO: Fix these functions to update input tensor in-place
+    'tril_', 'triu_',
+}
+# END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
+
 METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
@@ -117,6 +178,24 @@ TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
+# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+# values temporarily and pass the values to the return variables outside of the
+# `at::AutoNonVariableTypeMode` guard block.
+DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+auto tmp = ([&]() {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  return ${base_type_call};
+})();
+${return_values} = ${rhs_value};
+""")
+
+DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+{
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${base_type_call};
+}
+""")
+
 SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
@@ -152,7 +231,7 @@ if (jit::tracer::isTracing()) {
   node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  tracer_state->graph->appendNode(node);
+  tracer_state->graph->insertNode(node);
   ${inplace_guard}
   jit::tracer::setTracingState(nullptr);
 }
@@ -169,6 +248,12 @@ if (tracer_state) {
   jit::tracer::setTracingState(std::move(tracer_state));
   ${add_trace_outputs}
 }
+""")
+
+RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
+#ifndef NDEBUG
+${statements}
+#endif
 """)
 
 
@@ -253,6 +338,14 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
+    def dispatch_trace_input(arg_spec):
+        name, value, simple_type, nullable = arg_spec
+        # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
+        if simple_type == 'TensorList' and nullable:
+            return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, value, "true")
+        else:
+            return ADD_TRACE_INPUT.substitute(name=name, input=value)
+
     trace_inputs = declaration['arguments']
 
     if is_out_overload(declaration):
@@ -261,10 +354,10 @@ def format_trace_inputs(declaration):
         out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
 
-    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+    trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
 
     trace_inputs = \
-        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+        '\n'.join(dispatch_trace_input(arg_spec) for arg_spec in trace_input_spec)
 
     if is_out_overload(declaration):
         # for *_out functions, handle the result argument differently for inplace/outplace.
@@ -277,7 +370,7 @@ def format_trace_inputs(declaration):
         trace_name = uninplace_api_name(declaration['api_name'])
         has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
         if has_factory_name:
-            outplace = ADD_TRACE_INPUT.substitute(name='result', input='result.options()')
+            outplace = ADD_TRACE_INPUT.substitute(name='out', input='out.options()')
         else:
             outplace = ''
 
@@ -418,6 +511,65 @@ def emit_body(declaration):
     if func is not None and not requires_derivative:
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
+    def emit_save_inputs():
+        setup = []
+        if func is None:
+            return setup
+
+        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_gradients'])
+
+        # We don't want to save tensors if we know that they will never be used
+        # when computing the derivative, so we add guards to those statements
+        def guard_for(arg):
+            # It's hard to determine the edge offset if we have TensorLists
+            if has_tensorlist_arg:
+                return None
+
+            # Empirical evaluation of the cases where we insert those guards in
+            # backward show that they are somewhat useless. E.g. there's no need
+            # to guard on some values captured from forward, because they had to
+            # require_grad if the backward function even gets executed. I don't
+            # have any good ideas for detecting those cases, so I simply disabled the
+            # checks.
+            if 'backward' in func['name']:
+                return None
+
+            # If there's a single derivative we could compute, we already have
+            # a requires_grad check that is sufficient
+            if len(func['args_with_gradients']) <= 1:
+                return None
+
+            # We really only care about trimming down the amount of tensors we save
+            if arg['type'] != 'Tensor':
+                return None
+
+            # We want to emit simple guards, so we only allow that if checking one
+            # input is enough to determine whether we need that value
+            used_in = [d for d in func['derivatives'] if arg in d['saved_inputs']]
+            assert len(used_in) > 0
+            if len(used_in) != 1:
+                return None
+            derivative = used_in[0]
+            if len(derivative['var_names']) != 1:
+                return None
+            derivative_var_name = derivative['var_names'][0]
+
+            # Figure out the offset of the edge that uses this variable
+            for edge_off, arg in enumerate(func['args_with_gradients']):
+                if arg['name'] == derivative_var_name:
+                    break
+            else:
+                assert False
+
+            return 'grad_fn->should_compute_output({})'.format(edge_off)
+
+        setup.extend(save_variables(func['saved_inputs'], False, guard_for))
+        for arg in func['args_with_gradients']:
+            if arg['type'] == 'TensorList':
+                setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
+
+        return setup
+
     def setup_derivative():
         args_with_derivatives = find_args_with_derivatives()
 
@@ -440,11 +592,7 @@ def emit_body(declaration):
 
         setup = []
         setup.extend(ASSIGN_GRAD_FN.substitute(env).split('\n'))
-        if func is not None:
-            setup.extend(save_variables(func['saved_inputs'], False))
-            for arg in func['args_with_gradients']:
-                if arg['type'] == 'TensorList':
-                    setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
+        setup.extend(emit_save_inputs())
 
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
@@ -479,7 +627,7 @@ def emit_body(declaration):
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body
 
-    def save_variables(saved_variables, is_output):
+    def save_variables(saved_variables, is_output, guard_for=lambda name: None):
         # assign the saved variables to the generated grad_fn
         stmts = []
         for arg in saved_variables:
@@ -497,9 +645,15 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
-            elif arg['type'] == 'IntList':
+            elif arg['type'] == 'IntArrayRef':
                 expr = expr + ".vec()"
-            stmts.append('grad_fn->{} = {};'.format(name, expr))
+            guard = guard_for(arg)
+            if guard is None:
+                stmts.append('grad_fn->{} = {};'.format(name, expr))
+            else:
+                stmts.append('if ({}) {{'.format(guard))
+                stmts.append('  grad_fn->{} = {};'.format(name, expr))
+                stmts.append('}')
         return stmts
 
     def reference_args(args):
@@ -582,20 +736,56 @@ def emit_body(declaration):
         else:
             return 'as_variable({})'.format(call), []
 
+    def enforce_same_tensorimpl_and_storage(env, call):
+        save_ptrs_stmts = []
+        enforce_same_ptrs_stmts = []
+        if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
+            for arg in env.get('unpacked_args', []):
+                simple_type = env['unpacked_args_simple_type'][arg]
+                if simple_type == 'TensorList':
+                    save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                        SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                                ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                elif simple_type == 'Tensor':
+                    save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
+                                        SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
+                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
+                                                ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
+        assert (save_ptrs_stmts and enforce_same_ptrs_stmts) or (not save_ptrs_stmts and not enforce_same_ptrs_stmts)
+        if save_ptrs_stmts and enforce_same_ptrs_stmts:
+            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=save_ptrs_stmts) + \
+                call + \
+                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
+        return call
+
     def emit_call(env):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            call = CALL_VIA_DERIVED.substitute(combined)
-            if not modifies_arguments:
-                call, extra_wrapping_stmts = wrap_output(call)
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
+            # the baseType operations still dispatch to non-Variable type, even if the arguments passed
+            # in are now Variables.
+            # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if not modifies_arguments and not returns_void:
+                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call,
+                    return_values=tie_return_values(),
+                    rhs_value=rhs_value)
+            else:
+                call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not modifies_arguments and not returns_void:
-            call = '{} = {}'.format(tie_return_values(), call)
-        call = call + ';'
+            if not modifies_arguments and not returns_void:
+                call = '{} = {}'.format(tie_return_values(), call)
+            call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
+        call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
     def tie_return_values():
@@ -687,16 +877,18 @@ def unpack_args(env, declaration):
 
     body = []
     unpacked_args = []
+    unpacked_args_simple_type = {}
     for i, arg in enumerate(declaration['arguments']):
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
+            unpacked_args_simple_type[arg['name']] = arg['simple_type']
             continue
 
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
-            suffix = '_opt' if is_nullable else ''
+            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
@@ -711,8 +903,10 @@ def unpack_args(env, declaration):
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
+        unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
 
     env['unpacked_args'] = unpacked_args
+    env['unpacked_args_simple_type'] = unpacked_args_simple_type
     return body
 
 

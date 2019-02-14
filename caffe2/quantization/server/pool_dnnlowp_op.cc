@@ -1,11 +1,15 @@
 #include "caffe2/operators/pool_op.h"
-#include "caffe2_dnnlowp_utils.h"
-#include "conv_pool_dnnlowp_op_base.h"
-#include "op_wrapper.h"
+
+#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
+#include "caffe2/quantization/server/conv_pool_dnnlowp_op_base.h"
+#include "caffe2/quantization/server/op_wrapper.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
 using namespace std;
+
+namespace {
 
 template <typename T>
 class AveragePool {
@@ -55,9 +59,8 @@ class MaxPool {
   static void finalize(const int /*size*/, T& /*y_data*/) {}
 };
 
-namespace {
-
-using AveragePoolFp32Op = PoolOp<float, CPUContext, AveragePool<float>>;
+using AveragePoolFp32Op =
+    PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>;
 
 template <typename T>
 class AveragePoolDnnLowPOp final
@@ -353,7 +356,7 @@ class AveragePoolDnnLowPOp final
   }
 }; // class AveragePoolDnnLowPOp
 
-using MaxPoolFp32Op = PoolOp<float, CPUContext, MaxPool<float>>;
+using MaxPoolFp32Op = PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>;
 
 template <typename T>
 class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {

@@ -124,6 +124,11 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type):
+    # Remove fork/wait nodes
+    torch._C._jit_pass_inline_fork_wait(graph)
+    torch._C._jit_pass_dce(graph)
+    torch._C._jit_pass_lint(graph)
+
     torch._C._jit_pass_remove_inplace_ops(graph)
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -515,11 +520,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif op_name == "Undefined" or op_name == "None" or op_name == "ListConstruct":
-                # Undefined/None is not an ONNX operator; keep it as prim::Undefined/
-                # prim::None and let the exporter handle finally eliminating these
+            elif op_name == "None" or op_name == "ListConstruct" or op_name == "ListUnpack":
+                # None is not an ONNX operator; keep it as prim::None
+                # let the exporter handle finally eliminating these
 
-                # For ListConstruct, it will be erased in the ONNX peephole pass
+                # For ListConstruct/ListUnpack, it will be erased in the ONNX peephole pass
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())

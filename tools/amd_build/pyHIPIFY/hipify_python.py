@@ -613,7 +613,7 @@ def disable_function(input_string, function, replace_style):
     else:
         # Automatically detect signature.
         the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(
-            function.replace("(", "\(").replace(")", "\)")), input_string)
+            function.replace("(", r"\(").replace(")", r"\)")), input_string)
         if the_match is None:
             return input_string
 
@@ -1177,7 +1177,7 @@ def extract_arguments(start, string):
     return arguments
 
 
-RE_HIP_LAUNCH_KERNEL_GGL = re.compile("hipLaunchKernelGGL\(")
+RE_HIP_LAUNCH_KERNEL_GGL = re.compile(r"hipLaunchKernelGGL\(")
 
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition

@@ -1607,7 +1607,10 @@ void addGlobalMethods(py::module& m) {
          const std::vector<std::string>& external_inputs,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
          bool infer_shapes,
-         bool debug_builder) -> py::bytes {
+         int max_batch_size,
+         int max_seq_size,
+         bool debug_builder,
+         bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
             ParseProtoFromLargeString(
@@ -1618,11 +1621,20 @@ void addGlobalMethods(py::module& m) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
-        OnnxifiTransformer ts(infer_shapes, debug_builder);
+        OnnxifiTransformerOptions opts;
+        opts.infer_shapes = infer_shapes;
+        opts.bound_shape_spec.max_batch_size = max_batch_size;
+        opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.debug = debug_builder;
+        opts.use_onnx = use_onnx;
+        OnnxifiTransformer ts(opts);
+        Workspace* curr_ws = GetCurrentWorkspace();
+        auto weight_names = curr_ws->Blobs();
         ts.Transform(
-            GetCurrentWorkspace(),
+            curr_ws,
             &pred_net,
             external_inputs,
+            weight_names,
             tensor_shapes,
             std::unordered_set<int>());
         std::string pred_net_str2;

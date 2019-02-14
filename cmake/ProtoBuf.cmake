@@ -38,6 +38,16 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+  if (MSVC)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC)
+
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
@@ -53,7 +63,12 @@ macro(custom_protobuf_find)
   if (NOT TARGET protobuf::libprotobuf)
     add_library(protobuf::libprotobuf ALIAS libprotobuf)
     add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
-    add_executable(protobuf::protoc ALIAS protoc)
+    # There is link error when cross compiling protoc on mobile:
+    # https://github.com/protocolbuffers/protobuf/issues/2719
+    # And protoc is very unlikely needed for mobile builds.
+    if (NOT (ANDROID OR IOS))
+      add_executable(protobuf::protoc ALIAS protoc)
+    endif()
   endif()
 endmacro()
 
@@ -68,17 +83,13 @@ if (ANDROID OR IOS)
         "change in the future, and you will need to specify "
         "-DBUILD_CUSTOM_PROTOBUF=ON explicitly.")
   endif()
+  # There is link error when cross compiling protoc on mobile:
+  # https://github.com/protocolbuffers/protobuf/issues/2719
+  # And protoc is very unlikely needed for mobile builds.
+  set(__caffe2_protobuf_BUILD_PROTOC_BINARIES ${protobuf_BUILD_PROTOC_BINARIES})
+  set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
   custom_protobuf_find()
-  # Unfortunately, new protobuf does not support libprotoc and protoc
-  # cross-compilation so we will need to exclude it.
-  # The problem of using EXCLUDE_FROM_ALL is that one is not going to be able
-  # to run cmake install. A proper solution has to be implemented by protobuf
-  # since we derive our cmake files from there.
-  # TODO(jiayq): change this once https://github.com/google/protobuf/pull/3878
-  # merges.
-  set_target_properties(
-      libprotoc protoc PROPERTIES
-      EXCLUDE_FROM_ALL 1 EXCLUDE_FROM_DEFAULT_BUILD 1)
+  set(protobuf_BUILD_PROTOC_BINARIES ${__caffe2_protobuf_BUILD_PROTOC_BINARIES} CACHE BOOL "" FORCE)
 elseif (BUILD_CUSTOM_PROTOBUF)
   message(STATUS "Building using own protobuf under third_party per request.")
   custom_protobuf_find()

@@ -55,7 +55,9 @@ public:
   FetchedBlob FetchTensor(const itensor &atensor, bool force_copy) {
 #ifdef USE_NUMPY
     FetchedBlob result;
-    CAFFE_ENFORCE(atensor.materialized(),
+    CAFFE_ENFORCE((atensor.ndims() != 0) &&
+                  (atensor.get_nelems() == 0 ||
+                   atensor.get_data_handle() != nullptr),
                   "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(type_transform(atensor));
     CAFFE_ENFORCE(
@@ -152,16 +154,17 @@ public:
   bool ZeroDim(PyArrayObject *array) {
 #ifdef USE_NUMPY
     int ndim = PyArray_NDIM(array);
-    npy_intp *npy_dims = PyArray_DIMS(array);
-    return ndim == 0 ||
-      std::find(npy_dims, npy_dims + ndim, 0) != npy_dims + ndim;
+    return ndim == 0;
 #else
     CAFFE_THROW("Caffe2 was compiled without NumPy support.");
 #endif
   }
 
-  void Feed(const DeviceOption &option, PyArrayObject *original_array,
-            Blob *blob, bool in_place) {
+  void Feed(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Blob* blob,
+      bool in_place) override {
 #ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
@@ -180,7 +183,8 @@ public:
           cpu_tensor_feeder.FeedTensor(
               option,
               original_array,
-              BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+              BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+              true);
         } else {
           blob->Reset<Tensor>(new Tensor(
                                   cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));

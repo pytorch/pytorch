@@ -70,7 +70,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
@@ -110,7 +110,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntList size, const TensorOptions& options) {
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
 
@@ -329,7 +329,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());
+  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {

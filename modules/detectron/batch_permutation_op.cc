@@ -78,7 +78,6 @@ template <>
 bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& indices = Input(1);
-  auto* Y = Output(0);
 
   CAFFE_ENFORCE_EQ(indices.dim(), 1, "indices must be 1-d");
   CAFFE_ENFORCE_EQ(
@@ -90,7 +89,7 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
     indices.dim32(0),
     ")");
 
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   const int N = X.dim32(0);
   const int C = X.dim32(1);

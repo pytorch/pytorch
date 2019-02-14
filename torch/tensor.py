@@ -12,6 +12,10 @@ from torch._C import _add_docstr
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
+#
+# NB: If you add a new method to Tensor, you must update
+# torch/__init__.py.in to add a type annotation for your method;
+# otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -175,9 +179,17 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
+      For sparse tensors:
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      returned tensor will not update the original tensor anymore, and will instead
+      trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -247,9 +259,9 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
-    def norm(self, p="fro", dim=None, keepdim=False):
+    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func: `torch.norm`"""
-        return torch.norm(self, p, dim, keepdim)
+        return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
@@ -330,7 +342,7 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
@@ -376,7 +388,7 @@ class Tensor(torch._C._TensorBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
     def __floordiv__(self, other):
         result = self / other

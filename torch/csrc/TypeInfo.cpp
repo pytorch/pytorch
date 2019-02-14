@@ -133,9 +133,22 @@ static PyObject* THPFInfo_max(THPFInfo* self, void*) {
   });
 }
 
+static PyObject* THPFInfo_min(THPFInfo* self, void*) {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "min", [] {
+    return PyFloat_FromDouble(
+        std::numeric_limits<at::scalar_value_type<scalar_t>::type>::lowest());
+  });
+}
+
 static PyObject* THPIInfo_max(THPFInfo* self, void*) {
   return AT_DISPATCH_INTEGRAL_TYPES(at::CPU(self->type), "max", [] {
     return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+  });
+}
+
+static PyObject* THPIInfo_min(THPFInfo* self, void*) {
+  return AT_DISPATCH_INTEGRAL_TYPES(at::CPU(self->type), "min", [] {
+    return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
   });
 }
 
@@ -150,6 +163,7 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
     {"eps", (getter)THPFInfo_eps, nullptr, nullptr, nullptr},
     {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
+    {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
     {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
     {nullptr}};
 
@@ -200,6 +214,7 @@ PyTypeObject THPFInfoType = {
 static struct PyGetSetDef THPIInfo_properties[] = {
     {"bits", (getter)THPDTypeInfo_bits, nullptr, nullptr, nullptr},
     {"max", (getter)THPIInfo_max, nullptr, nullptr, nullptr},
+    {"min", (getter)THPIInfo_min, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static PyMethodDef THPIInfo_methods[] = {

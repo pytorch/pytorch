@@ -34,10 +34,10 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   // for the first time (providing the necessary type).  It is an ERROR to
   // invoke any PyTorch operations on such a half-constructed storage,
   // and this check tests for that case.
-  AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
+  AT_CHECK(tensor->storage(), "Cannot use PyTorch operations on a half-constructed "
            "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
            "it first; otherwise, this is a bug, please report it.");
-  return tensor->storage_.unsafeGetStorageImpl();
+  return tensor->storage().unsafeGetStorageImpl();
 }
 
 inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
@@ -115,12 +115,12 @@ TH_API void THTensor_free(THTensor *self);
 TH_API void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride);
 
-TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
-TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
+TH_CPP_API void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
 TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntList oldshape,
-    at::IntList oldstride,
-    at::IntList newshape);
+    at::IntArrayRef oldshape,
+    at::IntArrayRef oldstride,
+    at::IntArrayRef newshape);
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateAllTypes.h>

@@ -2,15 +2,17 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include <unordered_map>
-#include <mutex>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 struct KernelCacheImpl {
   // Note: std::unordered_map does not invalidate references even if rehashing
-  // occurs. This is a critical property for thread-safety. 
+  // occurs. This is a critical property for thread-safety.
   std::mutex mutex_;
   int64_t kernel_counter{0};
 
@@ -33,7 +35,8 @@ int64_t debugNumCachedKernelSpecs() {
   return cache.specMap_.size();
 }
 
-std::shared_ptr<Graph> normalizeGraphForCache(const std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> normalizeGraphForCache(
+    const std::shared_ptr<Graph>& graph) {
   auto result = Canonicalize(graph, /*keep_unique_names=*/false);
   EraseShapeInformation(result);
   return result;
@@ -49,22 +52,24 @@ int64_t store(std::shared_ptr<Graph> graph) {
   std::lock_guard<std::mutex> guard{cache.mutex_};
   const auto key = cache.kernel_counter++;
   cache.specMap_.emplace(
-    std::piecewise_construct
-  , std::forward_as_tuple(key)
-  , std::forward_as_tuple(key, graph));
+      std::piecewise_construct,
+      std::forward_as_tuple(key),
+      std::forward_as_tuple(key, graph));
   cache.graphToKey_.emplace(std::make_pair(std::move(repr), key));
   return key;
 }
 
 // XXX: Does not grab mutex
 static at::optional<KernelSpec*> nolock_retrieve(
-    KernelCacheImpl& cache, const int64_t key) {
+    KernelCacheImpl& cache,
+    const int64_t key) {
   auto it = cache.specMap_.find(key);
-  if (it == cache.specMap_.end()) return at::nullopt;
+  if (it == cache.specMap_.end())
+    return at::nullopt;
   return &(it->second);
 }
 
-at::optional<KernelSpec*> retrieve(const int64_t key) { 
+at::optional<KernelSpec*> retrieve(const int64_t key) {
   auto& cache = getKernelCache();
   std::lock_guard<std::mutex> guard{cache.mutex_};
   return nolock_retrieve(cache, key);
@@ -77,7 +82,8 @@ at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
 
   std::lock_guard<std::mutex> guard{cache.mutex_};
   auto it = cache.graphToKey_.find(repr);
-  if (it == cache.graphToKey_.end()) return at::nullopt;
+  if (it == cache.graphToKey_.end())
+    return at::nullopt;
   return nolock_retrieve(cache, it->second);
 }
 

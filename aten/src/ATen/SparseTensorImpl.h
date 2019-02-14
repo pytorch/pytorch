@@ -40,8 +40,8 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntList sizes() const override;
-  IntList strides() const override;
+  IntArrayRef sizes() const override;
+  IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
@@ -51,12 +51,14 @@ public:
 
   int64_t dim() const override;
   TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
+  bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;
 
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values
-  void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
+  void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
+    AT_CHECK(allow_tensor_metadata_change(), "raw_resize_ is not allowed on Tensor created from .data or .detach()");
     sizes_ = size.vec();
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
@@ -85,8 +87,9 @@ public:
   // and for API consistency we don't support it).
   // 4. When we attempt to shrink the size of any of the sparse dimensions on a non-empty sparse tensor
   // (this could make some of the stored indices out-of-bound and thus unsafe).
-  void resize_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
-    AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
+  void resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
+    AT_CHECK(allow_tensor_metadata_change(), "resize_ is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
     if (nnz() > 0) {
       auto alt_options_msg = "You could try the following options:\n\
 1. If you need an empty sparse tensor of this size, call `x = torch.sparse_coo_tensor(size)`.\n\
@@ -104,7 +107,7 @@ public:
       bool shrinking_dense_dim = false;
       auto sparse_size_original = sizes().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
-      for (int i = 0; i < sparse_dim; i++) {
+      for (int64_t i = 0; i < sparse_dim; i++) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
           shrinking_sparse_dims = true;
           break;
@@ -112,7 +115,7 @@ public:
       }
       auto dense_size_original = sizes().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
-      for (int i = 0; i < dense_dim; i++) {
+      for (int64_t i = 0; i < dense_dim; i++) {
         if (dense_size_new[i] < dense_size_original[i]) {
           shrinking_dense_dim = true;
           break;
@@ -142,8 +145,9 @@ public:
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
-  void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
-    AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
+  void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
+    AT_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
     sizes_ = size.vec();
     sparse_dim_ = sparse_dim;
@@ -158,10 +162,14 @@ public:
     refresh_numel();
   }
 
-  void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
+  void set_coalesced(bool coalesced) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_coalesced is not allowed on Tensor created from .data or .detach()");
+    coalesced_ = coalesced;
+  }
 
   // NOTE: this function is only used internally and not exposed to Python frontend
   void set_nnz_and_narrow(int64_t new_nnz) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_nnz_and_narrow is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(new_nnz <= nnz());
     indices_ = indices_.narrow(1, 0, new_nnz);
     values_ = values_.narrow(0, 0, new_nnz);
@@ -176,6 +184,32 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
+  // to this function that need to change the shallow copy's size or storage afterwards, and setting
+  // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
+  // undesirable.
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+    auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
+    // TensorImpl general fields
+    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
+    impl->sizes_ = sizes_;
+    impl->strides_ = strides_;
+    impl->storage_offset_ = storage_offset_;
+    impl->is_contiguous_ = is_contiguous_;
+    impl->is_wrapped_number_ = is_wrapped_number_;
+    impl->reserved_ = reserved_;
+
+    // Sparse-specific fields
+    impl->sparse_dim_ = sparse_dim();
+    impl->dense_dim_ = dense_dim();
+    impl->indices_ = indices();
+    impl->values_ = values();
+    impl->coalesced_ = coalesced();
+    impl->refresh_numel();
+    return impl;
+  }
  private:
   int64_t get_device_slow() const override {
     return values_.get_device();

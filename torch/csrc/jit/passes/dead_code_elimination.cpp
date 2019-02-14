@@ -1,29 +1,28 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
 
+namespace prim {
+using namespace ::c10::prim;
+}
+
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(std::move(graph))) {}
+      : aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
   DeadCodeEliminator() = default;
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
   // side effects are also marked.
   void run(Block* block, bool recurse) {
-    // Find the last wildcard in the block. We cannot eliminate any mutable ops
-    // that precede the last wildcard (since they may have written to the
-    // wildcard alias set)
-    setLastWildcard();
-
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 
@@ -41,24 +40,6 @@ class DeadCodeEliminator {
   }
 
  private:
-  void setLastWildcard() {
-    if (!aliasDb_) {
-      return;
-    }
-
-    const auto& wildcards = aliasDb_->getWildcardNodes();
-    if (wildcards.empty()) {
-      return;
-    }
-
-    lastWildcard_ = *wildcards.begin();
-    for (const auto wildcard : wildcards) {
-      if (wildcard->isAfter(*lastWildcard_)) {
-        lastWildcard_ = wildcard;
-      }
-    }
-  }
-
   // Special handling for block return nodes. Unlike other nodes, the block
   // return node doesn't really "use" its inputs. Consider:
   //
@@ -80,7 +61,7 @@ class DeadCodeEliminator {
       return;
     }
 
-    JIT_ASSERT(node->owningBlock()->return_node() == node);
+    AT_ASSERT(node->owningBlock()->return_node() == node);
     auto outerNode = node->owningBlock()->owningNode();
     if (outerNode == nullptr || outerNode->kind() == prim::Reverse) {
       // If there's no outer node, we're looking at the graph's top-level
@@ -90,7 +71,8 @@ class DeadCodeEliminator {
     }
 
     // Collect all inputs that are actually live
-    if (outerNode->kind() == prim::Loop || outerNode->kind() == onnx::Loop) {
+    if (outerNode->kind() == prim::Loop ||
+        outerNode->kind() == c10::onnx::Loop) {
       // Special handling to deal with loop carried dependencies.
       auto loop = LoopView(outerNode);
       for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {
@@ -106,7 +88,7 @@ class DeadCodeEliminator {
       // the loop body.
       liveValues_.insert(loop.nextCond());
     } else {
-      JIT_ASSERT(outerNode->outputs().size() == node->inputs().size());
+      AT_ASSERT(outerNode->outputs().size() == node->inputs().size());
       for (size_t i = 0; i < outerNode->outputs().size(); i++) {
         auto innerOutput = node->inputs()[i];
         auto outerOutput = outerNode->outputs()[i];
@@ -139,7 +121,7 @@ class DeadCodeEliminator {
     }
   }
 
-  // If we output or write to a live value, mark this node
+  // If we output or write to a live memory location, mark this node
   void markIfLive(Node* node) {
     for (const auto output : node->outputs()) {
       if (liveValues_.count(output)) {
@@ -148,10 +130,9 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      for (const auto write : aliasDb_->getWrites(node)) {
-        if (liveAliases_.count(write)) {
-          return mark(node);
-        }
+      const auto writes = aliasDb_->getWrites(node);
+      if (aliasDb_->mayAlias(writes, liveValues_)) {
+        return mark(node);
       }
     }
   }
@@ -182,12 +163,6 @@ class DeadCodeEliminator {
         continue;
       }
       liveValues_.insert(input);
-
-      if (aliasDb_) {
-        for (const auto alias : aliasDb_->getAliases(input)) {
-          liveAliases_.insert(alias);
-        }
-      }
     }
   }
 
@@ -228,16 +203,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      // Otherwise, there are two kinds of nodes with untracked effects:
-      // 1. Nodes that write to a value that may alias the graph inputs (since
-      //    the inputs can be used outside the graph).
-      // 2. Anything that could clobber a wildcard value.
-      bool touchesWildcard = false;
-      if (lastWildcard_) {
-        touchesWildcard = aliasDb_->hasWrites(node) &&
-            (node->isBefore(*lastWildcard_) || node == *lastWildcard_);
-      }
-      return aliasDb_->writesToInputAlias(node) || touchesWildcard;
+      return aliasDb_->hasUntrackedEffects(node);
     }
   }
 
@@ -296,12 +262,10 @@ class DeadCodeEliminator {
     }
   }
 
-  c10::optional<AliasDb> aliasDb_;
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
   std::unordered_set<const Value*> liveValues_;
-  std::unordered_set<const Value*> liveAliases_;
-  c10::optional<const Node*> lastWildcard_;
   std::function<void(const std::unordered_set<const Value*>&)> deleteCallback_ =
       [](const std::unordered_set<const Value*>&) {};
 };

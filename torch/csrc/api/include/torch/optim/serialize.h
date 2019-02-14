@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace optim {
-namespace detail {
 
 // Note: These functions are all called `serialize()` so they can be called
 // inside a template where the archive type is a template type and can thus be
@@ -49,6 +48,7 @@ void serialize(
     serialize::InputArchive& archive,
     const std::string& key,
     BufferContainer& buffers) {
+  buffers.clear();
   torch::Tensor size_tensor;
   archive.read(key + "/size", size_tensor);
   const size_t size = size_tensor.item<int64_t>();
@@ -59,9 +59,8 @@ void serialize(
   }
 }
 
-#define TORCH_OPTIM_SERIALIZE(name) \
-  torch::optim::detail::serialize(archive, #name, self.name)
+#define _TORCH_OPTIM_SERIALIZE(name) \
+  torch::optim::serialize(archive, #name, self.name)
 
-} // namespace detail
 } // namespace optim
 } // namespace torch

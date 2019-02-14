@@ -31,7 +31,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy and Cython to e
 See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
 
-## More about PyTorch
+## More About PyTorch
 
 At a granular level, PyTorch is a library that consists of the following components:
 
@@ -42,12 +42,11 @@ At a granular level, PyTorch is a library that consists of the following compone
 | **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
 | **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
-| **torch.legacy(.nn/.optim)** | legacy code that has been ported over from torch for backward compatibility reasons |
 
 Usually one uses PyTorch either as:
 
 - a replacement for NumPy to use the power of GPUs.
-- a deep learning research platform that provides maximum flexibility and speed
+- a deep learning research platform that provides maximum flexibility and speed.
 
 Elaborating further:
 
@@ -115,7 +114,7 @@ We've written custom memory allocators for the GPU to make sure that
 your deep learning models are maximally memory efficient.
 This enables you to train bigger deep learning models than before.
 
-### Extensions without Pain
+### Extensions Without Pain
 
 Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
 and with minimal abstractions.
@@ -131,7 +130,6 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 
 ### Binaries
 Commands to install from binaries via Conda or pip wheels are on our website:
-
 [https://pytorch.org](https://pytorch.org)
 
 ### From Source
@@ -152,30 +150,20 @@ If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are a
 Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
 The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
-#### Install optional dependencies
+#### Install Dependencies
+
+Common
+```
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+```
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
-
-# Install basic dependencies
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-
-# Add LAPACK support for the GPU
+# Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
 ```
 
-On macOS
-```bash
-export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
-
-On Windows
-```cmd
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
-#### Get the PyTorch source
+#### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
@@ -184,11 +172,13 @@ cd pytorch
 #### Install PyTorch
 On Linux
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
 On macOS
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
@@ -207,9 +197,9 @@ call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
 
-### Docker image
+### Docker Image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which python version is to be used by Miniconda, or leave it unset to use the default. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -256,8 +246,7 @@ Three pointers to get you started:
 
 ## Releases and Contributing
 
-PyTorch has a 90 day release cycle (major releases).
-Its current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch has a 90 day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 

@@ -30,8 +30,8 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
+    auto* remappingTensor =
+        Output(REMAPPING, inputTensor.sizes(), at::dtype<int>());
     remapping = remappingTensor->template mutable_data<int>();
   }
 

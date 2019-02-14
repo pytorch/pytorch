@@ -196,8 +196,9 @@ int cvfix_rotatedRectangleIntersection(
     const cv::RotatedRect& rect1,
     const cv::RotatedRect& rect2,
     cv::OutputArray intersectingRegion) {
+  // Used to test if two points are the same
   const float samePointEps = 0.00001f;
-  // used to test if two points are the same
+  const float EPS = 1e-14;
 
   cv::Point2f vec1[4], vec2[4];
   cv::Point2f pts1[4], pts2[4];
@@ -251,26 +252,21 @@ int cvfix_rotatedRectangleIntersection(
       float x21 = pts2[j].x - pts1[i].x;
       float y21 = pts2[j].y - pts1[i].y;
 
-      float vx1 = vec1[i].x;
-      float vy1 = vec1[i].y;
-
-      float vx2 = vec2[j].x;
-      float vy2 = vec2[j].y;
-
-      float det = vx2 * vy1 - vx1 * vy2;
-
-      float t1 = (vx2 * y21 - vy2 * x21) / det;
-      float t2 = (vx1 * y21 - vy1 * x21) / det;
+      const auto& l1 = vec1[i];
+      const auto& l2 = vec2[j];
 
       // This takes care of parallel lines
-      if (cvIsInf(t1) || cvIsInf(t2) || cvIsInf(t1) || cvIsInf(t2)) {
+      float det = l2.x * l1.y - l1.x * l2.y;
+      if (std::fabs(det) <= EPS) {
         continue;
       }
+
+      float t1 = (l2.x * y21 - l2.y * x21) / det;
+      float t2 = (l1.x * y21 - l1.y * x21) / det;
 
       if (t1 >= 0.0f && t1 <= 1.0f && t2 >= 0.0f && t2 <= 1.0f) {
         float xi = pts1[i].x + vec1[i].x * t1;
         float yi = pts1[i].y + vec1[i].y * t1;
-
         intersection.push_back(cv::Point2f(xi, yi));
       }
     }
@@ -280,7 +276,7 @@ int cvfix_rotatedRectangleIntersection(
     ret = cv::INTERSECT_PARTIAL;
   }
 
-  // Check for vertices from rect1 inside recct2
+  // Check for vertices from rect1 inside rect2
   for (int i = 0; i < 4; i++) {
     // We do a sign test to see which side the point lies.
     // If the point all lie on the same sign for all 4 sides of the rect,
@@ -319,7 +315,7 @@ int cvfix_rotatedRectangleIntersection(
     }
   }
 
-  // Reverse the check - check for vertices from rect2 inside recct1
+  // Reverse the check - check for vertices from rect2 inside rect1
   for (int i = 0; i < 4; i++) {
     // We do a sign test to see which side the point lies.
     // If the point all lie on the same sign for all 4 sides of the rect,

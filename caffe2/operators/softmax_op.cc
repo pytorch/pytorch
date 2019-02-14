@@ -14,16 +14,24 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
   // First, get scales
-  if (scale_.numel() != N) {
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (rowmax_.numel() != N) {
+
+  if (!rowmax_.defined()) {
+    rowmax_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (rowmax_.numel() != N) {
     rowmax_.Resize(N);
   }
-  if (sum_multiplier_.numel() != D) {
+
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
   SoftmaxCPU(
@@ -46,17 +54,23 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(1);
 
   const auto canonical_axis = Y.canonical_axis_index(axis_);
-  const int N = Y.size_to_dim(canonical_axis);
-  const int D = Y.size_from_dim(canonical_axis);
+  const int64_t N = Y.size_to_dim(canonical_axis);
+  const int64_t D = Y.size_from_dim(canonical_axis);
   // First, get scales
-  if (scale_.numel() != N) {
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (sum_multiplier_.numel() != D) {
+
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
+
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();

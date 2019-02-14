@@ -55,6 +55,7 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
         channels,
         activationLimits(Y->scale, Y->zero_point, Ac).first,
         activationLimits(Y->scale, Y->zero_point, Ac).second,
+        0 /* flags */,
         &this->qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

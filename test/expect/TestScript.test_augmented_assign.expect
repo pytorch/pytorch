@@ -1,10 +1,9 @@
-graph(%a.1 : Tensor
-      %b : Tensor) {
+graph(%a.1 : Tensor,
+      %b : Tensor):
   %2 : int = prim::Constant[value=1]()
   %a.2 : Tensor = aten::add_(%a.1, %b, %2)
   %a.3 : Tensor = aten::sub_(%a.2, %b, %2)
   %a.4 : Tensor = aten::div_(%a.3, %b)
   %a : Tensor = aten::mul_(%a.4, %b)
   %7 : (Tensor, Tensor) = prim::TupleConstruct(%a, %b)
-  return (%7);
-}
+  return (%7)

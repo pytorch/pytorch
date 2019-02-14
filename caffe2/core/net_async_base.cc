@@ -74,7 +74,7 @@ AsyncNetBase::AsyncNetBase(
   if (FLAGS_caffe2_net_async_inference_mode) {
     execution_chains_ = dag_utils::computeGroups(operator_nodes_);
   } else {
-    execution_chains_ = dag_utils::computeChains(*net_def, operator_nodes_);
+    execution_chains_ = dag_utils::computeChains(operator_nodes_);
   }
   chains_.reserve(execution_chains_.size());
   for (const auto& kv : execution_chains_) {

@@ -10,6 +10,7 @@
 //
 
 #include <THC/THCReduceApplyUtils.cuh>
+#include <c10/macros/Macros.h>
 
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L
@@ -25,6 +26,9 @@ template <typename T,
           typename ReduceOp,
           int ADims>
 __global__ void
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 kernelReduceAll(TensorInfo<T, IndexType> in,
                 IndexType totalElements,
                 AccT init,

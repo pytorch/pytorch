@@ -27,7 +27,7 @@ class NanCheckOp final : public Operator<Context> {
 
  private:
   TensorPrinter tensorPrinter_;
-  Tensor scratch_{Context::GetDeviceType()};
+  Tensor scratch_;
 };
 
 struct GetNanCheckGradient : public GradientMakerBase {
@@ -169,8 +169,7 @@ class AliasOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
-    Output(0)->ResizeLike(input);
-    Output(0)->ShareData(input);
+    OutputTensorAlias(0, input);
     return true;
   }
 };
@@ -212,7 +211,7 @@ class FlattenToVecOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
+        input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
@@ -255,18 +254,25 @@ class SumOp : public Operator<Context> {
   template <typename T, typename M>
   bool DoRunWithType() {
     auto& input0 = Input(0);
-    auto* output = Output(0);
+
     if (InputSize() == 1) {
-      output->CopyFrom(input0, true /*async*/);
+      // TODO: better TensorOptions argument passing(e.g. default argument)
+      OutputTensorCopyFrom(
+          0,
+          // I'll change the order of argument in another diff, so that we don't
+          // need to write this
+          at::dtype(input0.dtype()),
+          input0,
+          true /*async*/);
       return true;
     }
-    output->ResizeLike(input0);
+    auto* output = Output(0, input0.sizes(), at::dtype<T>());
     T* output_data = output->template mutable_data<T>();
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
-            "Check failed: output->dims() == Input(i).dims().",
+            "Check failed: output->sizes() == Input(i).sizes().",
             "Description: Input #",
             i,
             ", input dimension:",
@@ -331,10 +337,9 @@ class WeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     const int size = X0.numel();
-    auto* Y = Output(0);
-    if (Y != &X0) {
-      Y->ResizeLike(X0);
-    }
+    // Note: removed Aliasing check, since Output already has
+    // caching capability
+    auto* Y = Output(0, X0.sizes(), at::dtype<T>());
     T* Y_data = Y->template mutable_data<T>();
     if (input_size == 2) {
       math::Scale<float, T>(
@@ -346,15 +351,14 @@ class WeightedSumOp : public Operator<Context> {
       return true;
     }
     const auto& X1 = Input(2);
-    CAFFE_ENFORCE_NE(
-        &X1,
-        Y,
+    CAFFE_ENFORCE(
+        !IsInputOutputAlias(2, 0),
         "Input #2 is the same as output. If you want to do in-place updates, "
         "put the output as input #0.");
     const auto& weight1 = Input(3);
     CAFFE_ENFORCE_EQ(X1.numel(), size);
     CAFFE_ENFORCE_EQ(weight1.numel(), 1);
-    if (Y != &X0) {
+    if (!IsInputOutputAlias(0, 0)) {
       context_.template CopySameDevice<T>(size, X0.template data<T>(), Y_data);
     }
     math::Axpby<float, T, Context>(
@@ -371,7 +375,7 @@ class WeightedSumOp : public Operator<Context> {
       const std::string err_msg = "Input #" + to_string(i) +
           " is the same as output. If you want to do in-place updates, "
           "put the output as input #0.";
-      CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
+      CAFFE_ENFORCE(!IsInputOutputAlias(i, 0), err_msg);
       const auto& weighti = Input(i + 1);
       CAFFE_ENFORCE_EQ(Xi.numel(), size);
       CAFFE_ENFORCE_EQ(weighti.numel(), 1);
@@ -410,8 +414,8 @@ class WeightedSumGradientOp : public Operator<Context> {
     for (int i = 0; i < InputSize() / 2; i++) {
       auto& cur_w = Input(2 * i + 2);
       CAFFE_ENFORCE_EQ(cur_w.numel(), 1);
-      auto* cur_dX = Output(i);
-      cur_dX->ResizeLike(dY);
+
+      auto* cur_dX = Output(i, dY.sizes(), at::dtype<DstType>());
 
       math::Scale<float, DstType, Context>(
           size,
@@ -558,10 +562,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     }
     return true;
   }
-  Tensor x_data_host_{CPU};
-  Tensor weights_host_{CPU};
-  Tensor x_data_device_{Context::GetDeviceType()};
-  Tensor weights_device_{Context::GetDeviceType()};
+  Tensor x_data_host_;
+  Tensor weights_host_;
+  Tensor x_data_device_;
+  Tensor weights_device_;
 };
 
 /**
@@ -950,9 +954,8 @@ class SizeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
 
-    output->Resize(vector<int64_t>());
+    auto* output = Output(0, vector<int64_t>(), at::dtype<int64_t>());
     auto* output_data = output->template mutable_data<int64_t>();
 
     auto size = input.numel();
@@ -1264,15 +1267,13 @@ class RangeOp : public Operator<Context> {
     } else {
       length = static_cast<int>(ceil(diff / step));
     }
-    auto* output = Output(0);
+
     // Match numpy's behavior here.
     if (length <= 0) {
-      output->Resize(0);
-      // Called for the side effect of setting the data.
-      output->template mutable_data<T>();
+      Output(0, {0}, at::dtype<T>());
       return true;
     } else {
-      output->Resize(length);
+      auto* output = Output(0, {length}, at::dtype<T>());
       return DoRunOnDevice<T>(start, step, output);
     }
   }

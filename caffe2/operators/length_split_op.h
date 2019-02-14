@@ -57,7 +57,7 @@ class LengthsSplitOp final : public Operator<Context> {
     for (int i = 0; i < M; i++) {
       int32_t mod = Ldata[i] % n_split_;
       int32_t res =
-          mod != 0 ? math::divUp(Ldata[i], n_split_) : Ldata[i] / n_split_ + 1;
+          mod != 0 ? math::DivUp(Ldata[i], n_split_) : Ldata[i] / n_split_ + 1;
       for (int j = 0; j < n_split_; j++) {
         Ydata[(i * n_split_) + j] = mod-- > 0 ? res : res - 1;
       }

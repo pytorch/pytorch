@@ -115,7 +115,7 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   });
 }
 
-void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
+void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
   AT_ASSERT(ntensors() == 2 && num_outputs_ == 1);
 
   auto shape = this->shape();
@@ -125,7 +125,7 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
   if (tensor(0).numel() == 1) {
     loop(*this);
   }
-  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() <= 1 || at::in_parallel_region()) {
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region() || !parallelize) {
     auto reduce_dims = num_reduce_dims();
 
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
@@ -153,7 +153,15 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
       auto sub_iter = *this;
 
       sub_iter.narrow(dim, begin, end - begin);
-      sub_iter.foreach_reduced_elt(loop);
+      // On some broken setups, `#ifdef _OPENMP` is true,
+      // and `get_max_threads` returns > 1, but
+      // `#pragma omp parallel` is ignored.
+      // There is no API to check for this, so we need to explicitly
+      // stop trying to parallelize if we've already gotten here.
+      //
+      // (If we are on one of those broken setups, we will
+      //  only have one thread here, and end - begin == cols.)
+      sub_iter.foreach_reduced_elt(loop, false);
     });
   }
 }

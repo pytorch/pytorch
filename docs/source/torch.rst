@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
 .. autofunction:: set_default_tensor_type
@@ -266,6 +267,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flatten
 .. autofunction:: flip
+.. autofunction:: rot90
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm

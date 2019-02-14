@@ -41,7 +41,7 @@ class OpWrapper {
         // model loading when we're running a shadow operator in fp32 for
         // example for measuring quantization error.
         float_tensor->ResizeLike(qtensor);
-        Dequantize(
+        fbgemm::Dequantize<T>(
             qtensor.data<T>(),
             float_tensor->template mutable_data<float>(),
             qtensor.numel(),

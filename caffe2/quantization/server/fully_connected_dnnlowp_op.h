@@ -53,6 +53,7 @@ class FullyConnectedDNNLowPOp
   bool is_weight_constant_{true};
 
   float in_qparams0_scale_old_ = 0;
+  std::int32_t in_qparams0_zero_point_old_ = 0;
 }; // class FullyConnectedDNNLowPOp
 
 } // namespace caffe2

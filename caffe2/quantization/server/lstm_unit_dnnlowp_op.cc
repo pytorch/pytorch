@@ -16,7 +16,7 @@ LSTMUnitDNNLowPOp<T>::LSTMUnitDNNLowPOp(
     Workspace* ws)
     : LSTMUnitOp<CPUContext>(operator_def, ws),
       drop_states_(
-          OperatorBase::template GetSingleArgument<bool>("drop_states", false)),
+          this->template GetSingleArgument<bool>("drop_states", false)),
       qfactory_(GetQuantizationFactoryOf(this)) {}
 
 template <typename T>
@@ -39,7 +39,7 @@ OpWrapper<LSTMUnitOp<CPUContext>, T>* LSTMUnitDNNLowPOp<T>::Fp32Op_() {
 template <typename T>
 const TensorCPU& LSTMUnitDNNLowPOp<T>::InputTensorCPU_(int idx) {
   return InputIsType<int8::Int8TensorCPU>(idx)
-      ? OperatorBase::Input<int8::Int8TensorCPU>(idx).t
+      ? this->template Input<int8::Int8TensorCPU>(idx).t
       : Input(idx);
 }
 

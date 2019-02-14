@@ -5,8 +5,8 @@
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/tree_views.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
 namespace jit {
@@ -20,11 +20,7 @@ namespace script {
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
-enum NoneStatus {
- ALWAYS,
- MAYBE,
- NEVER
-};
+enum NoneStatus { ALWAYS, MAYBE, NEVER };
 
 struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
@@ -32,12 +28,15 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
-  virtual Value * asValue(const SourceRange& loc, Method & m) {
+  virtual Value* asValue(const SourceRange& loc, Method& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 
   // select an attribute on it, e.g. `this.field`
-  virtual std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) {
+  virtual std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
   virtual NoneStatus isNone() {
@@ -55,26 +54,25 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
-    const SourceRange& loc,
-    Method & m,
-    // note: names for args will be 'argument 0', 'argument 1', etc..
-    at::ArrayRef<NamedValue> inputs_,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-// n_binders is always set to the number of variables an expression is
-// syntactically bound to:
-//     a = foo() # 1 binder (note in this case the single binder might be a tuple)
-//     a, * b = foo() # 1 binder
-//     a, b = foo() # 2 binders
-//     foo() # 0 binders
-//
-// In subexpressions, like bar() in foo(bar()), n_binders is always set to
-// 1. n_binders is used as a hint to subexpressions to determine how many
-// values they should return when that number is ambiguous statically. In
-// particular it is currently used to decide how many tensors a call to a
-// python function will return. It is only a hint, functions do not have to
-// check that n_binders match the number of things they are returning, the
-// assignment logic will do that anyway.
+      const SourceRange& loc,
+      Method& m,
+      // note: names for args will be 'argument 0', 'argument 1', etc..
+      at::ArrayRef<NamedValue> inputs_,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) {
+    // n_binders is always set to the number of variables an expression is
+    // syntactically bound to:
+    //     a = foo() # 1 binder (note in this case the single binder might be a
+    //     tuple) a, * b = foo() # 1 binder a, b = foo() # 2 binders foo() # 0
+    //     binders
+    //
+    // In subexpressions, like bar() in foo(bar()), n_binders is always set to
+    // 1. n_binders is used as a hint to subexpressions to determine how many
+    // values they should return when that number is ambiguous statically. In
+    // particular it is currently used to decide how many tensors a call to a
+    // python function will return. It is only a hint, functions do not have to
+    // check that n_binders match the number of things they are returning, the
+    // assignment logic will do that anyway.
 
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
@@ -85,12 +83,11 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 // most things in the environment are just simple value types
 // and not special python syntax sugar types
 struct TORCH_API SimpleValue : public SugaredValue {
-  SimpleValue(Value * value)
-  : value(value) {}
+  SimpleValue(Value* value) : value(value) {}
   std::string kind() const override {
     return "value";
   }
-  Value * asValue(const SourceRange& range, Method & m) override {
+  Value* asValue(const SourceRange& range, Method& m) override {
     return value;
   }
   NoneStatus isNone() override {
@@ -105,11 +102,15 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Method& m,
       const c10::optional<size_t>& size_hint = {}) override;
-  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override;
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override;
   Value* getValue() const {
     return value;
   }
-private:
+
+ private:
   Value* value;
 };
 
@@ -135,19 +136,21 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(std::string name,
-                c10::optional<int64_t> version = at::nullopt)
-    : name(std::move(name))
-    , version(std::move(version)) {}
+  BuiltinModule(std::string name, c10::optional<int64_t> version = at::nullopt)
+      : name(std::move(name)), version(std::move(version)) {}
 
   std::string kind() const override {
     return "builtin module";
   }
-  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override {
-    return std::make_shared<BuiltinFunction>(Symbol::fromQualString(name+"::"+field), c10::nullopt);
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    return std::make_shared<BuiltinFunction>(
+        Symbol::fromQualString(name + "::" + field), c10::nullopt);
   }
 
-private:
+ private:
   std::string name;
   // when we add operator versioning, emit this op as it exising at 'version'
   // if not set, use the latest version
@@ -157,8 +160,9 @@ private:
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(std::shared_ptr<Module> module, Method& method)
-  : module(std::move(module)) //insurance that method stays alive
-  , method(method) {}
+      : module(std::move(module)) // insurance that method stays alive
+        ,
+        method(method) {}
   std::string kind() const override {
     return "method";
   }
@@ -168,13 +172,13 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    return std::make_shared<SimpleValue>(caller.emit_call_to(loc, method, inputs, attributes));
+    return std::make_shared<SimpleValue>(
+        caller.emit_call_to(loc, method, inputs, attributes));
   }
 
  private:
   std::shared_ptr<Module> module;
   Method& method;
-
 };
 
 struct TORCH_API PrintValue : public SugaredValue {
@@ -182,11 +186,11 @@ struct TORCH_API PrintValue : public SugaredValue {
     return "print";
   }
   std::shared_ptr<SugaredValue> call(
-    const SourceRange& loc,
-    Method & m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) override;
+      const SourceRange& loc,
+      Method& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
 };
 
 // expressions like int(x)
@@ -194,26 +198,25 @@ struct TORCH_API PrintValue : public SugaredValue {
 // is a noop when the input is a subtype of 'type'
 struct TORCH_API CastValue : public BuiltinFunction {
   CastValue(TypePtr type, c10::Symbol method)
-  : BuiltinFunction(method, c10::nullopt)
-  , type_(std::move(type)) {}
+      : BuiltinFunction(method, c10::nullopt), type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
-    const SourceRange& loc,
-    Method & m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) override {
-      if(inputs.size() == 1 && attributes.size() == 0) {
-        auto v = inputs[0].value(*m.graph());
-        if (v->type()->isSubtypeOf(type_)) {
-          return std::make_shared<SimpleValue>(v);
-        }
+      const SourceRange& loc,
+      Method& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() == 1 && attributes.size() == 0) {
+      auto v = inputs[0].value(*m.graph());
+      if (v->type()->isSubtypeOf(type_)) {
+        return std::make_shared<SimpleValue>(v);
       }
-      return BuiltinFunction::call(loc, m , inputs, attributes, n_binders);
+    }
+    return BuiltinFunction::call(loc, m, inputs, attributes, n_binders);
   }
-private:
+
+ private:
   TypePtr type_;
 };
-
 
 // These SugaredValues have special handling in the compiler because they
 // change the normal evalution order of the expression they participate in.
@@ -249,12 +252,12 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   }
 };
 
-static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [&](const NamedValue& v) {
-    return v.value(g);
-  });
+static inline std::vector<Value*> toValues(
+    Graph& g,
+    at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
 }
 
-}
+} // namespace script
 } // namespace jit
 } // namespace torch

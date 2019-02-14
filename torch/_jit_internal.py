@@ -6,26 +6,27 @@ circular dependency problems
 
 import weakref
 import inspect
-try:
-    import builtins  # PY3
-except Exception:
-    import __builtin__ as builtins  # PY2
+from torch._six import builtins
 
 # Tracks standalone weak script functions
-_compiled_weak_fns = weakref.WeakKeyDictionary()
+compiled_weak_fns = weakref.WeakKeyDictionary()
 
 # Tracks which methods should be converted to strong methods
-_weak_script_methods = weakref.WeakKeyDictionary()
+weak_script_methods = weakref.WeakKeyDictionary()
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
-_weak_modules = weakref.WeakKeyDictionary()
+weak_modules = weakref.WeakKeyDictionary()
 
 # Types that have been declared as weak modules
-_weak_types = weakref.WeakKeyDictionary()
+weak_types = weakref.WeakKeyDictionary()
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-_boolean_dispatched = weakref.WeakKeyDictionary()
+boolean_dispatched = weakref.WeakKeyDictionary()
+
+# Python Op functions that should be ignored by the compiler. These will be replaced
+# with an operator that always throws an error
+ignored_fns = weakref.WeakSet()
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -87,7 +88,7 @@ def weak_script(fn, _frames_up=0):
     inlined in the graph. When not used in a script function, the weak script
     annotation has no effect.
     """
-    _compiled_weak_fns[fn] = {
+    compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
         "rcb": createResolutionCallback(_frames_up + 1)
@@ -96,27 +97,27 @@ def weak_script(fn, _frames_up=0):
 
 
 def weak_module(cls):
-    _weak_types[cls] = {
+    weak_types[cls] = {
         "method_stubs": None
     }
     return cls
 
 
 def weak_script_method(fn):
-    _weak_script_methods[fn] = {
+    weak_script_methods[fn] = {
         "rcb": createResolutionCallback(frames_up=2),
         "original_method": fn
     }
     return fn
 
 
-def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
+def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
-    if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:
+    if compiled_weak_fns.get(if_true) is None or compiled_weak_fns.get(if_false) is None:
         raise RuntimeError("both functions must be weak script")
 
     def fn(*args, **kwargs):
@@ -144,7 +145,12 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
 
-    _boolean_dispatched[fn] = {
+    if module_name is not None:
+        fn.__module__ = module_name
+    if func_name is not None:
+        fn.__name__ = func_name
+
+    boolean_dispatched[fn] = {
         "if_true": if_true,
         "if_false": if_false,
         "index": arg_index,
@@ -154,15 +160,30 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     return fn
 
 
+def ignore(fn):
+    ignored_fns.add(fn)
+    return fn
+
+
 try:
     import typing
-    from typing import Tuple, List
+    from typing import Tuple, List, Dict
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Tuple or
              getattr(ann, '__origin__', None) is tuple)
+
+    def is_list(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.List or
+             getattr(ann, '__origin__', None) is list)
+
+    def is_dict(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Dict or
+             getattr(ann, '__origin__', None) is dict)
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -185,11 +206,26 @@ except ImportError:
         def __getitem__(self, types):
             return TupleInstance(types)
 
+    class DictInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class DictCls(object):
+        def __getitem__(self, types):
+            return DictInstance(types)
+
     Tuple = TupleCls()
     List = ListCls()
+    Dict = DictCls()
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
+
+    def is_list(ann):
+        return isinstance(ann, ListInstance)
+
+    def is_dict(ann):
+        return isinstance(ann, DictInstance)
 
 
 # allows BroadcastingList instance to be subscriptable

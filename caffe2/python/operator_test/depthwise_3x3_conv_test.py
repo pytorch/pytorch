@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from hypothesis import given
 import hypothesis.strategies as st
 
@@ -40,8 +40,8 @@ class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):
             - 0.5
         b = np.random.rand(channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         # Error handling path.

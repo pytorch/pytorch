@@ -47,6 +47,7 @@ class Int8ReluOp final : public Operator<CPUContext> {
         1 /* channels */,
         X.zero_point /* output min */,
         255 /* output max */,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

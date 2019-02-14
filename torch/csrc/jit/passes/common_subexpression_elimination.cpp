@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/interned_strings.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/hash.h>
 
 namespace torch {
@@ -21,10 +21,10 @@ void EliminateCommonSubexpression(
     const AliasDb& aliasDb,
     std::function<Node*(Node*)> parent_lookup_fn) {
   std::unordered_set<Node*, HashNode, EqualNode> subexprs;
-  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto node = *it;
     if (node->hasSideEffects() || node->isNondeterministic() ||
-        aliasDb.hasWriters(node) || aliasDb.hasWildcard(node)) {
+        aliasDb.hasWriters(node)) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;
     }
@@ -64,10 +64,10 @@ void EliminateCommonSubexpression(
     }
   }
 }
-}
+} // namespace
 
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   EliminateCommonSubexpression(
       graph->block(), aliasDb, [](Node*) { return nullptr; });
 }

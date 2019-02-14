@@ -87,12 +87,18 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
             Y->zero_point,
             Y->scale,
             activationLimits(Y->scale, Y->zero_point, Ac).first,
             activationLimits(Y->scale, Y->zero_point, Ac).second,
+            0 /* flags */,
             &this->qnnpackObject_);
         CAFFE_ENFORCE(
             createStatus == qnnp_status_success,

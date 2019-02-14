@@ -69,7 +69,7 @@ a taste of this interface:
 The ``at::Tensor`` class in ATen is not differentiable by default. To add the
 differentiability of tensors the autograd API provides, you must use tensor
 factory functions from the `torch::` namespace instead of the `at` namespace.
-For example, while a tensor created with `torch::ones` will not be differentiable,
+For example, while a tensor created with `at::ones` will not be differentiable,
 a tensor created with `torch::ones` will be.
 
 C++ Frontend

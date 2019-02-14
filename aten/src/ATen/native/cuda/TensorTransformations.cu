@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <cstddef>
 #include <vector>
@@ -11,12 +12,12 @@
 namespace at {
 namespace native {
 
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
@@ -67,7 +68,7 @@ void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int6
 }
 
 // Flip tensor given a list of dims
-Tensor flip_cuda(const Tensor& self, IntList dims) {
+Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   flip_check_errors(total_dims, flip_dims_size, dims);
@@ -149,7 +150,7 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
 }
 
 // Roll a tensor along a dimension
-Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
+Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }

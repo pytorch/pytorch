@@ -16,6 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -59,6 +60,76 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
   ASSERT_EQ(batch, expected);
 }
 
+// dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
+// contains 10, 5, 20 examples respectively.
+struct DummyChunkDataReader
+    : public datasets::ChunkDataReader<std::vector<int>> {
+ public:
+  using BatchType = std::vector<int>;
+
+  /// Read an entire chunk.
+  BatchType read_chunk(size_t chunk_index) override {
+    BatchType batch_data;
+    int start_index = chunk_index == 0
+        ? 0
+        : std::accumulate(chunk_sizes, chunk_sizes + chunk_index, 0);
+
+    batch_data.resize(chunk_sizes[chunk_index]);
+
+    std::iota(batch_data.begin(), batch_data.end(), start_index);
+
+    return batch_data;
+  }
+
+  size_t chunk_count() override {
+    return chunk_count_;
+  };
+
+  void reset() override{};
+
+  const static size_t chunk_count_ = 3;
+  size_t chunk_sizes[chunk_count_] = {10, 5, 20};
+};
+
+TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
+  DummyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  auto initialization_function =
+      [&](size_t preloader_count, size_t batch_size, size_t cache_size) {
+        datasets::SharedBatchDataset<datasets::ChunkDataset<
+            DummyChunkDataReader,
+            samplers::SequentialSampler,
+            samplers::SequentialSampler>>
+            dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+                DummyChunkDataReader,
+                samplers::SequentialSampler,
+                samplers::SequentialSampler>>(
+                data_reader,
+                sampler,
+                sampler,
+                datasets::ChunkDatasetOptions(
+                    preloader_count, batch_size, cache_size));
+      };
+
+  ASSERT_THROWS_WITH(
+      initialization_function(0, 1, 1),
+      "Preloader count is 0. At least one preloader needs to be specified.");
+
+  ASSERT_THROWS_WITH(
+      initialization_function(1, 0, 1),
+      "Batch size is 0. A positive batch size needs to be specified.");
+
+  ASSERT_THROWS_WITH(
+      initialization_function(1, 1, 0),
+      "Cache size is 0. A positive cache size needs to be specified.");
+
+  ASSERT_THROWS_WITH(
+      initialization_function(1, 10, 5),
+      "Cache size is less than batch size. Cache needs to be large enough to "
+      "hold at least one batch.");
+}
+
 struct InfiniteStreamDataset
     : datasets::StreamDataset<InfiniteStreamDataset, std::vector<int>> {
   std::vector<int> get_batch(size_t batch_size) override {
@@ -84,8 +155,8 @@ TEST(DataTest, InfiniteStreamDataset) {
 
   auto data_loader = torch::data::make_data_loader(
       std::move(dataset),
-      kBatchSize,
-      samplers::StreamSampler(/*epoch_size=*/39));
+      samplers::StreamSampler(/*epoch_size=*/39),
+      kBatchSize);
 
   size_t batch_index = 0;
   for (auto& batch : *data_loader) {
@@ -98,6 +169,7 @@ TEST(DataTest, InfiniteStreamDataset) {
   }
   ASSERT_EQ(batch_index, 3);
 }
+
 TEST(DataTest, NoSequencerIsIdentity) {
   using namespace torch::data::detail::sequencers; // NOLINT
   NoSequencer<int> no_sequencer;
@@ -128,10 +200,10 @@ TEST(DataTest, OrderedSequencerReOrdersValues) {
   size_t index = 0;
   auto getter = [&v, &index]() { return S{v.at(index++)}; };
 
-  // Let's say the sequence number matches for the first one, then it should
+  // Let's say the sequence number matches for the batch one, then it should
   // return immediately.
-  const auto first = sequencer.next(getter);
-  ASSERT_EQ(first.value().sequence_number, 0);
+  const auto batch = sequencer.next(getter);
+  ASSERT_EQ(batch.value().sequence_number, 0);
   ASSERT_EQ(index, 1);
 
   // Now it should call the getter until it gets the next value.
@@ -385,9 +457,9 @@ TEST(DataTest, StackTransformWorksForExample) {
 
   auto d = D().map(transforms::Stack<Example<>>());
 
-  Example<> first = d.get_batch({0, 1});
-  ASSERT_TRUE(first.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
-  ASSERT_TRUE(first.target.allclose(1 + torch::eye(4).slice(/*dim=*/0, 0, 2)));
+  Example<> batch = d.get_batch({0, 1});
+  ASSERT_TRUE(batch.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
+  ASSERT_TRUE(batch.target.allclose(1 + torch::eye(4).slice(/*dim=*/0, 0, 2)));
 
   Example<> second = d.get_batch({2, 3});
   ASSERT_TRUE(second.data.allclose(torch::eye(4).slice(/*dim=*/0, 2, 4)));
@@ -398,8 +470,8 @@ TEST(DataTest, StackTransformWorksForTensorExample) {
   auto d = datasets::TensorDataset(torch::eye(4))
                .map(transforms::Stack<TensorExample>());
 
-  TensorExample first = d.get_batch({0, 1});
-  ASSERT_TRUE(first.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
+  TensorExample batch = d.get_batch({0, 1});
+  ASSERT_TRUE(batch.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
 
   TensorExample second = d.get_batch({2, 3});
   ASSERT_TRUE(second.data.allclose(torch::eye(4).slice(/*dim=*/0, 2, 4)));
@@ -448,6 +520,80 @@ TEST(DataTest, TensorLambdaWorksforAnyTargetType) {
 
   ASSERT_TRUE(batch[1].data.allclose(torch::tensor(4.0)));
   ASSERT_EQ(batch[1].target, "2");
+}
+
+struct DummyTensorDataset
+    : datasets::Dataset<DummyTensorDataset, Example<torch::Tensor, int>> {
+  Example<torch::Tensor, int> get(size_t index) override {
+    const auto channels = static_cast<int64_t>(index);
+    torch::Tensor tensor =
+        (channels > 0) ? torch::ones({channels, 4, 4}) : torch::ones({4, 4});
+    return {tensor, static_cast<int>(channels)};
+  }
+
+  torch::optional<size_t> size() const override {
+    return 100;
+  }
+};
+
+TEST(DataTest, NormalizeTransform) {
+  auto dataset = DummyTensorDataset().map(transforms::Normalize<int>(0.5, 0.1));
+
+  // Works for zero (one implicit) channels
+  std::vector<Example<torch::Tensor, int>> output = dataset.get_batch(0);
+  ASSERT_EQ(output.size(), 1);
+  // (1 - 0.5) / 0.1 = 5
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({4, 4}) * 5))
+      << output[0].data;
+
+  // Works for one explicit channel
+  output = dataset.get_batch(1);
+  ASSERT_EQ(output.size(), 1);
+  ASSERT_EQ(output[0].data.size(0), 1);
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
+
+  // Works for two channels with different moments
+  dataset = DummyTensorDataset().map(
+      transforms::Normalize<int>({0.5, 1.5}, {0.1, 0.2}));
+  output = dataset.get_batch(2);
+  ASSERT_EQ(output.size(), 1);
+  ASSERT_EQ(output[0].data.size(0), 2);
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/0, /*end=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * -2.5))
+      << output[0].data;
+
+  // Works for three channels with one moment value
+  dataset = DummyTensorDataset().map(transforms::Normalize<int>(1.5, 0.2));
+  output = dataset.get_batch(3);
+  ASSERT_EQ(output.size(), 1);
+  ASSERT_EQ(output[0].data.size(0), 3);
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({3, 4, 4}) * -2.5))
+      << output[0].data;
+
+  // Works for three channels with different moments
+  dataset = DummyTensorDataset().map(
+      transforms::Normalize<int>({0.5, 1.5, -1.5}, {0.1, 0.2, 0.2}));
+  output = dataset.get_batch(3);
+  ASSERT_EQ(output.size(), 1);
+  ASSERT_EQ(output[0].data.size(0), 3);
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/0, /*end=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/1, /*end=*/2)
+                  .allclose(torch::ones({1, 4, 4}) * -2.5))
+      << output[0].data;
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/2)
+                  .allclose(torch::ones({1, 4, 4}) * 12.5))
+      << output[0].data;
 }
 
 struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
@@ -504,7 +650,7 @@ TEST(DataTest, QueuePopWithTimeoutThrowsUponTimeout) {
 TEST(DataTest, QueuePushAndPopFromDifferentThreads) {
   using torch::data::detail::Queue;
 
-  // First test: push first and the pop in thread.
+  // First test: push batch and the pop in thread.
   {
     Queue<int> queue;
     queue.push(1);
@@ -513,7 +659,7 @@ TEST(DataTest, QueuePushAndPopFromDifferentThreads) {
     ASSERT_EQ(future.get(), 1);
   }
 
-  // Second test: attempt to pop first (and block), then push.
+  // Second test: attempt to pop batch (and block), then push.
   {
     Queue<int> queue;
     std::thread thread([&queue] {
@@ -544,7 +690,7 @@ TEST(DataTest, DataShuttleCanPushAndPopJob) {
 
 TEST(DataTest, DataShuttleCanPushAndPopResult) {
   torch::data::detail::DataShuttle<int, int> shuttle;
-  // pop_result() will only attempt to pop if there was a push_job() first.
+  // pop_result() will only attempt to pop if there was a push_job() batch.
   shuttle.push_job(1);
   shuttle.push_job(2);
 
@@ -672,9 +818,9 @@ struct TestIndexSampler : public samplers::Sampler<TestIndex> {
 };
 
 TEST(DataTest, CanUseCustomTypeAsIndexType) {
-  const size_t kBatchSize = 10;
+  const int kBatchSize = 10;
   auto data_loader = torch::data::make_data_loader(
-      TestIndexDataset(23), kBatchSize, TestIndexSampler(23));
+      TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
   size_t i = 0;
   for (auto batch : *data_loader) {
@@ -948,7 +1094,7 @@ TEST(DataLoaderTest, RespectsTimeout) {
   ASSERT_LT(duration.count(), 1);
 }
 
-// https://stackoverflow.com/questions/24465533/implementing-boostbarrier-in-c11
+// stackoverflow.com/questions/24465533/implementing-boostbarrier-in-c11
 struct Barrier {
   explicit Barrier(size_t target) : counter_(target) {}
   void wait() {
@@ -973,12 +1119,12 @@ struct Barrier {
 // thread (for outside consumption) is not deterministic. Imagine the sampler is
 // a SequentialSampler with indices 0, 1, 2, 3. With batch size 1, each index
 // will be a single "job". Inside the dataloader, worker threads block until a
-// job is available. It is not deterministic which worker thread wakes up first
+// job is available. It is not deterministic which worker thread wakes up batch
 // to dequeue a particular batch. Further, some worker threads may take longer
 // than others to read the data for their index. As such, it could be that
 // worker thread 2 finishes before all other threads and returns its batch to
 // the main thread. In that case, the dataloader iterator would return the datum
-// at index 2 first, and afterwards the datum from whatever thread finishes
+// at index 2 batch, and afterwards the datum from whatever thread finishes
 // next. As such, the user may see data from indices 2, 0, 3, 1. On another run
 // of the same dataloader on the same data, threads may be scheduled differently
 // and return in order 0, 2, 3, 1. To force this ordering to deterministically
@@ -996,7 +1142,7 @@ struct Barrier {
 // `SequentialSampler` in the range `0...kNumberOfWorkers-1`. Each worker thread
 // has a copy of the dataset, and thus `get_batch()` is called on the
 // thread-local copy in each worker. We want to simulate out-of-order completion
-// of these threads. For this, we first set a barrier in the `get_batch()`
+// of these threads. For this, we batch set a barrier in the `get_batch()`
 // method to make sure every worker has some index to fetch assigned. Further,
 // each worker thread has a unique ID in `0...kNumberOfWorkers-1`.
 // There is a hard-coded ordering, `kOrderInWhichWorkersReturnTheirBatch`, in
@@ -1057,12 +1203,11 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
 TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   auto data_loader = torch::data::make_data_loader(
       ordering_test::Dataset{},
+      torch::data::samplers::SequentialSampler(ordering_test::kNumberOfWorkers),
       DataLoaderOptions()
           .batch_size(1)
           .workers(ordering_test::kNumberOfWorkers)
-          .enforce_ordering(true),
-      torch::data::samplers::SequentialSampler(
-          ordering_test::kNumberOfWorkers));
+          .enforce_ordering(true));
   std::vector<size_t> output;
   for (size_t value : *data_loader) {
     output.push_back(value);
@@ -1104,8 +1249,8 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
     }
   };
 
-  auto data_loader =
-      torch::data::make_data_loader(D{}, DataLoaderOptions().workers(2));
+  auto data_loader = torch::data::make_data_loader(
+      D{}, samplers::RandomSampler(100), DataLoaderOptions().workers(2));
   auto iterator = data_loader->begin();
 
   try {
@@ -1118,4 +1263,401 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
     ASSERT_THROW(
         std::rethrow_exception(e.original_exception), std::invalid_argument);
   }
+}
+
+TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+
+  struct D : datasets::StatefulDataset<D, int, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader(D{});
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const int i : *data_loader) {
+    ASSERT_LT(i, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+  }
+}
+
+TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 4;
+
+  struct D : datasets::StatefulDataset<D, int, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+    std::mutex mutex;
+  };
+
+  auto data_loader = torch::data::make_data_loader(
+      torch::data::datasets::make_shared_dataset<D>(),
+      DataLoaderOptions().workers(kNumberOfWorkers));
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const int i : *data_loader) {
+    ASSERT_LT(i, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+  }
+}
+
+TEST(DataLoaderTest, StatefulDatasetWithMap) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+
+  struct D : datasets::StatefulDataset<D, int, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader(
+      D().map(transforms::BatchLambda<int, std::string>(
+                  [](int x) { return std::to_string(x); }))
+          .map(transforms::BatchLambda<std::string, torch::Tensor>(
+              [](const std::string& x) {
+                return torch::tensor(static_cast<int64_t>(std::stoi(x)));
+              })),
+      DataLoaderOptions{});
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const torch::Tensor& t : *data_loader) {
+    ASSERT_LT(t.item<int64_t>(), kNumberOfExamplesAfterWhichTheDatasetExhausts);
+  }
+}
+
+TEST(DataLoaderTest, StatefulDatasetWithCollate) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+
+  struct D : datasets::StatefulDataset<D> {
+    torch::optional<std::vector<Example<>>> get_batch(
+        size_t batch_size) override {
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        counter += batch_size;
+        std::vector<Example<>> batch(
+            /*count=*/batch_size,
+            Example<>{torch::ones(batch_size + 1),
+                      torch::zeros(batch_size - 1)});
+        return batch;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+  };
+
+  auto d = D().map(transforms::Stack<Example<>>());
+
+  const size_t kBatchSize = 5;
+
+  // Notice that the `get_batch()` of the dataset returns a vector<Example>, but
+  // the `Stack` collation stacks the tensors into one.
+  torch::optional<Example<>> batch = d.get_batch(kBatchSize);
+  ASSERT_TRUE(batch.has_value());
+  ASSERT_EQ(batch->data.size(0), kBatchSize);
+  ASSERT_EQ(batch->data.size(1), kBatchSize + 1);
+  ASSERT_EQ(batch->target.size(0), kBatchSize);
+  ASSERT_EQ(batch->target.size(1), kBatchSize - 1);
+
+  ASSERT_TRUE(batch->data[0].allclose(torch::ones(kBatchSize + 1)));
+  ASSERT_TRUE(batch->target[0].allclose(torch::zeros(kBatchSize - 1)));
+}
+
+// This test tests the core function for iterate through a chunk dataset. It
+// contains test cases with different parameter combination. (For example,
+// different prefetch count, batch size and data loader worker count). It
+// verifies the return batches size and content when the order is deterministic.
+TEST(DataLoaderTest, ChunkDataSetGetBatch) {
+  // different prefetch count for testing.
+  const size_t prefetch_counts[] = {1, 2, 3, 4};
+
+  // different batch size for testing.
+  const size_t batch_sizes[] = {5, 7};
+
+  // test with/without worker threads
+  const size_t dataloader_worker_counts[] = {0, 2};
+
+  const size_t total_example_count = 35;
+  DummyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  // test functionality across epoch boundary
+  const int epoch_count = 2;
+
+  for (auto prefetch_count : prefetch_counts) {
+    for (auto batch_size : batch_sizes) {
+      for (auto dataloader_worker_count : dataloader_worker_counts) {
+        datasets::SharedBatchDataset<datasets::ChunkDataset<
+            DummyChunkDataReader,
+            samplers::SequentialSampler,
+            samplers::SequentialSampler>>
+            dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+                DummyChunkDataReader,
+                samplers::SequentialSampler,
+                samplers::SequentialSampler>>(
+                data_reader,
+                sampler,
+                sampler,
+                datasets::ChunkDatasetOptions(prefetch_count, batch_size));
+
+        auto data_loader = torch::data::make_data_loader(
+            dataset,
+            DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+
+        for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
+          std::vector<bool> result(total_example_count, false);
+          int iteration_count = 0;
+          for (auto iterator = data_loader->begin();
+               iterator != data_loader->end();
+               ++iterator, ++iteration_count) {
+            std::vector<int>& batch = *iterator;
+            ASSERT_EQ(batch.size(), batch_size);
+
+            // When prefetch_count is equal to 1 and no worker thread, the batch
+            // order is deterministic. So we can verify elements in each batch.
+            if (prefetch_count == 1 && dataloader_worker_count == 0) {
+              for (size_t j = 0; j < batch_size; ++j) {
+                ASSERT_EQ(batch[j], iteration_count * batch_size + j);
+              }
+            }
+            for (size_t j = 0; j < batch_size; ++j) {
+              result[batch[j]] = true;
+            }
+          }
+
+          for (auto data : result) {
+            ASSERT_EQ(data, true);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
+  const size_t prefetch_count = 1;
+  const size_t batch_size = 5;
+  const size_t requested_batch_size = 6;
+
+  DummyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  datasets::SharedBatchDataset<datasets::ChunkDataset<
+      DummyChunkDataReader,
+      samplers::SequentialSampler,
+      samplers::SequentialSampler>>
+      dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+          DummyChunkDataReader,
+          samplers::SequentialSampler,
+          samplers::SequentialSampler>>(
+          data_reader,
+          sampler,
+          sampler,
+          datasets::ChunkDatasetOptions(prefetch_count, batch_size));
+
+  auto data_loader = torch::data::make_data_loader(
+      dataset,
+      DataLoaderOptions(requested_batch_size).workers(0));
+
+  std::string exception_msg =
+      "The requested batch size does not match with the initialized batch "
+      "size.\n The requested batch size is 6, while the dataset is created"
+      " with batch size equal to 5";
+
+  ASSERT_THROWS_WITH(*(data_loader->begin()), exception_msg);
+}
+
+TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
+  struct DummyEmptyChunkDataReader
+      : datasets::ChunkDataReader<std::vector<int>> {
+   public:
+    using BatchType = std::vector<int>;
+
+    BatchType read_chunk(size_t chunk_index) override {
+      return {};
+    }
+
+    size_t chunk_count() override {
+      return 1;
+    };
+
+    void reset() override{};
+  };
+
+  const size_t prefetch_count = 1;
+  const size_t batch_size = 5;
+  DummyEmptyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  datasets::SharedBatchDataset<datasets::ChunkDataset<
+      DummyEmptyChunkDataReader,
+      samplers::SequentialSampler,
+      samplers::SequentialSampler>>
+      dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+          DummyEmptyChunkDataReader,
+          samplers::SequentialSampler,
+          samplers::SequentialSampler>>(
+          data_reader,
+          sampler,
+          sampler,
+          datasets::ChunkDatasetOptions(prefetch_count, batch_size));
+
+  auto data_loader = torch::data::make_data_loader(
+      dataset, DataLoaderOptions(batch_size).workers(0));
+
+  for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+       ++iterator) {
+    ASSERT_EQ(iterator->size(), 0);
+  }
+}
+
+TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
+  struct D : public datasets::ChunkDataReader<std::vector<int>> {
+   public:
+    using BatchType = std::vector<int>;
+
+    BatchType read_chunk(size_t chunk_index) override {
+      BatchType batch_data(10, 0);
+      return batch_data;
+    }
+
+    size_t chunk_count() override {
+      return 2;
+    };
+
+    void reset() override{};
+  };
+
+  const size_t batch_sizes[] = {17, 30};
+  D data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  for (auto batch_size : batch_sizes) {
+    datasets::SharedBatchDataset<datasets::ChunkDataset<
+        D,
+        samplers::SequentialSampler,
+        samplers::SequentialSampler>>
+        dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+            D,
+            samplers::SequentialSampler,
+            samplers::SequentialSampler>>(
+            data_reader,
+            sampler,
+            sampler,
+            datasets::ChunkDatasetOptions(1, batch_size));
+
+    auto data_loader = torch::data::make_data_loader(
+        dataset, DataLoaderOptions(batch_size).workers(0));
+
+    for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+         ++iterator) {
+      std::vector<int> batch = *iterator;
+      auto batch_size = batch.size();
+      if (batch_size == 17) {
+        ASSERT_TRUE(batch.size() == 17 || batch.size() == 3);
+      }
+      if (batch_size == 30) {
+        ASSERT_TRUE(batch.size() == 20);
+      }
+    }
+  }
+}
+
+TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
+  const size_t prefetch_count = 2;
+  const size_t batch_size = 5;
+
+  DummyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+  datasets::SharedBatchDataset<datasets::ChunkDataset<
+      DummyChunkDataReader,
+      samplers::SequentialSampler,
+      samplers::SequentialSampler>>
+      dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+          DummyChunkDataReader,
+          samplers::SequentialSampler,
+          samplers::SequentialSampler>>(
+          data_reader,
+          sampler,
+          sampler,
+          datasets::ChunkDatasetOptions(prefetch_count, batch_size));
+
+  samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
+
+  auto data_loader = torch::data::make_data_loader(
+      dataset.map(transforms::BatchLambda<std::vector<int>, int>(
+          [](std::vector<int> batch) {
+            return std::accumulate(batch.begin(), batch.end(), 0);
+          })),
+      DataLoaderOptions(batch_size).workers(0));
+
+  // before we start, the index should be 0.
+  ASSERT_EQ(chunk_sampler.index(), 0);
+
+  size_t sum = 0;
+  for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+       ++iterator) {
+    sum += *iterator;
+  }
+  ASSERT_EQ(sum, 595); // sum([0, 35))
+  // 3 chunks, and when exhausted the value is already incremented.
+  ASSERT_EQ(chunk_sampler.index(), 3);
 }

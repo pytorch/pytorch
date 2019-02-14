@@ -25,7 +25,7 @@
 
 using at::Backend;
 using at::Device;
-using at::IntList;
+using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
 using at::kLong;
@@ -53,25 +53,25 @@ void maybe_initialize_cuda(const Device device) {
   }
 }
 
-Tensor dispatch_zeros(const Type& type, optional<Device> device, IntList sizes) {
+Tensor dispatch_zeros(const Type& type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   return torch::zeros(sizes, type.options(std::move(device)));
 }
 
-Tensor dispatch_ones(const Type& type, optional<Device> device, IntList sizes) {
+Tensor dispatch_ones(const Type& type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   return torch::ones(sizes, type.options(std::move(device)));
 }
 
-Tensor dispatch_full(const Type& type, Scalar fill_value, optional<Device> device, IntList sizes) {
+Tensor dispatch_full(const Type& type, Scalar fill_value, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   return torch::full(sizes, fill_value, type.options(std::move(device)));
 }
 
-Tensor new_with_sizes(const Type& type, optional<Device> device, IntList sizes) {
+Tensor new_with_sizes(const Type& type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   return torch::empty(sizes, type.options(std::move(device)));
@@ -163,7 +163,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
-void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
+void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t dim,
                             ScalarType scalarType, int elementSize, PyObject* obj) {
   int64_t ndim = sizes.size();
   if (dim == ndim) {
@@ -249,7 +249,7 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return legacy_new_from_data(type, std::move(device), data);
+  return internal_new_from_data(type, std::move(device), data, false, false, false);
 }
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
@@ -266,8 +266,8 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
     "new(*, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor indices, Tensor values, *, Device? device=None)",
-    "new(Tensor indices, Tensor values, IntList size, *, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
+    "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
+    "new(IntArrayRef size, *, Device? device=None)",
   });
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -307,8 +307,8 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     "new(*, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor indices, Tensor values, *, Device? device=None)",
-    "new(Tensor indices, Tensor values, IntList size, *, Device? device=None)",
-    "new(IntList size, *, Device? device=None)",
+    "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
+    "new(IntArrayRef size, *, Device? device=None)",
   });
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -363,7 +363,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",
-    "new(IntList size, *, Device? device=None)",
+    "new(IntArrayRef size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -409,7 +409,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",  // this doesn't have a dtype/device because it creates an alias.
-    "new(IntList size, *, Device? device=None)",
+    "new(IntArrayRef size, *, Device? device=None)",
     "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -449,18 +449,26 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_new_from_data(
+Tensor indexing_tensor_from_data(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, std::move(device), data, false, false, false);
+  // Specific to tensor indexing, converts an indexing list to an
+  // indexing tensor (type Byte or Long)
+  ScalarType scalar_type = infer_scalar_type(data);
+  if (scalar_type == ScalarType::Byte) {
+    auto& idx_type = type.toScalarType(scalar_type);
+    return internal_new_from_data(idx_type, std::move(device), data, false, false, false);
+  } else {
+    return internal_new_from_data(type, std::move(device), data, false, false, false);
+  }
 }
 
 Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-    "sparse_coo_tensor(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
@@ -568,7 +576,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_empty(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_empty(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
@@ -582,7 +590,7 @@ Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_full(IntList size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_full(IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<5> parsed_args;
@@ -596,7 +604,7 @@ Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_ones(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_ones(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
@@ -610,7 +618,7 @@ Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
 
 Tensor new_zeros(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_zeros(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+    "new_zeros(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;

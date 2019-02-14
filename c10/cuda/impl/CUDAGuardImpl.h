@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 #include <c10/cuda/CUDAException.h>
@@ -39,7 +39,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaSetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    cudaSetDevice(d.index());
+    cudaError_t __err = cudaSetDevice(d.index());
+    if (__err != cudaSuccess) {
+      AT_WARN("CUDA error: ", cudaGetErrorString(__err));
+    }
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream().unwrap();
@@ -50,6 +53,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto old_stream = getCurrentCUDAStream(s.device().index());
     setCurrentCUDAStream(cs);
     return old_stream.unwrap();
+  }
+  DeviceIndex deviceCount() const override {
+    int deviceCnt;
+    C10_CUDA_CHECK(cudaGetDeviceCount(&deviceCnt));
+    return deviceCnt;
   }
 };
 
