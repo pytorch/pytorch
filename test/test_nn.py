@@ -3355,7 +3355,7 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_data_parallel_model_device(self):
         l = nn.Linear(2, 2)
-        error_msg = "module must have its parameters and buffers on device_ids\[0\]"
+        error_msg = "module must have its parameters and buffers on device_ids\\[0\\]"
         self.assertRaisesRegex(RuntimeError, error_msg, lambda: nn.DataParallel(l))
         self.assertRaisesRegex(
             RuntimeError, error_msg, lambda: nn.DataParallel(l.cuda(1)))
