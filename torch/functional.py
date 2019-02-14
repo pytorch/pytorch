@@ -403,9 +403,9 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional)): A tensor or a namedtuple of tensors containing
 
-            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **values** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
               :attr:`return_inverse` is True, there will be a
               2nd returned tensor (same shape as input) representing the indices
@@ -414,32 +414,31 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
     Example::
 
-        >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
-        >>> output
+        >>> values = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
+        >>> values
         tensor([ 2,  3,  1])
 
-        >>> output, inverse_indices = torch.unique(
+        >>> values, inverse_indices = torch.unique(
                 torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
-        >>> output
+        >>> values
         tensor([ 1,  2,  3])
         >>> inverse_indices
         tensor([ 0,  2,  1,  2])
 
-        >>> output, inverse_indices = torch.unique(
+        >>> values, inverse_indices = torch.unique(
                 torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
-        >>> output
+        >>> values
         tensor([ 1,  2,  3])
         >>> inverse_indices
         tensor([[ 0,  2],
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._C._VariableFunctions.unique(
+    ret = torch._C._VariableFunctions.unique(
         input, sorted=sorted, return_inverse=return_inverse, dim=dim)
-    if return_inverse:
-        return output, inverse_indices
-    else:
-        return output
+    if not return_inverse:
+        return ret.values
+    return ret
 
 
 def argmax(input, dim=None, keepdim=False):

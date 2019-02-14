@@ -2238,7 +2238,7 @@
   matches_jit_signature: True
   variants: method
 
-- func: unique(Tensor self, bool sorted=True, bool return_inverse=False, int? dim=None) -> (Tensor, Tensor)
+- func: unique(Tensor self, bool sorted=True, bool return_inverse=False, int? dim=None) -> (Tensor values, Tensor inverse_indices)
   matches_jit_signature: True
   variants: function
   dispatch:
@@ -2246,15 +2246,15 @@
     CUDA: _unique_cuda
 
 # unique_dim is not exposed to python, special cased in gen_python_functions.py
-- func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
+- func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor values, Tensor inverse_indices)
   variants: function
 
 # FIXME: for back compatibility reason, _unique and _unique_dim is still there
 # it just calls unique. These two functions should be deleted in the future
-- func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
+- func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor values, Tensor inverse_indices)
   variants: function
 
-- func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
+- func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor values, Tensor inverse_indices)
   matches_jit_signature: True
   variants: function
 

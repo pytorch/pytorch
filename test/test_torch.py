@@ -7130,6 +7130,11 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
 
+        # test unique
+        ret = a.unique(dim=0, return_inverse=True)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.inverse_indices, ret[1])
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
