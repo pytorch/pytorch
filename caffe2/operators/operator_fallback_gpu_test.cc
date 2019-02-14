@@ -11,7 +11,7 @@ class IncrementByOneOp final : public Operator<CPUContext> {
  public:
   IncrementByOneOp(const OperatorDef& def, Workspace* ws)
       : Operator<CPUContext>(def, ws) {}
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& in = Input(0);
 
     auto* out = Output(0, in.sizes(), at::dtype<float>());
