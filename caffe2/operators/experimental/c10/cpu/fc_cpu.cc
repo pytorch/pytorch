@@ -11,19 +11,25 @@ using caffe2::Tensor;
 
 namespace caffe2 {
 namespace {
+
+struct Cache final : public c10::KernelCache {
+  vector<int64_t> Y_shape_cache_;
+  at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
+};
+
 template <class DataType, class Context>
 void fc_op_cpu_impl(
-    const C10Tensor& X_,
-    const C10Tensor& W_,
-    const C10Tensor& b_,
-    const C10Tensor& Y_,
-    int axis,
-    int axis_w,
-    caffe2::ops::FullyConnected::Cache* cache) {
-  Tensor X(X_);
-  Tensor W(W_);
-  Tensor b(b_);
-  Tensor Y(Y_);
+    const at::Tensor& X_,
+    const at::Tensor& W_,
+    const at::Tensor& b_,
+    const at::Tensor& Y_,
+    int64_t axis,
+    int64_t axis_w,
+    Cache* cache) {
+  Tensor X{C10Tensor(X_)};
+  Tensor W{C10Tensor(W_)};
+  Tensor b{C10Tensor(b_)};
+  Tensor Y{C10Tensor(Y_)};
   CPUContext context;
 
   constexpr bool TransposeWeight = true;
@@ -123,16 +129,7 @@ void fc_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
-    .kernel(&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>)
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .withCache<caffe2::Cache>()
+    .kernel<decltype(caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

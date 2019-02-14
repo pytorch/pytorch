@@ -57,8 +57,10 @@ class GroupNormOp final : public Operator<Context> {
       mu_data = mu->template mutable_data<T>();
       rsig_data = rsig->template mutable_data<T>();
     } else {
-      ReinitializeTensor(&mu_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
-      ReinitializeTensor(&rsig_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      ReinitializeTensor(
+          &mu_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      ReinitializeTensor(
+          &rsig_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
       mu_data = mu_.template mutable_data<T>();
       rsig_data = rsig_.template mutable_data<T>();
     }
@@ -88,24 +90,26 @@ class GroupNormOp final : public Operator<Context> {
       T* mu,
       T* rsig) {
     const int C = G * D;
-    ReinitializeTensor(&scale_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    ReinitializeTensor(&bias_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &scale_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &bias_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* scale_data = scale_.template mutable_data<T>();
     T* bias_data = bias_.template mutable_data<T>();
     if (order_ == StorageOrder::NCHW) {
-      const std::array<int, 2> dims = {N * G, D * HxW};
-      const int axis = 1;
+      const std::array<int, 2> X_dims = {N * G, D * HxW};
+      const std::array<int, 2> Y_dims = {N * G, 1};
       math::Moments<T, Context>(
-          2, dims.data(), 1, &axis, X, mu, rsig, &context_);
+          2, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
       ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
       GroupNormForwardNCHW(N, C, HxW, X, scale_data, bias_data, Y);
     } else {
-      const std::array<int, 4> dims = {N, HxW, G, D};
-      const std::array<int, 2> axes = {1, 3};
+      const std::array<int, 4> X_dims = {N, HxW, G, D};
+      const std::array<int, 4> Y_dims = {N, 1, G, 1};
       math::Moments<T, Context>(
-          4, dims.data(), 2, axes.data(), X, mu, rsig, &context_);
+          4, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
       ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);

@@ -24,7 +24,7 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   for (size_t i = 0; i < shape_tensor.numel(); ++i) {
     shape.push_back(accessor[i]);
   }
-  return self.reshape(IntList(shape));
+  return self.reshape(IntArrayRef(shape));
 }
 
 Tensor _shape_as_tensor(const Tensor& self) {
@@ -50,7 +50,7 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   return at::legacy::th::_th_cat_out(result, tensors, dim);
 }
 
-static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* should already be wrapped */) {
+static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
     return false;
   }
@@ -66,7 +66,7 @@ static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* sho
 // for being concatenated along a given dimension.
 static void check_cat_sparse_dims(Tensor const &t,
   int64_t pos /* used only for debug messages */,
-  IntList sizes,
+  IntArrayRef sizes,
   int64_t wrapped,
   int64_t sparse_dim,
   int64_t dense_dim) {
@@ -86,7 +86,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
   int64_t sparse_dim = tensors[0].sparse_dim();
   int64_t dense_dim = tensors[0].dense_dim();
-  IntList sizes = tensors[0].sizes();
+  IntArrayRef sizes = tensors[0].sizes();
   if (wrapped < sparse_dim) {
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
@@ -267,7 +267,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, IntList size, bool implicit) {
+Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   // [expand implicit]
   // The implicit flag is set to true for any expand calls inserted by broadcast
   // operators in ExpandUtils.h This flag is recorded by the tracer to
@@ -291,14 +291,14 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
-Tensor sum_to_size(const Tensor& self, IntList size) {
+Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
   AT_CHECK(is_expandable_to(size, self.sizes()),
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
   return sum_to(self, size);
 }
 
-Tensor as_strided(const Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+Tensor as_strided(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
   AT_CHECK(
@@ -309,7 +309,7 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride, optional<int
   return result;
 }
 
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+Tensor &as_strided_(Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
@@ -364,7 +364,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor permute(const Tensor& self, IntList dims) {
+Tensor permute(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
   AT_CHECK(dims.size() == (size_t)nDims,
            "number of dims don't match in permute");
@@ -384,7 +384,7 @@ Tensor permute(const Tensor& self, IntList dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
-Tensor repeat(const Tensor& self, IntList repeats) {
+Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   AT_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
 
@@ -414,7 +414,7 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   return result;
 }
 
-Tensor reshape(const Tensor& self, IntList proposed_shape) {
+Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
@@ -431,12 +431,15 @@ Tensor reshape_as(const Tensor& self, const Tensor& other) {
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
-  AT_CHECK(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+  if (ndim == 0) {
+    AT_INDEX_ERROR("select() cannot be applied to a 0-dim tensor.");
+  }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
-  AT_CHECK(index >= -size && index < size,
-           "select(): index ", index, " out of range for tensor of size ",
-           self.sizes(), " at dimension ", dim);
+  if (index < -size || index >= size) {
+    AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+                   self.sizes(), " at dimension ", dim);
+  }
   if (index < 0) {
     index += size;
   }
@@ -450,7 +453,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
-  AT_CHECK(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
+  if (ndim == 0) {
+    AT_INDEX_ERROR("slice() cannot be applied to a 0-dim tensor.");
+  }
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
@@ -503,7 +508,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, int64_t dim) {
+std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   AT_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
   int64_t num_splits = split_sizes.size();
@@ -722,7 +727,7 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 //
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
-Tensor _unsafe_view(const Tensor& self, IntList size) {
+Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
   return self.view(size);
 }
 

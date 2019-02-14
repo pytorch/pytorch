@@ -23,9 +23,10 @@ shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
       cache;
   static mutex cache_mutex;
 
-  lock_guard<mutex> lock(cache_mutex);
-
   // Create a new packed matrix and compare with cached one if there's any.
+  // Note that a cache miss is as expensive as a cache hit here, the purpose of
+  // this cache is only to deduplicate the quantized tensors for improved
+  // memory bandwidth if different nets share copies of the same operator.
   // TODO: make this cheaper by computing hash of fdata.
   auto new_packed = make_shared<fbgemm::PackBMatrix<int8_t, ACC_T>>(
       trans,
@@ -37,24 +38,23 @@ shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
       1); // groups
 
   std::tuple<int, int, const void*> key(m, n, orig_data);
-  auto itr = cache.find(key);
+  std::shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> cache_entry;
+  {
+    lock_guard<mutex> lock(cache_mutex);
+    auto itr = cache.find(key);
+    if (itr != cache.end()) {
+      cache_entry = itr->second.lock();
+    }
+  } // release lock here during expensive equals()
 
-  if (itr == cache.end() || !itr->second.lock() ||
-      !itr->second.lock()->metaEquals(*new_packed)) {
+  if (!cache_entry || !cache_entry->metaEquals(*new_packed) ||
+      !cache_entry->equals(*new_packed)) {
     // cache miss
+    lock_guard<mutex> lock(cache_mutex);
     cache[key] = new_packed;
     return new_packed;
-  } else if (!itr->second.lock()->equals(*new_packed)) {
-    // cache hit but content is different then just copy the packed matrix
-    memcpy(
-        itr->second.lock()->getBuf(),
-        new_packed->getBuf(),
-        new_packed->blockRows() * new_packed->blockRowSize() *
-            new_packed->blockCols() * new_packed->blockColSize() *
-            sizeof(uint8_t));
-    return itr->second.lock();
   } else {
-    return itr->second.lock();
+    return cache_entry;
   }
 }
 

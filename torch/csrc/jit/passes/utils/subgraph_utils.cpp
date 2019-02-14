@@ -33,12 +33,12 @@ std::shared_ptr<Graph> getSubgraph(Node* n) {
 }
 
 void unmergeSubgraph(Node* subgraphNode) {
-  JIT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
 
   // Inline the graph, replace uses of node outputs and destroy the node
   const auto subgraphOutputs = inlineGraph(
       getSubgraph(subgraphNode), subgraphNode->inputs(), subgraphNode);
-  JIT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
+  AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
   }
@@ -46,7 +46,7 @@ void unmergeSubgraph(Node* subgraphNode) {
 }
 
 void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
-  JIT_ASSERT(hasSubgraph(subgraphNode));
+  AT_ASSERT(hasSubgraph(subgraphNode));
   if (hasSubgraph(toMerge)) {
     return mergeSubgraph(subgraphNode, toMerge);
   }
@@ -56,7 +56,7 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   // Map from values in the surrounding graph to inputs in the subgraph
   std::unordered_map<Value*, Value*> inputsMap;
 
-  JIT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
+  AT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
   size_t idx = 0;
   for (auto input : subgraphNode->inputs()) {
     inputsMap[input] = subgraph->inputs()[idx];
@@ -139,7 +139,7 @@ std::vector<Value*> inlineGraph(
   // Initialize a map of inner graph values to outer graph values
   std::unordered_map<const Value*, Value*> innerToOuter;
   const auto innerInputs = subgraph->inputs();
-  JIT_ASSERT(outerInputs.size() == innerInputs.size());
+  AT_ASSERT(outerInputs.size() == innerInputs.size());
   for (size_t i = 0; i < innerInputs.size(); ++i) {
     innerToOuter[innerInputs[i]] = outerInputs[i];
   }

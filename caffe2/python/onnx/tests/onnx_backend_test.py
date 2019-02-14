@@ -1,4 +1,4 @@
-## @package onnx
+# @package onnx
 # Module caffe2.python.onnx.tests.onnx_backend_test
 
 from __future__ import absolute_import
@@ -41,7 +41,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
-                     '|test_constantlike.*'  # Needs implementation
                      '|test_eyelike.*'  # Needs implementation
                      '|test_maxunpool.*'  # Needs implementation
                      '|test_acosh.*'  # Needs implementation
@@ -51,9 +50,11 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_scan.*'  # Needs implementation
                      '|test_isnan.*'  # Needs implementation
                      '|test_scatter.*'  # Should be similar to ScatterAssign
-                     '|test_constantofshape.*'  # Needs implementation
+                     '|test_constantofshape_int.*'  # Needs implementation
                      '|test_where.*'  # Needs implementation
                      '|test_shrink.*'  # Needs implementation
+                     '|test_nonzero.*'  # Needs implementation
+                     '|test_tfidfvectorizer.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

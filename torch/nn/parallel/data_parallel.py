@@ -47,10 +47,10 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel EXCEPT Tensors. All tensors will be scattered on dim
-    specified (default 0). Primitive types will be broadcasted, but all
-    other types will be a shallow copy and can be corrupted if written to in
-    the model's forward pass.
+    DataParallel but some types are specially handled. tensors will be
+    **scattered** on dim specified (default 0). tuple, list and dict types will
+    be shallow copied. The other types will be shared among different threads
+    and can be corrupted if written to in the model's forward pass.
 
     The parallelized :attr:`module` must have its parameters and buffers on
     ``device_ids[0]`` before running this :class:`~torch.nn.DataParallel`
@@ -58,7 +58,7 @@ class DataParallel(Module):
 
     .. warning::
         In each forward, :attr:`module` is **replicated** on each device, so any
-        updates to the runing module in ``forward`` will be lost. For example,
+        updates to the running module in ``forward`` will be lost. For example,
         if :attr:`module` has a counter attribute that is incremented in each
         ``forward``, it will always stay at the initial value becasue the update
         is done on the replicas which are destroyed after ``forward``. However,

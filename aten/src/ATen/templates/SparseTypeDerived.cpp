@@ -8,7 +8,7 @@
 // ${generated_comment}
 
 #include <ATen/${Generator}.h>
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>

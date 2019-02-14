@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "TH/generic/THStorage.h"
 #else
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <c10/core/StorageImpl.h>
 
 /* on pourrait avoir un liste chainee

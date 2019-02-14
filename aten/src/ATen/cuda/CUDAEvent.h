@@ -72,8 +72,12 @@ struct AT_CUDA_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
-  at::Device device() const {
-    return at::Device(at::kCUDA, device_index_);
+  optional<at::Device> device() const {
+    if (is_created_) {
+      return at::Device(at::kCUDA, device_index_);
+    } else {
+      return {};
+    }
   }
 
   bool isCreated() const { return is_created_; }

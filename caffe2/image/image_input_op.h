@@ -29,12 +29,15 @@ class ImageInputOp final
   // MULTI_LABEL_WEIGHTED_SPARSE: sparse active label indices with per-label weights
   // for multi-label classification
   // SINGLE_LABEL_WEIGHTED: single integer label for multi-class classification with weighted sampling
+  // EMBEDDING_LABEL: an array of floating numbers representing dense embedding.
+  //   It is useful for model distillation
   enum LABEL_TYPE {
     SINGLE_LABEL = 0,
     MULTI_LABEL_SPARSE = 1,
     MULTI_LABEL_DENSE = 2,
     MULTI_LABEL_WEIGHTED_SPARSE = 3,
-    SINGLE_LABEL_WEIGHTED = 4
+    SINGLE_LABEL_WEIGHTED = 4,
+    EMBEDDING_LABEL = 5,
   };
 
   // INCEPTION_STYLE: Random crop with size 8% - 100% image area and aspect
@@ -585,8 +588,8 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         prefetched_label_.mutable_data<float>()[item_id] =
             label_proto.float_data(0);
       } else if (label_type_ == MULTI_LABEL_SPARSE) {
-        float* label_data = prefetched_label_.mutable_data<float>() +
-          item_id * num_labels_;
+        float* label_data =
+            prefetched_label_.mutable_data<float>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(float) * num_labels_);
         for (int i = 0; i < label_proto.float_data_size(); ++i) {
           label_data[(int)label_proto.float_data(i)] = 1.0;
@@ -600,10 +603,11 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
           label_data[(int)label_proto.float_data(i)] =
               weight_proto.float_data(i);
         }
-      } else if (label_type_ == MULTI_LABEL_DENSE) {
+      } else if (
+          label_type_ == MULTI_LABEL_DENSE || label_type_ == EMBEDDING_LABEL) {
         CAFFE_ENFORCE(label_proto.float_data_size() == num_labels_);
-        float* label_data = prefetched_label_.mutable_data<float>() +
-          item_id * num_labels_;
+        float* label_data =
+            prefetched_label_.mutable_data<float>() + item_id * num_labels_;
         for (int i = 0; i < label_proto.float_data_size(); ++i) {
           label_data[i] = label_proto.float_data(i);
         }
@@ -616,8 +620,8 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         prefetched_label_.mutable_data<int>()[item_id] =
             label_proto.int32_data(0);
       } else if (label_type_ == MULTI_LABEL_SPARSE) {
-        int* label_data = prefetched_label_.mutable_data<int>() +
-          item_id * num_labels_;
+        int* label_data =
+            prefetched_label_.mutable_data<int>() + item_id * num_labels_;
         memset(label_data, 0, sizeof(int) * num_labels_);
         for (int i = 0; i < label_proto.int32_data_size(); ++i) {
           label_data[label_proto.int32_data(i)] = 1;
@@ -630,10 +634,11 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         for (int i = 0; i < label_proto.int32_data_size(); ++i) {
           label_data[label_proto.int32_data(i)] = weight_proto.float_data(i);
         }
-      } else if (label_type_ == MULTI_LABEL_DENSE) {
+      } else if (
+          label_type_ == MULTI_LABEL_DENSE || label_type_ == EMBEDDING_LABEL) {
         CAFFE_ENFORCE(label_proto.int32_data_size() == num_labels_);
-        int* label_data = prefetched_label_.mutable_data<int>() +
-          item_id * num_labels_;
+        int* label_data =
+            prefetched_label_.mutable_data<int>() + item_id * num_labels_;
         for (int i = 0; i < label_proto.int32_data_size(); ++i) {
           label_data[i] = label_proto.int32_data(i);
         }

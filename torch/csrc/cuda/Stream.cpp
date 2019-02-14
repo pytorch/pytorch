@@ -1,7 +1,7 @@
 #include <torch/csrc/cuda/Stream.h>
-
-#include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/THP.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
@@ -52,7 +52,7 @@ static void THCPStream_dealloc(THCPStream *self) {
 
 static PyObject * THCPStream_get_device(THCPStream *self) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(self->cuda_stream.device_index());
+  return THPDevice_New(self->cuda_stream.device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -85,7 +85,7 @@ static PyObject * THCPStream_query(THCPStream *self) {
 
 static PyObject * THCPStream_synchronize(THCPStream *self) {
   HANDLE_TH_ERRORS
-  self->cuda_stream.synchronize();
+  with_no_gil([&] { self->cuda_stream.synchronize(); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

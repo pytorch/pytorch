@@ -10,10 +10,10 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void sigmoid_op_cpu_impl(
-    const C10Tensor& input_,
-    const C10Tensor& output_) {
-  Tensor input(input_);
-  Tensor output(output_);
+    const at::Tensor& input_,
+    const at::Tensor& output_) {
+  Tensor input{C10Tensor(input_)};
+  Tensor output{C10Tensor(output_)};
   output.ResizeLike(input);
 
   caffe2::ConstEigenVectorArrayMap<DataType> xM(
@@ -27,8 +27,6 @@ void sigmoid_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Sigmoid)
-    .kernel(&caffe2::sigmoid_op_cpu_impl<float>)
-    .dispatchKey({DeviceTypeId::CPU,
-                  LayoutId(0),
-                  caffe2::TypeMeta::Id<float>()});
+    .kernel<decltype(caffe2::sigmoid_op_cpu_impl<float>), &caffe2::sigmoid_op_cpu_impl<float>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

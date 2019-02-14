@@ -1,7 +1,6 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : bool = prim::Constant[value=0]()
   %2 : int = prim::Constant[value=4]()
   %3 : int[] = prim::ListConstruct(%2)
   %4 : Tensor = aten::sum(%x, %3, %1)
-  return (%4);
-}
+  return (%4)

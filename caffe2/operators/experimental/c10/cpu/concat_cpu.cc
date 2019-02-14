@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    at::ArrayRef<C10Tensor> inputs,
-    const C10Tensor& output_,
-    const C10Tensor& split_,
-    int axis,
-    int add_axis) {
-  Tensor output(output_);
-  Tensor split(split_);
+    ArrayRef<at::Tensor> inputs,
+    const at::Tensor& output_,
+    const at::Tensor& split_,
+    int64_t axis,
+    int64_t add_axis) {
+  Tensor output{C10Tensor(output_)};
+  Tensor split{C10Tensor(split_)};
   CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));
@@ -108,6 +108,6 @@ void concat_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Concat)
-    .kernel(&caffe2::concat_op_cpu_impl<float, CPUContext>)
-    .dispatchKey(c10::DeviceTypeId::CPU);
+    .kernel<decltype(caffe2::concat_op_cpu_impl<float, CPUContext>), &caffe2::concat_op_cpu_impl<float, CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

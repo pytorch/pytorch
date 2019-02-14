@@ -53,7 +53,7 @@ struct BuiltinFunctionRegistry {
       loadBuiltinFunctions();
       state = INITIALIZED;
     }
-    JIT_ASSERT(state == INITIALIZED);
+    AT_ASSERT(state == INITIALIZED);
     auto it = builtins_by_name.find(name);
     if (it == builtins_by_name.end())
       return empty;

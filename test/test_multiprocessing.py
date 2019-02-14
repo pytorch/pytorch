@@ -457,8 +457,7 @@ class TestMultiprocessing(TestCase):
             e1.ipc_handle()
 
     def _test_event_handle_importer_consumer(handle, p2c, c2p):
-        e1 = torch.cuda.Event.from_ipc_handle(
-            torch.cuda.current_device(), handle)
+        e1 = torch.cuda.Event.from_ipc_handle(0, handle)
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()

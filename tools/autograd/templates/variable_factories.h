@@ -51,8 +51,8 @@ using Deleter = std::function<void(void*)>;
 /// interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
-    at::IntList sizes,
-    at::IntList strides,
+    at::IntArrayRef sizes,
+    at::IntArrayRef strides,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor =
@@ -67,8 +67,8 @@ inline at::Tensor from_blob(
 /// what type to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
-    at::IntList sizes,
-    at::IntList strides,
+    at::IntArrayRef sizes,
+    at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
   return torch::from_blob(
       data,
@@ -86,7 +86,7 @@ inline at::Tensor from_blob(
 /// to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
-    at::IntList sizes,
+    at::IntArrayRef sizes,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor =
@@ -100,7 +100,7 @@ inline at::Tensor from_blob(
 /// tensor, such as what type to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
-    at::IntList sizes,
+    at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
   return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }

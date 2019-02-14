@@ -9,12 +9,14 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
+from torch._jit_internal import ignore
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
 
 import math
 from collections import defaultdict, OrderedDict, namedtuple
+import textwrap
 import sys
 import warnings
 import itertools
@@ -73,7 +75,10 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f, map_location=None):
+DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
+
+
+def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
@@ -90,6 +95,10 @@ def load(f, map_location=None):
                 or a string containing a file name
             map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
                 torch.device('cpu'))
+            _extra_files: map from filename to content. The extra
+                filenames given in the map would be loaded and their content
+                would be stored in the provided map.
+
 
         Returns:
             A ``ScriptModule`` object.
@@ -105,6 +114,10 @@ def load(f, map_location=None):
             >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
             # Load all tensors onto CPU, using a string
             >>> torch.jit.load(buffer, map_location='cpu')
+            # Load with extra files.
+            >>> files = {'metadata.json' : ''}
+            >>> torch.jit.load('scriptmodule.pt', _extra_files = files)
+            >>> print (files['metadata.json'])
     """
     m = ScriptModule()
 
@@ -115,7 +128,9 @@ def load(f, map_location=None):
                 setattr(curr, name, ScriptModule())
             curr = getattr(curr, name)
         return curr
-
+    if isinstance(f, string_classes):
+        if not os.path.exists(f):
+            raise ValueError("The provided filename {} does not exist".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -128,13 +143,14 @@ def load(f, map_location=None):
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f, map_location)
+        torch._C.import_ir_module(module_lookup, f, map_location, _extra_files)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location)
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location, _extra_files)
+
     return m
 
 
-def save(m, f):
+def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     """
         Saves a ScriptModule to a file.
 
@@ -142,6 +158,7 @@ def save(m, f):
             m: a ScriptModule to save
             f: a file-like object (has to implement write and flush) or a string
                containing a file name
+            _extra_files: Map from filename to contents which will be stored as part of 'f'
 
         .. warning::
             If you are using Python 2, torch.save does NOT support StringIO.StringIO
@@ -157,13 +174,17 @@ def save(m, f):
             >>> # Save to io.BytesIO buffer
             >>> buffer = io.BytesIO()
             >>> torch.jit.save(m, buffer)
+            >>> # Save with extra files
+            >>> extra_files = torch._C.ExtraFilesMap()
+            >>> extra_files['foo.txt'] = 'bar'
+            >>> torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        m.save(f)
+        m.save(f, _extra_files=_extra_files)
     else:
-        ret = m.save_to_buffer()
+        ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
 
 
@@ -667,6 +688,16 @@ def _try_get_dispatched_fn(fn):
     return _jit_internal.boolean_dispatched.get(fn)
 
 
+def _try_get_overloaded_fn(fn):
+    if not hasattr(fn, '__self__') or not isinstance(fn.__self__, ScriptModule):
+        # Only allow overloads for bound methods
+        return None
+    overloads = fn.__self__._overloads.get(fn.__name__, None)
+    if overloads is None:
+        return None
+    return [getattr(fn.__self__, overload) for overload in overloads]
+
+
 def _try_compile_weak_script(fn):
     entry = _jit_internal.compiled_weak_fns.get(fn)
     if entry is None:
@@ -724,6 +755,14 @@ def _try_get_weak_module(mod):
     if not isinstance(mod, Module):
         return None
     return _jit_internal.weak_modules.get(mod)
+
+
+def _try_get_ignored_op(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return fn in _jit_internal.ignored_fns
 
 
 def _is_weak_type(cls):
@@ -896,13 +935,13 @@ def _get_valid_constant(attr, v):
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(
-        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
-        "is not a valid constant.\n" +
-        "Valid constants are:\n" +
-        "  1. a nn.ModuleList\n" +
-        "  2. a value of type {{{}}}\n".format(constants) +
-        "  3. a list or tuple of (2)\n")
+    raise TypeError(textwrap.dedent("""
+        '{}' object for attribute '{}' is not a valid constant.
+        Valid constants are:
+          1. a nn.ModuleList
+          2. a value of type {{{}}}
+          3. a list or tuple of (2)
+        """.format(type(v).__name__, attr, constants)))
 
 
 def _create_methods_from_stubs(self, stubs):
@@ -939,6 +978,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         original_init = getattr(cls, '__init__', lambda self: None)
         super_constants = getattr(super(cls), '_constants_set', set())
         cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1114,14 +1154,23 @@ if _enabled:
 
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-            if isinstance(value, ModuleList):
+
+            def conv_module_to_const(module_value):
+                if not isinstance(module_value, (ModuleList, Sequential)):
+                    return module_value
+                for i in range(len(module_value)):
+                    module_value[i] = conv_module_to_const(module_value[i])
+                if isinstance(module_value, Sequential):
+                    return _ConstSequential(module_value)
+                else:
+                    return _ConstModuleList(module_value)
+
+            if isinstance(value, (ModuleList, Sequential)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
                 # is set as an attribute of the parent module.
-                super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
-            elif isinstance(value, Sequential):
-                super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
+                super(ScriptModule, self).__setattr__(attr, conv_module_to_const(value))
             else:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
@@ -1186,6 +1235,9 @@ if _enabled:
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
+            # Copy overloads
+            self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
+
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
 
@@ -1215,8 +1267,11 @@ if _enabled:
                 raise AttributeError("Cannot set new attribute '{}' on "
                                      "weak script module once it has been "
                                      "created".format(attr))
+
 else:
-    ScriptModule = torch.nn.Module
+    class ScriptModule(torch.nn.Module):
+        def __init__(self, optimize=True):
+            super(ScriptModule, self).__init__()
 
 
 def _get_weak_stubs(cls):

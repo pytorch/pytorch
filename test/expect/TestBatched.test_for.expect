@@ -1,14 +1,14 @@
-graph(%x.1_data : Tensor
-      %x.1_mask : Tensor
-      %x.1_dims : Tensor
-      %y_data : Tensor
-      %y_mask : Tensor
-      %y_dims : Tensor) {
+graph(%x.1_data : Tensor,
+      %x.1_mask : Tensor,
+      %x.1_dims : Tensor,
+      %y_data : Tensor,
+      %y_mask : Tensor,
+      %y_dims : Tensor):
   %6 : int = prim::Constant[value=1]()
   %7 : bool = prim::Constant[value=1]()
   %8 : int = prim::Constant[value=10]()
   %x : Tensor, %10 : Tensor, %11 : Tensor = prim::Loop(%8, %7, %x.1_data, %x.1_mask, %x.1_dims)
-    block0(%loop_num : int, %5_data : Tensor, %5_mask : Tensor, %5_dims : Tensor) {
+    block0(%loop_num : int, %5_data : Tensor, %5_mask : Tensor, %5_dims : Tensor):
       %16 : Long() = prim::NumToTensor(%6)
       %alpha : float = prim::Float(%16)
       %data.1 : Tensor = aten::add(%5_data, %y_data, %alpha)
@@ -16,7 +16,5 @@ graph(%x.1_data : Tensor
       %dims : Tensor = aten::__or__(%5_dims, %y_dims)
       %data : Tensor = aten::where(%mask, %data.1, %5_data)
       -> (%7, %data, %mask, %dims)
-    }
   %22 : (Tensor, Tensor, Tensor) = prim::TupleConstruct(%x, %10, %11)
-  return (%22);
-}
+  return (%22)
