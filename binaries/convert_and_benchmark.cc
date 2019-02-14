@@ -321,7 +321,6 @@ TensorProtos writeValues(
   return protos;
 }
 
-
 TensorProtos convertImages(std::string& image_file) {
   vector<string> file_names;
   if (image_file != "") {
