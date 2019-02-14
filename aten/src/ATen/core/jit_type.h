@@ -1048,12 +1048,6 @@ template<class T> struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
-template<class K, class V> struct getTypePtr_<c10::ivalue::DictUnorderedMap<K, V>> final {
-  static TypePtr call() {
-    static auto type = DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
-    return type;
-  }
-};
 }
 template<class T> inline TypePtr getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendy
