@@ -24,6 +24,9 @@
 #include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -31,6 +34,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+PYBIND11_MAKE_OPAQUE(torch::jit::script::ExtraFilesMap);
 
 namespace torch {
 namespace jit {
@@ -592,6 +597,10 @@ FunctionSchema getSchemaWithNameAndDefaults(
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  // STL containers are not mutable by default and hence we need to bind as
+  // follows.
+  py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -599,16 +608,22 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<>())
       .def(
           "save",
-          [](std::shared_ptr<Module> m, const std::string& filename) {
-            m->save(filename);
-          })
+          [](std::shared_ptr<Module> m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m->save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
       .def(
           "save_to_buffer",
-          [](std::shared_ptr<Module> m) {
+          [](std::shared_ptr<Module> m,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            m->save(buf);
+            m->save(buf, _extra_files);
             return py::bytes(buf.str());
-          })
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -882,20 +897,22 @@ void initJitScriptBindings(PyObject* module) {
       "import_ir_module",
       [](ModuleLookup module_lookup,
          const std::string& filename,
-         py::object map_location) {
+         py::object map_location,
+         ExtraFilesMap& extra_files) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device);
+        import_ir_module(module_lookup, filename, optional_device, extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
       [](ModuleLookup module_lookup,
          const std::string& buffer,
-         py::object map_location) {
+         py::object map_location,
+         ExtraFilesMap& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
@@ -903,7 +920,7 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, in, optional_device);
+        import_ir_module(module_lookup, in, optional_device, extra_files);
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
