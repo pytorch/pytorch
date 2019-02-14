@@ -60,7 +60,9 @@ void propagateNode(Node* n) {
   for (size_t i = 0; i < outputs.size(); ++i) {
     try {
       auto new_output = graph->insertConstant(outputs[i]);
-      new_output->setType(n->outputs()[i]->type());
+      if (outputs[i].isNone()) {
+        new_output->setType(n->outputs()[i]->type());
+      }
       n->outputs()[i]->replaceAllUsesWith(new_output);
     } catch (constant_not_supported_error& err) {
       // we cannot actually represent the IValue as a constant node,
