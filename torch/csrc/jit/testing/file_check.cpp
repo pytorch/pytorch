@@ -18,10 +18,14 @@
 #include <sstream>
 #include <string>
 
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
+
 namespace testing {
 
 enum CheckType {
@@ -42,207 +46,157 @@ struct Check {
     count_ = count;
   };
 
-  void setSourceLocation(SourceRange sl) {
-    source_range_ = std::move(sl);
-  }
-
   CheckType type_;
   c10::optional<size_t> count_;
   const std::string search_str_;
-  c10::optional<SourceRange> source_range_;
+
+  friend std::ostream& operator<<(std::ostream& out, const Check& c);
 };
 
-// For a basic CHECK, the match is equal to the matching substring
-// For a CHECK-DAG group, the begin is first position of all checks,
-// and end is the last position of all checks.
-struct Match {
-  Match(int64_t begin, int64_t end) : begin(begin), end(end){};
-
-  int64_t begin; // inclusive
-  int64_t end; // exclusive
+std::ostream& operator<<(std::ostream& out, const Check& c) {
+  switch (c.type_) {
+    case CHECK:
+      out << "CHECK";
+      break;
+    case CHECK_NEXT:
+      out << "CHECK-NEXT";
+      break;
+    case CHECK_SAME:
+      out << "CHECK-SAME";
+      break;
+    case CHECK_NOT:
+      out << "CHECK-NOT";
+      break;
+    case CHECK_DAG:
+      out << "CHECK-DAG";
+      break;
+    case CHECK_COUNT:
+      out << "CHECK-COUNT-" << *c.count_;
+      break;
+  }
+  out << ": " << c.search_str_;
+  return out;
 };
 
 namespace {
-static std::string escapeString(const std::string& input) {
-  std::string s = input;
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    for (size_t i = 0; i < search.size(); i++) {
-      size_t pos = s.find(search[i]);
-      while (pos != std::string::npos) {
-        s.replace(pos, 1, replace[i]);
-        pos = s.find(search[i], pos + 1);
-      }
-    }
-  }
-  return s;
-}
-
 size_t assertFind(
-    const std::string& file,
+    SourceRange search_range,
     const std::string& sub,
-    size_t start,
-    std::function<void(std::ostream& out)> extra_msg = nullptr) {
-  auto pos = file.find(sub, start);
-  if (pos == std::string::npos) {
-    auto range =
-        SourceRange(std::make_shared<std::string>(file), start, sub.size());
+    const Check& check) {
+  auto pos = search_range.file().find(sub, search_range.start());
+  if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
+    auto range = SourceRange(
+        std::make_shared<std::string>(search_range.file()),
+        search_range.start(),
+        sub.size());
     std::stringstream ss;
-    ss << "Expected to find '" << escapeString(sub)
-       << "' but did not find it\n";
+    ss << "Expected to find ";
+    printQuotedString(ss, sub);
+    ss << " but did not find it\n";
     range.highlight(ss);
-    if (extra_msg)
-      extra_msg(ss);
+    ss << "From " << check << "\n";
     throw std::runtime_error(ss.str());
   }
   return pos;
 }
 
 size_t assertFind(
-    const std::string& file,
+    std::shared_ptr<std::string> file,
     const std::string& sub,
     size_t start,
     const Check& check) {
-  return assertFind(file, sub, start, [&](std::ostream& out) {
-    out << "From the check defined\n";
-    check.source_range_->highlight(out);
-  });
+  return assertFind(SourceRange(file, start, file->size()), sub, check);
 }
 
 void assertNotFind(
-    const std::string& file,
+    SourceRange range,
     const std::string& sub,
     const Check& check) {
-  auto pos = file.find(sub);
-  if (pos != std::string::npos) {
-    auto range =
-        SourceRange(std::make_shared<std::string>(file), pos, sub.size() + pos);
+  auto pos = range.file().find(sub, range.start());
+  if (pos != std::string::npos && (pos + sub.size()) <= range.end()) {
+    auto found_range = SourceRange(
+        std::make_shared<std::string>(range.file()), pos, sub.size() + pos);
     std::stringstream ss;
-    ss << "Expected to not find '" << escapeString(sub) << "' but found it\n";
-    range.highlight(ss);
-    ss << "From the check defined\n";
-    check.source_range_->highlight(ss);
+    ss << "Expected to not find ";
+    printQuotedString(ss, sub);
+    ss << " but found it\n";
+    found_range.highlight(ss);
+    ss << "From " << check << "\n";
     throw std::runtime_error(ss.str());
   }
 }
 } // namespace
 
 struct FileCheckImpl {
- public:
-  TORCH_API explicit FileCheckImpl(const std::string& file) {
-    check_file = std::make_shared<std::string>(file);
-    makeGroups(parseStrings());
+  TORCH_API explicit FileCheckImpl() {}
+
+  TORCH_API void run(const std::string& test_file) {
+    has_run = true;
+    doChecks(std::make_shared<std::string>(test_file));
   }
 
-  TORCH_API void checkFile(const std::string& test_file) {
-    doChecks(test_file);
+  TORCH_API void addCheck(
+      CheckType type,
+      const std::string& s,
+      c10::optional<size_t> count = c10::nullopt) {
+    Check check(type, s, count);
+
+    // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
+    if (groups.size() == 0 || (type != CHECK_NOT && type != CHECK_DAG)) {
+      groups.push_back({check});
+    } else {
+      auto& last_group = groups.back();
+      if (last_group.at(0).type_ == type) {
+        last_group.push_back(check);
+      } else {
+        groups.push_back({check});
+      }
+    }
+
+    has_run = false;
   }
+
+  bool has_run;
 
  private:
-  std::vector<Check> parseStrings() {
-    std::vector<Check> operands;
-    std::vector<std::pair<CheckType, std::string>> check_pairs = {
-        {CHECK, ":"},
-        {CHECK_NEXT, "-NEXT:"},
-        {CHECK_SAME, "-SAME:"},
-        {CHECK_NOT, "-NOT:"},
-        {CHECK_DAG, "-DAG:"},
-        {CHECK_COUNT, "-COUNT-"}, // needs special parsing
-    };
-    const std::string prefix = "CHECK";
-
-    size_t start = 0;
-    start = check_file->find(prefix, start);
-
-    while (start != std::string::npos) {
-      for (const auto& check_pair : check_pairs) {
-        const std::string& check_suffix = check_pair.second;
-        auto suffix_pos = check_file->find(check_suffix, start);
-        if (suffix_pos != start + prefix.size()) {
-          continue;
-        }
-        size_t end_check_string = suffix_pos + check_suffix.size();
-        CheckType type = check_pair.first;
-        c10::optional<size_t> count = c10::nullopt;
-        if (type == CHECK_COUNT) {
-          size_t end = assertFind(*check_file, ":", end_check_string);
-          count = std::stoll(
-              check_file->substr(end_check_string, end - end_check_string));
-          end_check_string = end + 1;
-        }
-        auto end_line = check_file->find("\n", end_check_string);
-        auto check = Check(
-            type,
-            check_file->substr(end_check_string, end_line - end_check_string),
-            count);
-        check.setSourceLocation(
-            SourceRange(check_file, start, end_check_string));
-        operands.push_back(check);
-        start = end_line;
-        break;
-      }
-      start = check_file->find(prefix, start);
-    }
-    return operands;
-  }
-
-  // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
-  void makeGroups(std::vector<Check> input) {
-    for (size_t i = 0; i < input.size(); ++i) {
-      std::vector<Check> group = {input[i]};
-      CheckType type = input[i].type_;
-      if (type != CHECK_NOT && type != CHECK_DAG) {
-        groups.push_back(group);
-        continue;
-      }
-      while (i + 1 < input.size() && input[i + 1].type_ == type) {
-        ++i;
-        group.push_back(input[i]);
-      }
-      groups.push_back(group);
-    }
-  }
-
   void doCheckNot(
       const std::vector<Check>& nots,
-      const std::string& file,
-      Match prev,
-      Match next) {
-    auto start = prev.end; // inclusive
-    auto end = next.begin; // exclusive
+      std::shared_ptr<std::string> file,
+      SourceRange prev,
+      SourceRange next) {
+    auto start = prev.end(); // inclusive
+    auto end = next.start(); // exclusive
     if (end < start) {
       return;
     }
-    const auto& substr = file.substr(start, end - start);
     for (const auto& check : nots) {
       AT_ASSERT(check.type_ == CHECK_NOT);
-      assertNotFind(substr, check.search_str_, check);
+      assertNotFind(SourceRange(file, start, end), check.search_str_, check);
     }
   }
 
-  Match matchDagGroup(
+  SourceRange matchDagGroup(
       const std::vector<Check>& group,
-      const std::string& test_file,
-      Match prev) {
+      std::shared_ptr<std::string> test_file,
+      SourceRange prev) {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
 
     AT_ASSERT(groups.size() != 0);
     for (const auto& check : group) {
       AT_ASSERT(check.type_ == group[0].type_);
-      auto pos = assertFind(test_file, check.search_str_, prev.end, check);
+      auto pos = assertFind(test_file, check.search_str_, prev.end(), check);
       group_beg = std::min(pos, group_beg);
       group_end = std::max(pos + check.search_str_.size(), group_end);
     }
 
-    return Match(group_beg, group_end);
+    return SourceRange(test_file, group_beg, group_end);
   }
 
-  Match matchGroup(
+  SourceRange matchGroup(
       const std::vector<Check>& group,
-      const std::string& test_file,
-      Match prev) {
+      std::shared_ptr<std::string> test_file,
+      SourceRange prev) {
     AT_ASSERT(group.size() != 0);
     CheckType type = group[0].type_;
 
@@ -253,7 +207,7 @@ struct FileCheckImpl {
     AT_ASSERT(group.size() == 1);
 
     const auto& check = group[0];
-    size_t start_range = prev.end;
+    size_t start_range = prev.end();
     size_t end_range = start_range;
 
     switch (check.type_) {
@@ -264,7 +218,7 @@ struct FileCheckImpl {
       } break;
       case CHECK_SAME: {
         auto pos = assertFind(test_file, check.search_str_, start_range, check);
-        assertNotFind(test_file.substr(prev.end, pos), "\n", check);
+        assertNotFind(SourceRange(test_file, prev.end(), pos), "\n", check);
         start_range = pos;
         end_range = pos + check.search_str_.size();
       } break;
@@ -272,8 +226,7 @@ struct FileCheckImpl {
         auto line_end = assertFind(test_file, "\n", start_range, check);
         auto pos =
             assertFind(test_file, check.search_str_, line_end + 1, check);
-        assertNotFind(
-            test_file.substr(line_end + 1, pos - (line_end + 1)), "\n", check);
+        assertNotFind(SourceRange(test_file, line_end + 1, pos), "\n", check);
         start_range = pos;
         end_range = pos + check.search_str_.size();
       } break;
@@ -296,11 +249,11 @@ struct FileCheckImpl {
         AT_ASSERT(false);
       } break;
     }
-    return Match(start_range, end_range);
+    return SourceRange(test_file, start_range, end_range);
   }
 
-  void doChecks(const std::string& test_file) {
-    Match prev(0, 0);
+  void doChecks(std::shared_ptr<std::string> test_file) {
+    SourceRange prev(test_file, 0, 0);
     for (size_t i = 0; i < groups.size(); i++) {
       const auto& curr_group = groups[i];
       CheckType type = curr_group.at(0).type_;
@@ -310,27 +263,66 @@ struct FileCheckImpl {
         if (i + 1 < groups.size()) {
           const auto& next_group = groups[i + 1];
           AT_ASSERT(next_group.at(0).type_ != CHECK_NOT);
-          Match after_not = matchGroup(next_group, test_file, prev);
+          SourceRange after_not = matchGroup(next_group, test_file, prev);
           doCheckNot(curr_group, test_file, prev, after_not);
           prev = after_not;
           ++i; // already checked the group after
         } else {
-          Match end_of_file(test_file.size() + 1, test_file.size() + 1);
+          SourceRange end_of_file(
+              test_file, test_file->size() + 1, test_file->size() + 1);
           doCheckNot(curr_group, test_file, prev, end_of_file);
         }
       }
     }
   }
 
+  std::vector<Check> checks;
   std::shared_ptr<std::string> check_file;
   std::vector<std::vector<Check>> groups;
 };
 
-void FileCheck::checkFile(
-    const std::string& check_file,
-    const std::string& test_file) {
-  FileCheckImpl(check_file).checkFile(test_file);
+FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
+
+FileCheck::~FileCheck() {
+  if (!fcImpl->has_run) {
+    std::cout << "You have not run this instance of FileCheck!\n";
+  }
+  fcImpl.reset();
 };
+
+void FileCheck::run(const std::string& test_file) {
+  fcImpl->run(test_file);
+};
+
+FileCheck* FileCheck::check(const std::string& str) {
+  fcImpl->addCheck(CHECK, str);
+  return this;
+}
+
+FileCheck* FileCheck::check_not(const std::string& str) {
+  fcImpl->addCheck(CHECK_NOT, str);
+  return this;
+}
+
+FileCheck* FileCheck::check_same(const std::string& str) {
+  fcImpl->addCheck(CHECK_SAME, str);
+  return this;
+}
+
+FileCheck* FileCheck::check_next(const std::string& str) {
+  fcImpl->addCheck(CHECK_NEXT, str);
+  return this;
+}
+
+FileCheck* FileCheck::check_count(const std::string& str, size_t count) {
+  fcImpl->addCheck(CHECK_COUNT, str, count);
+  return this;
+}
+
+FileCheck* FileCheck::check_dag(const std::string& str) {
+  fcImpl->addCheck(CHECK_DAG, str);
+  return this;
+}
 
 } // namespace testing
 } // namespace jit
