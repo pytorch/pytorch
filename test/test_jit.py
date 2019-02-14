@@ -4203,59 +4203,71 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_is_none_dispatch(self):
-        class Test(torch.jit.ScriptModule):
-            __constants__ = ['b']
 
-            def __init__(self, b=None):
-                super(Test, self).__init__()
-                self.b = b
+        @torch.jit.script
+        def test_lhs_none_rhs_none():
+            # LHS, RHS both alwaysNone, dispatch always_none_branch
+            # only emit one prim::Constant
+            if None is None:
+                return 1
+            elif None is not None:
+                return 2
+            else:
+                return 3
 
-            @torch.jit.script_method
-            def forward(self, input, opt=None):
-                # type: (Tensor, Optional[Tensor]) -> Tensor
-                x = input
-                # opt is maybeNone until forward get called in runtime
-                # b is either mustNone or neverNone when module created
-                # RHS is None case
-                # LHS = self.b: dispatch always_none_branch
-                if self.b is not None:
-                    x = self.b(input)
-                if self.b is None:
-                    x = input + 1
+        self.assertTrue(str(test_lhs_none_rhs_none.graph).count(': int = prim::Constant') == 1)
 
-                # LHS = opt: emit normal if stmt
-                if opt is not None:
-                    x = opt + x
-                if opt is None:
-                    x = x + 3
+        @torch.jit.script
+        def test_lhs_opt_rhs_none(lhs=None):
+            # type: (Optional[Tensor]) -> int
+            # LHS maybeNone: emit normal if stmt that contains 3 constants
+            if lhs is not None:
+                return 2
+            elif lhs is None:
+                return 1
+            else:
+                return 3
 
-                # LHS is None case
-                # RHS = opt emit normal if stmt
-                if None is opt:
-                    x = x + 5
-                if None is not opt:
-                    x = x + 6
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-                # RHS = self.b dispatch always_none_branch
-                if None is self.b:
-                    x = input + x
-                if None is not self.b:
-                    x = input + x
+        @torch.jit.script
+        def test_lhs_none_rhs_opt(rhs=None):
+            # type: (Optional[Tensor]) -> int
+            # RHS maybeNone, emit normal if stmt that contains 3 constants
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
 
-                # LHS, RHS both are None
-                # dispatch always_none_branch
-                if None is None:
-                    x = x + 7
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-                if None is not None:
-                    x = x + 9
+        @torch.jit.script
+        def test_lhs_never_rhs_none(lhs):
+            # LHS neverNone, RHS alwaysNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if lhs is None:
+                return 1
+            elif lhs is not None:
+                return 2
+            else:
+                return 3
 
-                return x
+        self.assertTrue(str(test_lhs_never_rhs_none.graph).count(': int = prim::Constant') == 1)
 
-        inputs = torch.zeros(1, 2)
-        self.assertExpectedGraph(Test().graph)
-        out = Test()(inputs)
-        self.assertEqual(out, inputs + 16)
+        @torch.jit.script
+        def test_lhs_none_rhs_never(rhs):
+            # LHS alwaysNone, RHS neverNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
+
+        self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
