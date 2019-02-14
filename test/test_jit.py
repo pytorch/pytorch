@@ -9868,7 +9868,6 @@ a")
         self.assertEqual(fn(), {'ok': 10})
 
 
-
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
