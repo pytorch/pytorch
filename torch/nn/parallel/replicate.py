@@ -38,6 +38,7 @@ def _replicatable_module(module, memo=None):
     if memo is None:
         memo = set()
 
+    # memorize visited modules
     memo.add(module)
     if _is_script_module(module):
         memo.update(descendant_modules(module))
@@ -45,6 +46,8 @@ def _replicatable_module(module, memo=None):
                    descendant in descendant_modules(module))
 
     for child in module.children():
+        # since any unreplicatable module will cause the check to return
+        # False early, visited modules here can be safely ignored.
         if child in memo:
             continue
         if not _replicatable_module(child, memo):
