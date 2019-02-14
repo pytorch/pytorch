@@ -1,9 +1,11 @@
 #pragma once
+#ifdef USE_CUDA
 #include <c10/core/Allocator.h>
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
 
@@ -30,7 +32,11 @@ struct CudaIPCSentData final {
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
 
-  CudaIPCSentData(std::string handle, int64_t offset, int64_t* counter_ptr, at::Device device)
+  CudaIPCSentData(
+      std::string handle,
+      int64_t offset,
+      int64_t* counter_ptr,
+      at::Device device)
       : handle_(handle),
         offset_(offset),
         counter_ptr_(counter_ptr),
@@ -41,8 +47,8 @@ struct CudaIPCSentData final {
         &event_,
         cudaEventDisableTiming | cudaEventInterprocess |
             cudaEventBlockingSync));
-    C10_CUDA_CHECK(
-        cudaEventRecord(event_, c10::cuda::getCurrentCUDAStream(device.index())));
+    C10_CUDA_CHECK(cudaEventRecord(
+        event_, c10::cuda::getCurrentCUDAStream(device.index())));
   }
   ~CudaIPCSentData();
 
@@ -74,9 +80,7 @@ struct CudaIPCSentDataLimbo final {
   std::vector<std::unique_ptr<CudaIPCSentData>> shared_blocks_;
 };
 
-
 struct CudaIPCRefCountersFile final {
-  ~CudaIPCRefCountersFile();
   CudaIPCRefCountersFile(
       std::string handle,
       uint64_t size,
@@ -133,5 +137,5 @@ struct CudaIPCReceivedData final {
   std::shared_ptr<void> shared_ptr_;
 };
 
-
 } // namespace torch
+#endif

@@ -1,5 +1,5 @@
+#ifdef USE_CUDA
 #include <torch/csrc/CudaIPCTypes.h>
-#include <iostream>
 #include <map>
 #include <mutex>
 
@@ -8,8 +8,8 @@ namespace torch {
 void BadIPCPatternError() {
   static bool warned = false;
   if (not warned) {
-    std::cerr
-        << "Producer process has been terminated before all shared CUDA tensors released.\n";
+    LOG(WARNING)
+        << "Producer process has been terminated before all shared CUDA tensors released.";
     warned = true;
   }
 }
@@ -20,6 +20,7 @@ struct CudaIPCGlobalEntities {
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
+  CudaIPCGlobalEntities() : ref_counters_files_() {}
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
@@ -81,10 +82,11 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
   static bool warned = false;
   if (shared_blocks_.size() > CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO &&
       !warned) {
-    std::cerr
+    LOG(WARNING)
         << "Producer process tried to deallocate over "
         << CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO
-        << " memory blocks referred by consumer processes. Deallocation might be significantly slowed down.\n";
+        << " memory blocks referred by consumer processes. Deallocation might be significantly slowed down. "
+        << "We assume it will never going to be the case, but if it is, please file but to https://github.com/pytorch/pytorch";
     warned = true;
   }
   shared_blocks_.push_back(std::move(shared_block));
@@ -99,10 +101,11 @@ void CudaIPCSentDataDelete(void* ptr) {
   cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
 }
 
-void ReturnRefCounter(std::string handle, uint64_t offset /* unused */) {
+void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
   std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
   cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);
-  if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() == 0 &&
+  if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() ==
+          0 &&
       !cuda_ipc_global_entities.ref_counters_files_[handle]->have_offsets()) {
     cuda_ipc_global_entities.ref_counters_files_.erase(handle);
   }
@@ -114,7 +117,7 @@ bool CudaIPCHaveRefCounter() {
 }
 
 void CudaIPCCreateRefCounter(
-    std::string handle,
+    const std::string handle,
     uint64_t size,
     at::DataPtr data_ptr) {
   auto rc = std::make_shared<CudaIPCRefCountersFile>(
@@ -136,12 +139,12 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       device);
 
   cuda_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
-  if (!cuda_ipc_global_entities.next_available_ref_counters_file_->have_offsets()) {
+  if (!cuda_ipc_global_entities.next_available_ref_counters_file_
+           ->have_offsets()) {
     cuda_ipc_global_entities.next_available_ref_counters_file_ = nullptr;
   }
   return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
 
-CudaIPCRefCountersFile::~CudaIPCRefCountersFile() {}
-
 } // namespace torch
+#endif
