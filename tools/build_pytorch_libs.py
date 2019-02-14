@@ -200,6 +200,9 @@ def run_cmake(version,
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 
+    if USE_MKLDNN:
+        cmake_defines(cmake_args, MKLDNN_ENABLE_CONCURRENT_EXEC="ON")
+
     expected_wrapper = '/usr/local/opt/ccache/libexec'
     if IS_DARWIN and os.path.exists(expected_wrapper):
         cmake_defines(cmake_args,

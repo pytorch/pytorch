@@ -431,12 +431,15 @@ Tensor reshape_as(const Tensor& self, const Tensor& other) {
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
-  AT_CHECK(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+  if (ndim == 0) {
+    AT_INDEX_ERROR("select() cannot be applied to a 0-dim tensor.");
+  }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
-  AT_CHECK(index >= -size && index < size,
-           "select(): index ", index, " out of range for tensor of size ",
-           self.sizes(), " at dimension ", dim);
+  if (index < -size || index >= size) {
+    AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+                   self.sizes(), " at dimension ", dim);
+  }
   if (index < 0) {
     index += size;
   }
@@ -450,7 +453,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
-  AT_CHECK(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
+  if (ndim == 0) {
+    AT_INDEX_ERROR("slice() cannot be applied to a 0-dim tensor.");
+  }
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();

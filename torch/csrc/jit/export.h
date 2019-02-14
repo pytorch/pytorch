@@ -37,11 +37,15 @@ TORCH_API std::string pretty_print_onnx(
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false);
 
-TORCH_API void ExportModule(const script::Module& module, std::ostream& out);
+TORCH_API void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
 TORCH_API void ExportModule(
     const script::Module& module,
-    const std::string& filename);
+    const std::string& filename,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
 } // namespace jit
 } // namespace torch

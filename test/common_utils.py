@@ -410,7 +410,8 @@ class TestCase(expecttest.TestCase):
                         # inf check if allow_inf=True
                         if allow_inf:
                             inf_mask = torch.isinf(a)
-                            self.assertTrue(torch.equal(inf_mask, torch.isinf(b)), message)
+                            inf_sign = inf_mask.sign()
+                            self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
                             diff[inf_mask] = 0
                     # TODO: implement abs on CharTensor (int8)
                     if diff.is_signed() and diff.dtype != torch.int8:

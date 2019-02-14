@@ -91,11 +91,19 @@ def get_cmake_version(run_lambda):
 
 
 def get_nvidia_driver_version(run_lambda):
+    if get_platform() == 'darwin':
+        cmd = 'kextstat | grep -i cuda'
+        return run_and_parse_first_match(run_lambda, cmd,
+                                         r'com[.]nvidia[.]CUDA [(](.*?)[)]')
     smi = get_nvidia_smi()
     return run_and_parse_first_match(run_lambda, smi, r'Driver Version: (.*?) ')
 
 
 def get_gpu_info(run_lambda):
+    if get_platform() == 'darwin':
+        if TORCH_AVAILABLE and torch.cuda.is_available():
+            return torch.cuda.get_device_name(None)
+        return None
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
@@ -113,13 +121,20 @@ def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     if get_platform() == 'win32':
         cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
+    elif get_platform() == 'darwin':
+        # CUDA libraries and drivers can be found in /usr/local/cuda/. See
+        # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
+        # https://docs.nvidia.com/deeplearning/sdk/cudnn-install/index.html#installmac
+        # Use CUDNN_LIBRARY when cudnn library is installed elsewhere.
+        cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
     else:
         cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
-    if len(out) == 0:
-        return None
-    if rc != 1 and rc != 0:
+    if len(out) == 0 or (rc != 1 and rc != 0):
+        l = os.environ.get('CUDNN_LIBRARY')
+        if l is not None and os.path.isfile(l):
+            return os.path.realpath(l)
         return None
     files = set()
     for fn in out.split('\n'):
@@ -137,6 +152,7 @@ def get_cudnn_version(run_lambda):
 
 
 def get_nvidia_smi():
+    # Note: nvidia-smi is currently available only on Windows and Linux
     smi = 'nvidia-smi'
     if get_platform() == 'win32':
         smi = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\%s"' % smi

@@ -1,6 +1,5 @@
-graph(%input : Double(2, 2)) {
+graph(%input : Double(2, 2)):
   %1 : float = prim::Constant[value=0.6](), scope: Dropout
   %2 : bool = prim::Constant[value=1](), scope: Dropout
   %3 : Double(2, 2) = aten::dropout(%input, %1, %2), scope: Dropout
-  return (%3);
-}
+  return (%3)
