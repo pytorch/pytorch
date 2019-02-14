@@ -751,6 +751,30 @@ DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 
+template<typename T>
+inline T IValue::to() && {
+  auto& items = toGenericListRef();
+  T converted_list;
+  std::transform(
+      items.begin(), items.end(), std::back_inserter(converted_list), [
+      ](IValue ivalue) -> typename T::value_type {
+        return ivalue.to<typename T::value_type>();
+      });
+  return std::move(converted_list);
+}
+
+template<typename T>
+inline T IValue::to() const & {
+  auto& items = toGenericListRef();
+  T converted_list;
+  std::transform(
+      items.begin(), items.end(), std::back_inserter(converted_list), [
+      ](IValue ivalue) -> typename T::value_type {
+        return ivalue.to<typename T::value_type>();
+      });
+  return converted_list;
+}
+
 // note: when adding a DEFINE_TO case here you should also add a
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
