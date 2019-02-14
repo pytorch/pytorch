@@ -1,26 +1,22 @@
-graph(%a.1 : Dynamic
-      %b.1 : Dynamic) {
+graph(%a.1 : Dynamic,
+      %b.1 : Dynamic):
   %d.1 : Long() = prim::Constant[value={3}]()
   %3 : Long() = prim::Constant[value={20}]()
   %4 : Byte() = prim::Constant[value={1}]()
   %a : Dynamic, %d : Long(), %b : Dynamic = prim::Loop(%3, %4, %a.1, %d.1, %b.1)
-    block0(%_ : Dynamic, %6 : Dynamic, %10 : Long(), %14 : Dynamic) {
+    block0(%_ : Dynamic, %6 : Dynamic, %10 : Long(), %14 : Dynamic):
       %7 : Long() = prim::Constant[value={10}]()
       %8 : Dynamic = aten::gt(%6, %7)
       %a.3 : Dynamic, %b.3 : Dynamic, %d.3 : Long() = prim::If(%8)
-        block0() {
+        block0():
           %9 : Long() = prim::Constant[value={3}]()
           %a.2 : Dynamic = aten::add[alpha={1}](%9, %10)
           -> (%a.2, %14, %10)
-        }
-        block1() {
+        block1():
           %12 : Long() = prim::Constant[value={3}]()
           %b.2 : Dynamic = aten::add[alpha={1}](%12, %10)
           %d.2 : Long() = prim::Constant[value={4}]()
           -> (%6, %b.2, %d.2)
-        }
       %20 : Byte() = prim::Constant[value={1}]()
       -> (%20, %a.3, %d.3, %b.3)
-    }
-  return (%d);
-}
+  return (%d)
