@@ -7,7 +7,7 @@ namespace c10 {
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
   if (dim_post_expr <= 0) {
     if (!wrap_scalar) {
-        AT_INDEX_ERROR("dimension specified as ", dim, " but tensor has no dimensions");
+      AT_INDEX_ERROR("dimension specified as ", dim, " but tensor has no dimensions");
     }
     dim_post_expr = 1; // this will make range [-1, 0]
   }

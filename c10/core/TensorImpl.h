@@ -1070,7 +1070,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = Storage(storage_.device(), data_type_);
+    storage_ = Storage::create_legacy(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
@@ -1168,7 +1168,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = Storage(storage_.device(), meta);
+          storage_ = Storage::create_legacy(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -1188,7 +1188,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // know how to reallocate it. However, in order to preserve legacy C2
       // behavior, we allow reallocating the memory using default allocator.
       if (allocator == nullptr) {
-        allocator = caffe2::GetAllocator(storage_.device_type());
+        allocator = GetAllocator(storage_.device_type());
       }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as

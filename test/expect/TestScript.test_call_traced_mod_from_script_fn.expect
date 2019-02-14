@@ -1,4 +1,4 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %6 : Device = prim::Constant[value="cpu"](), scope: TracedModule
   %5 : int = prim::Constant[value=0](), scope: TracedModule
   %4 : int = prim::Constant[value=7](), scope: TracedModule
@@ -9,5 +9,4 @@ graph(%x : Tensor) {
   %7 : Double(4, 3) = aten::zeros(%3, %4, %5, %6), scope: TracedModule
   %8 : Double(3, 3) = aten::mm(%x, %7), scope: TracedModule
   %11 : Tensor = aten::add(%8, %9, %9)
-  return (%11);
-}
+  return (%11)

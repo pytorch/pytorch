@@ -1,4 +1,4 @@
-graph(%a : Tensor) {
+graph(%a : Tensor):
   %1 : Device = prim::Constant[value="cpu"]()
   %2 : int = prim::Constant[value=6]()
   %i.1 : int = prim::Constant[value=0]()
@@ -12,7 +12,7 @@ graph(%a : Tensor) {
   %b : Tensor = aten::rand(%10, %2, %i.1, %1)
   %12 : bool = aten::lt(%i.1, %7)
   %i : int = prim::Loop(%6, %12, %i.1)
-    block0(%14 : int, %15 : int) {
+    block0(%14 : int, %15 : int):
       %c.1 : Tensor = aten::select(%l, %i.1)
       %17 : int[] = prim::ListConstruct(%4, %5)
       %18 : Tensor = aten::rand(%17, %2, %i.1, %1)
@@ -20,6 +20,4 @@ graph(%a : Tensor) {
       %i.2 : int = aten::add(%15, %7)
       %21 : bool = aten::lt(%i.2, %7)
       -> (%21, %i.2)
-    }
-  return (%b);
-}
+  return (%b)

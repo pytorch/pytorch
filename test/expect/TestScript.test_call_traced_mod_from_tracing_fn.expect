@@ -1,8 +1,7 @@
-graph(%0 : Double(3, 4)) {
+graph(%0 : Double(3, 4)):
   %1 : Double(4, 3) = prim::Constant[value=<Tensor>](), scope: TracedModule[TracedModule]
   %2 : Double(*, *) = aten::mm(%0, %1), scope: TracedModule
   %3 : Double() = prim::Constant[value={1}]()
   %4 : int = prim::Constant[value=1]()
   %5 : Double(3, 3) = aten::add(%2, %3, %4)
-  return (%5);
-}
+  return (%5)
