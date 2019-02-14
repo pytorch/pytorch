@@ -163,10 +163,10 @@ class CAFFE2_API Tensor {
 
   const char * toString() const;
 
-  IntList sizes() const {
+  IntArrayRef sizes() const {
     return impl_->sizes();
   }
-  IntList strides() const {
+  IntArrayRef strides() const {
     return impl_->strides();
   }
   int64_t ndimension() const {
@@ -183,6 +183,9 @@ class CAFFE2_API Tensor {
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
+  }
+  bool has_storage() const {
+    return defined() && impl_->has_storage();
   }
   const Storage& storage() const {
     return impl_->storage();
@@ -324,8 +327,8 @@ class CAFFE2_API Tensor {
   Tensor argmax() const;
   Tensor argmin(int64_t dim, bool keepdim=false) const;
   Tensor argmin() const;
-  Tensor as_strided(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
-  Tensor & as_strided_(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt);
+  Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
+  Tensor & as_strided_(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt);
   Tensor asin() const;
   Tensor & asin_();
   Tensor atan() const;
@@ -365,7 +368,7 @@ class CAFFE2_API Tensor {
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other);
   Tensor dot(const Tensor & tensor) const;
-  Tensor & resize_(IntList size);
+  Tensor & resize_(IntArrayRef size);
   Tensor erf() const;
   Tensor & erf_();
   Tensor erfc() const;
@@ -374,7 +377,7 @@ class CAFFE2_API Tensor {
   Tensor & exp_();
   Tensor expm1() const;
   Tensor & expm1_();
-  Tensor expand(IntList size, bool implicit=false) const;
+  Tensor expand(IntArrayRef size, bool implicit=false) const;
   Tensor expand_as(const Tensor & other) const;
   Tensor flatten(int64_t start_dim=0, int64_t end_dim=-1) const;
   Tensor & fill_(Scalar value);
@@ -386,18 +389,11 @@ class CAFFE2_API Tensor {
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
   Tensor rfft(int64_t signal_ndim, bool normalized=false, bool onesided=true) const;
-  Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) const;
+  Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntArrayRef signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
-  Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor index_fill(int64_t dim, const Tensor & index, Scalar source) const;
-  Tensor scatter(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const;
-  Tensor masked_scatter(const Tensor & mask, const Tensor & source) const;
-  Tensor masked_fill(const Tensor & mask, Scalar source) const;
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
@@ -418,19 +414,19 @@ class CAFFE2_API Tensor {
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
-  Tensor logsumexp(int64_t dim, bool keepdim=false) const;
+  Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
-  Tensor max_values(int64_t dim, bool keepdim=false) const;
+  Tensor max_values(IntArrayRef dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
-  Tensor mean(IntList dim, bool keepdim, ScalarType dtype) const;
-  Tensor mean(IntList dim, bool keepdim=false) const;
-  Tensor mean(IntList dim, ScalarType dtype) const;
+  Tensor mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const;
+  Tensor mean(IntArrayRef dim, bool keepdim=false) const;
+  Tensor mean(IntArrayRef dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
-  Tensor min_values(int64_t dim, bool keepdim=false) const;
+  Tensor min_values(IntArrayRef dim, bool keepdim=false) const;
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
   Tensor mul(const Tensor & other) const;
@@ -442,11 +438,11 @@ class CAFFE2_API Tensor {
   Tensor & mvlgamma_(int64_t p);
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
-  Tensor permute(IntList dims) const;
+  Tensor permute(IntArrayRef dims) const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
-  Tensor repeat(IntList repeats) const;
-  Tensor reshape(IntList shape) const;
+  Tensor repeat(IntArrayRef repeats) const;
+  Tensor reshape(IntArrayRef shape) const;
   Tensor reshape_as(const Tensor & other) const;
   Tensor round() const;
   Tensor & round_();
@@ -474,7 +470,7 @@ class CAFFE2_API Tensor {
   Tensor softmax(int64_t dim, ScalarType dtype) const;
   Tensor softmax(int64_t dim) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
-  std::vector<Tensor> split_with_sizes(IntList split_sizes, int64_t dim=0) const;
+  std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
   Tensor squeeze(int64_t dim) const;
   Tensor & squeeze_();
@@ -484,14 +480,14 @@ class CAFFE2_API Tensor {
   int64_t stride(int64_t dim) const;
   Tensor sum(ScalarType dtype) const;
   Tensor sum() const;
-  Tensor sum(IntList dim, bool keepdim, ScalarType dtype) const;
-  Tensor sum(IntList dim, bool keepdim=false) const;
-  Tensor sum(IntList dim, ScalarType dtype) const;
-  Tensor sum_to_size(IntList size) const;
+  Tensor sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const;
+  Tensor sum(IntArrayRef dim, bool keepdim=false) const;
+  Tensor sum(IntArrayRef dim, ScalarType dtype) const;
+  Tensor sum_to_size(IntArrayRef size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
-  Tensor std(IntList dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(ScalarType dtype) const;
   Tensor prod() const;
   Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
@@ -505,22 +501,22 @@ class CAFFE2_API Tensor {
   Tensor & tanh_();
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
-  Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims={}) const;
-  Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
+  Tensor flip(IntArrayRef dims) const;
+  Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
+  Tensor rot90(int64_t k=1, IntArrayRef dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();
   Tensor type_as(const Tensor & other) const;
   Tensor unsqueeze(int64_t dim) const;
   Tensor & unsqueeze_(int64_t dim);
   Tensor var(bool unbiased=true) const;
-  Tensor var(IntList dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor var(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
   Tensor norm(c10::optional<Scalar> p, ScalarType dtype) const;
   Tensor norm(Scalar p=2) const;
-  Tensor norm(c10::optional<Scalar> p, IntList dim, bool keepdim, ScalarType dtype) const;
-  Tensor norm(c10::optional<Scalar> p, IntList dim, bool keepdim=false) const;
+  Tensor norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const;
+  Tensor norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim=false) const;
   Tensor clone() const;
   Tensor & resize_as_(const Tensor & the_template);
   Tensor pow(Scalar exponent) const;
@@ -531,8 +527,8 @@ class CAFFE2_API Tensor {
   Tensor & sub_(Scalar other, Scalar alpha=1);
   Tensor addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
-  Tensor & sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim);
-  Tensor & sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim);
+  Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
+  Tensor & sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
   Tensor sparse_mask(SparseTensorRef mask) const;
   Tensor to_dense() const;
   int64_t sparse_dim() const;
@@ -558,14 +554,14 @@ class CAFFE2_API Tensor {
   Scalar item() const;
   void* data_ptr() const;
   Tensor & set_(Storage source);
-  Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
+  Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={});
   Tensor & set_(const Tensor & source);
   Tensor & set_();
   bool is_set_to(const Tensor & tensor) const;
   Tensor & masked_fill_(const Tensor & mask, Scalar value);
   Tensor & masked_fill_(const Tensor & mask, const Tensor & value);
   Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
-  Tensor view(IntList size) const;
+  Tensor view(IntArrayRef size) const;
   Tensor & put_(const Tensor & index, const Tensor & source, bool accumulate=false);
   Tensor & index_add_(int64_t dim, const Tensor & index, const Tensor & source);
   Tensor & index_fill_(int64_t dim, const Tensor & index, Scalar value);

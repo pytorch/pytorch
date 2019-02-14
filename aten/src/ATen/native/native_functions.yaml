@@ -37,7 +37,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic) -> (Tensor, Tensor)
+- func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -709,20 +709,20 @@
 - func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
 
 # convenience function that converts to intlists for you
-- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
 
-- func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0) -> (Tensor, Tensor)
+- func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
     CPU:  ctc_loss_cpu
     CUDA: ctc_loss_gpu
 
-- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank) -> Tensor
+- func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   matches_jit_signature: True
   dispatch:
     CPU: ctc_loss_backward_cpu
@@ -1094,7 +1094,7 @@
 - func: _cufft_clear_plan_cache() -> void
   device_guard: False
 
-- func: index(Tensor self, Tensor[] indices) -> Tensor
+- func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -1102,33 +1102,12 @@
 - func: index_copy_(Tensor(a!) self, int dim, IndexTensor index, Tensor source) -> Tensor(a!)
   variants: method
 
-- func: index_copy(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor
+- func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: index_put_(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+- func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   matches_jit_signature: True
-  variants: function, method
-
-- func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: index_fill(Tensor self, int64_t dim, IndexTensor index, Scalar source) -> Tensor
-  variants: function, method
-
-- func: scatter(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: scatter_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
-  variants: function, method
-
-- func: masked_fill(Tensor self, Tensor mask, Scalar source) -> Tensor
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -1334,11 +1313,11 @@
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
 
-- func: logsumexp(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: logsumexp(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: logsumexp(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
@@ -1366,7 +1345,7 @@
 
 - func: max(Tensor self, int64_t dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) ->(Tensor(a!) values, Tensor(b!) indices)
 
-- func: max_values(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
@@ -1425,7 +1404,7 @@
 
 - func: min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) ->(Tensor(a!), Tensor(b!))
 
-- func: min_values(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
@@ -1614,7 +1593,7 @@
   matches_jit_signature: True
 
 - func: cdist(Tensor x1, Tensor x2, double p=2) -> Tensor
-    
+
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
 

@@ -72,7 +72,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
   ss << " does not match the shape of the indexed tensor " << self.sizes();
   ss << " at index " << idx;
-  AT_ERROR(ss.str());
+  AT_INDEX_ERROR(ss.str());
 }
 
 static void checkIndexTensorTypes(TensorList indices) {
@@ -80,8 +80,9 @@ static void checkIndexTensorTypes(TensorList indices) {
     if (tensor.defined()) {
       auto& type = tensor.type();
       auto scalarType = type.scalarType();
-      AT_CHECK(scalarType == kLong || scalarType == kByte,
-               "tensors used as indices must be long or byte tensors");
+      if (scalarType != kLong && scalarType != kByte) {
+          AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
+      }
     }
   }
 }
@@ -301,7 +302,7 @@ struct AdvancedIndex {
 // values and the stride of src. The new shape is not meaningful. It's used to make
 // the shape compatible with the result tensor.
 static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_indexed,
-                           IntList replacement_shape) {
+                           IntArrayRef replacement_shape) {
   auto shape = DimVector(src.sizes());
   auto strides = DimVector(src.strides());
   int64_t end = dims_before + dims_indexed;
@@ -326,8 +327,8 @@ static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t 
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 {
   int64_t element_size_bytes = src.type().elementSizeInBytes();
-  int dims_before = 0, dims_after = 0, dims_indexed = 0;
-  IntList replacement_shape;
+  int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
+  IntArrayRef replacement_shape;
   for (size_t dim = 0; dim < indices_list.size(); dim++) {
     if (!indices_list[dim].defined()) {
       if (dims_indexed == 0) {
@@ -350,7 +351,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // restride_src with an unhelpful error message.
   if (std::find(indexed_sizes.begin(), indexed_sizes.end(), 0) != indexed_sizes.end() &&
       std::find(replacement_shape.begin(), replacement_shape.end(), 0) == replacement_shape.end()) {
-    AT_ERROR("index is out of bounds for dim with size 0");
+    AT_INDEX_ERROR("index is out of bounds for dimension with size 0");
   }
 
   this->dims_before = dims_before;
@@ -382,8 +383,8 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   try {
     indices = expand_outplace(indices);
   } catch (std::exception& e) {
-    AT_ERROR("shape mismatch: indexing tensors could not be broadcast together"
-             " with shapes ", shapes_as_str(indices));
+    AT_INDEX_ERROR("shape mismatch: indexing tensors could not be broadcast together"
+                   " with shapes ", shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
   while (indices.size() < (size_t)self.dim()) {
@@ -495,38 +496,6 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   }
 
   return at::legacy::th::_th_index_copy_(self, dim, index, source);
-}
-
-Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_copy_(dim, index, source);
-}
-
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_add_(dim, index, source);
-}
-
-Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return self.clone().index_fill_(dim, index, source);
-}
-
-Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_(dim, index, source);
-}
-
-Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_add_(dim, index, source);
-}
-
-Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_scatter_(_mask, source);
-}
-
-Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_fill_(mask, source);
 }
 
 }} // at::native

@@ -515,7 +515,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
   }
 }
 
-Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntList dims_to_sum) {
+Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
   AT_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   AT_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
@@ -527,7 +527,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
   LongTensor input_indices = input._indices();
   Tensor input_values = input._values();
-  IntList input_sizes = input.sizes();
+  IntArrayRef input_sizes = input.sizes();
   const int64_t input_sparse_dim = input.sparse_dim();
   const int64_t input_dense_dim = input.dense_dim();
   const int64_t input_nnz = input._nnz();

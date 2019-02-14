@@ -41,7 +41,7 @@ using CUBLAS_HALF_TYPE = rocblas_half;
 using CUBLAS_HALF_TYPE = __half;
 #endif // __HIP_PLATFORM_HCC
 
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -301,74 +301,6 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
 }
 
 } // namespace
-
-#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Func<TIn, CUDAContext>(                 \
-      const int N,                                                \
-      const TIn* A,                                               \
-      const TIn* B,                                               \
-      TOut* C,                                                    \
-      CUDAContext* context) {                                     \
-    SimpleBinaryOpCUDAKernel<TIn, TOut, Op<TIn>>                  \
-        <<<CAFFE_GET_BLOCKS(N),                                   \
-           CAFFE_CUDA_NUM_THREADS,                                \
-           0,                                                     \
-           context->cuda_stream()>>>(N, Op<TIn>(), A, B, C);      \
-  }
-
-#define DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(Func, Op)                \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
-
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LT, thrust::less)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
-
-#undef DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION
-
-#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Func, Op)                         \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, float, Func, Op)               \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, AddFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, DivFunctor)
-
-#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
-
-#define DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
-
-#undef DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
-    float,
-    float,
-    ElemwiseMax,
-    thrust::maximum);
-
-#undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
 
 #define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
   template <>                                                             \
@@ -1550,7 +1482,7 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
 #define CAFFE2_SPECIALIZED_CUDA_SET(T)                              \
   template <>                                                       \
   CAFFE2_CUDA_API void Set<T, CUDAContext>(                         \
-      const size_t N, const T alpha, T* Y, CUDAContext* context) {  \
+      const int N, const T alpha, T* Y, CUDAContext* context) {     \
     if (N == 0) {                                                   \
       return;                                                       \
     }                                                               \
@@ -1578,7 +1510,7 @@ CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
 
 template <>
 CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
-    const size_t N,
+    const int N,
     const at::Half alpha,
     at::Half* Y,
     CUDAContext* context) {
@@ -3424,27 +3356,19 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDAImpl(
 
 template <typename T, class Reducer>
 CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
+    const int ndim,
+    const int* X_dims,
+    const int* Y_dims,
     const Reducer& reducer,
     const T init,
     const T alpha,
     const T* X,
     T* Y,
     CUDAContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-  std::vector<int> Y_dims_vector(dims, dims + num_dims);
-  for (int i = 0; i < num_axes; ++i) {
-    Y_dims_vector[axes[i]] = 1;
-  }
-  const int* X_dims = dims;
-  const int* Y_dims = Y_dims_vector.data();
   const int X_size =
-      std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>());
+      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
   const int Y_size =
-      std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
+      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
   if (X_size == 0) {
     Set<T, CUDAContext>(Y_size, alpha * init, Y, context);
     return;
@@ -3453,13 +3377,13 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
     Set<T, CUDAContext>(Y_size, T(0), Y, context);
     return;
   }
-  if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
+  if (std::equal(X_dims, X_dims + ndim, Y_dims)) {
     Scale<T, T, CUDAContext>(X_size, alpha, X, Y, context);
     return;
   }
   int rows;
   int cols;
-  if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+  if (utils::IsRowwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     RowwiseReduceKernel<T>
         <<<std::min(rows, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
@@ -3467,7 +3391,7 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
            context->cuda_stream()>>>(rows, cols, reducer, init, alpha, X, Y);
     return;
   }
-  if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
+  if (utils::IsColwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     ColwiseReduceKernel<T>
         <<<std::min(cols, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
@@ -3475,20 +3399,19 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
            context->cuda_stream()>>>(rows, cols, reducer, init, alpha, X, Y);
     return;
   }
-  std::vector<int> transpose_axes(num_dims);
-  utils::ComputeTransposeAxesForReduceOp(
-      num_dims, num_axes, axes, transpose_axes.data());
+  std::vector<int> axes(ndim);
+  utils::ComputeTransposeAxesForReduceOp(ndim, Y_dims, axes.data());
   const int outer_size = Y_size;
   const int inner_size = X_size / Y_size;
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      num_dims,
+      ndim,
       ReduceTensorCUDAImpl,
       T,
       Reducer,
       outer_size,
       inner_size,
-      dims,
-      transpose_axes.data(),
+      X_dims,
+      axes.data(),
       reducer,
       init,
       alpha,
@@ -3502,19 +3425,17 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(T)        \
   template <>                                        \
   CAFFE2_CUDA_EXPORT void ReduceMin<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
+      const int ndim,                                \
+      const int* X_dims,                             \
+      const int* Y_dims,                             \
       const T alpha,                                 \
       const T* X,                                    \
       T* Y,                                          \
       CUDAContext* context) {                        \
     ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
+        ndim,                                        \
+        X_dims,                                      \
+        Y_dims,                                      \
         cub::Min(),                                  \
         std::numeric_limits<T>::max(),               \
         alpha,                                       \
@@ -3531,19 +3452,17 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(double)
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(T)        \
   template <>                                        \
   CAFFE2_CUDA_EXPORT void ReduceMax<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
+      const int ndim,                                \
+      const int* X_dims,                             \
+      const int* Y_dims,                             \
       const T alpha,                                 \
       const T* X,                                    \
       T* Y,                                          \
       CUDAContext* context) {                        \
     ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
+        ndim,                                        \
+        X_dims,                                      \
+        Y_dims,                                      \
         cub::Max(),                                  \
         std::numeric_limits<T>::lowest(),            \
         alpha,                                       \
@@ -3557,28 +3476,18 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(float)
 CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX
 
-#define CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(T)        \
-  template <>                                        \
-  CAFFE2_CUDA_EXPORT void ReduceSum<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
-      const T alpha,                                 \
-      const T* X,                                    \
-      T* Y,                                          \
-      CUDAContext* context) {                        \
-    ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
-        cub::Sum(),                                  \
-        T(0),                                        \
-        alpha,                                       \
-        X,                                           \
-        Y,                                           \
-        context);                                    \
+#define CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(T)                          \
+  template <>                                                          \
+  CAFFE2_CUDA_EXPORT void ReduceSum<T, CUDAContext>(                   \
+      const int ndim,                                                  \
+      const int* X_dims,                                               \
+      const int* Y_dims,                                               \
+      const T alpha,                                                   \
+      const T* X,                                                      \
+      T* Y,                                                            \
+      CUDAContext* context) {                                          \
+    ReduceTensorCUDA(                                                  \
+        ndim, X_dims, Y_dims, cub::Sum(), T(0), alpha, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int64_t)
@@ -3589,23 +3498,23 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(double)
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(T)        \
   template <>                                         \
   CAFFE2_CUDA_EXPORT void ReduceMean<T, CUDAContext>( \
-      const int num_dims,                             \
-      const int* dims,                                \
-      const int num_axes,                             \
-      const int* axes,                                \
+      const int ndim,                                 \
+      const int* X_dims,                              \
+      const int* Y_dims,                              \
       const T alpha,                                  \
       const T* X,                                     \
       T* Y,                                           \
       CUDAContext* context) {                         \
     int scale = 1;                                    \
-    for (int i = 0; i < num_axes; ++i) {              \
-      scale *= dims[axes[i]];                         \
+    for (int i = 0; i < ndim; ++i) {                  \
+      if (Y_dims[i] == 1) {                           \
+        scale *= X_dims[i];                           \
+      }                                               \
     }                                                 \
     ReduceTensorCUDA(                                 \
-        num_dims,                                     \
-        dims,                                         \
-        num_axes,                                     \
-        axes,                                         \
+        ndim,                                         \
+        X_dims,                                       \
+        Y_dims,                                       \
         cub::Sum(),                                   \
         T(0),                                         \
         alpha / static_cast<T>(scale),                \

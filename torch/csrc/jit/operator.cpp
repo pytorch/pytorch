@@ -159,8 +159,17 @@ struct SchemaParser {
       value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
-      value = DynamicType::get();
+      value = TensorType::get();
       alias_info = parseAliasAnnotation();
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+      L.next();
+      L.expect('(');
+      auto key_type = parseType().first;
+      L.expect(',');
+      auto value_type = parseType().first;
+      alias_info = parseAliasAnnotation();
+      L.expect(')');
+      value = DictType::create(key_type, value_type);
     } else {
       auto value_alias = parseBaseType();
       value = value_alias.first;
@@ -206,11 +215,11 @@ struct SchemaParser {
       alias_info = std::move(container);
     }
     if (is_return) {
-      // optionally named return values
+      // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
         name = L.next().text();
       } else {
-        name = "ret" + std::to_string(idx);
+        name = "";
       }
     } else {
       name = L.expect(TK_IDENT).text();
@@ -306,7 +315,7 @@ struct SchemaParser {
       c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
-      case TypeKind::DynamicType:
+      case TypeKind::TensorType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       } break;
@@ -501,7 +510,6 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
-
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

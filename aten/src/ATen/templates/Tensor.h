@@ -163,10 +163,10 @@ class CAFFE2_API Tensor {
 
   const char * toString() const;
 
-  IntList sizes() const {
+  IntArrayRef sizes() const {
     return impl_->sizes();
   }
-  IntList strides() const {
+  IntArrayRef strides() const {
     return impl_->strides();
   }
   int64_t ndimension() const {
@@ -183,6 +183,9 @@ class CAFFE2_API Tensor {
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
+  }
+  bool has_storage() const {
+    return defined() && impl_->has_storage();
   }
   const Storage& storage() const {
     return impl_->storage();

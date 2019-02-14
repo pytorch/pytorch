@@ -52,6 +52,23 @@ private:
 };
 
 /**
+ * Implement this interface and register your instance with the dispatcher
+ * to get notified when operators are registered or deregistered with
+ * the dispatcher.
+ */
+class CAFFE2_API OpRegistrationListener {
+public:
+  virtual ~OpRegistrationListener();
+
+  virtual void onOperatorRegistered(const OperatorHandle& op) = 0;
+  virtual void onOperatorDeregistered(const OperatorHandle& op) = 0;
+};
+
+namespace detail {
+class RegistrationListenerList;
+}
+
+/**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
  */
 class CAFFE2_API Dispatcher final {
@@ -67,6 +84,8 @@ private:
   friend class OperatorHandle;
 
 public:
+  ~Dispatcher();
+
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
@@ -100,8 +119,19 @@ public:
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
 
+  /**
+   * Add a listener that gets called whenever a new op is registered or an existing
+   * op is deregistered. Immediately after registering, this listener gets called
+   * for all previously registered ops, so it can be used to keep track of ops
+   * registered with this dispatcher.
+   */
+  void addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
+
 private:
+  Dispatcher();
+
   std::list<OperatorDef> operators_;
+  std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
 
@@ -129,35 +159,6 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorDefIterator_;
 };
 
-
-
-inline OperatorHandle Dispatcher::registerSchema(FunctionSchema schema) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  operators_.emplace_back(std::move(schema));
-  return OperatorHandle(--operators_.end());
-}
-
-inline void Dispatcher::deregisterSchema(const OperatorHandle& op) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
-    AT_ERROR("Tried to deregister op schema that still has kernels registered");
-  }
-  operators_.erase(op.operatorDefIterator_);
-}
-
-inline void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
-}
-
-inline void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
-}
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.

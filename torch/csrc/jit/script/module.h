@@ -35,6 +35,8 @@ namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+// Map which stores filename to content.
+using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 // A method in a module, e.g. f in:
 //
@@ -73,6 +75,10 @@ struct Method {
       stack.emplace_back(*tp);
     }
     get_executor().run(stack);
+  }
+
+  void run(Stack&& stack) {
+    run(stack);
   }
 
   IValue operator()(std::vector<IValue> stack) {
@@ -548,9 +554,13 @@ struct Module {
     return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
 
-  void save(std::ostream& out);
+  void save(
+      std::ostream& out,
+      const ExtraFilesMap& extra_files = ExtraFilesMap());
 
-  void save(const std::string& filename);
+  void save(
+      const std::string& filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap());
 
   void copy_into(
       std::function<std::shared_ptr<Module>(std::vector<std::string>)>
