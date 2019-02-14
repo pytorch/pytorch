@@ -3970,6 +3970,24 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear_empty, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
