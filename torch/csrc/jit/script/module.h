@@ -585,22 +585,6 @@ struct Module {
     }
   }
 
-  void copy_method(
-    std::string name,
-    std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
-    std::shared_ptr<Module> orig) {
-
-    std::vector<at::Tensor*> member_inputs;
-    for (auto& p : params) {
-      NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
-      AT_ASSERT(np != nullptr);
-      member_inputs.push_back(np->slot());
-    }
-
-    Method* orig_method = orig->find_method(name);
-    create_method(name, orig_method->graph()->copy(), member_inputs);
-  }
-
  private:
   void to_impl(
       const c10::optional<at::Device>& device,

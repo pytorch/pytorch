@@ -116,7 +116,6 @@ def replicate(network, devices, detach=False):
                 keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
                 for key in keys:
                     replica.__dict__[key] = module.__dict__[key]
-                replica.__class__ = module.__class__
             else:
                 replica = module.__new__(type(module))
                 replica.__dict__ = module.__dict__.copy()
