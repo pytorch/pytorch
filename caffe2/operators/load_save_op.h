@@ -40,9 +40,8 @@ template <class Context>
 class DBExistsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit DBExistsOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
             this->template GetSingleArgument<int>("absolute_path", false)),
@@ -71,9 +70,8 @@ template <class Context>
 class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit LoadOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit LoadOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
             this->template GetSingleArgument<int>("absolute_path", false)),
@@ -410,9 +408,8 @@ template <class Context>
 class SaveOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit SaveOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit SaveOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
             this->template GetSingleArgument<int>("absolute_path", false)),
@@ -524,9 +521,8 @@ string FormatString(const string& pattern, Ts... values) {
 template <class Context>
 class CheckpointOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit CheckpointOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         db_pattern_(this->template GetSingleArgument<string>("db", "")),
         every_(this->template GetSingleArgument<int>("every", 1)),
         ws_(ws),
