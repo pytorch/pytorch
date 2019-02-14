@@ -350,7 +350,7 @@ def synchronize():
 
 
 def ipc_collect():
-    r"""TODO: Description"""
+    r"""Force collects GPU memory after it has been released by CUDA IPC."""
     _lazy_init()
     return torch._C._cuda_ipc_collect()
 

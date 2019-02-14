@@ -88,7 +88,6 @@ def rebuild_tensor(cls, storage, metadata):
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
                         requires_grad, ref_counter_handle, ref_counter_offset, event_handle):
-    # print("rebuild_cuda_tensor %s " % threading.current_thread())
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
@@ -106,7 +105,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 event_handle)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         else:
-            # We already ref counting this Storage, but producer need new refcounters to be released.
+            # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
@@ -117,7 +116,6 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
 
 
 def reduce_tensor(tensor):
-    # print("reduce %s " % threading.current_thread())
     storage = tensor.storage()
 
     if tensor.requires_grad and not tensor.is_leaf:
@@ -219,7 +217,6 @@ def reduce_tensor(tensor):
     # thing.
     #
     if storage.is_cuda:
-        # torch.cuda.synchronize()
         (device,
          handle,
          storage_size_bytes,

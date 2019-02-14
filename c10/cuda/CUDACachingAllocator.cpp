@@ -14,9 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <iostream>
-#include <sys/types.h>
-       #include <unistd.h>
+
 
 namespace c10 {
 namespace cuda {
@@ -484,7 +482,7 @@ struct THCCachingAllocator
       cuda_events.emplace_back(event, block);
     }
 
-    cudaSetDevice(prev_device);
+    C10_CUDA_CHECK(cudaSetDevice(prev_device));
   }
 
   void process_events()
@@ -653,7 +651,6 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
       [handle, curr_device](void *ptr) {
         cuda::CUDAGuard device_guard(curr_device);
         std::lock_guard<std::mutex> deleter_lock(IpcMutex);
-        // std::cout << getpid() << " Release mem handle\n";
         C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;
