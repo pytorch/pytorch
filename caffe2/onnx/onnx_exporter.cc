@@ -920,7 +920,6 @@ ConvertedResult OnnxExporter::CreateUpsampleNodes(
         MakeTensor("resolved scale tensor", tmp_vector, TensorProto::FLOAT);
 
     auto node = MakeNode("Constant", {}, {resolved_scale});
-    MakeAttribute("value", resolved_scale_tensor);
     node.add_attribute()->CopyFrom(
         MakeAttribute("value", resolved_scale_tensor));
     nodes.emplace_back(node);
@@ -1060,16 +1059,18 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (has_axis) {
     axis = it->second->i();
   }
+
+  auto gemm_x_input = x;
   if (x_shape.dims().size() > 2) {
     // we need to reshape only when dimension is higher than 2
-    auto outer = DimProd(x_shape, 0, axis);
-    auto inner = DimProd(x_shape, axis, x_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
-    auto reshaped_x = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
-    x = reshaped_x;
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+
+    gemm_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
+                std::vector<int64_t>{ -1, inner }));
+    nodes.emplace_back(MakeNode("Reshape",
+                { x, const_tensors.back().name() },
+                { gemm_x_input }));
   }
 
   it = args.find("axis_w");
@@ -1081,32 +1082,48 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
     auto reshaped_w = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
+                std::vector<int64_t>{ outer, inner }));
+    nodes.emplace_back(MakeNode("Reshape",
+                { w, const_tensors.back().name() },
+                { reshaped_w }));
     w = reshaped_w;
   }
 
-  auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
-  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
-  nodes.emplace_back(MakeNode(
-      "Gemm",
-      {x, w, b},
-      {gemm_y_output},
-      attrs,
-      def.name()));
+  auto gemm_y_output = axis > 1 ? dummy_->NewDummyName() : y;
+  nodes.emplace_back(MakeNode("Gemm",
+              { gemm_x_input, w, b },
+              { gemm_y_output },
+              { MakeAttribute("transB", 1L) },
+              def.name()));
 
-  if (has_axis) {
-    std::vector<int64_t> dims;
-    for (int i = 0; i < axis; ++i) {
-      dims.push_back(x_shape.dims(i));
-    }
-    dims.push_back(-1);
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {gemm_y_output, const_tensors.back().name()}, {y}));
+  // capture the outer shape if needed.
+  if (axis > 1) {
+    const auto x_shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {x_shape}));
+
+    const auto x_shape_outer = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Slice",
+                { x_shape },
+                { x_shape_outer },
+                std::vector<AttributeProto>{
+                    MakeAttribute("starts", std::vector<int64_t>{ 0 }),
+                    MakeAttribute("ends", std::vector<int64_t>{ axis }),
+                }));
+
+    const auto y_shape = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, { -1 }));
+    nodes.emplace_back(MakeNode("Concat",
+                { x_shape_outer, const_tensors.back().name() },
+                { y_shape },
+                std::vector<AttributeProto>{
+                    MakeAttribute("axis", static_cast<int64_t>(0)),
+                }));
+ 
+    nodes.emplace_back(MakeNode("Reshape",
+                { gemm_y_output, y_shape },
+                { y }));
   }
 
   return result;
