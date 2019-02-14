@@ -14,8 +14,9 @@ template <typename T, class Context>
 class DeformConvOpBase : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  template <class... Args>
+  explicit DeformConvOpBase(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...),
         deformable_group_(
             this->template GetSingleArgument<int>("deformable_group", 1)) {}
   ~DeformConvOpBase() {}
@@ -57,8 +58,9 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : DeformConvOpBase<T, Context>(operator_def, ws) {
+  template <class... Args>
+  explicit DeformConvOp(Args&&... args)
+      : DeformConvOpBase<T, Context>(std::forward<Args>(args)...) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
     if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -84,8 +86,9 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : DeformConvOpBase<T, Context>(operator_def, ws),
+  template <class... Args>
+  explicit DeformConvGradientOp(Args&&... args)
+      : DeformConvOpBase<T, Context>(std::forward<Args>(args)...),
         no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 4),
