@@ -255,29 +255,13 @@ class TestOperators(TestCase):
         self.assertONNX(nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False,
                                            padding=1, output_padding=2), x)
 
-    def test_maxpool1(self):
+    def test_maxpool(self):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
-    def test_maxpool2(self):
-        x = torch.randn(20, 16, 50, 32)
-        self.assertONNX(nn.MaxPool2d(3, stride=2), x)
-
-    def test_maxpool3(self):
-        x = torch.randn(20, 16, 50, 44, 31)
-        self.assertONNX(nn.MaxPool3d(3, stride=2), x)
-
-    def test_maxpool1_indices(self):
+    def test_maxpool_indices(self):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
-
-    def test_maxpool2_indices(self):
-        x = torch.randn(20, 16, 50, 32)
-        self.assertONNX(nn.MaxPool2d(3, stride=2, return_indices=True), x)
-
-    def test_maxpool3_indices(self):
-        x = torch.randn(20, 16, 50, 44, 31)
-        self.assertONNX(nn.MaxPool3d(3, stride=2, return_indices=True), x)
 
     def test_at_op(self):
         x = torch.randn(3, 4)
