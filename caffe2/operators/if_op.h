@@ -10,8 +10,9 @@ namespace caffe2 {
 template <class Context>
 class IfOp final : public Operator<Context> {
  public:
-  IfOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit IfOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("then_net"),
         "then_net must be specified in If operator");
