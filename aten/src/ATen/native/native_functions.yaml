@@ -1038,11 +1038,11 @@
 - func: ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   matches_jit_signature: True
   variants: function, method
 
-- func: gesv(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) ->(Tensor(a!), Tensor(b!))
+- func: gesv(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) LU) ->(Tensor(a!) solution, Tensor(b!) LU)
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -1890,7 +1890,7 @@
   variants: function, method
   device_guard: False
 
-- func: slogdet(Tensor self) -> (Tensor, Tensor)
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor log)
   matches_jit_signature: True
   variants: function, method
 
@@ -3782,15 +3782,15 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor, Tensor)
+- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: method, function
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor, Tensor)
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: method, function
 

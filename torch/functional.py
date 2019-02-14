@@ -599,8 +599,8 @@ def argsort(input, dim=None, descending=False):
                 [3, 2, 1, 0]])
     """
     if dim is None:
-        return torch.sort(input, -1, descending)[1]
-    return torch.sort(input, dim, descending)[1]
+        return torch.sort(input, -1, descending).indices
+    return torch.sort(input, dim, descending).indices
 
 
 def cartesian_prod(*tensors):
