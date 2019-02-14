@@ -13,12 +13,10 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, SGDR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm, load_tests
-import numpy as np
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
 
 def rosenbrock(tensor):
     x, y = tensor
@@ -843,7 +841,7 @@ class TestLRScheduler(TestCase):
         T_cur = 0
         targets = [[0.05], [0.5]]
         scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in np.arange(0.1, iters, 0.1):
+        for i in torch.arange(0.1, iters, 0.1):
             T_cur = round(T_cur + 0.1, 1)
             if T_cur == T:
                 T_cur = 0
@@ -860,7 +858,7 @@ class TestLRScheduler(TestCase):
         T_cur = 0
         targets = [[0.05], [0.5]]
         scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in np.arange(0.1, iters, 0.1):
+        for i in torch.arange(0.1, iters, 0.1):
             T_cur = round(T_cur + 0.1, 1)
             if T_cur == T:
                 T_cur = 0
@@ -951,8 +949,8 @@ class TestLRScheduler(TestCase):
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
 
     def _test_sgdr(self, scheduler, targets, epochs=10):
-        for index, epoch in enumerate(np.arange(0, epochs, 0.1)):
-            epoch = round(epoch, 1)
+        for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
+            epoch = round(epoch.item(), 1)
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertAlmostEqual(target[index], param_group['lr'],
