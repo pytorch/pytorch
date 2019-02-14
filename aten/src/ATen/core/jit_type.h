@@ -1056,6 +1056,8 @@ template<class K, class V> struct getTypePtr_<c10::ivalue::DictUnorderedMap<K, V
 };
 }
 template<class T> inline TypePtr getTypePtr() {
+  // TODO: static_assert that a templated function exists, and throw a friendy
+  // error message if not
   return detail::getTypePtr_<T>::call();
 }
 
