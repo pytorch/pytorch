@@ -162,9 +162,10 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
     std::tie(storage_ptr, record_size) = reader_.getRecord(record_key);
     auto cpu_storage = at::Storage(
         at::CPU(type).typeMeta(),
-        std::move(storage_ptr),
         record_size / at::CPU(type).typeMeta().itemsize(),
-        nullptr); // NB: we didn't set any allocator for the tensor
+        std::move(storage_ptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false); // NB: we didn't set any allocator for the tensor
     if (device.type() == at::DeviceType::CPU) {
       storage_it =
           storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
