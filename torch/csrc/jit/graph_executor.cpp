@@ -108,7 +108,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
     variable_list outputs;
     outputs.reserve(num_outputs());
     for (size_t i = 0; i < num_outputs(); ++i) {
-      if (should_compute_output(i)) {
+      // Input grad can also be None even if it requires grad
+      // Example: `other` in expand_as(self, other)
+      if (should_compute_output(i) && !stack[i].isNone()) {
         auto output = std::move(stack[i]).toTensor();
         const auto& edge = next_edge(i);
         if (output.defined()) {
