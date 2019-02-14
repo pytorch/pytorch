@@ -1627,7 +1627,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformer ts(opts);
         Workspace* curr_ws = GetCurrentWorkspace();
         auto weight_names = curr_ws->Blobs();
-        ts.Transform(
+        ts.transform(
             curr_ws,
             &pred_net,
             weight_names,
