@@ -12,9 +12,8 @@ namespace caffe2 {
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
-  template <class... Args>
-  explicit CudnnConvOpBase(Args&&... args)
-      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
+  explicit CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         cudnn_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
             "ws_nbytes_limit",
@@ -433,9 +432,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
 
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
-  template <class... Args>
-  explicit CudnnConvOp(Args&&... args)
-      : CudnnConvOpBase(std::forward<Args>(args)...) {}
+  explicit CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : CudnnConvOpBase(operator_def, ws) {}
 
   ~CudnnConvOp() {}
 
@@ -455,9 +453,8 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
 class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
-  template <class... Args>
-  explicit CudnnConvGradientOp(Args&&... args)
-      : CudnnConvOpBase(std::forward<Args>(args)...),
+  explicit CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : CudnnConvOpBase(operator_def, ws),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),

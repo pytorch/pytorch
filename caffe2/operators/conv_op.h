@@ -14,9 +14,8 @@ template <typename T, class Context>
 class ConvOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  template <class... Args>
-  explicit ConvOp(Args&&... args)
-      : ConvPoolOpBase<Context>(std::forward<Args>(args)...) {
+  explicit ConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<Context>(operator_def, ws) {
     // Since this is the default convolution implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
     CAFFE_ENFORCE(
@@ -69,9 +68,8 @@ template <typename T, class Context>
 class ConvGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  template <class... Args>
-  explicit ConvGradientOp(Args&&... args)
-      : ConvPoolOpBase<Context>(std::forward<Args>(args)...),
+  explicit ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<Context>(operator_def, ws),
         no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),

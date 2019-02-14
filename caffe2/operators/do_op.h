@@ -17,9 +17,8 @@ namespace caffe2 {
 template <class Context>
 class DoOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit DoOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...), parent_ws_(ws) {
+  explicit DoOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws), parent_ws_(ws) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("net"),
         "net must be specified in Do operator");
