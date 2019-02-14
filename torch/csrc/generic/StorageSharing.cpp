@@ -266,9 +266,17 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = PyLong_FromLong(sent_data->offset());
 
+
     cudaIpcEventHandle_t ipc_event_handle;
+
+#ifndef __HIP_PLATFORM_HCC__
     THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+#else
+    // Pass any uninitialized data, we are not going to use it.
+#endif
+
     _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
+
   }
 
   if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes || !_event_handle) {
@@ -372,14 +380,18 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
 
+#ifndef __HIP_PLATFORM_HCC__
   // Ensure that producer prepared all tensor's data
-  std::string s_ipc_event_handle = THPStorage_(bytesAsHandleString)(_event_handle);
+  std::string s_ipc_event_handle =
+      THPStorage_(bytesAsHandleString)(_event_handle);
   auto ipc_event_handle =
       reinterpret_cast<const cudaIpcEventHandle_t*>(s_ipc_event_handle.c_str());
   cudaEvent_t event;
   cudaIpcOpenEventHandle(&event, *ipc_event_handle);
-  auto stream = c10::cuda::getCurrentCUDAStream(device);
   cudaEventSynchronize(event);
+#else
+  // Already syncronized inside producer stream
+#endif
 
   std::string s_handle = THPStorage_(bytesAsHandleString)(_handle);
   std::shared_ptr<void> basePtr = c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);

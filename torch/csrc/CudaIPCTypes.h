@@ -31,6 +31,7 @@ struct CudaIPCSentData final {
   int64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
+  at::Device device_;
 
   CudaIPCSentData(
       std::string handle,
@@ -40,7 +41,9 @@ struct CudaIPCSentData final {
       : handle_(handle),
         offset_(offset),
         counter_ptr_(counter_ptr),
-        original_ptr_() {
+        original_ptr_(),
+        device_(device) {
+#ifndef __HIP_PLATFORM_HCC__
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put)
     C10_CUDA_CHECK(cudaEventCreateWithFlags(
@@ -49,6 +52,12 @@ struct CudaIPCSentData final {
             cudaEventBlockingSync));
     C10_CUDA_CHECK(cudaEventRecord(
         event_, c10::cuda::getCurrentCUDAStream(device.index())));
+#else
+    // cuIpcGetEventHandle with HIP is not supported, so we have to sync
+    // stream instead of passing event
+    auto stream = c10::cuda::getCurrentCUDAStream(device)
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
   }
   ~CudaIPCSentData();
 

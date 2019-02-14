@@ -75,7 +75,13 @@ void CudaIPCSentDataLimbo::collect() {
 
 CudaIPCSentData::~CudaIPCSentData() {
   ReturnRefCounter(handle_, offset_);
-  cudaEventDestroy(event_); // TODO: Add error checking and error log spam
+#ifndef __HIP_PLATFORM_HCC__
+  try {
+    at::cuda::CUDAGuard device_guard(device_.index());
+    cudaEventDestroy(event_);
+  } catch (...) { /* No throw */
+  }
+#endif
 }
 
 void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
