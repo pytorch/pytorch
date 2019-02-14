@@ -34,10 +34,11 @@ TensorDescriptors<T>::~TensorDescriptors() {
 }
 
 template <typename T>
+template<class... Args> explicit RecurrentBaseOp(Args&&... args
 RecurrentBaseOp<T>::RecurrentBaseOp(
     const OperatorDef& operator_def,
     Workspace* ws)
-    : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
+    : Operator<CUDAContext>(std::forward<Args>(args)...), cudnn_wrapper_(&context_) {
   CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropoutDesc_));
   CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
   CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
