@@ -1,4 +1,4 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : bool = prim::Constant[value=1]()
   %y.1 : int = prim::Constant[value=0]()
   %3 : int = prim::Constant[value=1]()
@@ -9,7 +9,7 @@ graph(%x : Tensor) {
   %8 : int = aten::mul(%6, %7)
   %9 : int = aten::sub(%4, %8)
   %y.3 : int = prim::Loop(%6, %1, %y.1)
-    block0(%11 : int, %12 : int) {
+    block0(%11 : int, %12 : int):
       %y.12 : int = aten::add(%12, %3)
       %y.5 : int = aten::add(%y.12, %3)
       %y.6 : int = aten::add(%y.5, %3)
@@ -19,11 +19,8 @@ graph(%x : Tensor) {
       %y.10 : int = aten::add(%y.9, %3)
       %y.11 : int = aten::add(%y.10, %3)
       -> (%1, %y.11)
-    }
   %y : int = prim::Loop(%9, %1, %y.3)
-    block0(%22 : int, %23 : int) {
+    block0(%22 : int, %23 : int):
       %y.4 : int = aten::add(%23, %3)
       -> (%1, %y.4)
-    }
-  return (%y);
-}
+  return (%y)
