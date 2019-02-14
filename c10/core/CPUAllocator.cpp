@@ -41,6 +41,11 @@ void* alloc_cpu(size_t nbytes) {
   if (nbytes == 0) {
     return nullptr;
   }
+  // We might have clowny upstream code that tries to alloc a negative number
+  // of bytes. Let's catch it early.
+  CAFFE_ENFORCE(
+    ((ptrdiff_t)nbytes) >= 0,
+    "alloc_cpu() seems to have been called with negative number: ", nbytes);
 
   void* data;
 #ifdef __ANDROID__

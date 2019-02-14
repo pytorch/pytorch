@@ -1,18 +1,16 @@
-graph(%x : Float(*, *)
-      %y : Float(*, *)) {
+graph(%x : Float(*, *),
+      %y : Float(*, *)):
   %2 : Tensor[] = prim::ListConstruct(%x, %y)
   %3 : Tensor[] = aten::broadcast_tensors(%2)
   %4 : Tensor, %5 : Tensor = prim::ListUnpack(%3)
   %6 : Float(*, *) = prim::FusionGroup_0(%5, %4)
-  return (%6);
-}
-with prim::FusionGroup_0 = graph(%0 : Tensor
-      %1 : Tensor) {
+  return (%6)
+with prim::FusionGroup_0 = graph(%0 : Tensor,
+      %1 : Tensor):
   %2 : Float(*, *), %3 : Float(*, *) = prim::ConstantChunk[chunks=2, dim=1](%1)
   %4 : Float(*, *), %5 : Float(*, *) = prim::ConstantChunk[chunks=2, dim=1](%0)
   %6 : int = prim::Constant[value=1]()
   %7 : Float(*, *) = aten::add(%2, %4, %6)
   %8 : Float(*, *) = aten::add(%3, %5, %6)
   %9 : Float(*, *) = aten::mul(%7, %8)
-  return (%9);
-}
+  return (%9)

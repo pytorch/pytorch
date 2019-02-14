@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -16,8 +15,7 @@
 #include <unistd.h>
 #endif
 
-namespace torch {
-namespace utils {
+namespace c10 {
 namespace detail {
 // Creates the filename pattern passed to and completed by `mkstemp`.
 // Returns std::vector<char> because `mkstemp` needs a (non-const) `char*` and
@@ -102,5 +100,4 @@ inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
   }
   AT_ERROR("Error generating temporary file: ", std::strerror(errno));
 }
-} // namespace utils
-} // namespace torch
+} // namespace c10
