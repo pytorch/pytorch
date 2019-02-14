@@ -25,7 +25,7 @@ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
-// returns round down to the closest integer of log2(n)
+// returns floor(log2(n))
 static inline int last_pow2(int n) {
   n |= (n >>  1);
   n |= (n >>  2);
