@@ -137,6 +137,7 @@ void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
       TensorProto_DataType_INT32);
+  current_dim_type_ = ShapeInfo::DimType::SEQ;
 }
 
 void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
