@@ -344,6 +344,7 @@ THC_API void THNN_(SmoothL1Criterion_updateOutput)(
                   THCTensor *input,
                   THCTensor *target,
                   THCTensor *output,
+                  accreal beta,
                   int64_t reduction);
 
 THC_API void THNN_(SmoothL1Criterion_updateGradInput)(
@@ -352,6 +353,7 @@ THC_API void THNN_(SmoothL1Criterion_updateGradInput)(
                   THCTensor *target,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
+                  accreal beta,
                   int64_t reduction);
 
 THC_API void THNN_(IndexLinear_updateOutput)(

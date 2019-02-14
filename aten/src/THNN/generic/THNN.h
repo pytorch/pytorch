@@ -265,6 +265,7 @@ TH_API void THNN_(SmoothL1Criterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
+          accreal beta,
           int64_t reduction);
 TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
           THNNState *state,
@@ -272,6 +273,7 @@ TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
+          accreal beta,
           int64_t reduction);
 
 TH_API void THNN_(SoftPlus_updateOutput)(

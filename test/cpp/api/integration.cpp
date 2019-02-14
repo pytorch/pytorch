@@ -198,6 +198,7 @@ TEST_F(IntegrationTest, CartPole) {
     auto r_t = torch::from_blob(
         rewards.data(), {static_cast<int64_t>(rewards.size())});
     r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
+    double beta = 1.0;
 
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
@@ -205,7 +206,7 @@ TEST_F(IntegrationTest, CartPole) {
       auto r = rewards[i] - saved_values[i].item<float>();
       policy_loss.push_back(-r * saved_log_probs[i]);
       value_loss.push_back(
-          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i], beta));
     }
 
     auto loss =

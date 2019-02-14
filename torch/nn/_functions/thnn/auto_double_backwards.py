@@ -204,12 +204,12 @@ def nllloss_double_backwards(ctx, ggI):
 
 
 def smoothl1loss_double_backwards(ctx, ggI):
-    size_average = ctx.additional_args[0]
+    beta, size_average = ctx.additional_args[0], ctx.additional_args[1]
     input, target, gO = ctx.saved_tensors
     div_factor = input.nelement() if size_average else 1
 
     input_sub_target = input - target
-    small_error_mask = (input_sub_target.abs() < 1)
+    small_error_mask = (input_sub_target.abs() < beta)
     large_error_mask = (small_error_mask == 0)
     large_error_pos_mask = (((input_sub_target > 0) + large_error_mask) == 2).type_as(ggI)
     large_error_neg_mask = (((input_sub_target <= 0) + large_error_mask) == 2).type_as(ggI)

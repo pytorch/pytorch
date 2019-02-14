@@ -7,10 +7,13 @@ void THNN_(SmoothL1Criterion_updateOutput)(
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
+           accreal beta_,
            int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
+  scalar_t beta = ScalarConvert<accreal, scalar_t>::to(beta_);
+
   THArgCheck(
     THCTensor_(nElement)(state, input) == THCTensor_(nElement)(state, target), 2,
     "input and target need to have the same number of elements"
@@ -19,7 +22,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, output,
-                        smoothl1_updateOutput_no_reduce_functor<scalar_t>());
+                        smoothl1_updateOutput_no_reduce_functor<scalar_t>(beta));
     return;
   }
 
@@ -38,7 +41,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, (accreal) 0,
-    thrust::plus<accreal>(), smoothl1_functor<scalar_t, accreal>()
+    thrust::plus<accreal>(), smoothl1_functor<scalar_t, accreal>(beta)
   );
 
   if (reduction == Reduction::Mean)
@@ -56,6 +59,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
+           accreal beta_,
            int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
@@ -65,12 +69,13 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     "input and target need to have the same number of elements"
   );
 
+  scalar_t beta = ScalarConvert<accreal, scalar_t>::to(beta_);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   if (reduction == Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
     THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, gradInput,
-                        smoothl1_updateGradInput_no_reduce_functor<scalar_t>());
+                        smoothl1_updateGradInput_no_reduce_functor<scalar_t>(beta));
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
   }
@@ -93,7 +98,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, gradInput_data,
-    smoothl1_updateGradInput_functor<scalar_t>(norm, THCTensor_(get0d)(state, gradOutput))
+    smoothl1_updateGradInput_functor<scalar_t>(norm, THCTensor_(get0d)(state, gradOutput), beta)
   );
 
   THCTensor_(free)(state, input);

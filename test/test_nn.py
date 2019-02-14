@@ -2926,7 +2926,6 @@ class TestNN(NNTestCase):
                         input = torch.randn(input_shape, device=device, requires_grad=True)
                         target = torch.empty(input_shape, device=device).random_(2)
                         sigmoid = nn.Sigmoid()
-
                         input = torch.randn(input_shape, device=device, requires_grad=True)
                         m = module(reduction=reduction)
                         output = m(sigmoid(input), target)
@@ -7727,8 +7726,9 @@ new_criterion_tests = [
         input_size=(),
         target_size=(),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        extra_args=(.6,),
+        reference_fn=lambda i, t, b, m:
+            smoothl1loss_reference(i, t, b, reduction=get_reduction(m)),
         desc='scalar',
     ),
     dict(

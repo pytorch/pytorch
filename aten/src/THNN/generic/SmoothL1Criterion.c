@@ -7,15 +7,17 @@ void THNN_(SmoothL1Criterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
+          accreal beta_,
           int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
+  scalar_t beta = TH_CONVERT_ACCREAL_TO_REAL(beta_);
 
   if (reduction == Reduction::None) {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
       scalar_t z = fabs(*input_data - *target_data);
-      *output_data = z < 1 ? 0.5 * z * z : z - 0.5;
+      *output_data = z < beta ? 0.5 * z * z : z - 0.5;
     );
     return;
   }
@@ -25,7 +27,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   scalar_t sum = 0;
   TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
     scalar_t z = fabs(*input_data - *target_data);
-    sum += z < 1 ? 0.5*z*z : z - 0.5;
+    sum += z < beta ? 0.5*z*z : z - 0.5;
   );
 
   if (reduction == Reduction::Mean)
@@ -40,18 +42,20 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
+          accreal beta_,
           int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
+  scalar_t beta = TH_CONVERT_ACCREAL_TO_REAL(beta_);
 
   if (reduction == Reduction::None) {
     THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       scalar_t x = *input_data - *target_data;
-      if (x < -1.) {
+      if (x < -beta) {
         *gradInput_data = -1.;
-      } else if (x > 1.) {
+      } else if (x > beta) {
         *gradInput_data = 1.;
       } else {
         *gradInput_data = x;
@@ -68,9 +72,9 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     scalar_t x = *input_data - *target_data;
-    if (x < -1.)
+    if (x < -beta)
      *gradInput_data = - norm;
-    else if (x > 1.)
+    else if (x > beta)
      *gradInput_data = norm;
     else
      *gradInput_data = norm * x;

@@ -629,10 +629,10 @@ def smoothl1loss_no_reduce_test():
     return dict(
         fullname='SmoothL1Loss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none')),
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), beta=0.6, reduction='none')),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
-            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), beta=0.6, reduction='none'),
         pickle=False)
 
 
@@ -641,10 +641,10 @@ def smoothl1loss_no_reduce_scalar_test():
     return dict(
         fullname='SmoothL1Loss_no_reduce_scalar',
         constructor=wrap_functional(
-            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none')),
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), beta=0.6, reduction='none')),
         input_fn=lambda: torch.randn(()),
         reference_fn=lambda i, _:
-            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), beta=0.6, reduction='none'),
         pickle=False)
 
 
@@ -2324,11 +2324,11 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
-def smoothl1loss_reference(input, target, reduction='mean'):
+def smoothl1loss_reference(input, target, beta, reduction='mean'):
     abs_diff = (input - target).abs()
-    ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
-    lt_one_mask = (abs_diff < 1).type_as(abs_diff)
-    output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
+    ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
+    lt_beta_mask = (abs_diff < beta).type_as(abs_diff)
+    output = ge_beta_mask * (abs_diff - 0.5) + lt_beta_mask * 0.5 * (abs_diff ** 2)
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -2717,8 +2717,9 @@ criterion_tests = [
         input_size=(5, 10),
         target_size=(5, 10),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        extra_args = (.6,),
+        reference_fn=lambda i, t, b, m:
+            smoothl1loss_reference(i, t, b, reduction=get_reduction(m)),
     ),
     dict(
         module_name='SoftMarginLoss',

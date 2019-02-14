@@ -776,8 +776,8 @@ class SmoothL1Loss(_Loss):
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
 
     @weak_script_method
-    def forward(self, input, target):
-        return F.smooth_l1_loss(input, target, reduction=self.reduction)
+    def forward(self, input, target, beta=1.0):
+        return F.smooth_l1_loss(input, target, beta, reduction=self.reduction)
 
 
 @weak_module

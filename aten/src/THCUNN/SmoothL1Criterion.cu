@@ -17,19 +17,23 @@
 template <typename Dtype, typename Acctype>
 struct smoothl1_functor
 {
-  smoothl1_functor() {}
+  const Dtype beta;
+
+  smoothl1_functor(Dtype beta_) : beta(beta_) {}
 
   __host__ __device__ Acctype operator()(const Dtype &x, const Dtype &y) const
   {
     Acctype z = ScalarConvert<Dtype, Acctype>::to(THCNumerics<Dtype>::abs(x-y));
-    return z < Acctype(1) ? 0.5f*z*z : z - 0.5f;
+    return z < Acctype(beta) ? 0.5f*z*z : z - 0.5f;
   }
 };
 
 template <typename Dtype>
 struct smoothl1_updateOutput_no_reduce_functor
 {
-  smoothl1_updateOutput_no_reduce_functor() {}
+  const Dtype beta;
+
+  smoothl1_updateOutput_no_reduce_functor(Dtype beta_) : beta(beta_) {}
 
   __forceinline__ __host__ __device__ void operator()(
       const Dtype *x,
@@ -38,14 +42,15 @@ struct smoothl1_updateOutput_no_reduce_functor
   {
     Dtype oneHalf = ScalarConvert<float, Dtype>::to(0.5f);
     Dtype z = THCNumerics<Dtype>::abs(*x - *y);
-    *out = z < ScalarConvert<int, Dtype>::to(1) ? oneHalf * z * z : z - oneHalf;
+    *out = z < ScalarConvert<int, Dtype>::to(beta) ? oneHalf * z * z : z - oneHalf;
   }
 };
 
 template <typename Dtype>
 struct smoothl1_updateGradInput_no_reduce_functor
 {
-  smoothl1_updateGradInput_no_reduce_functor() {}
+  const Dtype beta;
+  smoothl1_updateGradInput_no_reduce_functor(Dtype beta_) : beta(beta_) {}
 
   __host__ __device__ void operator()(
       const Dtype *x,
@@ -53,11 +58,13 @@ struct smoothl1_updateGradInput_no_reduce_functor
       Dtype *gradInput) const
   {
     Dtype z = *x - *y;
+    Dtype beta = ScalarConvert<double, Dtype>::to(beta);
+    Dtype minusBeta = ScalarConvert<double, Dtype>::to(-beta);
     Dtype one = ScalarConvert<int, Dtype>::to(1);
     Dtype minusOne = ScalarConvert<int, Dtype>::to(-1);
-    if (z < minusOne) {
+    if (z < minusBeta) {
       *gradInput = minusOne;
-    } else if (z > one) {
+    } else if (z > beta) {
       *gradInput = one;
     } else {
       *gradInput = z;
@@ -70,17 +77,18 @@ struct smoothl1_updateGradInput_functor
 {
   const Dtype norm;
   const Dtype gradOutput;
+  const Dtype beta;
 
-  smoothl1_updateGradInput_functor(Dtype norm_, Dtype gradOutput_)
-    : norm(norm_), gradOutput(gradOutput_)
+  smoothl1_updateGradInput_functor(Dtype norm_, Dtype gradOutput_, Dtype beta_)
+    : norm(norm_), gradOutput(gradOutput_), beta(beta_)
   {}
 
   __host__ __device__ Dtype operator()(const Dtype &x, const Dtype &y) const
   {
     Dtype z = x - y;
-    if (z < ScalarConvert<int, Dtype>::to(-1))
+    if (z < ScalarConvert<int, Dtype>::to(-beta))
       return -norm * gradOutput;
-    else if (z > ScalarConvert<int, Dtype>::to(1))
+    else if (z > ScalarConvert<int, Dtype>::to(beta))
       return norm * gradOutput;
     else
       return norm * z * gradOutput;

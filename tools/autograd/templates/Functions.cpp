@@ -855,20 +855,20 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
   return output;
 }
 
-Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, Scalar beta, int64_t reduction) {
   auto d = (input - target).abs();
-  auto grad_input = grad * (d < 1).toType(grad.type());
+  auto grad_input = grad * (d < beta).toType(grad.type());
   if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, Scalar beta, int64_t reduction) {
   if (reduction == Reduction::None) {
-    return smooth_l1_loss_backward(grad, input, target, reduction);
+    return smooth_l1_loss_backward(grad, input, target, beta, reduction);
   }
-  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
+  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, beta, reduction);
   return (r * grad).sum();
 }
 

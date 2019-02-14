@@ -965,8 +965,8 @@
 - name: nll_loss2d_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction, int64_t ignore_index)
   self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction)
-  self: smooth_l1_loss_backward(grad, self, target, reduction)
+- name: smooth_l1_loss(Tensor self, Tensor target, Scalar beta, int64_t reduction)
+  self: smooth_l1_loss_backward(grad, self, target, beta, reduction)
 
 - name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   self: soft_margin_loss_backward(grad, self, target, reduction)
@@ -1272,9 +1272,9 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
 
-- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
-  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
-  self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
+- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar beta, int64_t reduction)
+  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, beta, reduction)
+  self: smooth_l1_loss_double_backward(grad * grad_output, self, target, beta, reduction)
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output)
   grad_output: softplus_backward(grad, self, beta, threshold, output)

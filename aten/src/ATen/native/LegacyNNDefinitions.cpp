@@ -145,21 +145,22 @@ Tensor nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, cons
   return at::legacy::th::_thnn_nll_loss2d_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight);
 }
 
-Tensor & smooth_l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::legacy::th::_thnn_smooth_l1_loss_forward_out(output, self, target, reduction);
+Tensor & smooth_l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, Scalar beta, int64_t reduction) {
+  return at::legacy::th::_thnn_smooth_l1_loss_forward_out(output, self, target, beta, reduction);
 }
 
-Tensor smooth_l1_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::legacy::th::_thnn_smooth_l1_loss_forward(self, target, reduction);
+Tensor smooth_l1_loss(const Tensor & self, const Tensor & target, Scalar beta, int64_t reduction) {
+  return at::legacy::th::_thnn_smooth_l1_loss_forward(self, target, beta, reduction);
 }
 
 Tensor & smooth_l1_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self,
-                                     const Tensor & target, int64_t reduction) {
-  return at::legacy::th::_thnn_smooth_l1_loss_backward_out(grad_input, grad_output, self, target, reduction);
+                                     const Tensor & target, Scalar beta, int64_t reduction) {
+  return at::legacy::th::_thnn_smooth_l1_loss_backward_out(grad_input, grad_output, self, target, beta, reduction);
 }
 
-Tensor smooth_l1_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::legacy::th::_thnn_smooth_l1_loss_backward(grad_output, self, target, reduction);
+Tensor smooth_l1_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, 
+                                      Scalar beta, int64_t reduction) {
+  return at::legacy::th::_thnn_smooth_l1_loss_backward(grad_output, self, target, beta, reduction);
 }
 
 Tensor & soft_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
