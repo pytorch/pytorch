@@ -839,7 +839,7 @@ TEST_F(ModuleTest, PrettyPrint) {
   struct TestModule : torch::nn::Module {
     TestModule(int x, float y) : x_(x), y_(y) {}
 
-    void pretty_print(std::ostream& stream) const {
+    void pretty_print(std::ostream& stream) const override {
       stream << "TestModule(x=" << x_ << ", y=" << y_ << ")";
     }
 

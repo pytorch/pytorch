@@ -1,21 +1,20 @@
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
   %9 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%9);
-}
-with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
-      %1 : Float(*)
-      %2 : Float(*)
-      %3 : Float(*, *)
-      %4 : Float(*, *)
-      %5 : Float(*, *)
-      %6 : Float(*, *)) {
+  return (%9)
+with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *),
+      %1 : Float(*),
+      %2 : Float(*),
+      %3 : Float(*, *),
+      %4 : Float(*, *),
+      %5 : Float(*, *),
+      %6 : Float(*, *)):
   %7 : Float(*, *) = aten::t(%6)
   %8 : Float(*, *) = aten::mm(%5, %7)
   %9 : Float(*, *) = aten::t(%4)
@@ -36,13 +35,12 @@ with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
   %33 : int[] = aten::size(%ingate.1)
   %34 : int[] = prim::BroadcastSizes(%32, %30)
   %35 : int[] = prim::BroadcastSizes(%33, %31)
-  return (%hy, %cy, %7, %9, %11, %12, %21, %13, %22, %14, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %34, %35, %24);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Tensor
-      %2 : Tensor
-      %3 : Tensor
-      %4 : Tensor) {
+  return (%hy, %cy, %7, %9, %11, %12, %21, %13, %22, %14, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %34, %35, %24)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Tensor,
+      %2 : Tensor,
+      %3 : Tensor,
+      %4 : Tensor):
   %5 : Float(*, *), %6 : Float(*, *), %7 : Float(*, *), %8 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%4)
   %9 : Float(*, *), %10 : Float(*, *), %11 : Float(*, *), %12 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%3)
   %13 : Float(*, *), %14 : Float(*, *), %15 : Float(*, *), %16 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%2)
@@ -69,5 +67,4 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %cy : Float(*, *) = aten::add(%38, %39, %21)
   %41 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate.1, %41)
-  return (%hy, %41, %cy, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1);
-}
+  return (%hy, %41, %cy, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1)

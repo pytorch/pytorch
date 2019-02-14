@@ -75,7 +75,10 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f, map_location=None):
+DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
+
+
+def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
@@ -92,6 +95,10 @@ def load(f, map_location=None):
                 or a string containing a file name
             map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
                 torch.device('cpu'))
+            _extra_files: map from filename to content. The extra
+                filenames given in the map would be loaded and their content
+                would be stored in the provided map.
+
 
         Returns:
             A ``ScriptModule`` object.
@@ -107,6 +114,10 @@ def load(f, map_location=None):
             >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
             # Load all tensors onto CPU, using a string
             >>> torch.jit.load(buffer, map_location='cpu')
+            # Load with extra files.
+            >>> files = {'metadata.json' : ''}
+            >>> torch.jit.load('scriptmodule.pt', _extra_files = files)
+            >>> print (files['metadata.json'])
     """
     m = ScriptModule()
 
@@ -132,13 +143,14 @@ def load(f, map_location=None):
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f, map_location)
+        torch._C.import_ir_module(module_lookup, f, map_location, _extra_files)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location)
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location, _extra_files)
+
     return m
 
 
-def save(m, f):
+def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     """
         Saves a ScriptModule to a file.
 
@@ -146,6 +158,7 @@ def save(m, f):
             m: a ScriptModule to save
             f: a file-like object (has to implement write and flush) or a string
                containing a file name
+            _extra_files: Map from filename to contents which will be stored as part of 'f'
 
         .. warning::
             If you are using Python 2, torch.save does NOT support StringIO.StringIO
@@ -161,13 +174,17 @@ def save(m, f):
             >>> # Save to io.BytesIO buffer
             >>> buffer = io.BytesIO()
             >>> torch.jit.save(m, buffer)
+            >>> # Save with extra files
+            >>> extra_files = torch._C.ExtraFilesMap()
+            >>> extra_files['foo.txt'] = 'bar'
+            >>> torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        m.save(f)
+        m.save(f, _extra_files=_extra_files)
     else:
-        ret = m.save_to_buffer()
+        ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
 
 
@@ -1250,6 +1267,7 @@ if _enabled:
                 raise AttributeError("Cannot set new attribute '{}' on "
                                      "weak script module once it has been "
                                      "created".format(attr))
+
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
