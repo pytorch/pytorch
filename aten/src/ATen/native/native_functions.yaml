@@ -3565,10 +3565,10 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: gather(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse=False, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: gather(Tensor self, int dim, Tensor index) -> Tensor
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse=False) -> Tensor
   matches_jit_signature: True
   variants: method, function
 

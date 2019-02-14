@@ -1974,6 +1974,25 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   return grad.sparse_mask(at::SparseTensorRef(input));
 }
 
+Tensor gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
+    Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
+    int64_t n_above = grad.numel();
+    int64_t n_below = 1;
+    for (int i=0; i<self.ndimension(); i++) {
+        n_above /= grad.size(i);
+        if (i == dim) {
+            sparse_ind[i] = index.reshape(-1);
+        } else {
+            sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand(grad.size(i), n_above).reshape(-1).repeat(n_below);
+        }
+        n_below *= grad.size(i);
+    }
+//    return grad
+    std::cout << "*** " << self.sizes() << "\n";
+    return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
+} 
+
+
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
   auto negated_pad = pad.vec();
