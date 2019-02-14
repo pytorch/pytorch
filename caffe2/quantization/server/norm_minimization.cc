@@ -2,7 +2,6 @@
 #include "caffe2/utils/cpuid.h"
 #include "l2_minimization.h"
 
-#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -29,12 +28,12 @@ GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
     //     = density * (end^2 - begin^2) / 2
     float left_begin = std::min(0.0f, begin);
     float left_end = std::min(0.0f, end);
-    assert(left_begin * left_begin >= left_end * left_end);
+    AT_ASSERT(left_begin * left_begin >= left_end * left_end);
     norm += (left_begin * left_begin - left_end * left_end) / 2;
 
     float right_begin = std::max(0.0f, begin);
     float right_end = std::max(0.0f, end);
-    assert(right_end * right_end >= right_begin * right_begin);
+    AT_ASSERT(right_end * right_end >= right_begin * right_begin);
     norm += (right_end * right_end - right_begin * right_begin) / 2;
   }
 
@@ -56,8 +55,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   int nbins = bins.size();
   int dst_nbins = 1 << precision;
   float min = hist.Min(), max = hist.Max();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+  AT_ASSERT(min <= 0.f);
+  AT_ASSERT(max >= 0.f);
   double bin_width = (max - min) / nbins;
 
   // calculate the CDF
@@ -185,8 +184,8 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   }
   int dst_nbins = 1 << precision;
   float min = hist.Min(), max = hist.Max();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+  AT_ASSERT(min <= 0.f);
+  AT_ASSERT(max >= 0.f);
   float bin_width = (max - min) / nbins;
   int zero_bin = round(-min / bin_width);
 

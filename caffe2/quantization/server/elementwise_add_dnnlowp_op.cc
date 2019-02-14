@@ -57,7 +57,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
               in_requantization_params);
         }
       } else {
-        assert(A.template IsType<float>());
+        AT_ASSERT(A.template IsType<float>());
         const float* input_data = InputTensorCPU_(i).template data<float>();
 #ifdef _OPENMP
 #pragma omp parallel for

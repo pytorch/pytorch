@@ -4,7 +4,6 @@
 #include "kl_minimization.h"
 #include "l2_minimization.h"
 
-#include <cassert>
 #include <cctype>
 #ifdef _OPENMP
 #include <omp.h>
@@ -92,7 +91,7 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
   } else if (s_lower == "p99") {
     return QuantizationFactory::P99_QUANTIZATION;
   } else {
-    assert(false);
+    AT_ASSERT(false);
     return QuantizationFactory::MIN_MAX_QUANTIZATION;
   }
 }
@@ -180,7 +179,7 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
       return KLDivergenceMinimization().ChooseQuantizationParams(
           hist, preserve_sparsity, precision);
     case P99_QUANTIZATION:
-      assert(preserve_sparsity);
+      AT_ASSERT(preserve_sparsity);
       return P99().ChooseQuantizationParams(hist, preserve_sparsity, precision);
     case MIN_MAX_QUANTIZATION:
     default:

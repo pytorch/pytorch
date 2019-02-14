@@ -109,7 +109,7 @@ float computeEarliestPossibleStartTimeFromDAG(
     auto& prereqScheduleItem = output.getTaskScheduleItem(prereqTaskId);
     // Since the algorithm schedule tasks in topological order, at this point
     // all the prerequisites should have been scheduled.
-    assert(prereqScheduleItem.isAssigned());
+    AT_ASSERT(prereqScheduleItem.isAssigned());
 
     // Communication time to send output from the prerequisite task to the
     // current task.
@@ -192,7 +192,7 @@ void updateSlots(
     startSlotId++;
   }
   // Start slot must exist.
-  assert(
+  AT_ASSERT(
       startSlotId < slots.size() &&
       assignment.start < slots.at(startSlotId).endTime);
 
@@ -217,7 +217,7 @@ void updateSlots(
     endSlotId++;
   }
   // End slot must exist.
-  assert(
+  AT_ASSERT(
       endSlotId < slots.size() &&
       assignment.end <= slots.at(endSlotId).endTime);
 

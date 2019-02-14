@@ -100,8 +100,8 @@ void OutputMinMaxObserver::Stop() {
           std::min(min_max_map_[out_name].first, min);
       min_max_map_[out_name].second =
           std::max(min_max_map_[out_name].second, max);
-      assert(min_max_map_[out_name].second >= min_max_map_[out_name].first);
-      assert(min_max_map_[out_name].first < 1e38);
+      AT_ASSERT(min_max_map_[out_name].second >= min_max_map_[out_name].first);
+      AT_ASSERT(min_max_map_[out_name].first < 1e38);
 
       VLOG(2) << this << " " << info_->type << " " << i << " " << out_name
               << " " << info_->tensor_infos[i].min << " "
@@ -190,8 +190,8 @@ OutputMinMaxNetObserver::~OutputMinMaxNetObserver() {
     int op_index = 0;
     for (auto key_value : min_max_map_) {
       ostringstream ost;
-      assert(key_value.second.first <= key_value.second.second);
-      assert(key_value.second.first < 1e38);
+      AT_ASSERT(key_value.second.first <= key_value.second.second);
+      AT_ASSERT(key_value.second.first < 1e38);
       ost << op_index << " 0 " << key_value.first << " "
           << key_value.second.first << " " << key_value.second.second;
       f << ost.str() << endl;
@@ -453,9 +453,9 @@ RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
       } else {
         f >> op_index2 >> i2 >> tensor_name >> min >> max;
       }
-      assert(op_index2 == op_index);
-      assert(i2 == i);
-      assert(tensor_name == op->debug_def().output(i));
+      AT_ASSERT(op_index2 == op_index);
+      AT_ASSERT(i2 == i);
+      AT_ASSERT(tensor_name == op->debug_def().output(i));
 
       TensorQuantizationParams qparams;
       if (max > min) {

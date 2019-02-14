@@ -379,7 +379,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
       } else if (!is_B_constant_) {
         reason = "B is not constant";
       } else {
-        assert(false);
+        AT_ASSERT(false);
       }
       LOG(WARNING) << "BatchMatMul with output " << this->debug_def().output(0)
                    << " falls back to slow path because " << reason;

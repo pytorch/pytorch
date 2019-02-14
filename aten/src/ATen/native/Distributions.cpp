@@ -15,7 +15,6 @@
 
 #include <type_traits>
 #include <functional>
-#include <assert.h>
 #include <cpuinfo.h>
 
 #include <TH/THRandom.h>

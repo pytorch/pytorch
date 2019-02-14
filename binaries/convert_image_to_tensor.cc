@@ -85,7 +85,7 @@ void reportTime(
     return;
   }
   vector<string> s = caffe2::split('|', FLAGS_report_time);
-  assert(s[0] == "json");
+  AT_ASSERT(s[0] == "json");
   std::string identifier = "";
   if (s.size() > 1) {
     identifier = s[1];
@@ -104,7 +104,7 @@ void splitSizes(const std::string& arg, int* ptr0, int* ptr1) {
     *ptr0 = std::stoi(sizes[0]);
     *ptr1 = std::stoi(sizes[0]);
   } else {
-    assert(false);
+    AT_ASSERT(false);
   }
 }
 
@@ -118,7 +118,7 @@ cv::Mat resizeImage(cv::Mat& img) {
   if (max_size < 0) {
     max_size = INT_MAX;
   }
-  assert(min_size <= max_size);
+  AT_ASSERT(min_size <= max_size);
 
   int im_min_size = img.rows > img.cols ? img.cols : img.rows;
   int im_max_size = img.rows > img.cols ? img.rows : img.cols;
@@ -129,11 +129,11 @@ cv::Mat resizeImage(cv::Mat& img) {
   }
   int scaled_width = int(round(img.cols * im_scale));
   int scaled_height = int(round(img.rows * im_scale));
-  assert((scaled_width <= max_size) && (scaled_height <= max_size));
+  AT_ASSERT((scaled_width <= max_size) && (scaled_height <= max_size));
   if ((scaled_width < min_size) || (scaled_height < min_size)) {
-    assert((scaled_width == max_size) || (scaled_height == max_size));
+    AT_ASSERT((scaled_width == max_size) || (scaled_height == max_size));
   } else {
-    assert((scaled_width == min_size) || (scaled_height == min_size));
+    AT_ASSERT((scaled_width == min_size) || (scaled_height == min_size));
   }
   cv::Mat resized_img;
   cv::resize(
@@ -161,7 +161,7 @@ cv::Mat cropToRec(cv::Mat& img, int* height_ptr, int* width_ptr) {
     height = height > img.rows ? img.rows : height;
     roi.width = width;
     roi.height = height;
-    assert(
+    AT_ASSERT(
         0 <= roi.x && 0 <= roi.width && roi.x + roi.width <= img.cols &&
         0 <= roi.y && 0 <= roi.height && roi.y + roi.height <= img.rows);
     cropped_img = img(roi);
@@ -235,7 +235,7 @@ std::vector<float> convertOneImage(
     std::string& filename,
     int* height_ptr,
     int* width_ptr) {
-  assert(filename[0] != '~');
+  AT_ASSERT(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
 
@@ -264,8 +264,8 @@ std::vector<float> convertOneImage(
 
   // Assert we don't have to deal with alignment
   DCHECK(crop.isContinuous());
-  assert(crop.rows == height);
-  assert(crop.cols == width);
+  AT_ASSERT(crop.rows == height);
+  AT_ASSERT(crop.cols == width);
   std::vector<float> one_image_values = convertToVector(crop);
   *height_ptr = height;
   *width_ptr = width;
@@ -279,7 +279,7 @@ int getBatchSize(int num_items) {
   if (batch_size < 0) {
     batch_size = num_items;
   } else {
-    assert(num_items % batch_size == 0);
+    AT_ASSERT(num_items % batch_size == 0);
   }
   return batch_size;
 }
@@ -292,7 +292,7 @@ void writeValues(
   caffe2::Timer timer;
   timer.Start();
 
-  assert(dims.size() == values.size());
+  AT_ASSERT(dims.size() == values.size());
   int num_batches = dims.size();
 
   TensorProtos protos;
@@ -312,7 +312,7 @@ void writeValues(
 
     // Not optimized
     for (int i = 0; i < batch_size; i++) {
-      assert(values[k][i].size() == entry_size);
+      AT_ASSERT(values[k][i].size() == entry_size);
       for (int j = 0; j < values[k][i].size(); j++) {
         data->add_float_data(values[k][i][j]);
       }
@@ -350,7 +350,7 @@ void convertImages() {
   }
   int batch_size = getBatchSize(file_names.size());
   int num_batches = file_names.size() / batch_size;
-  assert(file_names.size() == batch_size * num_batches);
+  AT_ASSERT(file_names.size() == batch_size * num_batches);
   std::vector<std::vector<std::vector<float>>> values;
   std::vector<std::vector<int>> dims;
   int C = FLAGS_color ? 3 : 1;
@@ -367,8 +367,8 @@ void convertImages() {
         height = one_height;
         width = one_width;
       } else {
-        assert(height == one_height);
-        assert(width == one_width);
+        AT_ASSERT(height == one_height);
+        AT_ASSERT(width == one_width);
       }
       one_value.push_back(one_image_values);
     }
@@ -404,17 +404,17 @@ void convertValues() {
   std::string line;
   std::getline(infile, line);
   vector<int> file_dims = splitString <int>(line);
-  assert(file_dims.size() >= 2);
+  AT_ASSERT(file_dims.size() >= 2);
 
   int num_items = file_dims[0];
   int batch_size = getBatchSize(num_items);
   int num_batches = num_items / batch_size;
-  assert(num_items == batch_size * num_batches);
+  AT_ASSERT(num_items == batch_size * num_batches);
   vector<string> lines;
   while (std::getline(infile, line)) {
     lines.push_back(line);
   }
-  assert(lines.size() == num_items);
+  AT_ASSERT(lines.size() == num_items);
   std::vector<std::vector<std::vector<float>>> values;
   std::vector<std::vector<int>> dims;
   for (int i = 0; i < num_batches; i++) {
@@ -427,7 +427,7 @@ void convertValues() {
       if (num < 0) {
         num = item.size();
       } else {
-        assert(num == item.size());
+        AT_ASSERT(num == item.size());
       }
       one_value.push_back(item);
     }

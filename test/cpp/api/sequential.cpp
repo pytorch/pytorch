@@ -153,7 +153,7 @@ TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
     explicit MockModule(int value) : expected(value) {}
     int expected;
     int forward(int value) {
-      assert(value == expected);
+      AT_ASSERT(value == expected);
       return value + 1;
     }
   };

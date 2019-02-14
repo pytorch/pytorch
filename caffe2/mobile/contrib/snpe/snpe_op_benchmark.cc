@@ -87,7 +87,7 @@ float snpe_run(int iters, Workspace& ws) {
   def.add_arg()->CopyFrom(MakeArgument("model_buffer", model_buffer.str()));
 
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
-  assert(op.get());
+  AT_ASSERT(op.get());
   Timer timer;
   timer.Start();
   for (auto i = 0; i < iters; ++i) {

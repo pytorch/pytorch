@@ -37,7 +37,7 @@ int main(int argc, const char* argv[]) {
       ist >> cnt;
       bins.push_back(cnt);
     }
-    assert(bins.size() == nbins);
+    AT_ASSERT(bins.size() == nbins);
 
     Histogram hist = Histogram(min, max, bins);
     TensorQuantizationParams qparams =

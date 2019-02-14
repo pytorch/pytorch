@@ -65,13 +65,13 @@ void NNModule::replaceSubgraph(
   for (const auto& input : node_inputs) {
     sg_inputs_copy.erase(input);
   }
-  assert(sg_inputs_copy.size() == 0 && "Not all inputs were listed");
+  AT_ASSERT(sg_inputs_copy.size() == 0 && "Not all inputs were listed");
 
   auto sg_outputs_copy = sg_outputs;
   for (const auto& output : node_outputs) {
     sg_outputs_copy.erase(output);
   }
-  assert(sg_outputs_copy.size() == 0 && "Not all outputs were listed");
+  AT_ASSERT(sg_outputs_copy.size() == 0 && "Not all outputs were listed");
 
   for (auto& input : node_inputs) {
     dataFlow.createEdge(input, node);
@@ -99,12 +99,12 @@ bool hasProducer(NNGraph::NodeRef n) {
 }
 
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n) {
-  assert(
+  AT_ASSERT(
       is<NeuralNetData>(n) &&
       "getProducer only works with NeuralNetData types.");
   auto inEdges = n->getInEdges();
-  assert(inEdges.size() > 0 && "Tensor does not have a producer.");
-  assert(
+  AT_ASSERT(inEdges.size() > 0 && "Tensor does not have a producer.");
+  AT_ASSERT(
       inEdges.size() == 1 &&
       "Malformed NNGraph, NeuralNetData has multiple producers.");
   return inEdges.front()->tail();
@@ -115,7 +115,7 @@ bool hasConsumer(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n) {
-  assert(
+  AT_ASSERT(
       is<NeuralNetData>(n) &&
       "getProducer only works with NeuralNetData types.");
   std::vector<NNGraph::NodeRef> out;
@@ -130,7 +130,7 @@ bool hasInputs(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n) {
-  assert(
+  AT_ASSERT(
       is<NeuralNetOperator>(n) &&
       "getInputs only works with NeuralNetOperator types.");
   std::vector<NNGraph::NodeRef> out;
@@ -141,7 +141,7 @@ std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n) {
 }
 
 std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
-  assert(
+  AT_ASSERT(
       is<NeuralNetOperator>(n) &&
       "getOutputs only works with NeuralNetOperator types.");
   std::vector<NNGraph::NodeRef> out;
@@ -195,11 +195,11 @@ std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& subgraph) {
 void replaceProducer(
     NNGraph::NodeRef tensorNode,
     NNGraph::NodeRef newProducer) {
-  assert(
+  AT_ASSERT(
       is<NeuralNetData>(tensorNode) &&
       "First argument must contain NeuralNetData");
   auto inEdges = tensorNode->getInEdges();
-  assert(
+  AT_ASSERT(
       inEdges.size() == 1 && "Tensor node passed in does not have a producer");
   auto edge = inEdges.at(0);
   auto prevProducer = edge->tail();

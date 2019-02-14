@@ -1,7 +1,6 @@
 #include "caffe2/core/logging.h"
 #include "l2_minimization.h"
 
-#include <cassert>
 #include <cmath>
 
 namespace dnnlowp {
@@ -10,13 +9,13 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
     const Histogram& hist,
     bool preserve_sparsity,
     int /*precision*/) {
-  assert(preserve_sparsity); // only support preserve_sparsity
+  AT_ASSERT(preserve_sparsity); // only support preserve_sparsity
 
   const std::vector<uint64_t> bins = *hist.GetHistogram();
   int nbins = bins.size();
   float min = hist.Min(), max = hist.Max();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+  AT_ASSERT(min <= 0.f);
+  AT_ASSERT(max >= 0.f);
   float bin_width = (max - min) / nbins;
   int zero_bin = ceil(-min / bin_width);
 

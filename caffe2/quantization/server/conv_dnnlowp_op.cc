@@ -418,7 +418,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       } else if (FLAGS_caffe2_dnnlowp_force_slow_path) {
         reason = "slow path enforced";
       } else {
-        assert(false);
+        AT_ASSERT(false);
       }
       if (!reason.empty()) {
         static int log_occurences = 0;

@@ -19,13 +19,12 @@
 #include "nomnigraph/Support/Casting.h"
 #include "nomnigraph/Support/Pointer.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
+#include <c10/util/Exception.h>
 
 #include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <assert.h>
 
 namespace nom {
 namespace repr {
@@ -361,7 +360,7 @@ struct C10_EXPORT
     get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
-      assert(0 && "Cannot get type from node");
+      AT_ASSERT(0 && "Cannot get type from node");
       return nullptr;
     }
     auto nno = dyn_cast<NeuralNetOperator>(n->data().get());
@@ -374,7 +373,7 @@ struct C10_EXPORT
     get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
-      assert(0 && "Cannot get type from node");
+      AT_ASSERT(0 && "Cannot get type from node");
       return nullptr;
     }
     auto nno = dyn_cast<NeuralNetData>(n->data().get());
@@ -444,12 +443,12 @@ void insertOp(
     return;
   }
 
-  assert(0 && "insertOp takes (DFG, Tensor, Op) or (DFG, Op, Tensor)");
+  AT_ASSERT(0 && "insertOp takes (DFG, Tensor, Op) or (DFG, Op, Tensor)");
 }
 
 template <typename NewT, typename OldT>
 NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
-  assert(is<OldT>(node) && "Cannot get type from node.");
+  AT_ASSERT(is<OldT>(node) && "Cannot get type from node.");
 
   NeuralNetOperator* nnOpPtr =
       dyn_cast<NeuralNetOperator>(node->mutableData()->release());

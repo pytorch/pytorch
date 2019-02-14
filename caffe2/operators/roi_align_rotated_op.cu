@@ -169,7 +169,7 @@ bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(R.dim(), 2);
   CAFFE_ENFORCE_EQ(R.dim32(1), 6);
 
-  assert(sampling_ratio_ >= 0);
+  AT_ASSERT(sampling_ratio_ >= 0);
 
   auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>()); // RoI pooled data
 

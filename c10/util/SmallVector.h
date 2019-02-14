@@ -22,9 +22,9 @@
 
 #include <c10/util/AlignOf.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -194,38 +194,38 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
 
   // SmallVector::at is NOT from LLVM.
   reference at(size_type idx) {
-    assert(idx < size());
+    AT_ASSERT(idx < size());
     return begin()[idx];
   }
   const_reference at(size_type idx) const {
-    assert(idx < size());
+    AT_ASSERT(idx < size());
     return begin()[idx];
   }
 
   reference operator[](size_type idx) {
-    assert(idx < size());
+    AT_ASSERT(idx < size());
     return begin()[idx];
   }
   const_reference operator[](size_type idx) const {
-    assert(idx < size());
+    AT_ASSERT(idx < size());
     return begin()[idx];
   }
 
   reference front() {
-    assert(!empty());
+    AT_ASSERT(!empty());
     return begin()[0];
   }
   const_reference front() const {
-    assert(!empty());
+    AT_ASSERT(!empty());
     return begin()[0];
   }
 
   reference back() {
-    assert(!empty());
+    AT_ASSERT(!empty());
     return end()[-1];
   }
   const_reference back() const {
-    assert(!empty());
+    AT_ASSERT(!empty());
     return end()[-1];
   }
 };
@@ -512,8 +512,8 @@ class SmallVectorImpl
     // Just cast away constness because this is a non-const member function.
     iterator I = const_cast<iterator>(CI);
 
-    assert(I >= this->begin() && "Iterator to erase is out of bounds.");
-    assert(I < this->end() && "Erasing at past-the-end iterator.");
+    AT_ASSERT(I >= this->begin() && "Iterator to erase is out of bounds.");
+    AT_ASSERT(I < this->end() && "Erasing at past-the-end iterator.");
 
     iterator N = I;
     // Shift all elts down one.
@@ -528,9 +528,9 @@ class SmallVectorImpl
     iterator S = const_cast<iterator>(CS);
     iterator E = const_cast<iterator>(CE);
 
-    assert(S >= this->begin() && "Range to erase is out of bounds.");
-    assert(S <= E && "Trying to erase invalid range.");
-    assert(E <= this->end() && "Trying to erase past the end.");
+    AT_ASSERT(S >= this->begin() && "Range to erase is out of bounds.");
+    AT_ASSERT(S <= E && "Trying to erase invalid range.");
+    AT_ASSERT(E <= this->end() && "Trying to erase past the end.");
 
     iterator N = S;
     // Shift all elts down.
@@ -547,8 +547,8 @@ class SmallVectorImpl
       return this->end() - 1;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    AT_ASSERT(I >= this->begin() && "Insertion iterator is out of bounds.");
+    AT_ASSERT(I <= this->end() && "Inserting past the end of the vector.");
 
     if (this->EndX >= this->CapacityX) {
       size_t EltNo = I - this->begin();
@@ -577,8 +577,8 @@ class SmallVectorImpl
       return this->end() - 1;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    AT_ASSERT(I >= this->begin() && "Insertion iterator is out of bounds.");
+    AT_ASSERT(I <= this->end() && "Inserting past the end of the vector.");
 
     if (this->EndX >= this->CapacityX) {
       size_t EltNo = I - this->begin();
@@ -609,8 +609,8 @@ class SmallVectorImpl
       return this->begin() + InsertElt;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    AT_ASSERT(I >= this->begin() && "Insertion iterator is out of bounds.");
+    AT_ASSERT(I <= this->end() && "Inserting past the end of the vector.");
 
     // Ensure there is enough space.
     reserve(this->size() + NumToInsert);
@@ -666,8 +666,8 @@ class SmallVectorImpl
       return this->begin() + InsertElt;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    AT_ASSERT(I >= this->begin() && "Insertion iterator is out of bounds.");
+    AT_ASSERT(I <= this->end() && "Inserting past the end of the vector.");
 
     size_t NumToInsert = std::distance(From, To);
 
@@ -755,7 +755,7 @@ class SmallVectorImpl
   /// update the size later. This avoids the cost of value initializing elements
   /// which will only be overwritten.
   void set_size(size_type N) {
-    assert(N <= this->capacity());
+    AT_ASSERT(N <= this->capacity());
     this->setEnd(this->begin() + N);
   }
 };

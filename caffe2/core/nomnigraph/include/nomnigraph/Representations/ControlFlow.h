@@ -6,6 +6,7 @@
 #include "nomnigraph/Representations/Compiler.h"
 #include "nomnigraph/Support/Pointer.h"
 
+#include <c10/util/Exception.h>
 #include <unordered_map>
 
 namespace nom {
@@ -30,7 +31,7 @@ class BasicBlock {
 
   void trackNode(NodeRef node) {
     callbacks_[node] = node->registerDestructorCallback([&](NodeRef n) {
-      assert(
+      AT_ASSERT(
           hasInstruction(n) &&
           "Destructor callback invoked on untracked node in BasicBlock.");
       deleteInstruction(n);
@@ -44,7 +45,7 @@ class BasicBlock {
   }
 
   void pushInstructionNode(NodeRef node) {
-    assert(
+    AT_ASSERT(
         isa<Instruction>(node->data()) &&
         "Cannot push non-instruction node to basic block.");
     instructions_.emplace_back(node);
@@ -69,8 +70,8 @@ class BasicBlock {
   }
 
   void moveInstructionBefore(NodeRef instr1, NodeRef instr2) {
-    assert(hasInstruction(instr1) && "Instruction not in basic block.");
-    assert(hasInstruction(instr2) && "Instruction not in basic block.");
+    AT_ASSERT(hasInstruction(instr1) && "Instruction not in basic block.");
+    AT_ASSERT(hasInstruction(instr2) && "Instruction not in basic block.");
     auto it1 =
         std::find(std::begin(instructions_), std::end(instructions_), instr1);
     auto it2 =
@@ -80,7 +81,7 @@ class BasicBlock {
   }
 
   void deleteInstruction(NodeRef instr) {
-    assert(hasInstruction(instr) && "Instruction not in basic block.");
+    AT_ASSERT(hasInstruction(instr) && "Instruction not in basic block.");
     instructions_.erase(
         std::remove(instructions_.begin(), instructions_.end(), instr),
         instructions_.end());
@@ -141,9 +142,9 @@ class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
 
   // Named functions are simply basic blocks stored in labeled Subgraphs
   BasicBlockRef createNamedFunction(std::string name) {
-    assert(name != "anonymous" && "Reserved token anonymous cannot be used");
+    AT_ASSERT(name != "anonymous" && "Reserved token anonymous cannot be used");
     auto bb = this->createNode(BasicBlockType<G>());
-    assert(functions.count(name) == 0 && "Name already in use.");
+    AT_ASSERT(functions.count(name) == 0 && "Name already in use.");
     typename ControlFlowGraphImpl<G>::type::SubgraphType sg;
     sg.addNode(bb);
     functions[name] = sg;

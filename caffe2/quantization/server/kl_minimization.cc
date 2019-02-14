@@ -13,8 +13,8 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
   int nbins = bins.size();
   int dst_nbins = 1 << precision;
   float min = hist.Min(), max = hist.Max();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+  AT_ASSERT(min <= 0.f);
+  AT_ASSERT(max >= 0.f);
   double bin_width = (max - min) / nbins;
   int zero_bin = round(-min / bin_width);
 
@@ -81,10 +81,10 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
               fraction = src_bin_end_not_rounded - src_bin_begin_not_rounded;
             } else if (src_bin == src_bin_begin) {
               fraction = (src_bin_begin + 1) - src_bin_begin_not_rounded;
-              assert(fraction >= 0);
+              AT_ASSERT(fraction >= 0);
             } else if (src_bin == src_bin_end - 1) {
               fraction = src_bin_end_not_rounded - (src_bin_end - 1);
-              assert(fraction >= 0);
+              AT_ASSERT(fraction >= 0);
             }
             bin *= fraction;
             sum += bin;
@@ -131,7 +131,7 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
         } // src_bin
       } // dst_bin
 
-      assert(kl >= 0);
+      AT_ASSERT(kl >= 0);
       if (kl < kl_min) {
         kl_min = kl;
         best_start_bin = start_bin;

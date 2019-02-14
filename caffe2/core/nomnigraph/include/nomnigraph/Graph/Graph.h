@@ -10,6 +10,7 @@
 
 #include "caffe2/core/common.h"
 #include "nomnigraph/Support/Common.h"
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <iterator>
@@ -18,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include <assert.h>
 #include <stdio.h>
 
 #define DEBUG_PRINT(...)
@@ -136,7 +136,7 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
 
   void removeEdgeInternal(std::vector<EdgeRef>& edges, EdgeRef e) {
     auto iter = std::find(edges.begin(), edges.end(), e);
-    assert(
+    AT_ASSERT(
         iter != edges.end() &&
         "Attempted to remove edge that isn't connected to this node");
     edges.erase(iter);
@@ -256,7 +256,7 @@ class Graph {
 
   // Move a node from this graph to the destGraph
   void moveNode(NodeRef node, Graph<T, U...>* destGraph) {
-    assert(hasNode(node));
+    AT_ASSERT(hasNode(node));
     for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
       if (&(*it) == node) {
         std::list<Node<T, U...>>& destNodes = destGraph->nodes_;
@@ -270,9 +270,9 @@ class Graph {
 
   // Move an edge from this graph to the destGraph
   void moveEdge(EdgeRef edge, Graph<T, U...>* destGraph) {
-    assert(hasEdge(edge));
-    assert(destGraph->hasNode(edge->tail()));
-    assert(destGraph->hasNode(edge->head()));
+    AT_ASSERT(hasEdge(edge));
+    AT_ASSERT(destGraph->hasNode(edge->tail()));
+    AT_ASSERT(destGraph->hasNode(edge->head()));
     std::list<Edge<T, U...>>& destEdges = destGraph->edges_;
     for (auto it = edges_.begin(); it != edges_.end(); ++it) {
       if (&(*it) == edge) {
@@ -302,14 +302,14 @@ class Graph {
     for (auto it = edges_.begin(); it != edges_.end(); ++it) {
       auto edge = &(*it);
       if (sg.hasEdge(edge)) {
-        assert(destGraph->hasNode(edge->tail()));
-        assert(destGraph->hasNode(edge->head()));
+        AT_ASSERT(destGraph->hasNode(edge->tail()));
+        AT_ASSERT(destGraph->hasNode(edge->head()));
         destEdges.splice(destEdges.end(), edges_, it--);
         sg.removeEdge(edge);
       }
     }
-    assert(sg.getNodes().size() == 0);
-    assert(sg.getEdges().size() == 0);
+    AT_ASSERT(sg.getNodes().size() == 0);
+    AT_ASSERT(sg.getEdges().size() == 0);
   }
 
   // Validates the graph.  Returns true if the graph is valid
@@ -451,7 +451,7 @@ class Graph {
   /// note: will fail assertion if the edge does not exist.
   EdgeRef getEdge(NodeRef tail, NodeRef head) const {
     auto result = getEdgeIfExists(tail, head);
-    assert(result && "Edge doesn't exist.");
+    AT_ASSERT(result && "Edge doesn't exist.");
     return result;
   }
 

@@ -10,6 +10,7 @@
 #include "nomnigraph/Converters/Dot.h"
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Representations/NeuralNet.h"
+#include <c10/util/Exception.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -47,7 +48,7 @@ namespace {
 std::map<std::string, std::string> NNPrinter(
     typename nom::repr::NNGraph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
-  assert(node->data() && "Node doesn't have data, can't render it");
+  AT_ASSERT(node->data() && "Node doesn't have data, can't render it");
   if (isa<nom::repr::NeuralNetOperator>(node->data())) {
     auto* op = dyn_cast<nom::repr::NeuralNetOperator>(node->data().get());
     labelMap["label"] = op->getName();
@@ -62,7 +63,7 @@ std::map<std::string, std::string> NNPrinter(
 using Graph = nom::Graph<py::object>;
 std::map<std::string, std::string> GraphPrinter(typename Graph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
-  assert(node->data() && "Node doesn't have data, can't render it");
+  AT_ASSERT(node->data() && "Node doesn't have data, can't render it");
   labelMap["label"] = py::str(node->data());
   return labelMap;
 };

@@ -1,5 +1,4 @@
-#include "tanh.h"
-#include <cassert>
+#include "tanh.h">
 #include "caffe2/core/logging.h"
 
 namespace dnnlowp {
@@ -76,10 +75,10 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
     double y_end = tanh((i + 0.5) * in_qparams_.scale);
 
     int y_avg_q = nearbyint((y_begin + y_end) / 2 / out_qparams_.scale);
-    assert(y_avg_q * out_qparams_.scale - y_begin < max_abs_err);
-    assert(y_end - y_avg_q * out_qparams_.scale < max_abs_err);
-    assert(y_avg_q >= 0);
-    assert(y_avg_q < (1 << (num_out_bits_ - 1)));
+    AT_ASSERT(y_avg_q * out_qparams_.scale - y_begin < max_abs_err);
+    AT_ASSERT(y_end - y_avg_q * out_qparams_.scale < max_abs_err);
+    AT_ASSERT(y_avg_q >= 0);
+    AT_ASSERT(y_avg_q < (1 << (num_out_bits_ - 1)));
     processing_region_lut_[i - x_pq_index_] = y_avg_q;
 #ifdef PRINT_TANH_TABLE
     LOG(INFO) << i << " " << y_avg_q;
@@ -121,11 +120,11 @@ T Tanh<T>::Compute(T x) const {
     y = x_sgn * processing_region_lut_[x_mag - x_pq_index_];
   }
 
-  assert(y + out_qparams_.zero_point <= std::numeric_limits<T>::max());
+  AT_ASSERT(y + out_qparams_.zero_point <= std::numeric_limits<T>::max());
 
   // assuming output is unsigned
-  assert(y + out_qparams_.zero_point >= 0);
-  assert(y + out_qparams_.zero_point < (1 << num_out_bits_));
+  AT_ASSERT(y + out_qparams_.zero_point >= 0);
+  AT_ASSERT(y + out_qparams_.zero_point < (1 << num_out_bits_));
 
   return y + out_qparams_.zero_point;
 }

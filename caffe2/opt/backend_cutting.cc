@@ -41,7 +41,7 @@ std::string ShowNode(NodeRef node) {
 void DumpGraph(NNGraph* g) {
   auto nnprinter = [](typename NNGraph::NodeRef node) {
     std::map<std::string, std::string> labelMap;
-    assert(node->data() && "Node doesn't have data, can't render it");
+    AT_ASSERT(node->data() && "Node doesn't have data, can't render it");
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
       labelMap["label"] =
@@ -205,7 +205,7 @@ caffe2::NetDef ConvertToC2Net(
   for (auto node : sub.nodes) {
     if (nn::is<NeuralNetOperator>(node)) {
       const auto* nn_op = nn::get<NeuralNetOperator>(node);
-      assert(
+      AT_ASSERT(
           isa<Caffe2Annotation>(nn_op->getAnnotation()) &&
           "Cannot get caffe2 op from NNOp");
       const auto& op_def =

@@ -48,7 +48,7 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   input_vec.emplace_back(std::move(input));
   caffe2::Predictor::TensorList output_vec;
   p(input_vec, &output_vec);
-  assert(output_vec.size() == 1);
+  AT_ASSERT(output_vec.size() == 1);
   caffe2::TensorCPU* output = &output_vec.front();
   // output is our styled image
   float* outputArray = output->mutable_data<float>();

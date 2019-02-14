@@ -12,7 +12,6 @@
 #ifndef NOM_GRAPH_ALGORITHMS_H
 #define NOM_GRAPH_ALGORITHMS_H
 
-#include <assert.h>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -20,6 +19,7 @@
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/TarjansImpl.h"
 #include "nomnigraph/Graph/TopoSort.h"
+#include <c10/util/Exception.h>
 
 namespace nom {
 namespace algorithm {
@@ -61,12 +61,12 @@ template <typename G>
 Graph<typename G::NodeRef> dominatorTree(
     G* g,
     typename G::NodeRef source = nullptr) {
-  assert(
+  AT_ASSERT(
       g->getMutableNodes().size() > 0 &&
       "Cannot find dominator tree of empty graph.");
   if (!source) {
     auto rootSCC = tarjans(g).back();
-    assert(
+    AT_ASSERT(
         rootSCC.getNodes().size() == 1 &&
         "Cannot determine source node topologically, please specify one.");
     for (auto& node : rootSCC.getNodes()) {
@@ -139,7 +139,7 @@ immediateDominatorMap(G* g, typename G::NodeRef source = nullptr) {
   auto idomTree = dominatorTree(g, source);
   for (auto node : idomTree.getMutableNodes()) {
     // Sanity check, really should never happen.
-    assert(
+    AT_ASSERT(
         node->getInEdges().size() <= 1 &&
         "Invalid dominator tree generated from graph, cannot determing idom map.");
     // In degenerate cases, or for the root node, we self dominate.

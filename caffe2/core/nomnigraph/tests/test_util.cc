@@ -66,7 +66,7 @@ std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::Node
   auto& bb = node->data();
   labelMap["label"] = to_string((unsigned long long)node) + "\\n";
   for (const auto& instr : bb.getInstructions()) {
-    assert(isa<nom::repr::NeuralNetOperator>(instr->data()) &&
+    AT_ASSERT(isa<nom::repr::NeuralNetOperator>(instr->data()) &&
            "Invalid instruction.");
     auto *op = dyn_cast<nom::repr::NeuralNetOperator>(instr->data().get());
     bool hasOutput = false;
@@ -103,7 +103,7 @@ std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph:
 
 std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
-  assert(node->data() && "Node doesn't have data, can't render it");
+  AT_ASSERT(node->data() && "Node doesn't have data, can't render it");
   if (isa<nom::repr::NeuralNetOperator>(node->data())) {
     auto *op = dyn_cast<nom::repr::NeuralNetOperator>(node->data().get());
     labelMap["label"] =

@@ -4,6 +4,7 @@
 #include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/Exception.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/dispatch/KernelFunction.h>
 
@@ -56,7 +57,7 @@ class ThreadsafeOperatorTable_ final {
     map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
       auto num_removed = map.erase(key);
 
-      assert(num_removed <= 1); // This is not a multi-map
+      AT_ASSERT(num_removed <= 1);
       if (num_removed == 0) {
         AT_ERROR("Tried to deregister a kernel with dispatch key '",
                  dispatch_key_to_string(key), "' for operator '", operator_name,

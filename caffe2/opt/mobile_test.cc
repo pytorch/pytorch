@@ -39,7 +39,7 @@ TEST(MobileTest, Convolution) {
   auto optimized_net = caffe2::convertToCaffe2Proto(nn, net);
   for (auto op : optimized_net.op()) {
     if (op.type() == "Conv") {
-      assert(op.engine() == "NNPACK");
+      AT_ASSERT(op.engine() == "NNPACK");
     }
   }
 }

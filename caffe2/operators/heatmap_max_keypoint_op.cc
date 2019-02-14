@@ -94,7 +94,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       const int maxY = maxIndex / heatmap_size;
       const int maxX = maxIndex - heatmap_size * maxY;
 
-      assert(heatmaps(heatmap_index, maxIndex) == maxScore);
+      AT_ASSERT(heatmaps(heatmap_index, maxIndex) == maxScore);
       ERArrXXf fmax = ERArrXXf::Zero(3, 3);
 
       // initialize fmax values of local 3x3 grid
@@ -103,8 +103,8 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
         for (int x = -1; x <= 1; x++) {
           int xx = x - 2 * (x + maxX >= heatmap_size) + 2 * (x + maxX < 0);
           int yy = y - 2 * (y + maxY >= heatmap_size) + 2 * (y + maxY < 0);
-          assert((xx + maxX < heatmap_size) && (xx + maxX >= 0));
-          assert((yy + maxY < heatmap_size) && (yy + maxY >= 0));
+          AT_ASSERT((xx + maxX < heatmap_size) && (xx + maxX >= 0));
+          AT_ASSERT((yy + maxY < heatmap_size) && (yy + maxY >= 0));
           const int coord_index = (yy + maxY) * heatmap_size + xx + maxX;
           fmax(y + 1, x + 1) = heatmaps(heatmap_index, coord_index);
         }
@@ -138,8 +138,8 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
         deltaScore = fmax(1, 1) - b.transpose() * delta +
             1.0 / 2.0 * delta.transpose() * A * delta;
       }
-      assert(std::abs(delta(0)) <= MAX_DELTA);
-      assert(std::abs(delta(1)) <= MAX_DELTA);
+      AT_ASSERT(std::abs(delta(0)) <= MAX_DELTA);
+      AT_ASSERT(std::abs(delta(1)) <= MAX_DELTA);
       // find maximum of detla scores
       keypoints(k, 0 * keypoint_count + j) =
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;

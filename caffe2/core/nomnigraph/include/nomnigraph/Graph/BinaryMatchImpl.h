@@ -94,7 +94,7 @@ std::vector<Subgraph<T, U...>> binaryMatch(Graph<T, U...>* g, F condition) {
   }
 
   if (edgeSet.size()) {
-    assert(
+    AT_ASSERT(
         0 &&
         "Invalid graph for Kahn's algorithm, cycle detected.  Please use Tarjans.");
   }

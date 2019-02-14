@@ -150,7 +150,7 @@ class DotGenerator {
       if (inputInEdgeCt == 0) { // Node @ top of subgraph
         output << (uint64_t)input;
       } else { // Node between operators
-        assert(inputInEdgeCt == 1);
+        AT_ASSERT(inputInEdgeCt == 1);
         output << (uint64_t)input->getInEdges().at(0)->tail();
       }
       output << ":" << (uint64_t)input << ":s -> " << (uint64_t)op << ":"

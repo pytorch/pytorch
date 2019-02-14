@@ -298,7 +298,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     // if R has 5 columns, the first column is the index, otherwise 0
     CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
-    assert(sampling_ratio_ >= 0);
+    AT_ASSERT(sampling_ratio_ >= 0);
 
     // only supports NHWC now
     ReinitializeTensor(

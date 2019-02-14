@@ -158,7 +158,7 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
     return true;
   }
 
-  assert(sampling_ratio_ >= 0);
+  AT_ASSERT(sampling_ratio_ >= 0);
 
   auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>());
   int output_size = Y->numel();

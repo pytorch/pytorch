@@ -119,48 +119,48 @@ ASSERT_SAME_TYPE(tinyness_before);
 
 TEST(TestHalf, CommonMath) {
   float threshold = 0.00001;
-  assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
-  assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
-  assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
-  assert(std::abs(std::log10(Half(1000.0)) - std::log10(1000.0f)) <= threshold);
-  assert(std::abs(std::log1p(Half(0.0)) - std::log1p(0.0f)) <= threshold);
-  assert(std::abs(std::log2(Half(1000.0)) - std::log2(1000.0f)) <= threshold);
-  assert(std::abs(std::expm1(Half(1.0)) - std::expm1(1.0f)) <= threshold);
-  assert(std::abs(std::cos(Half(0.0)) - std::cos(0.0f)) <= threshold);
-  assert(std::abs(std::sin(Half(0.0)) - std::sin(0.0f)) <= threshold);
-  assert(std::abs(std::sqrt(Half(100.0)) - std::sqrt(100.0f)) <= threshold);
-  assert(std::abs(std::ceil(Half(2.4)) - std::ceil(2.4f)) <= threshold);
-  assert(std::abs(std::floor(Half(2.7)) - std::floor(2.7f)) <= threshold);
-  assert(std::abs(std::trunc(Half(2.7)) - std::trunc(2.7f)) <= threshold);
-  assert(std::abs(std::acos(Half(-1.0)) - std::acos(-1.0f)) <= threshold);
-  assert(std::abs(std::cosh(Half(1.0)) - std::cosh(1.0f)) <= threshold);
-  assert(std::abs(std::acosh(Half(1.0)) - std::acosh(1.0f)) <= threshold);
-  assert(std::abs(std::asin(Half(1.0)) - std::asin(1.0f)) <= threshold);
-  assert(std::abs(std::sinh(Half(1.0)) - std::sinh(1.0f)) <= threshold);
-  assert(std::abs(std::asinh(Half(1.0)) - std::asinh(1.0f)) <= threshold);
-  assert(std::abs(std::tan(Half(0.0)) - std::tan(0.0f)) <= threshold);
-  assert(std::abs(std::atan(Half(1.0)) - std::atan(1.0f)) <= threshold);
-  assert(std::abs(std::tanh(Half(1.0)) - std::tanh(1.0f)) <= threshold);
-  assert(std::abs(std::erf(Half(10.0)) - std::erf(10.0f)) <= threshold);
-  assert(std::abs(std::erfc(Half(10.0)) - std::erfc(10.0f)) <= threshold);
-  assert(std::abs(std::abs(Half(-3.0)) - std::abs(-3.0f)) <= threshold);
-  assert(std::abs(std::round(Half(2.3)) - std::round(2.3f)) <= threshold);
-  assert(
+  AT_ASSERT(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::log10(Half(1000.0)) - std::log10(1000.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::log1p(Half(0.0)) - std::log1p(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::log2(Half(1000.0)) - std::log2(1000.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::expm1(Half(1.0)) - std::expm1(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::cos(Half(0.0)) - std::cos(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::sin(Half(0.0)) - std::sin(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::sqrt(Half(100.0)) - std::sqrt(100.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::ceil(Half(2.4)) - std::ceil(2.4f)) <= threshold);
+  AT_ASSERT(std::abs(std::floor(Half(2.7)) - std::floor(2.7f)) <= threshold);
+  AT_ASSERT(std::abs(std::trunc(Half(2.7)) - std::trunc(2.7f)) <= threshold);
+  AT_ASSERT(std::abs(std::acos(Half(-1.0)) - std::acos(-1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::cosh(Half(1.0)) - std::cosh(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::acosh(Half(1.0)) - std::acosh(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::asin(Half(1.0)) - std::asin(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::sinh(Half(1.0)) - std::sinh(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::asinh(Half(1.0)) - std::asinh(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::tan(Half(0.0)) - std::tan(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::atan(Half(1.0)) - std::atan(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::tanh(Half(1.0)) - std::tanh(1.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::erf(Half(10.0)) - std::erf(10.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::erfc(Half(10.0)) - std::erfc(10.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::abs(Half(-3.0)) - std::abs(-3.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::round(Half(2.3)) - std::round(2.3f)) <= threshold);
+  AT_ASSERT(
       std::abs(std::pow(Half(2.0), Half(10.0)) - std::pow(2.0f, 10.0f)) <=
       threshold);
-  assert(
+  AT_ASSERT(
       std::abs(std::atan2(Half(7.0), Half(0.0)) - std::atan2(7.0f, 0.0f)) <=
       threshold);
 #ifdef __APPLE__
   // @TODO: can macos do implicit conversion of Half?
-  assert(
+  AT_ASSERT(
       std::abs(std::isnan(static_cast<float>(Half(0.0))) - std::isnan(0.0f)) <=
       threshold);
-  assert(
+  AT_ASSERT(
       std::abs(std::isinf(static_cast<float>(Half(0.0))) - std::isinf(0.0f)) <=
       threshold);
 #else
-  assert(std::abs(std::isnan(Half(0.0)) - std::isnan(0.0f)) <= threshold);
-  assert(std::abs(std::isinf(Half(0.0)) - std::isinf(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::isnan(Half(0.0)) - std::isnan(0.0f)) <= threshold);
+  AT_ASSERT(std::abs(std::isinf(Half(0.0)) - std::isinf(0.0f)) <= threshold);
 #endif
 }

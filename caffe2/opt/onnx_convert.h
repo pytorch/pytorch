@@ -13,11 +13,11 @@ public:
     OpDef = opDef;
   }
   const caffe2::OperatorDef* getOperatorDef() const {
-    assert(OpDef && "OperatorDef was never set.  Use OnnxAnnotation::setOperatorDef.");
+    AT_ASSERT(OpDef && "OperatorDef was never set.  Use OnnxAnnotation::setOperatorDef.");
     return OpDef;
   }
   caffe2::OperatorDef* getMutableOperatorDef() {
-    assert(OpDef && "OperatorDef was never set.  Use OnnxAnnotation::setOperatorDef.");
+    AT_ASSERT(OpDef && "OperatorDef was never set.  Use OnnxAnnotation::setOperatorDef.");
     return OpDef;
   }
 

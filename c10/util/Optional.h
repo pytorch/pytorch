@@ -22,13 +22,13 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <c10/util/Exception.h>
 
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
@@ -145,7 +145,7 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) (EXPR)
 #else
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) \
-  ((CHECK) ? (EXPR) : ([] { assert(!#CHECK); }(), (EXPR)))
+  ((CHECK) ? (EXPR) : ([] { AT_ASSERT(!#CHECK); }(), (EXPR)))
 #endif
 
 namespace detail_ {
@@ -376,7 +376,7 @@ class optional : private OptionalBase<T> {
   template <class... Args>
   void initialize(Args&&... args) noexcept(
       noexcept(T(std::forward<Args>(args)...))) {
-    assert(!OptionalBase<T>::init_);
+    AT_ASSERT(!OptionalBase<T>::init_);
     ::new (static_cast<void*>(dataptr())) T(std::forward<Args>(args)...);
     OptionalBase<T>::init_ = true;
   }
@@ -384,7 +384,7 @@ class optional : private OptionalBase<T> {
   template <class U, class... Args>
   void initialize(std::initializer_list<U> il, Args&&... args) noexcept(
       noexcept(T(il, std::forward<Args>(args)...))) {
-    assert(!OptionalBase<T>::init_);
+    AT_ASSERT(!OptionalBase<T>::init_);
     ::new (static_cast<void*>(dataptr())) T(il, std::forward<Args>(args)...);
     OptionalBase<T>::init_ = true;
   }
@@ -545,7 +545,7 @@ class optional : private OptionalBase<T> {
 #if OPTIONAL_HAS_MOVE_ACCESSORS == 1
 
   OPTIONAL_MUTABLE_CONSTEXPR T* operator->() {
-    assert(initialized());
+    AT_ASSERT(initialized());
     return dataptr();
   }
 
@@ -554,12 +554,12 @@ class optional : private OptionalBase<T> {
   }
 
   OPTIONAL_MUTABLE_CONSTEXPR T& operator*() & {
-    assert(initialized());
+    AT_ASSERT(initialized());
     return contained_val();
   }
 
   OPTIONAL_MUTABLE_CONSTEXPR T&& operator*() && {
-    assert(initialized());
+    AT_ASSERT(initialized());
     return constexpr_move(contained_val());
   }
 
@@ -584,7 +584,7 @@ class optional : private OptionalBase<T> {
 #else
 
   T* operator->() {
-    assert(initialized());
+    AT_ASSERT(initialized());
     return dataptr();
   }
 
@@ -593,7 +593,7 @@ class optional : private OptionalBase<T> {
   }
 
   T& operator*() {
-    assert(initialized());
+    AT_ASSERT(initialized());
     return contained_val();
   }
 

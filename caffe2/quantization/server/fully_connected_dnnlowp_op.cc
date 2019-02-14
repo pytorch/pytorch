@@ -493,7 +493,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         } else if (this->debug_def().engine() == "DNNLOWP_ACC16") {
           reason = "";
         } else {
-          assert(false);
+          AT_ASSERT(false);
         }
         if (!reason.empty()) {
           LOG(WARNING) << "Conv with weight " << this->debug_def().input(1)
