@@ -210,7 +210,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
                 assert argument['name'] == func_return[arg_idx]['name'] or \
-                       argument['name'] == func_return[arg_idx]['name'] + "_return"
+                    argument['name'] == func_return[arg_idx]['name'] + "_return"
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
