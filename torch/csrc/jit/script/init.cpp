@@ -139,8 +139,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 'd');
-    Node* new_node =
-        getPythonOp(m.graph(), THPObjectPtr(func.release().ptr()), cconv);
+    Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
+        THPObjectPtr(func.release().ptr()), cconv, {}));
+
+    // Mark if function is ignored on export
+    if (py::cast<bool>(py::module::import("torch.jit")
+                           .attr("_try_get_ignored_op")(self))) {
+      auto python_op = static_cast<PythonOp*>(new_node);
+      python_op->ignore_on_export = true;
+    }
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for (auto& i : matched_schema->inputs)
       new_node->addInput(i);
@@ -165,14 +172,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     }
   }
 
-  virtual Node* getPythonOp(
-      const std::shared_ptr<Graph>& graph,
-      THPObjectPtr func_ptr,
-      std::string& cconv) const {
-    return graph->insertNode(
-        graph->createPythonOp(std::move(func_ptr), cconv, {}));
-  }
-
   py::object self;
 };
 
@@ -191,26 +190,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   }
 };
 
-// For ignored Python functions, set the PythonOp in the graph to
-// be ignored on export
-struct VISIBILITY_HIDDEN IgnoredPythonValue : public PythonValue {
-  IgnoredPythonValue(py::object self) : PythonValue(std::move(self)) {}
-
-  std::string kind() const override {
-    return "ignored python value";
-  }
-
-protected:
-  Node* getPythonOp(
-      const std::shared_ptr<Graph>& graph,
-      THPObjectPtr func_ptr,
-      std::string& cconv) const override {
-    Node* node = PythonValue::getPythonOp(graph, std::move(func_ptr), cconv);
-    auto python_op = static_cast<PythonOp*>(node);
-    python_op->ignore_on_export = true;
-    return node;
-  }
-};
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup)
@@ -516,12 +495,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
-  }
-
-  py::object ignored_python_op =
-      py::module::import("torch.jit").attr("_try_get_ignored_op")(obj);
-  if (py::cast<bool>(ignored_python_op)) {
-    return std::make_shared<IgnoredPythonValue>(obj);
   }
 
   py::object overloads =
