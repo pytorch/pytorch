@@ -122,7 +122,6 @@ def process_function(func):
     release_variables = []
     saved_list_sizes = []
     unpack = []
-    argument_names = [x['name'] for x in func['declaration']['arguments']]
 
     env['compute_index_ranges'] = []
     for arg in func['args_with_gradients']:
