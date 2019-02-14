@@ -9,6 +9,9 @@ C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
 #define C10_ENABLE_NUMA
 #endif
 
+// This code used to have a lot of VLOGs. However, because allocation might be
+// triggered during static initialization, it's unsafe to invoke VLOG here
+
 namespace c10 {
 
 #ifdef C10_ENABLE_NUMA
@@ -21,7 +24,6 @@ void NUMABind(int numa_node_id) {
     return;
   }
   if (!IsNUMAEnabled()) {
-    VLOG(1) << "NUMA is not enabled";
     return;
   }
 
@@ -39,7 +41,6 @@ void NUMABind(int numa_node_id) {
 
 int GetNUMANode(const void* ptr) {
   if (!IsNUMAEnabled()) {
-    VLOG(1) << "NUMA is not enabled";
     return -1;
   }
   AT_ASSERT(ptr);
@@ -59,7 +60,6 @@ int GetNUMANode(const void* ptr) {
 
 int GetNumNUMANodes() {
   if (!IsNUMAEnabled()) {
-    VLOG(1) << "NUMA is not enabled";
     return -1;
   }
 
@@ -71,7 +71,6 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
     return;
   }
   if (!IsNUMAEnabled()) {
-    VLOG(1) << "NUMA is not enabled";
     return;
   }
   AT_ASSERT(ptr);
@@ -97,7 +96,6 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
 
 int GetCurrentNUMANode() {
   if (!IsNUMAEnabled()) {
-    VLOG(1) << "NUMA is not enabled";
     return -1;
   }
 
@@ -112,29 +110,20 @@ bool IsNUMAEnabled() {
 }
 
 void NUMABind(int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
 }
 
 int GetNUMANode(const void* ptr) {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 
 int GetNumNUMANodes() {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 
 void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
 }
 
 int GetCurrentNUMANode() {
-  VLOG(1) << "NUMA is not enabled";
   return -1;
 }
 

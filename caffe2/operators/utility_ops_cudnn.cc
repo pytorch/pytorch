@@ -21,7 +21,7 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
         add_desc_, CUDNN_OP_TENSOR_ADD, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN));
   }
 
-  ~CuDNNWeightedSumOp() {
+  ~CuDNNWeightedSumOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyOpTensorDescriptor(add_desc_));
   }

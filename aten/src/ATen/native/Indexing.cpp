@@ -72,7 +72,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
   ss << " does not match the shape of the indexed tensor " << self.sizes();
   ss << " at index " << idx;
-  AT_ERROR(ss.str());
+  AT_INDEX_ERROR(ss.str());
 }
 
 static void checkIndexTensorTypes(TensorList indices) {
@@ -80,8 +80,9 @@ static void checkIndexTensorTypes(TensorList indices) {
     if (tensor.defined()) {
       auto& type = tensor.type();
       auto scalarType = type.scalarType();
-      AT_CHECK(scalarType == kLong || scalarType == kByte,
-               "tensors used as indices must be long or byte tensors");
+      if (scalarType != kLong && scalarType != kByte) {
+          AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
+      }
     }
   }
 }
@@ -350,7 +351,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // restride_src with an unhelpful error message.
   if (std::find(indexed_sizes.begin(), indexed_sizes.end(), 0) != indexed_sizes.end() &&
       std::find(replacement_shape.begin(), replacement_shape.end(), 0) == replacement_shape.end()) {
-    AT_ERROR("index is out of bounds for dim with size 0");
+    AT_INDEX_ERROR("index is out of bounds for dimension with size 0");
   }
 
   this->dims_before = dims_before;
@@ -382,8 +383,8 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   try {
     indices = expand_outplace(indices);
   } catch (std::exception& e) {
-    AT_ERROR("shape mismatch: indexing tensors could not be broadcast together"
-             " with shapes ", shapes_as_str(indices));
+    AT_INDEX_ERROR("shape mismatch: indexing tensors could not be broadcast together"
+                   " with shapes ", shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
   while (indices.size() < (size_t)self.dim()) {

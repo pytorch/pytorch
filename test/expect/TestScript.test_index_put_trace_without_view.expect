@@ -1,6 +1,6 @@
-graph(%target : Double(100)
-      %indices.1 : Long(4)
-      %rhs : Double(4)) {
+graph(%target : Double(100),
+      %indices.1 : Long(4),
+      %rhs : Double(4)):
   %3 : int = prim::Constant[value=4]()
   %4 : int = prim::Constant[value=0]()
   %5 : Device = prim::Constant[value="cpu"]()
@@ -10,5 +10,4 @@ graph(%target : Double(100)
   %9 : Tensor?[] = prim::ListConstruct(%indices)
   %10 : bool = prim::Constant[value=0]()
   %11 : Double(100) = aten::index_put_(%target, %9, %rhs, %10)
-  return (%11);
-}
+  return (%11)
