@@ -42,8 +42,9 @@ template <typename SkipOutputCopy>
 class GPUFallbackOpEx final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
-      : Operator<CUDAContext>(def, ws) {
+  template <class... Args>
+  explicit GPUFallbackOpEx(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.

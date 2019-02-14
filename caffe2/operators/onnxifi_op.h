@@ -25,8 +25,9 @@ class OnnxifiOp final : public Operator<Context> {
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit OnnxifiOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
