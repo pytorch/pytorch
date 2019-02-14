@@ -2077,7 +2077,7 @@ class TestAutograd(TestCase):
             f_args_tensor = deepcopy(unpack_variables(f_args_variable))
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
-            self.assertTrue(gradcheck(f, f_args_variable, eps=1e-6, atol=PRECISION, avoid=False))
+            self.assertTrue(gradcheck(f, f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_cat_empty(self):
         f_args_variable = (torch.randn(0, S, requires_grad=True),
