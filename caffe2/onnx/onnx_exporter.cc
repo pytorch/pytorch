@@ -6,6 +6,7 @@
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <numeric>
 #include <unordered_set>
 
 namespace caffe2 {
@@ -297,10 +298,14 @@ OnnxExporter::get_special_operators() const {
           {"AveragePool", &OnnxExporter::CreateConvPoolNodes},
           {"FC", &OnnxExporter::CreateGemmNodes},
           {"Concat", &OnnxExporter::CreateConcatNodes},
+          {"MergeDim", &OnnxExporter::CreateMergeDimNodes},
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
           {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ReduceMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceFrontMean", &OnnxExporter::CreateReduceMeanNodes},
+          {"ReduceBackMean", &OnnxExporter::CreateReduceMeanNodes},
           {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
@@ -742,6 +747,40 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateMergeDimNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  const auto& x = def.input(0);
+  const auto& y = def.output(0);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+
+  {
+    const auto ndim = shapes.at(x).dims().size();
+    CAFFE_ENFORCE_GE(ndim, 2, "No enough dims to merge.");
+    std::vector<int64_t> dims(ndim);
+    dims[0] = 1;
+    dims[1] = -1;
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+  }
+
+  const auto reshaped = dummy_->NewDummyName();
+  nodes.emplace_back(MakeNode("Reshape",
+              { x, const_tensors.back().name() },
+              { reshaped }));
+
+  nodes.emplace_back(MakeNode("Squeeze",
+              { reshaped },
+              { y },
+              std::vector<AttributeProto>{
+                  MakeAttribute("axes", std::vector<int64_t>{ 0 }),
+              }));
+
+  return result;
+}
+
 ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -790,6 +829,73 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   return result;
 }
 
+ConvertedResult OnnxExporter::CreateReduceMeanNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+    CAFFE_ENFORCE_GE(def.input_size(), 1);
+    CAFFE_ENFORCE_LE(def.input_size(), 2);
+    CAFFE_ENFORCE_EQ(def.input_size(), 1, "Input \"lengths\" is not supported.");
+    CAFFE_ENFORCE_GE(def.output_size(), 1);
+    const auto& x = def.input(0);
+    const auto& y = def.output(0);
+    const auto& dims = shapes.at(x).dims();
+
+    ConvertedResult result;
+    auto& nodes = result.first;
+    auto& const_tensors = result.second;
+    std::unordered_map<std::string, const caffe2::Argument*> args;
+    for (const auto& a : def.arg()) {
+        args.emplace(a.name(), &a);
+    }
+
+    std::vector<int64_t> axes;
+    int64_t keepdims = 1;
+
+    if (def.type() == "ReduceMean") {
+        // axes
+        auto it = args.find("axes");
+        if (it == args.end()) {
+            axes.resize(dims.size());
+            std::iota(axes.begin(), axes.end(), 0);
+        } else {
+            axes.assign(it->second->ints().begin(), it->second->ints().end());
+        }
+
+        // keepdims
+        it = args.find("keepdims");
+        if (it != args.end()) {
+            keepdims = it->second->i();
+        }
+    } else {
+        // num_reduce_dim
+        auto it = args.find("num_reduce_dim");
+        const int64_t num_reduce_dim = it == args.end() ? 1 : it->second->i();
+        CAFFE_ENFORCE_LE(num_reduce_dim, dims.size());
+        axes.resize(num_reduce_dim);
+
+        int64_t start_dim = 0;
+        if (def.type() == "ReduceFrontMean") {
+            start_dim = 0;
+        } else if (def.type() == "ReduceBackMean") {
+            start_dim = dims.size() - axes.size();
+        }
+        std::iota(axes.begin(), axes.end(), start_dim);
+
+        keepdims = 0;
+    }
+
+    nodes.emplace_back(MakeNode("ReduceMean",
+                { x },
+                { y },
+                {
+                    MakeAttribute("axes", axes),
+                    MakeAttribute("keepdims", keepdims),
+                },
+                def.name()));
+
+    return result;
+}
+
 ConvertedResult OnnxExporter::CreateUpsampleNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
@@ -814,7 +920,6 @@ ConvertedResult OnnxExporter::CreateUpsampleNodes(
         MakeTensor("resolved scale tensor", tmp_vector, TensorProto::FLOAT);
 
     auto node = MakeNode("Constant", {}, {resolved_scale});
-    MakeAttribute("value", resolved_scale_tensor);
     node.add_attribute()->CopyFrom(
         MakeAttribute("value", resolved_scale_tensor));
     nodes.emplace_back(node);
@@ -954,16 +1059,18 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   if (has_axis) {
     axis = it->second->i();
   }
+
+  auto gemm_x_input = x;
   if (x_shape.dims().size() > 2) {
     // we need to reshape only when dimension is higher than 2
-    auto outer = DimProd(x_shape, 0, axis);
-    auto inner = DimProd(x_shape, axis, x_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
-    auto reshaped_x = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
-    x = reshaped_x;
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+
+    gemm_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
+                std::vector<int64_t>{ -1, inner }));
+    nodes.emplace_back(MakeNode("Reshape",
+                { x, const_tensors.back().name() },
+                { gemm_x_input }));
   }
 
   it = args.find("axis_w");
@@ -975,32 +1082,48 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
-    std::vector<int64_t> dims = {outer, inner};
     auto reshaped_w = dummy_->NewDummyName();
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {w, const_tensors.back().name()}, {reshaped_w}));
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_,
+                std::vector<int64_t>{ outer, inner }));
+    nodes.emplace_back(MakeNode("Reshape",
+                { w, const_tensors.back().name() },
+                { reshaped_w }));
     w = reshaped_w;
   }
 
-  auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
-  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
-  nodes.emplace_back(MakeNode(
-      "Gemm",
-      {x, w, b},
-      {gemm_y_output},
-      attrs,
-      def.name()));
+  auto gemm_y_output = axis > 1 ? dummy_->NewDummyName() : y;
+  nodes.emplace_back(MakeNode("Gemm",
+              { gemm_x_input, w, b },
+              { gemm_y_output },
+              { MakeAttribute("transB", 1L) },
+              def.name()));
 
-  if (has_axis) {
-    std::vector<int64_t> dims;
-    for (int i = 0; i < axis; ++i) {
-      dims.push_back(x_shape.dims(i));
-    }
-    dims.push_back(-1);
-    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
-    nodes.emplace_back(
-        MakeNode("Reshape", {gemm_y_output, const_tensors.back().name()}, {y}));
+  // capture the outer shape if needed.
+  if (axis > 1) {
+    const auto x_shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {x_shape}));
+
+    const auto x_shape_outer = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Slice",
+                { x_shape },
+                { x_shape_outer },
+                std::vector<AttributeProto>{
+                    MakeAttribute("starts", std::vector<int64_t>{ 0 }),
+                    MakeAttribute("ends", std::vector<int64_t>{ axis }),
+                }));
+
+    const auto y_shape = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, { -1 }));
+    nodes.emplace_back(MakeNode("Concat",
+                { x_shape_outer, const_tensors.back().name() },
+                { y_shape },
+                std::vector<AttributeProto>{
+                    MakeAttribute("axis", static_cast<int64_t>(0)),
+                }));
+ 
+    nodes.emplace_back(MakeNode("Reshape",
+                { gemm_y_output, y_shape },
+                { y }));
   }
 
   return result;
