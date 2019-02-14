@@ -152,16 +152,17 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         type, output_tensor, &tensor_descriptor);
   }
   bool ext_success = false;
+  onnxMemoryFenceV1 input_fence;
+  onnxMemoryFenceV1 output_fence;
 #ifdef ONNXIFI_ENABLE_EXT
   onnxExtensionFunctionPointer onnxSetIOAndRunGraphPointer;
   if (lib_->onnxGetExtensionFunctionAddress(
-          backend_id_, "onnxSetIOAndRunGraph", onnxSetOpAndRunGraphPointer) ==
+          backend_id_, "onnxSetIOAndRunGraph", onnxSetIOAndRunGraphPointer) ==
       ONNXIFI_STATUS_SUCCESS) {
-    onnxMemoryFenceV1 output_fence;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
     CAFFE_ENFORCE_EQ(
-        (*onnxExtensionFunctionPointer)(
+        (*onnxSetIOAndRunGraphPointer)(
             graph,
             input_desc_.size(),
             input_desc_.data(),
@@ -169,6 +170,10 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
             output_desc_.data(),
             output_fence),
         ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
     ext_success = true;
   }
 #endif
@@ -182,23 +187,21 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
             output_desc_.data()),
         ONNXIFI_STATUS_SUCCESS);
 
-    onnxMemoryFenceV1 input_fence;
     input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitEvent(backend_, &input_fence.event),
         ONNXIFI_STATUS_SUCCESS);
-    onnxMemoryFenceV1 output_fence;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
 
     // Call the asycn run on backend, singal event on input fence and wait for
     // the event on output fence
     CAFFE_ENFORCE_EQ(
-        lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-    CAFFE_ENFORCE_EQ(
         lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
         ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
