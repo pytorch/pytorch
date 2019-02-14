@@ -150,18 +150,28 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
 }
 
 // This attempts to recover the type from an IValue, including nested Generic
-// Lists. It only examines the first element of each generic container,
+// Lists. It only examines the first element (the first of the iterator in the
+// case of a dict) of each generic container,
 // and if a generic container is empty returns typevar as the base element.
 // XXX: only used for better error messages, should not be used elsewhere
-TypePtr attemptToRecoverType(const IValue& input_ivalue) {
-  if (input_ivalue.isGenericList()) {
-    auto& ivalue_list = input_ivalue.toGenericListRef();
+TypePtr attemptToRecoverType(const IValue& ivalue) {
+  if (ivalue.isGenericList()) {
+    auto& ivalue_list = ivalue.toGenericListRef();
     if (ivalue_list.size() == 0) {
       return ListType::create(VarType::create("t"));
     }
     return ListType::create(attemptToRecoverType(ivalue_list[0]));
   }
-  return incompleteInferTypeFrom(input_ivalue);
+  if (ivalue.isGenericDict()) {
+    const auto& dict = ivalue.toGenericDictRef();
+    if (dict.size() == 0) {
+      return DictType::create(VarType::create("t"), VarType::create("t"));
+    }
+    auto item = dict.begin();
+    return DictType::create(
+        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
+  }
+  return incompleteInferTypeFrom(ivalue);
 }
 
 // Checks if input_ivalue is a subvalue of type.
@@ -176,6 +186,15 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     return std::all_of(ivalue_list.begin(), ivalue_list.end(), [&](const IValue& list_elem) {
       return isSubvalueOf(list_elem, element_type);
     });
+  }
+  if (ivalue.isGenericDict()) {
+    auto dict_type = type->expect<DictType>();
+    const auto& dict = ivalue.toGenericDictRef();
+    return std::all_of(
+        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
+          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
+              isSubvalueOf(item.second, dict_type->getValueType());
+        });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }

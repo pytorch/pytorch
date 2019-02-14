@@ -48,9 +48,8 @@ C10_DEFINE_string(
     "-1,-1",
     "The center cropped hight and width. If the value is less than zero, "
     "it is not cropped.");
-C10_DEFINE_string(input_images, "", "Comma separated images");
-C10_DEFINE_string(input_image_file, "", "The file containing imput images");
-C10_DEFINE_string(input_text_file, "", "the text file to be written to blobs");
+C10_DEFINE_string(input_image_files, "", "Files containing imput images");
+C10_DEFINE_string(input_text_files, "", "Text files to be written to blobs");
 C10_DEFINE_string(
     preprocess,
     "",
@@ -322,12 +321,11 @@ TensorProtos writeValues(
   return protos;
 }
 
-TensorProtos convertImages() {
+
+TensorProtos convertImages(std::string& image_file) {
   vector<string> file_names;
-  if (FLAGS_input_images != "") {
-    file_names = caffe2::split(',', FLAGS_input_images);
-  } else if (FLAGS_input_image_file != "") {
-    std::ifstream infile(FLAGS_input_image_file);
+  if (image_file != "") {
+    std::ifstream infile(image_file);
     std::string line;
     while (std::getline(infile, line)) {
       vector<string> file_name = caffe2::split(',', line);
@@ -391,12 +389,12 @@ vector<TYPE> splitString(std::string& line) {
    <entry>, <entry>, <entry>...
    ....
 */
-TensorProtos convertValues() {
-  if (FLAGS_input_text_file == "") {
+TensorProtos convertValues(std::string& file_name) {
+  if (file_name == "") {
     TensorProtos proto;
     return proto;
   }
-  std::ifstream infile(FLAGS_input_text_file);
+  std::ifstream infile(file_name);
   std::string line;
   std::getline(infile, line);
   vector<int> file_dims = splitString <int>(line);
@@ -657,8 +655,6 @@ void runNetwork(
 int benchmark(
     int argc,
     char* argv[],
-    caffe2::TensorProtos* proto_images,
-    caffe2::TensorProtos* proto_values,
     const string& FLAGS_backend,
     const string& FLAGS_init_net,
     const string& FLAGS_input_dims,
@@ -704,13 +700,24 @@ int benchmark(
 
   map<string, caffe2::TensorProtos> tensor_protos_map;
 
-  workspace->CreateBlob("data");
-  tensor_protos_map.insert(std::make_pair("data", *proto_images));
+  int num_blobs;
+  vector<string> images = caffe2::split(';', FLAGS_input_image_files);
+  for (int i = 0; i < images.size(); ++i) {
+    vector<string> mapping = caffe2::split(',', images[i]);
+    caffe2::TensorProtos proto_images = caffe2::convertImages(mapping[1]);
+    workspace->CreateBlob(mapping[0]);
+    tensor_protos_map.insert(std::make_pair(mapping[0], proto_images));
+    num_blobs = proto_images.protos_size();
+  }
 
-  workspace->CreateBlob("im_info");
-  tensor_protos_map.insert(std::make_pair("im_info", *proto_values));
-
-  int num_blobs = proto_images->protos_size();
+  vector<string> values = caffe2::split(';', FLAGS_input_text_files);
+  for (int i = 0; i < values.size(); ++i) {
+    vector<string> mapping = caffe2::split(',', values[i]);
+    caffe2::TensorProtos proto_values = caffe2::convertValues(mapping[1]);
+    workspace->CreateBlob(mapping[0]);
+    tensor_protos_map.insert(std::make_pair(mapping[0], proto_values));
+    num_blobs = proto_values.protos_size();
+  }
 
   runNetwork(
       workspace,
@@ -734,14 +741,9 @@ int benchmark(
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  caffe2::TensorProtos proto_images = caffe2::convertImages();
-  caffe2::TensorProtos proto_values = caffe2::convertValues();
-
   benchmark(
       argc,
       argv,
-      &proto_images,
-      &proto_values,
       FLAGS_backend,
       FLAGS_init_net,
       FLAGS_input_dims,
