@@ -664,9 +664,16 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
-    @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_false(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=False)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_true(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=True)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d_no_padding(self):
