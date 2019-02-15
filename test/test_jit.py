@@ -5881,6 +5881,23 @@ a")
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_script_module_list_sequential_error(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
