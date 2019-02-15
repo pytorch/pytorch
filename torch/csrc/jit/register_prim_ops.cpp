@@ -1014,6 +1014,30 @@ int listClear(Stack& stack) {
   return 0;
 }
 
+template <typename TList, typename TElement>
+int listInsert(Stack& stack) {
+  TList list;
+  int64_t idx;
+  TElement elem;
+  pop(stack, list, idx, elem);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (normalized_idx >= list_size) {
+    if (idx < 0) {
+      elements.push_front(elem);
+    } else {
+      elements.push_back(elem);
+    }
+  } else {
+    elements.insert(elements.begin() + normalized_idx, elem);
+  }
+
+  return 0;
+}
+
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1303,7 +1327,11 @@ RegisterOperators reg2({
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
-          listClear<Shared<c_type>>)
+          listClear<Shared<c_type>>),                                       \
+      Operator(                                                             \
+          "aten::insert( " decl_type "[](a!) self, int idx,                 \
+          " decl_type " el) -> ()",                                         \
+          listClear<Shared<c_type>, c_type::ElemType>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1322,7 +1350,11 @@ RegisterOperators reg2({
           listSetItem<Shared<c_type>, c_type::ElemType>),              \
       Operator(                                                        \
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
-          listClear<Shared<c_type>>)
+          listClear<Shared<c_type>>),                                  \
+      Operator(                                                        \
+          "aten::insert( " decl_type "[](a!) self, int idx,            \
+          " decl_type " el) -> ()",                                    \
+          listClear<Shared<c_type>, c_type::ElemType>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
