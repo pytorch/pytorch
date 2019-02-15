@@ -2854,9 +2854,9 @@ Arguments:
         value in the input tensor.
 
 Returns:
-    Tensor: LongTensor that has one more dimension with 1 values at the
-        index of last dimension indicated by the input, and 0 everywhere
-        else.
+    LongTensor that has one more dimension with 1 values at the
+    index of last dimension indicated by the input, and 0 everywhere
+    else.
 
 Examples:
     >>> F.one_hot(torch.arange(0, 5) % 3)
