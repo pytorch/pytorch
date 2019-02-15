@@ -593,6 +593,10 @@
   self: not_implemented("_pdist_backward")
   pdist: not_implemented("_pdist_backward")
 
+- name: cdist(Tensor x1, Tensor x2, double p)
+  x1: _cdist_backward(grad, x1, x2, p, result)
+  x2: _cdist_backward(grad.t().contiguous(), x2, x1, p, result.t().contiguous())
+
 - name: normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 

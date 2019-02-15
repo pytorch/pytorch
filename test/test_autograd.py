@@ -2094,6 +2094,16 @@ class TestAutograd(TestCase):
                               False, f_args_variable, f_args_tensor)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
+    def test_cdist(self):
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            f_args_variable = (torch.randn(S, S, requires_grad=True),
+                               torch.randn(S, S, requires_grad=True))
+            f = lambda a, b: torch.cdist(a, b, p)
+            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+            run_functional_checks(self, "test_cdist", "cdist", f,
+                                  True, f_args_variable, f_args_tensor)
+            self.assertTrue(gradcheck(f, f_args_variable, eps=1e-6, atol=PRECISION))
+
     def test_cat_empty(self):
         f_args_variable = (torch.randn(0, S, requires_grad=True),
                            torch.randn(S, S, requires_grad=True))
