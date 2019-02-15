@@ -886,9 +886,9 @@ class TestJit(JitTestCase):
         traced = torch.jit.trace(f, (x,))
         f(x)
         graph = traced.graph_for(x)
-        # There should be 4 int constants for the right sides of operators, plus two
-        # for alpha arguments for add and sub
-        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
+        # There should be 4 int constants for the right sides of operators, plus one
+        # for the alpha argument for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant') == 5)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -3970,6 +3970,24 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear_empty, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -4979,6 +4997,39 @@ a")
                     self.assertEqual(a.device, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking)").device)
                     self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32)").dtype)
                     self.assertEqual(b.device, s(b, "t.to(dtype=torch.int32)").device)
+
+        # Test AD: aten::to(Tensor self, int dtype, bool non_blocking, bool copy) -> Tensor
+        t = torch.tensor(5).float().requires_grad_()
+        out_ref = t.to(torch.float32)
+        out = s(t, "t.to(torch.float32)")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Device? device, int? dtype, bool non_blocking, bool copy) -> Tensor
+        out_ref = t.to('cpu')
+        out = s(t, "t.to('cpu')")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Tensor other, bool non_blocking, bool copy) -> Tensor
+        @torch.jit.script
+        def func2(t, t_ref):
+            return t.to(t_ref)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        t_ref = torch.tensor(4).double()
+        out_ref = t.to(t_ref)
+        out = func2(t, t_ref)
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_tensor_number_math_cuda(self):
@@ -10619,6 +10670,7 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',
@@ -11820,10 +11872,9 @@ class TestCustomOperators(JitTestCase):
         input = torch.ones(5, 5)
         trace = torch.jit.trace(torch.ops.aten.relu, [input])
         self.assertExpectedInline(canonical(trace.graph), '''\
-graph(%0 : Double(5, 5)) {
+graph(%0 : Double(5, 5)):
   %1 : Double(5, 5) = aten::relu(%0)
-  return (%1);
-}
+  return (%1)
 ''')
 
     def test_script_graph_contains_custom_op(self):
@@ -11831,10 +11882,9 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : Tensor = aten::relu(%x)
-  return (%1);
-}
+  return (%1)
 ''')
 
 
@@ -12708,6 +12758,51 @@ class TestAsync(JitTestCase):
         # smoke test for ONNX export
         f = io.BytesIO()
         torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
+    def test_save_load_with_extra_files(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return a
+
+        expected_extra_files = torch._C.ExtraFilesMap()
+        expected_extra_files['foo'] = 'bar'
+        m = MyMod()
+
+        # Save to file.
+        with TemporaryFileName() as fname:
+            m.save(fname, _extra_files=expected_extra_files)
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+            # Use torch.jit API
+            torch.jit.save(m, fname, _extra_files=expected_extra_files)
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+        # Save to buffer.
+        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Use torch.jit API
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
+        buffer.seek(0)
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Non-existent file 'bar'
+        with self.assertRaises(RuntimeError):
+            extra_files['bar'] = ''
+            torch.jit.load(buffer, _extra_files=extra_files)
 
 
 for test in autograd_method_tests():

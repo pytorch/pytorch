@@ -1,4 +1,4 @@
-graph() {
+graph():
   %0 : int = prim::Constant[value=1]()
   %1 : Device = prim::Constant[value="cpu"]()
   %2 : int = prim::Constant[value=0]()
@@ -17,14 +17,11 @@ graph() {
   %15 : Tensor = aten::gt(%a.2, %14)
   %16 : bool = prim::Bool(%15)
   %b : Tensor = prim::If(%16)
-    block0() {
+    block0():
       %18 : int[] = prim::ListConstruct(%4, %5)
       %19 : Tensor = aten::rand(%18, %3, %2, %1)
       %b.2 : Tensor = aten::add_(%b.1, %19, %0)
       -> (%b.2)
-    }
-    block1() {
+    block1():
       -> (%b.1)
-    }
-  return (%b);
-}
+  return (%b)

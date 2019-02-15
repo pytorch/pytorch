@@ -85,57 +85,36 @@ uint64_t OnnxifiDataType(caffe2::TensorProto::DataType t) {
 #undef CAFFE2_TO_ONNXIFI_TYPE
 }
 
-// TODO: Use ShapeInfo instead of shape
 ShapeInfoMap InferShapes(
     Workspace* ws,
     NetDef* pred_net,
-    CaffeMap<std::string, TensorShape>* shape_hints_ordered,
-    bool infer_shapes,
+    std::unordered_map<std::string, TensorShape>* shape_hints_mapped,
     const BoundShapeSpec& spec) {
   ShapeInfoMap shape_map;
-  if (infer_shapes) {
-    // Populate shapes from workplace
-    const std::vector<std::string> ws_blobs = ws->Blobs();
-    for (const auto& s : ws_blobs) {
-      auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
-      if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
-        shape_map[s] = shape_info;
-      }
-    }
-    for (const auto& kv : *shape_hints_ordered) {
-      shape_map.emplace(
-          std::piecewise_construct,
-          std::forward_as_tuple(kv.first),
-          std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, kv.second));
-    }
-    BoundShapeInferencer eng(spec);
-    eng.InferBoundShapeAndType(*pred_net, shape_map);
-    const auto& out_map = eng.shape_info();
-
-    for (const auto& kv : out_map) {
-      shape_map.emplace(
-          std::piecewise_construct,
-          std::forward_as_tuple(kv.first),
-          std::forward_as_tuple(kv.second.dim_type, kv.second.shape));
-    }
-  } else {
-    // TODO: deprecate this path
-    Workspace ws_local(ws);
-    ws_local.RunNetOnce(*pred_net);
-    const std::vector<std::string> ws_blobs = ws_local.Blobs();
-    for (const auto& s : ws_blobs) {
-      const Blob* b = ws_local.GetBlob(s);
-      auto shape = GetTensorShapeOfBlob(b);
-      if (!shape.unknown_shape()) {
-        shape_map.emplace(
-            std::piecewise_construct,
-            std::forward_as_tuple(s),
-            std::forward_as_tuple(
-                ShapeInfo::DimType::CONSTANT, std::move(shape)));
-      }
+  // Populate shapes from workplace
+  const std::vector<std::string> ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
+    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+      shape_map[s] = shape_info;
     }
   }
+  for (const auto& kv : *shape_hints_mapped) {
+    shape_map.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(kv.first),
+        std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, kv.second));
+  }
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(*pred_net, shape_map);
+  const auto& out_map = eng.shape_info();
 
+  for (const auto& kv : out_map) {
+    shape_map.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(kv.first),
+        std::forward_as_tuple(kv.second.dim_type, kv.second.shape));
+  }
   return shape_map;
 }
 
@@ -724,7 +703,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   return net_opt;
 }
 
-CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
+std::unordered_map<std::string, TensorShape>
+OnnxifiTransformer::SsaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
@@ -743,31 +723,36 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net, weights);
   // Annote the ops with net position
   AnnotateOpIndex(pred_net);
-  std::vector<std::string> external_inputs;
+
   // Need to add mapping for weights. This will be used to create new workspace
   // with mapped weights.
   for (const auto& w : weights) {
     input_mapping_.emplace(w, w);
   }
+
+  // Since we are going to create a mapped workspace, we need to make sure that
+  // the parent workspace has the mapped blob names. If the blobs don't exist
+  // (usually such blobs are input tensor names), we exclude them from mapping.
+  std::vector<std::string> exclude_mapping;
   for (const auto kv : input_mapping_) {
     reverse_input_mapping_.emplace(kv.second, kv.first);
     if (!ws->HasBlob(kv.second)) {
-      external_inputs.emplace_back(kv.first);
+      exclude_mapping.emplace_back(kv.first);
     }
   }
-  for (const auto& i : external_inputs) {
+  for (const auto& i : exclude_mapping) {
     input_mapping_.erase(i);
   }
-  CaffeMap<std::string, TensorShape> shape_hints_ordered;
+  std::unordered_map<std::string, TensorShape> shape_hints_mapped;
   for (const auto& kv : input_shape_hints) {
     const auto it = reverse_input_mapping_.find(kv.first);
     if (it != reverse_input_mapping_.end()) {
-      shape_hints_ordered.emplace(it->second, kv.second);
+      shape_hints_mapped.emplace(it->second, kv.second);
     } else {
-      shape_hints_ordered.emplace(kv.first, kv.second);
+      shape_hints_mapped.emplace(kv.first, kv.second);
     }
   }
-  return shape_hints_ordered;
+  return shape_hints_mapped;
 }
 
 NetDef OnnxifiTransformer::TransformViaC2(
@@ -996,7 +981,6 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
 void OnnxifiTransformer::Transform(
     Workspace* ws,
     NetDef* pred_net,
-    const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& weight_names,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
@@ -1011,17 +995,13 @@ void OnnxifiTransformer::Transform(
       weight_names.begin(), weight_names.end());
 
   // SSA Rewrite the net
-  auto shape_hints_ordered =
+  auto shape_hints_mapped =
       SsaRewriteAndMapNames(ws, pred_net, weights, input_shape_hints);
 
   // Populate shape info
   Workspace mapped_ws(ws, input_mapping_);
   ShapeInfoMap shape_hints = InferShapes(
-      &mapped_ws,
-      pred_net,
-      &shape_hints_ordered,
-      opts_.infer_shapes,
-      opts_.bound_shape_spec);
+      &mapped_ws, pred_net, &shape_hints_mapped, opts_.bound_shape_spec);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx

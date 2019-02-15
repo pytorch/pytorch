@@ -1003,6 +1003,17 @@ Operation listAppend(const Node* node) {
   };
 }
 
+template <typename TList>
+int listClear(Stack& stack) {
+  TList a;
+  pop(stack, a);
+
+  a->elements().clear();
+  push(stack, a);
+
+  return 0;
+}
+
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1289,7 +1300,10 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
           " el) -> " decl_type "[](a!)",                                    \
-          listSetItem<Shared<c_type>, c_type::ElemType>)
+          listSetItem<Shared<c_type>, c_type::ElemType>),                   \
+      Operator(                                                             \
+          "aten::clear( " decl_type "[](a!) self) -> ()",                   \
+          listClear<Shared<c_type>>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1305,7 +1319,10 @@ RegisterOperators reg2({
       Operator(                                                        \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
           " el) -> " decl_type "[](a!)",                               \
-          listSetItem<Shared<c_type>, c_type::ElemType>)
+          listSetItem<Shared<c_type>, c_type::ElemType>),              \
+      Operator(                                                        \
+          "aten::clear( " decl_type "[](a!) self) -> ()",              \
+          listClear<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
