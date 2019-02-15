@@ -92,66 +92,159 @@ echo "Now at the bottom of the script."
 EOL
 
 cat >$TMP_DIR/ci_scripts/test_python_nn.bat <<EOL
+
+
+echo "KARL: runnin test_python_nn.bat"
+
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
+
+
 :: Some smoke tests
+echo "KARL: A1"
 cd test/
+
 :: Checking that caffe2.python is available
+echo "KARL: A2"
 python -c "from caffe2.python import core"
+
+echo "KARL: A3"
+
 if ERRORLEVEL 1 exit /b 1
+
+echo "KARL: A4"
+
 :: Checking that MKL is available
 python -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
+
+echo "KARL: A5"
+
 if ERRORLEVEL 1 exit /b 1
+
+echo "KARL: A6"
+
 :: Checking that CUDA archs are setup correctly
 python -c "import torch; torch.randn([3,5]).cuda()"
+
+echo "KARL: A7"
+
 if ERRORLEVEL 1 exit /b 1
 :: Checking that magma is available
+
+echo "KARL: A8"
+
 python -c "import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)"
+
+echo "KARL: A9"
+
 if ERRORLEVEL 1 exit /b 1
+
+echo "KARL: A10"
+
 :: Checking that CuDNN is available
 python -c "import torch; exit(0 if torch.backends.cudnn.is_available() else 1)"
+
+echo "KARL: A11"
+
 if ERRORLEVEL 1 exit /b 1
+
+echo "KARL: A12"
+
 cd ..
 
+
+echo "KARL: A13"
 :: Run nn tests
 cd test/ && python run_test.py --include nn --verbose && cd ..
+
+echo "KARL: A14"
+
 EOL
 
 cat >$TMP_DIR/ci_scripts/test_python_all_except_nn.bat <<EOL
+
+
+echo "KARL: C1"
+
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
+
+
+echo "KARL: C2"
+
 cd test/ && python run_test.py --exclude nn --verbose && cd ..
+
+
+echo "KARL: C3"
 EOL
 
 cat >$TMP_DIR/ci_scripts/test_custom_script_ops.bat <<EOL
+
+
+echo "KARL: D1"
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
 
+echo "KARL: D2"
 cd test/custom_operator
 
+
+echo "KARL: D3"
 :: Build the custom operator library.
 mkdir build
 cd build
+
+
+echo "KARL: D4"
 :: Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
 cmake -DCMAKE_PREFIX_PATH=%TMP_DIR_WIN%\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..
+
+echo "KARL: D5"
 ninja -v
+
+
+echo "KARL: D6"
 cd ..
 
 :: Run tests Python-side and export a script module.
 python test_custom_ops.py -v
+
+echo "KARL: D7"
+
 python model.py --export-script-module="build/model.pt"
+
+
+echo "KARL: D8"
 :: Run tests C++-side and load the exported script module.
 cd build
+
+echo "KARL: D9"
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%TMP_DIR_WIN%\\build\\torch\\lib;%PATH%
 test_custom_ops.exe model.pt
+
+echo "KARL: D10"
+
 EOL
 
 cat >$TMP_DIR/ci_scripts/test_libtorch.bat <<EOL
+
+
+echo "KARL: E1"
+
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
+
+
+echo "KARL: E2"
+
 dir
 dir %TMP_DIR_WIN%\\build
 dir %TMP_DIR_WIN%\\build\\torch
 dir %TMP_DIR_WIN%\\build\\torch\\lib
 cd %TMP_DIR_WIN%\\build\\torch\\lib
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%TMP_DIR_WIN%\\build\\torch\\lib;%PATH%
+
+
+echo "KARL: E3"
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
+
+echo "KARL: E4"
 EOL
 
 run_tests() {
@@ -163,10 +256,18 @@ run_tests() {
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
+
+            echo "KARL: B1"
+
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+
+            echo "KARL: B2"
+
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat
+
+            echo "KARL: B3"
         fi
     fi
 }
