@@ -121,9 +121,8 @@ class TimerInstance {
 };
 
 struct TimerBeginOp : public Operator<CPUContext> {
-  template <class... Args>
-  explicit TimerBeginOp(Args&&... args)
-      : Operator(std::forward<Args>(args)...),
+  explicit TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws),
         given_name_(GetSingleArgument<std::string>(
             "counter_name",
             operator_def.output().Get(0))),
