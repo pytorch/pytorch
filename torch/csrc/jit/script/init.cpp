@@ -906,7 +906,6 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         auto lookup = [&](const std::vector<std::string>& names) {
-          AutoGIL gil;
           return py::cast<std::shared_ptr<script::Module>>(
               module_lookup(names));
         };
