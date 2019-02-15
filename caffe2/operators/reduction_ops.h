@@ -18,9 +18,8 @@ class SumElementsOp : public Operator<Context> {
   explicit SumElementsOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
-  template <class... Args>
-  explicit SumElementsOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...), average_(average) {}
+  explicit SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
+      : Operator<Context>(operator_def, ws), average_(average) {}
   ~SumElementsOp() {}
 
   bool RunOnDevice() override {
@@ -81,9 +80,8 @@ class SumElementsGradientOp : public Operator<Context> {
   explicit SumElementsGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
-  template <class... Args>
-  explicit SumElementsGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...), average_(average) {}
+  explicit SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws, bool average)
+      : Operator<Context>(operator_def, ws), average_(average) {}
   ~SumElementsGradientOp() {}
 
   bool RunOnDevice() override;

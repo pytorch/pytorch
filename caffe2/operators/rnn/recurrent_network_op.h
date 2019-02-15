@@ -182,9 +182,8 @@ template <class Context>
 class RecurrentNetworkOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit RecurrentNetworkOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit RecurrentNetworkOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
         enable_rnn_executor_(this->template GetSingleArgument<bool>(
             "enable_rnn_executor",
@@ -417,9 +416,8 @@ template <class Context>
 class RecurrentNetworkGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit RecurrentNetworkGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit RecurrentNetworkGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         sharedWs_(ws),
         enable_rnn_executor_(this->template GetSingleArgument<bool>(
             "enable_rnn_executor",
