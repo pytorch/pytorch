@@ -113,6 +113,16 @@ if ERRORLEVEL 1 exit /b 1
 
 echo "KARL: A4"
 
+
+:: Checking that torch is importable
+python -c "import torch"
+
+echo "KARL: A4.4"
+
+if ERRORLEVEL 1 exit /b 1
+
+echo "KARL: A4.5"
+
 :: Checking that MKL is available
 python -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
 
@@ -257,17 +267,11 @@ run_tests() {
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
 
-            echo "KARL: B1"
-
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-
-            echo "KARL: B2"
 
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat
-
-            echo "KARL: B3"
         fi
     fi
 }
