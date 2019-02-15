@@ -72,9 +72,8 @@ class PrintOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
-  template <class... Args>
-  explicit PrintOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit PrintOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         tensor_printer_(
             operator_def.input(0),
             this->template GetSingleArgument<int>("to_file", 0)
