@@ -127,7 +127,7 @@ class DataParallel(Module):
         if not all(t.is_cuda and t.device.index == device_ids[0]
                    for t in chain(module.parameters(), module.buffers())):
             raise RuntimeError("module must have its parameters and buffers "
-                               "on device %d (device_ids[0])"%device_ids[0])
+                               "on device %d (device_ids[0])" % device_ids[0])
 
         self.dim = dim
         self.module = module

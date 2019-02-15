@@ -3357,11 +3357,11 @@ class TestNN(NNTestCase):
         l = nn.Linear(2, 2)
         error_msg = "module must have its parameters and buffers on device %d "
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(0), lambda: nn.DataParallel(l))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l))
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(0), lambda: nn.DataParallel(l.cuda(1)))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1)))
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(1),
+            RuntimeError, error_msg % (1),
             lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0]))
 
         nn.DataParallel(l.cuda())
@@ -3369,17 +3369,17 @@ class TestNN(NNTestCase):
 
         s = nn.Sequential(l.cpu())
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
 
         s = nn.Sequential(deepcopy(l), l.cuda())
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
         self.assertRaisesRegex(
-            RuntimeError, error_msg%(1),
+            RuntimeError, error_msg % (1),
             lambda: nn.DataParallel(s, device_ids=[1, 0]))
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
