@@ -895,7 +895,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def(
       "import_ir_module",
-      [](ModuleLookup module_lookup,
+      [](py::function module_lookup,
          const std::string& filename,
          py::object map_location,
          ExtraFilesMap& extra_files) {
@@ -906,8 +906,9 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         auto lookup = [&](const std::vector<std::string>& names) {
-          AutoNoGIL gil;
-          return module_lookup(names);
+          AutoGIL gil;
+          return py::cast<std::shared_ptr<script::Module>>(
+              module_lookup(names));
         };
         import_ir_module(lookup, filename, optional_device, extra_files);
       });
