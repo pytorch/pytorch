@@ -471,17 +471,13 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  if (checkTrilTriuBatchContiguous(self)) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
-      apply_triu_tril<scalar_t, true, false>(self, self, k);
-    });
-  } else {
-    Tensor result = at::empty_like(self);
-    AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
-      apply_triu_tril<scalar_t, false, false>(result, self.contiguous(), k);
-    });
-    self.copy_(result);
-  }
+  bool inplace = checkTrilTriuBatchContiguous(self);
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor result = inplace ? self : at::empty_like(self);
+  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
+    apply_triu_tril<scalar_t, inplace, false>(result, self_c, k);
+  });
+  if (!inplace) self.copy_(result);
   return self;
 }
 
@@ -509,17 +505,13 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  if (checkTrilTriuBatchContiguous(self)) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
-      apply_triu_tril<scalar_t, true, true>(self, self, k);
-    });
-  } else {
-    Tensor result = at::empty_like(self);
-    AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
-      apply_triu_tril<scalar_t, false, true>(result, self.contiguous(), k);
-    });
-    self.copy_(result);
-  }
+  bool inplace = checkTrilTriuBatchContiguous(self);
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  Tensor result = inplace ? self : at::empty_like(self);
+  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
+    apply_triu_tril<scalar_t, inplace, true>(result, self_c, k);
+  });
+  if (!inplace) self.copy_(result);
   return self;
 }
 
