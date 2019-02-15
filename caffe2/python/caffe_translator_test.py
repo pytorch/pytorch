@@ -32,9 +32,6 @@ import unittest
 class TestNumericalEquivalence(test_util.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Do nothing if caffe and test data is not found
-        if not (CAFFE_FOUND and os.path.exists('data/testdata/caffe_translator')):
-            return
         # We will do all the computation stuff in the global space.
         caffenet = caffe_pb2.NetParameter()
         caffenet_pretrained = caffe_pb2.NetParameter()
