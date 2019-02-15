@@ -1009,8 +1009,6 @@ int listClear(Stack& stack) {
   pop(stack, a);
 
   a->elements().clear();
-  push(stack, a);
-
   return 0;
 }
 
