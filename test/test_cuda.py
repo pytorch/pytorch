@@ -903,24 +903,29 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_copy_non_default_stream(self):
+        def _test_copy(self, x, y, output):
+            s0 = torch.cuda.Stream()
+            with torch.cuda.stream(s0):
+                torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+                y.copy_(x + 1, non_blocking=True)
+
+            s1 = torch.cuda.Stream()
+            with torch.cuda.stream(s1):
+                y.copy_(x, non_blocking=True)
+
+            s0.synchronize()
+            s1.synchronize()
+            self.assertEqual(y, output)
+
         d0 = torch.device('cuda:0')
         x0 = torch.zeros(5, 5, device=d0)
 
         d1 = torch.device('cuda:1')
         x1 = torch.zeros(5, 5, device=d1)
-        s0 = torch.cuda.Stream()
-        with torch.cuda.stream(s0):
-            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
-            x1.copy_(x0 + 1)
+        _test_copy(self, x0, x1, torch.zeros(5, 5, device=d1))
 
-        s1 = torch.cuda.Stream()
-        with torch.cuda.stream(s1):
-            x1.copy_(x0, non_blocking=True)
-            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
-
-        s0.synchronize()
-        s1.synchronize()
-        self.assertEqual(x1, torch.zeros(5, 5, device=d1))
+        x2 = torch.zeros(5, 5, device=d0)
+        _test_copy(self, x0, x2, torch.ones(5, 5, device=d1))
 
     def test_copy_non_blocking(self):
         x = torch.randn(5, 5).cuda()
