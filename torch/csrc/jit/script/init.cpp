@@ -175,7 +175,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << kind() << " cannot be used as a tuple";
-    if (type_str == "ModuleList" || type_str == "Sequential") {
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
       ss << ". Did you forget to add it to __constants__? ";
     }
     throw ErrorReport(loc) << ss.str();
