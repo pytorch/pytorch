@@ -30,7 +30,6 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_dnnlowp_acc16_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_fake_lowp_op.cc"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_rowwise_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/group_norm_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/lstm_unit_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/pool_dnnlowp_op.cc"

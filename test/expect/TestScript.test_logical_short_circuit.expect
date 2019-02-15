@@ -1,39 +1,30 @@
-graph(%t : Tensor) {
+graph(%t : Tensor):
   %1 : bool = prim::Constant[value=1]()
   %2 : bool = prim::Constant[value=0]()
   %c1.1 : int = prim::Constant[value=1]()
   %4 : int = prim::Constant[value=0]()
   %5 : bool = prim::If(%2)
-    block0() {
+    block0():
       %6 : Tensor = aten::select(%t, %4, %c1.1)
       %7 : bool = prim::Bool(%6)
       -> (%7)
-    }
-    block1() {
+    block1():
       -> (%2)
-    }
   %8 : bool = prim::If(%5)
-    block0() {
+    block0():
       -> (%5)
-    }
-    block1() {
+    block1():
       %9 : bool = prim::If(%1)
-        block0() {
+        block0():
           -> (%1)
-        }
-        block1() {
+        block1():
           %10 : Tensor = aten::select(%t, %4, %c1.1)
           %11 : bool = prim::Bool(%10)
           -> (%11)
-        }
       -> (%9)
-    }
   %c1 : int = prim::If(%8)
-    block0() {
+    block0():
       -> (%4)
-    }
-    block1() {
+    block1():
       -> (%c1.1)
-    }
-  return (%c1);
-}
+  return (%c1)

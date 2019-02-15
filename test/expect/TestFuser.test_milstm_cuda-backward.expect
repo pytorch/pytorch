@@ -1,71 +1,70 @@
-graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : UndefinedTensor
-      %3 : UndefinedTensor
-      %4 : UndefinedTensor
-      %5 : UndefinedTensor
-      %6 : UndefinedTensor
-      %7 : UndefinedTensor
-      %8 : UndefinedTensor
-      %9 : UndefinedTensor
-      %10 : Float(*, *)
-      %11 : Float(*)
-      %12 : Float(*)
-      %13 : Float(*)
-      %14 : Float(*, *)
-      %15 : Float(*, *)
-      %Wx : Float(*, *)
-      %Uz : Float(*, *)
-      %18 : Float(*, *)
-      %19 : int[]
-      %20 : int[]
-      %21 : int[]
-      %22 : int[]
-      %23 : int[]
-      %24 : int[]
-      %ingate : Float(*, *)
-      %forgetgate : Float(*, *)
-      %cellgate : Float(*, *)
-      %outgate : Float(*, *)
-      %29 : int[]
-      %30 : int[]
-      %31 : Float(*, *)) {
-  %32 : int = prim::Constant[value=1]()
-  %33 : int[] = aten::size(%outgate)
-  %34 : int[] = aten::size(%31)
-  %35 : int[] = aten::size(%ingate)
-  %36 : int[] = aten::size(%cellgate)
-  %37 : int[] = aten::size(%forgetgate)
-  %38 : Tensor = prim::FusionGroup_0(%outgate, %0, %31, %33)
-  %39 : Tensor, %40 : Tensor, %41 : Tensor = prim::FusionGroup_1(%10, %ingate, %cellgate, %1, %31, %0, %outgate, %forgetgate, %37, %29, %36, %35, %30, %34)
-  %42 : Tensor[] = prim::ListConstruct(%41, %39, %40, %38)
-  %43 : Tensor = aten::cat(%42, %32)
-  %44 : Tensor = aten::_grad_sum_to_size(%43, %24)
-  %45 : Tensor = aten::_grad_sum_to_size(%43, %22)
-  %46 : int[] = aten::size(%11)
-  %grad_self.7 : Tensor = prim::FusionGroup_2(%45, %Uz, %46)
-  %48 : int[] = aten::size(%Uz)
-  %49 : Tensor = aten::_grad_sum_to_size(%43, %19)
-  %50 : Tensor = aten::_grad_sum_to_size(%43, %20)
-  %51 : int[] = aten::size(%12)
-  %grad_self.9 : Tensor = prim::FusionGroup_3(%50, %Wx, %51)
-  %53 : int[] = aten::size(%Wx)
-  %54 : int[] = aten::size(%18)
-  %55 : Tensor = prim::FusionGroup_4(%49, %18, %45, %11, %48)
-  %56 : int[] = aten::size(%13)
-  %grad_self.13 : Tensor, %58 : Tensor = prim::FusionGroup_5(%Wx, %13, %49, %Uz, %50, %12, %56, %53, %54)
+graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : UndefinedTensor,
+      %3 : UndefinedTensor,
+      %4 : UndefinedTensor,
+      %5 : UndefinedTensor,
+      %6 : UndefinedTensor,
+      %7 : UndefinedTensor,
+      %8 : UndefinedTensor,
+      %9 : UndefinedTensor,
+      %10 : Float(*, *),
+      %11 : Float(*),
+      %12 : Float(*),
+      %13 : Float(*),
+      %14 : Float(*, *),
+      %15 : Float(*, *),
+      %Wx : Float(*, *),
+      %Uz : Float(*, *),
+      %18 : Float(*, *),
+      %self_size.13 : int[],
+      %other_size.13 : int[],
+      %self_size.11 : int[],
+      %other_size.11 : int[],
+      %self_size.9 : int[],
+      %24 : int[],
+      %25 : int[],
+      %self_size.7 : int[],
+      %27 : int[],
+      %28 : int[],
+      %29 : int[],
+      %30 : int[],
+      %ingate : Float(*, *),
+      %forgetgate : Float(*, *),
+      %cellgate : Float(*, *),
+      %outgate : Float(*, *),
+      %self_size.5 : int[],
+      %self_size.3 : int[],
+      %other_size.3 : int[],
+      %38 : int[],
+      %39 : int[],
+      %40 : Float(*, *),
+      %self_size.1 : int[],
+      %other_size.1 : int[]):
+  %43 : int = prim::Constant[value=1]()
+  %44 : Tensor = prim::FusionGroup_0(%outgate, %0, %40, %self_size.1)
+  %45 : Tensor, %46 : Tensor, %47 : Tensor = prim::FusionGroup_1(%10, %ingate, %cellgate, %1, %40, %0, %outgate, %forgetgate, %self_size.5, %38, %other_size.3, %self_size.3, %39, %other_size.1)
+  %48 : Tensor[] = prim::ListConstruct(%47, %45, %46, %44)
+  %49 : Tensor = aten::cat(%48, %43)
+  %50 : Tensor = aten::_grad_sum_to_size(%49, %30)
+  %51 : Tensor = aten::_grad_sum_to_size(%49, %28)
+  %grad_self.7 : Tensor = prim::FusionGroup_2(%51, %Uz, %self_size.7)
+  %53 : Tensor = aten::_grad_sum_to_size(%49, %24)
+  %54 : Tensor = aten::_grad_sum_to_size(%49, %25)
+  %grad_self.9 : Tensor = prim::FusionGroup_3(%54, %Wx, %self_size.9)
+  %56 : Tensor = prim::FusionGroup_4(%53, %18, %51, %11, %other_size.11)
+  %grad_self.13 : Tensor, %58 : Tensor = prim::FusionGroup_5(%Wx, %13, %53, %Uz, %54, %12, %self_size.13, %other_size.13, %self_size.11)
   %59 : Float(*, *) = aten::t(%14)
-  %60 : Float(*, *) = aten::mm(%59, %55)
-  %61 : Float(*, *) = aten::t(%60)
+  %60 : Float(*, *) = aten::mm(%59, %56)
+  %grad_self.15 : Float(*, *) = aten::t(%60)
   %62 : Float(*, *) = aten::t(%15)
   %63 : Float(*, *) = aten::mm(%62, %58)
-  %64 : Float(*, *) = aten::t(%63)
-  return (%44, %grad_self.7, %grad_self.9, %grad_self.13, %61, %64);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : Float(*, *)
-      %3 : int[]) {
+  %grad_self.17 : Float(*, *) = aten::t(%63)
+  return (%50, %grad_self.7, %grad_self.9, %grad_self.13, %grad_self.15, %grad_self.17)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : Float(*, *),
+      %3 : int[]):
   %4 : int = prim::Constant[value=1]()
   %5 : Float(*, *) = aten::mul(%1, %2)
   %grad_self.1 : Tensor = aten::_grad_sum_to_size(%5, %3)
@@ -73,22 +72,21 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %8 : Float(*, *) = aten::add(%7, %4, %4)
   %9 : Float(*, *) = aten::mul(%8, %0)
   %10 : Tensor = aten::mul(%9, %grad_self.1)
-  return (%10);
-}
-with prim::FusionGroup_1 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : Float(*, *)
-      %3 : Float(*, *)
-      %4 : Float(*, *)
-      %5 : Float(*, *)
-      %6 : Float(*, *)
-      %7 : Float(*, *)
-      %8 : int[]
-      %9 : int[]
-      %10 : int[]
-      %11 : int[]
-      %12 : int[]
-      %13 : int[]) {
+  return (%10)
+with prim::FusionGroup_1 = graph(%0 : Float(*, *),
+      %1 : Float(*, *),
+      %2 : Float(*, *),
+      %3 : Float(*, *),
+      %4 : Float(*, *),
+      %5 : Float(*, *),
+      %6 : Float(*, *),
+      %7 : Float(*, *),
+      %8 : int[],
+      %9 : int[],
+      %10 : int[],
+      %11 : int[],
+      %12 : int[],
+      %13 : int[]):
   %14 : int = prim::Constant[value=1]()
   %15 : Float(*, *) = aten::neg(%7)
   %16 : Float(*, *) = aten::add(%15, %14, %14)
@@ -117,44 +115,40 @@ with prim::FusionGroup_1 = graph(%0 : Float(*, *)
   %39 : Tensor = aten::mul(%38, %0)
   %grad_self.5 : Tensor = aten::_grad_sum_to_size(%39, %8)
   %41 : Tensor = aten::mul(%17, %grad_self.5)
-  return (%41, %37, %34);
-}
-with prim::FusionGroup_2 = graph(%0 : Tensor
-      %1 : Float(*, *)
-      %2 : int[]) {
+  return (%41, %37, %34)
+with prim::FusionGroup_2 = graph(%0 : Tensor,
+      %1 : Float(*, *),
+      %2 : int[]):
   %3 : Tensor = aten::mul(%0, %1)
   %grad_self.7 : Tensor = aten::_grad_sum_to_size(%3, %2)
-  return (%grad_self.7);
-}
-with prim::FusionGroup_3 = graph(%0 : Tensor
-      %1 : Float(*, *)
-      %2 : int[]) {
+  return (%grad_self.7)
+with prim::FusionGroup_3 = graph(%0 : Tensor,
+      %1 : Float(*, *),
+      %2 : int[]):
   %3 : Tensor = aten::mul(%0, %1)
   %grad_self.9 : Tensor = aten::_grad_sum_to_size(%3, %2)
-  return (%grad_self.9);
-}
-with prim::FusionGroup_4 = graph(%0 : Tensor
-      %1 : Float(*, *)
-      %2 : Tensor
-      %3 : Float(*)
-      %4 : int[]) {
+  return (%grad_self.9)
+with prim::FusionGroup_4 = graph(%0 : Tensor,
+      %1 : Float(*, *),
+      %2 : Tensor,
+      %3 : Float(*),
+      %4 : int[]):
   %5 : int = prim::Constant[value=1]()
   %6 : Tensor = aten::mul(%2, %3)
   %grad_other.7 : Tensor = aten::_grad_sum_to_size(%6, %4)
   %8 : Tensor = aten::mul(%0, %1)
   %grad_other.11 : Tensor = aten::_grad_sum_to_size(%8, %4)
   %10 : Tensor = aten::add(%grad_other.7, %grad_other.11, %5)
-  return (%10);
-}
-with prim::FusionGroup_5 = graph(%0 : Float(*, *)
-      %1 : Float(*)
-      %2 : Tensor
-      %3 : Float(*, *)
-      %4 : Tensor
-      %5 : Float(*)
-      %6 : int[]
-      %7 : int[]
-      %8 : int[]) {
+  return (%10)
+with prim::FusionGroup_5 = graph(%0 : Float(*, *),
+      %1 : Float(*),
+      %2 : Tensor,
+      %3 : Float(*, *),
+      %4 : Tensor,
+      %5 : Float(*),
+      %6 : int[],
+      %7 : int[],
+      %8 : int[]):
   %9 : int = prim::Constant[value=1]()
   %10 : Tensor = aten::mul(%4, %5)
   %grad_other.9 : Tensor = aten::_grad_sum_to_size(%10, %7)
@@ -165,5 +159,4 @@ with prim::FusionGroup_5 = graph(%0 : Float(*, *)
   %16 : Tensor = aten::add(%grad_other.9, %grad_other.13, %9)
   %17 : Tensor = aten::mul(%grad_self.11, %0)
   %grad_self.13 : Tensor = aten::_grad_sum_to_size(%17, %6)
-  return (%grad_self.13, %16);
-}
+  return (%grad_self.13, %16)

@@ -452,7 +452,7 @@
   self: zeros_like(grad)
 
 - name: logsumexp(Tensor self, IntArrayRef dim, bool keepdim)
-  self: logsumexp_backward(grad, self, result, dim, keepdim)
+  self: at::logsumexp_backward(grad, self, result, dim, keepdim)
 
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -495,13 +495,13 @@
   self: grad.expand(self.sizes()).to(self.type().scalarType()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim) / at::_safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType()) / at::_safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType()) / at::_safe_size(self.sizes(), dim)
 
 - name: median(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -1061,8 +1061,8 @@
 - name: upsample_nearest3d(Tensor self, IntArrayRef output_size)
   self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
-- name: adaptive_avg_pool2d(Tensor self, IntArrayRef output_size)
-  self: adaptive_avg_pool2d_backward(grad, self)
+- name: _adaptive_avg_pool2d(Tensor self, IntArrayRef output_size)
+  self: _adaptive_avg_pool2d_backward(grad, self)
 
 - name: adaptive_avg_pool3d(Tensor self, IntArrayRef output_size)
   self: adaptive_avg_pool3d_backward(grad, self)
@@ -1148,8 +1148,8 @@
 
 # NN double backwards support
 
-- name: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
-  grad_output: adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+- name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
+  grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
 - name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self)

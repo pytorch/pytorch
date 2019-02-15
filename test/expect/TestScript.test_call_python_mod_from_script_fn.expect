@@ -1,6 +1,5 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %2 : int = prim::Constant[value=1]()
   %1 : Tensor = ^<python_value>()(%x)
   %4 : Tensor = aten::add(%1, %2, %2)
-  return (%4);
-}
+  return (%4)
