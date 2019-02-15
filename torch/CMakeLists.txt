@@ -536,6 +536,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -545,7 +546,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     )
 
   set(TORCH_PYTHON_INCLUDE_DIRECTORIES
