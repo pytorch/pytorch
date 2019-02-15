@@ -2858,20 +2858,20 @@ Returns:
         index of last dimension indicated by the input, and 0 everywhere
         else.
 
-Examples::
-    >>> torch.one_hot(torch.arange(0, 5) % 3)
+Examples:
+    >>> F.one_hot(torch.arange(0, 5) % 3)
     tensor([[1, 0, 0],
             [0, 1, 0],
             [0, 0, 1],
             [1, 0, 0],
             [0, 1, 0]])
-    >>> torch.one_hot(torch.arange(0, 5) % 3, num_classes=5)
+    >>> F.one_hot(torch.arange(0, 5) % 3, num_classes=5)
     tensor([[1, 0, 0, 0, 0],
             [0, 1, 0, 0, 0],
             [0, 0, 1, 0, 0],
             [1, 0, 0, 0, 0],
             [0, 1, 0, 0, 0]])
-    >>> torch.one_hot(torch.arange(0, 6).view(3,2) % 3)
+    >>> F.one_hot(torch.arange(0, 6).view(3,2) % 3)
     tensor([[[1, 0, 0],
              [0, 1, 0]],
 
