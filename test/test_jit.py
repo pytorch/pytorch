@@ -10152,6 +10152,23 @@ a")
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_wrong_decorator(self):
+        with self.assertRaisesRegex(RuntimeError, "not a method"):
+            @torch.jit.script_method
+            def fn():
+                return 4
+
+
+        with self.assertRaisesRegex(RuntimeError, "not a function"):
+            class M(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.weight = torch.nn.Parameter(torch.randn(5, 5))
+
+                @torch.jit.script
+                def forward(self, x):
+                    return x
+
 
 class MnistNet(nn.Module):
     def __init__(self):

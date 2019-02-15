@@ -712,9 +712,21 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
+def _is_method(fn, frames_up=1):
+    frame = inspect.currentframe()
+    i = 0
+    while i < frames_up + 1:
+        frame = frame.f_back
+        i += 1
+    return '__init__' in frame.f_locals
+
+
 def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
+    if _is_method(fn):
+        raise RuntimeError("'{}' was not a function, ScriptModule methods should"
+                           " be annotated with '@torch.jit.script_method'".format(fn.__name__))
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
@@ -742,6 +754,9 @@ def script_method(fn, _rcb=None):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
+    if not _is_method(fn):
+        raise RuntimeError("'{}' was not a method, functions should be "
+                           "annotated with '@torch.jit.script'".format(fn.__name__))
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
