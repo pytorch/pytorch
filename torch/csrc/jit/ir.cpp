@@ -1318,10 +1318,11 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
+    TypePtr result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+      *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {
