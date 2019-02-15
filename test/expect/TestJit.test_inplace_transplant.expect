@@ -1,4 +1,4 @@
-graph(%0 : Double(1)) {
+graph(%0 : Double(1)):
   %1 : Double(1) = aten::clone(%0)
   %2 : Long() = prim::Constant[value={2}]()
   %3 : int = prim::Constant[value=1]()
@@ -6,5 +6,4 @@ graph(%0 : Double(1)) {
   %5 : Long() = prim::Constant[value={3}]()
   %6 : int = prim::Constant[value=1]()
   %7 : Double(1) = aten::add_(%4, %5, %6)
-  return (%7);
-}
+  return (%7)

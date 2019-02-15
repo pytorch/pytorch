@@ -1,6 +1,5 @@
-graph(%x : Double(3, 4)
-      %1 : Double(4, 3)) {
+graph(%x : Double(3, 4),
+      %1 : Double(4, 3)):
   %2 : Double(3, 4) = aten::neg(%x), scope: TracedModule
   %3 : Double(3, 3) = aten::mm(%2, %1), scope: TracedModule
-  return (%3);
-}
+  return (%3)

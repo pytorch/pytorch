@@ -186,6 +186,39 @@ class TestCaffe2Basic(DownloadingTestCase):
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
+    def test_fc(self):
+        X_fake = np.zeros((3, 1, 3, 1, 7), dtype=np.float32)
+        X = np.random.randn(5, 2, 3, 1, 7).astype(np.float32)
+        W = np.random.randn(11, 21).astype(np.float32)
+        B = np.random.randn(11).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-fc-net'
+        predict_net.external_input[:] = ['X', 'W', 'B']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'FC',
+                inputs=['X', 'W', 'B'],
+                outputs=['Y'],
+                axis=2,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X, W, B])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X_fake.shape),
+                'W': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[W.dtype], W.shape),
+                'B': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[B.dtype], B.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_gemm(self):
         # simple
         A = np.random.randn(3, 2).astype(np.float32)
@@ -473,6 +506,33 @@ class TestCaffe2Basic(DownloadingTestCase):
             op.ParseFromString(s)
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
+
+    def test_mergedim(self):
+        X = np.random.randn(2, 3, 1, 5).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-mergedim-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'MergeDim',
+                inputs=['X'],
+                outputs=['Y'],
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_tensor_filling_ops(self):
         for dtype in [

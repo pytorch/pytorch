@@ -1,8 +1,7 @@
-graph(%0 : Double(1, 3, 227, 227)
-      %1 : Double(64, 3, 11, 11)
-      %2 : Double(64)) {
+graph(%0 : Double(1, 3, 227, 227),
+      %1 : Double(64, 3, 11, 11),
+      %2 : Double(64)):
   %3 : Double(1, 64, 56, 56) = onnx::Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%0, %1, %2), scope: Net/Sequential[features]/Conv2d[0]
   %4 : Double(1, 64, 56, 56) = onnx::Relu(%3), scope: Net/Sequential[features]/ReLU[1]
   %5 : Double(1, 64, 27, 27) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%4), scope: Net/Sequential[features]/MaxPool2d[2]
-  return (%5);
-}
+  return (%5)
