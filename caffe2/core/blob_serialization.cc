@@ -31,7 +31,7 @@ namespace caffe2 {
 class StringSerializer : public BlobSerializerBase {
  public:
   StringSerializer() {}
-  ~StringSerializer() {}
+  ~StringSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.

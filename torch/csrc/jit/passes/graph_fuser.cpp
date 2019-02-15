@@ -1272,6 +1272,7 @@ bool trackSingleGradSumToSizeToOutputs(
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
       // add this used to be prim::AutogradAdd
   }};
 
