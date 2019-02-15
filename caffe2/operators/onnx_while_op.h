@@ -11,9 +11,8 @@ namespace caffe2 {
 template <class Context>
 class ONNXWhileOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit ONNXWhileOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit ONNXWhileOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         parent_ws_(ws),
         has_trip_count_(
             this->template GetSingleArgument<int64_t>("has_trip_count", 0)),
