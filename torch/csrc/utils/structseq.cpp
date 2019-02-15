@@ -38,9 +38,9 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         if (repr == NULL)
             return NULL;
 #if PY_MAJOR_VERSION == 2
-        crepr = PyUnicode_AsUTF8(repr);
-#else
         crepr = PyString_AsString(repr);
+#else
+        crepr = PyUnicode_AsUTF8(repr);
 #endif
         if (crepr == NULL) {
 #if PY_MAJOR_VERSION == 2
