@@ -107,12 +107,12 @@ def is_dict_like(data):
     return type(data) is dict or type(data) is OrderedDict
 
 
-FORCED_QUOTED_VALUE_KEYS = set(
+FORCED_QUOTED_VALUE_KEYS = {
     "DOCKER_IMAGE",
     "PYTHON_VERSION",
     "USE_CUDA_DOCKER_RUNTIME",
     "MULTI_GPU",
-)
+}
 
 
 def render_yaml(key, data, fh, depth=0):
