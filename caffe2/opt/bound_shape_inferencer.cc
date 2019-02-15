@@ -46,7 +46,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   shape_info_ = info;
 
   for (const auto& op : net.op()) {
-    LOG(INFO) << op.type();
+    VLOG(1) << op.type();
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise" ||
         op.type() == "SparseLengthsWeightedSum" ||
