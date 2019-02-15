@@ -5,6 +5,35 @@
 namespace torch {
 namespace utils {
 
+#if PY_MAJOR_VERSION == 2
+static PyObject*
+structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
+{
+    PyTupleObject *np;
+    Py_ssize_t i;
+
+    if (low < 0)
+        low = 0;
+    if (high > Py_SIZE(obj))
+        high = Py_SIZE(obj);
+    if (high < low)
+        high = low;
+    np = (PyTupleObject *)PyTuple_New(high-low);
+    if (np == NULL)
+        return NULL;
+    for(i = low; i < high; ++i) {
+        PyObject *v = obj->ob_item[i];
+        Py_INCREF(v);
+        PyTuple_SET_ITEM(np, i-low, v);
+    }
+    return (PyObject *) np;
+}
+
+static PyObject *make_tuple(PyStructSequence *obj) {
+    return structseq_slice(obj, 0, Py_SIZE(obj));
+}
+#endif
+
 PyObject *returned_structseq_repr(PyStructSequence *obj) {
     PyTypeObject *typ = Py_TYPE(obj);
     std::stringstream ss;
