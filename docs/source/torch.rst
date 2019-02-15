@@ -262,8 +262,6 @@ Other Operations
 .. autofunction:: cartesian_prod
 .. autofunction:: combinations
 .. autofunction:: cross
-.. autofunction:: cartesian_prod
-.. autofunction:: combinations
 .. autofunction:: diag
 .. autofunction:: diag_embed
 .. autofunction:: diagflat
