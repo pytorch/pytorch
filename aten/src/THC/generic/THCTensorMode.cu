@@ -31,7 +31,7 @@ void THCTensor_(calculateMode)(THCState *state,
 
   // Fill sortBuffer with [0, 1, 2, ... nElement - 1]
   thrust::sequence(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -40,7 +40,7 @@ void THCTensor_(calculateMode)(THCState *state,
 
   // Sort the input data. The original indices of the data are stored in seq
   thrust::sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -54,7 +54,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Count # of unique elements via an inner product between adjacent elements.
   // Add 1 if two neighboring element are not equal.
   int unique = 1 + thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -71,7 +71,7 @@ void THCTensor_(calculateMode)(THCState *state,
   thrust::device_vector<scalar_t> keys(unique);
   thrust::device_vector<int> counts(unique);
   thrust::reduce_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -85,7 +85,7 @@ void THCTensor_(calculateMode)(THCState *state,
 
   // Find index of maximum count
   thrust::device_vector<int>::iterator it = thrust::max_element(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -96,7 +96,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Find first index within which it occurs
 #if defined(THC_REAL_IS_HALF)
   thrust::device_vector<scalar_t>::iterator positionIter = thrust::find_if(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -104,7 +104,7 @@ void THCTensor_(calculateMode)(THCState *state,
     iter.begin(), iter.end(), ThrustHalfEqualToPredicate(mode));
 #else
   thrust::device_vector<scalar_t>::iterator positionIter = thrust::find(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,

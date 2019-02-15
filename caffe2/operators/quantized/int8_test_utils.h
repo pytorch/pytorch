@@ -25,7 +25,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
   auto r = caffe2::make_unique<int8::Int8TensorCPU>();
   r->scale = 0.01;
   r->zero_point = static_cast<int32_t>(std::numeric_limits<uint8_t>::max()) / 2;
-  r->t.Resize(dims);
+  ReinitializeTensor(&r->t, dims, at::dtype<uint8_t>().device(CPU));
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint8_t> dis;

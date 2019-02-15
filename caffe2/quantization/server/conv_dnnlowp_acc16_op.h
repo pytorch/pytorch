@@ -18,7 +18,6 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   using BaseType = ConvDNNLowPOp<std::uint8_t, ReluFused>;
   using BaseType::BIAS;
   using BaseType::col_buffer_;
-  using BaseType::dequantize_output_;
   using BaseType::FILTER;
   using BaseType::in_qparams_;
   using BaseType::INPUT;
@@ -36,15 +35,10 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
 
   bool GetQuantizationParameters_();
 
-  template <typename InType>
-  bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType>
-  bool RunOnDeviceWithOrderNHWCAndType_();
-
-  template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
+  template <fbgemm::QuantizationGranularity Q_GRAN>
   void DispatchFBGEMM_(
-      PackAMatrix& packA,
-      const std::uint8_t* col_buffer_quantized_data,
+      fbgemm::PackAWithRowOffset<std::uint8_t, std::int16_t>& packA,
+      const std::uint8_t* col_buffer_data,
       vector<std::int32_t>* Y_int32,
       uint8_t* Y_uint8_data);
 

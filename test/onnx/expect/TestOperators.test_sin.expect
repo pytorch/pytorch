@@ -1,4 +1,4 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "0.4"
 graph {

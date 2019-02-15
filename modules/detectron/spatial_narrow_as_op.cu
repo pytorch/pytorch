@@ -130,9 +130,8 @@ bool SpatialNarrowAsGradientOp<CUDAContext>::DoRunWithType() {
   auto& A = Input(0);
   auto& B = Input(1);
   auto& dC = Input(2); // Gradient of net w.r.t. output of forward op
-  auto* dA = Output(0); // Gradient of net w.r.t. input to forward op
+  auto* dA = Output(0, A.sizes(), at::dtype<T>()); // Gradient of net w.r.t. input to forward op
 
-  dA->ResizeLike(A);
   math::Set<T, CUDAContext>(
       dA->size(), 0.f, dA->template mutable_data<T>(), &context_);
   int out_width = dA->dim32(3);

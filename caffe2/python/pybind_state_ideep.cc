@@ -160,8 +160,11 @@ public:
 #endif
   }
 
-  void Feed(const DeviceOption &option, PyArrayObject *original_array,
-            Blob *blob, bool in_place) {
+  void Feed(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Blob* blob,
+      bool in_place) override {
 #ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
@@ -180,7 +183,8 @@ public:
           cpu_tensor_feeder.FeedTensor(
               option,
               original_array,
-              BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+              BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+              true);
         } else {
           blob->Reset<Tensor>(new Tensor(
                                   cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));

@@ -1,6 +1,5 @@
-graph(%x : Tensor
-      %1 : Tensor) {
+graph(%x : Tensor,
+      %1 : Tensor):
   %2 : Tensor = aten::mm(%x, %1)
   %3 : Tensor = aten::neg(%2)
-  return (%3);
-}
+  return (%3)

@@ -3,15 +3,17 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <ATen/core/thread_pool.h>
 
 #include <exception>
 #include <iostream>
@@ -232,7 +234,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
       // In other words, we find the first program point for v that
       // _reverse_ dominates the definition of v, and add a drop point there.
       Node* same_depth_node = findOwnerInBlock(n, v->node()->owningBlock());
-      JIT_ASSERT(
+      AT_ASSERT(
           same_depth_node); // failure means v is not in scope for n, use lint!
 
       // In the case where v and n are in the same block, just mark
@@ -322,10 +324,10 @@ struct ContainerTensor : public at::TensorImpl {
             /* is_variable */ false) {}
 
   ~ContainerTensor() override = default;
-  at::IntList sizes() const override {
+  at::IntArrayRef sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  at::IntList strides() const override {
+  at::IntArrayRef strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
   int64_t dim() const override {
@@ -377,7 +379,7 @@ struct CodeImpl {
   // jump when input is false
   void createJumpFalse(int from_inst, int to_inst) {
     auto& inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == prim::Placeholder);
+    AT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack& stack) {
       auto t = pop(stack).toBool();
@@ -389,7 +391,7 @@ struct CodeImpl {
   // jump when input is true
   void createJumpTrue(int from_inst, int to_inst) {
     auto& inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == prim::Placeholder);
+    AT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack& stack) {
       auto t = pop(stack).toBool();
@@ -400,7 +402,7 @@ struct CodeImpl {
 
   void createJump(int from_inst, int to_inst) {
     auto& inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == prim::Placeholder);
+    AT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [=](Stack& stack) { return offset; };
     inst.debug_name = prim::Jump;
@@ -575,7 +577,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<int>& list, int value) {
-    JIT_ASSERTM(
+    AT_CHECK(
         list.start + list.size == (int)int_data.size(),
         "another list already started");
     int_data.push_back(value);
@@ -586,7 +588,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<bool>& list, int value) {
-    JIT_ASSERTM(
+    AT_CHECK(
         list.start + list.size == (int)bool_data.size(),
         "another list already started");
     bool_data.push_back(value);
@@ -597,11 +599,11 @@ struct CodeImpl {
   void aliasRegistersTo(
       ArrayRef<Value*> new_allocations,
       ArrayRef<Value*> existing_allocations) {
-    JIT_ASSERT(new_allocations.size() == existing_allocations.size());
+    AT_ASSERT(new_allocations.size() == existing_allocations.size());
     for (size_t i = 0; i < new_allocations.size(); ++i) {
       auto n = new_allocations[i]->unique();
       auto e = existing_allocations[i]->unique();
-      JIT_ASSERT(unique_to_reg.count(e) > 0 && unique_to_reg.count(n) == 0);
+      AT_ASSERT(unique_to_reg.count(e) > 0 && unique_to_reg.count(n) == 0);
       unique_to_reg[n] = unique_to_reg[e];
     }
   }
@@ -609,7 +611,7 @@ struct CodeImpl {
     size_t u = n->unique();
     if (unique_to_reg.count(u) > 0)
       return unique_to_reg[u];
-    JIT_ASSERT(!required);
+    AT_ASSERT(!required);
     int r = register_size++;
     unique_to_reg[u] = r;
     return r;
@@ -715,7 +717,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         pc = new_pc;
       } catch (Suspend& e) {
         // wait() expects a single input
-        JIT_ASSERT(inst.inputs.values.size == 1);
+        AT_ASSERT(inst.inputs.values.size == 1);
 
         getOrCreateFuture();
 
@@ -729,7 +731,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // the current thread will continue running before it suspends.
         InterpreterState state(intrusive_from_this());
         e.future->addCallback([state]() {
-          c10::global_work_queue().run(InterpreterContinuation(state, Stack()));
+          c10::global_work_queue().run(InterpreterContinuation(state, Stack(),
+              autograd::GradMode::is_enabled()));
         });
 
         return true;
@@ -880,5 +883,10 @@ c10::intrusive_ptr<Future> InterpreterState::getFuture() {
 InterpreterState::InterpreterState(
     c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
     : pImpl(std::move(pImpl_)) {}
+
+void InterpreterContinuation::operator()() {
+  autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  state.runAsync(stack);
+}
 } // namespace jit
 } // namespace torch

@@ -7,7 +7,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/transform_reduce.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <thrust/unique.h>

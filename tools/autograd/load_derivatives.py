@@ -251,7 +251,7 @@ def saved_variables(formula, args):
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntList',
+            'type': 'IntArrayRef',
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {

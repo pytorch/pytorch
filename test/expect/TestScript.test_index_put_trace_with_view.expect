@@ -1,6 +1,6 @@
-graph(%target : Double(100)
-      %indices.1 : Long(4)
-      %rhs : Double(1, 1, 1, 4)) {
+graph(%target : Double(100),
+      %indices.1 : Long(4),
+      %rhs : Double(1, 1, 1, 4)):
   %3 : int = prim::Constant[value=4]()
   %4 : int[] = prim::ListConstruct(%3)
   %5 : Double(4) = aten::view(%rhs, %4)
@@ -10,8 +10,7 @@ graph(%target : Double(100)
   %9 : bool = prim::Constant[value=0]()
   %10 : bool = prim::Constant[value=0]()
   %indices : Long(4) = aten::to(%indices.1, %6, %7, %8, %9, %10)
-  %12 : Tensor[] = prim::ListConstruct(%indices)
+  %12 : Tensor?[] = prim::ListConstruct(%indices)
   %13 : bool = prim::Constant[value=0]()
   %14 : Double(100) = aten::index_put_(%target, %12, %5, %13)
-  return (%14);
-}
+  return (%14)

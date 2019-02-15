@@ -11,7 +11,9 @@
 #include <caffe2/core/hip/common_gpu.h>
 #endif
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+// See Note [hip-clang differences to hcc]
+
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIP__)
 #define CONVERSIONS_DECL __host__ __device__ inline
 #else
 #define CONVERSIONS_DECL inline

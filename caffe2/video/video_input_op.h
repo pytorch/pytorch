@@ -51,10 +51,10 @@ class VideoInputOp final : public PrefetchOperator<Context> {
       std::bernoulli_distribution* mirror_this_clip);
 
   const db::DBReader* reader_;
-  Tensor prefetched_clip_rgb_{CPU};
-  Tensor prefetched_clip_of_{CPU};
-  Tensor prefetched_label_{CPU};
-  Tensor prefetched_video_id_{CPU};
+  Tensor prefetched_clip_rgb_;
+  Tensor prefetched_clip_of_;
+  Tensor prefetched_label_;
+  Tensor prefetched_video_id_;
   Tensor prefetched_clip_rgb_on_device_{Context::GetDeviceType()};
   Tensor prefetched_clip_of_on_device_{Context::GetDeviceType()};
   Tensor prefetched_label_on_device_{Context::GetDeviceType()};
@@ -470,26 +470,25 @@ VideoInputOp<Context>::VideoInputOp(
   data_shape[2] = length_rgb_;
   data_shape[3] = crop_height_;
   data_shape[4] = crop_width_;
-  prefetched_clip_rgb_.Resize(data_shape);
+  ReinitializeTensor(&prefetched_clip_rgb_, data_shape, at::dtype<float>().device(CPU));
 
   // for optical flow data
   data_shape[1] = channels_of_;
   data_shape[2] = length_of_;
-  prefetched_clip_of_.Resize(data_shape);
+  ReinitializeTensor(&prefetched_clip_of_, data_shape, at::dtype<float>().device(CPU));
 
   // If do_multi_label is used, output label is a binary vector
   // of length num_of_class indicating which labels present
   if (do_multi_label_) {
     label_shape[0] = batch_size_ * clip_per_video_ * multi_crop_count_;
     label_shape[1] = num_of_class_;
-    prefetched_label_.Resize(label_shape);
+    ReinitializeTensor(&prefetched_label_, label_shape, at::dtype<int>().device(CPU));
   } else {
     prefetched_label_.Resize(
         vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
   }
 
-  prefetched_video_id_.Resize(
-      vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
+  ReinitializeTensor(&prefetched_video_id_,  vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_), at::dtype<int>().device(CPU));
 }
 
 template <class Context>

@@ -3,8 +3,10 @@ import sys
 import ast
 import inspect
 import torch
-from .._jit_internal import List, Tuple, BroadcastingList1, BroadcastingList2, BroadcastingList3, is_tuple
-from torch._C import DynamicType, TupleType, FloatType, IntType
+from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
+from torch._C import DynamicType, TupleType, FloatType, IntType, \
+    ListType, StringType, DictType
 from textwrap import dedent
 
 
@@ -28,6 +30,8 @@ _eval_env = {
     'Tensor': torch.Tensor,
     'typing': Module('typing', {'Tuple': Tuple}),
     'Tuple': Tuple,
+    'List': List,
+    'Dict': Dict,
 }
 
 
@@ -63,6 +67,8 @@ def get_num_params(fn):
     if source is None:
         return None
     py_ast = ast.parse(source)
+    if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
+        raise RuntimeError("cannot instantiate class object ({}) inside jit.script".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     py_def = py_ast.body[0]
@@ -88,16 +94,16 @@ def parse_type_line(type_line):
 
     try:
         arg_ann = eval(arg_ann_str, _eval_env)
-    except SyntaxError:
-        raise RuntimeError("Failed to parse the argument list of a type annotation")
+    except (NameError, SyntaxError) as e:
+        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
     try:
         ret_ann = eval(ret_ann_str, _eval_env)
-    except SyntaxError:
-        raise RuntimeError("Failed to parse the return type of a type annotation")
+    except (NameError, SyntaxError) as e:
+        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
     arg_types = [ann_to_type(ann) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann)
@@ -162,8 +168,16 @@ def ann_to_type(ann):
         return DynamicType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
+    elif is_list(ann):
+        return ListType(ann_to_type(ann.__args__[0]))
+    elif is_dict(ann):
+        key = ann_to_type(ann.__args__[0])
+        value = ann_to_type(ann.__args__[1])
+        return DictType(key, value)
     elif ann is float:
         return FloatType.get()
     elif ann is int:
         return IntType.get()
-    raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")
+    elif ann is str:
+        return StringType.get()
+    raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))

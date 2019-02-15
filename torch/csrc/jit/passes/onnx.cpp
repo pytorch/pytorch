@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/onnx.h>
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
@@ -18,7 +18,7 @@ void removePrintOps(Block* block) {
       removePrintOps(b);
     }
     if (it->kind() == prim::Print || it->kind() == aten::warn) {
-      for (auto i = 0; i < it->inputs().size();) {
+      for (size_t i = 0; i < it->inputs().size();) {
         auto input = it->inputs().at(i);
         // only handling constants bc of potential side effects
         if (input->uses().size() == 1 &&
@@ -63,8 +63,8 @@ void BlockToONNX(
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
     auto it = env.find(n);
-    JIT_ASSERTM(it != env.end(), "Dangling node reference");
-    JIT_ASSERTM(it->second, "Unused node was subsequently used");
+    AT_CHECK(it != env.end(), "Dangling node reference");
+    AT_CHECK(it->second, "Unused node was subsequently used");
     return it->second;
   };
 
@@ -199,13 +199,13 @@ void BlockToONNX(
     for (auto arg_type : op->cconv) {
       py::object obj;
       if (arg_type == 'c') {
-        JIT_ASSERTM(
+        AT_CHECK(
             scalar_it != op->scalar_args.end(),
             "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(
             py::handle((scalar_it++)->get()));
       } else if (arg_type == 'd') {
-        JIT_ASSERTM(node_it != inputs.end(), "expected too many inputs");
+        AT_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
         throw std::runtime_error("unexpected calling convention");
@@ -226,11 +226,11 @@ void BlockToONNX(
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    IR_IFM(node, PythonOp)
-    callPySymbolicMethod(value);
-    IR_ELSE()
-    callPySymbolicFunction(node);
-    IR_END()
+    if (node->kind() == prim::PythonOp) {
+      callPySymbolicMethod(static_cast<PythonOp*>(node));
+    } else {
+      callPySymbolicFunction(node);
+    }
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));

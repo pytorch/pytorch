@@ -34,7 +34,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
   thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
   accreal sum = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, (accreal) 0,
@@ -89,7 +89,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, gradInput_data,

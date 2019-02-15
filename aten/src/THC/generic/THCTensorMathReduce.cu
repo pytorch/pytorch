@@ -270,7 +270,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
 
   if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),
@@ -278,7 +278,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
   } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(INFINITY),
@@ -286,7 +286,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
   } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),
@@ -294,7 +294,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(0)));
   } else {
     result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       self_data, self_data+size, src_data, scalar_cast<accreal>(0),

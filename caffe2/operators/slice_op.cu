@@ -61,17 +61,17 @@ bool SliceImplGpu(
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.size());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
-  std::vector<int> starts_idx(data.ndim());
-  std::vector<int> ends_idx(data.ndim());
-  std::vector<int> dst_sizes(data.ndim());
+  std::vector<int> starts_idx(data.dim());
+  std::vector<int> ends_idx(data.dim());
+  std::vector<int> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.size(i);
       continue;
@@ -104,7 +104,7 @@ bool SliceImplGpu(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
@@ -114,7 +114,7 @@ bool SliceImplGpu(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
@@ -202,7 +202,7 @@ bool SliceImplGpu(
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
-        gdata->size(),
+        gdata->numel(),
         0.0f,
         (float*)gdata->raw_mutable_data(go->meta()),
         context);
@@ -255,16 +255,16 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -285,8 +285,8 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 
 };  // class SliceOp<CUDAContext>
 
@@ -318,8 +318,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -331,8 +331,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -356,8 +356,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };  // class SliceGradientOp<CUDAContext>
 REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<CUDAContext>);
 } // namespace caffe2

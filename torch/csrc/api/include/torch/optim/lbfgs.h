@@ -65,8 +65,8 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
     archive("H_diag", self.H_diag, /*is_buffer=*/true);
     archive("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
     archive("prev_loss", self.prev_loss, /*is_buffer=*/true);
-    detail::serialize(archive, "old_dirs", self.old_dirs);
-    detail::serialize(archive, "old_stps", self.old_stps);
+    optim::serialize(archive, "old_dirs", self.old_dirs);
+    optim::serialize(archive, "old_stps", self.old_stps);
   }
 };
 } // namespace optim

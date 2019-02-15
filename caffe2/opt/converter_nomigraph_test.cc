@@ -1,34 +1,24 @@
+#include "caffe2/core/test_utils.h"
 #include "caffe2/opt/converter.h"
 
 #include <gtest/gtest.h>
 
-#define ADD_ARG(_op, _name, _type, _val)                                       \
-{                                                                            \
-  caffe2::Argument *arg = _op->add_arg();                                    \
-  arg->set_name(_name);                                                      \
-  arg->set_##_type(_val);                                                    \
-}
-
 TEST(Converter, Basic) {
+  using namespace caffe2::testing;
   caffe2::NetDef net;
   for (auto i = 0; i < 10; ++i) {
     if (rand() % 2) {
-      caffe2::OperatorDef *def = net.add_op();
-      def->set_type("Conv");
-      def->add_input("X");
-      def->add_input("W" + c10::to_string(i)); // different weights
-      ADD_ARG(def, "kernel", i, 3);
-      ADD_ARG(def, "stride", i, 1);
-      ADD_ARG(def, "pad", i, 0);
-      ADD_ARG(def, "order", s, "NCHW");
-      def->add_output("X");
-      def->mutable_device_option()->set_node_name("conv_runner");
+      NetMutator(&net)
+          .newOp("Conv", {"X", "W" + c10::to_string(i)}, {"X"})
+          .addArgument("kernel", 3)
+          .addArgument("stride", 1)
+          .addArgument("pad", 0)
+          .addArgument("order", string("NCHW"))
+          .setDeviceOptionName("conv_runner");
     } else {
-      caffe2::OperatorDef *def = net.add_op();
-      def->set_type("Relu");
-      def->add_input("X");
-      def->add_output("X");
-      def->mutable_device_option()->set_node_name("relu_runner");
+      NetMutator(&net)
+          .newOp("Relu", {"X"}, {"X"})
+          .setDeviceOptionName("relu_runner");
     }
   }
   auto nn = caffe2::convertToNNModule(net);
@@ -36,44 +26,24 @@ TEST(Converter, Basic) {
 }
 
 TEST(Converter, UnknownType) {
+  using namespace caffe2::testing;
   caffe2::NetDef net;
-
-  caffe2::OperatorDef *def = net.add_op();
-  def->set_type("NeverSeen");
-  def->add_input("X");
-  def->add_output("X");
-  def->mutable_device_option()->set_node_name(
-      "device_" + c10::to_string(rand() % 2));
+  NetMutator(&net)
+      .newOp("NeverSeen", {"X"}, {"X"})
+      .setDeviceOptionName("device_" + c10::to_string(rand() % 2));
   auto nn = caffe2::convertToNNModule(net);
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
 }
 
 caffe2::NetDef fakeNet() {
+  using namespace caffe2::testing;
   caffe2::NetDef net;
-
-  {
-    caffe2::OperatorDef* def = net.add_op();
-    def->set_type("Fake");
-    def->add_input("X");
-    def->add_output("Y");
-  }
-  {
-    caffe2::OperatorDef* def = net.add_op();
-    def->set_type("Fake");
-    def->add_input("Y");
-    def->add_output("Z");
-  }
-  {
-    caffe2::OperatorDef* def = net.add_op();
-    def->set_type("Fake");
-    def->add_input("Z");
-    def->add_input("X");
-    def->add_output("W");
-  }
-  net.add_external_input("X");
-  net.add_external_output("Y");
-  net.add_external_output("W");
-
+  NetMutator(&net)
+      .newOp("Fake", {"X"}, {"Y"})
+      .newOp("Fake", {"Y"}, {"Z"})
+      .newOp("Fake", {"Z", "X"}, {"W"})
+      .externalInputs({"X"})
+      .externalOutputs({"Y", "W"});
   return net;
 }
 

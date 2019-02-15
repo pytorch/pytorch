@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/upsampling.h>
+#include "ATen/cuda/CUDAContext.h"
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,
@@ -53,7 +54,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rwidth, align_corners, idata, odata);
@@ -84,7 +85,7 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<scalar_t ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rwidth, align_corners, data1, data2);

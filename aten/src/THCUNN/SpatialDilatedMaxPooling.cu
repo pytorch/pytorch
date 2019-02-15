@@ -4,6 +4,7 @@
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCNumerics.cuh>
 #include <THCUNN/common.h>
+#include <c10/macros/Macros.h>
 
 // kernels borrowed from Caffe
 template <typename Dtype, typename AccType>
@@ -47,7 +48,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
 const int BACKWARD_THREADS = 256;
 
 template <typename Dtype, typename AccType>
-__launch_bounds__(BACKWARD_THREADS,2048/BACKWARD_THREADS)
+C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 8)
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,

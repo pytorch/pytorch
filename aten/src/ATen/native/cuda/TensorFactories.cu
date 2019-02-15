@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/cuda/Resize.cuh>
 #include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
@@ -42,9 +43,9 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntList size, const TensorOptions& options) {
+Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
@@ -62,6 +63,12 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
   return tensor;
+}
+
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+  auto t = at::native::empty_cuda({0}, options);
+  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
+  return t;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {

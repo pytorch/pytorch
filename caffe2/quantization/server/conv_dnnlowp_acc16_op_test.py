@@ -31,8 +31,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         output_channels_per_group=st.integers(2, 16),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        in_quantized=st.booleans(),
-        out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
@@ -51,8 +49,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
-        in_quantized,
-        out_quantized,
         weight_quantized,
         share_col_buffer,
         preserve_activation_sparsity,
@@ -121,8 +117,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine
+            do_dequantize = "DNNLOWP" in engine
             do_quantize_weight = (
                 "DNNLOWP" in engine and weight_quantized and len(outputs) > 0
             )
@@ -166,7 +162,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 dilation=dilation,
                 pad=pad,
                 order=order,
-                dequantize_output=not do_dequantize,
                 shared_buffer=(1 if share_col_buffer else 0),
                 preserve_activation_sparsity=preserve_activation_sparsity,
                 preserve_weight_sparsity=preserve_weight_sparsity,
@@ -210,8 +205,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         output_channels_per_group=st.integers(2, 16),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NHWC"]),
-        in_quantized=st.booleans(),
-        out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
         prepack_weight=st.booleans(),
         nbits_in_non_outlier=st.sampled_from((0, 1, 6, 8)),
@@ -232,8 +225,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
-        in_quantized,
-        out_quantized,
         weight_quantized,
         prepack_weight,
         nbits_in_non_outlier,
@@ -295,8 +286,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine
+            do_dequantize = "DNNLOWP" in engine
             do_quantize_weight = "DNNLOWP" in engine and weight_quantized
             do_prepack_weight = "DNNLOWP" in engine and prepack_weight
 
@@ -357,7 +348,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 dilation=dilation,
                 pad=pad,
                 order=order,
-                dequantize_output=not do_dequantize,
                 nbits_in_non_outlier=nbits_in_non_outlier,
                 shared_buffer=(1 if share_col_buffer else 0),
                 preserve_activation_sparsity=preserve_activation_sparsity,

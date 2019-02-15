@@ -54,7 +54,7 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
 
   if (batch_size > 0 && weights_dim > 0) {
     auto* out_idx = Output(0, {batch_size, 1}, at::dtype<int>());
-    unif_samples_.Resize(batch_size);
+    ReinitializeTensor(&unif_samples_, {batch_size}, at::dtype<float>().device(CUDA));
 
     const float* in_weights_data = in_weights.data<float>();
     const float* in_val_data = nullptr;

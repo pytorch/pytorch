@@ -114,14 +114,14 @@ void THNN_(LookupTableBag_accGradParameters)(
     thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
 
     thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       countIter, countIter + numel, origIndicesIter);
 
     // Sort; a stable sort is not required
     thrust::sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
@@ -145,7 +145,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndices_ptr,
@@ -158,7 +158,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       thrust::make_reverse_iterator(sortedIndices_ptr + numel),

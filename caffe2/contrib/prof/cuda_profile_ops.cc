@@ -51,11 +51,11 @@ class CudaProfileInitializeOp : public OperatorBase {
     }
   }
 
-  ~CudaProfileInitializeOp() {
+  ~CudaProfileInitializeOp() override {
     unlink(config_.c_str());
   }
 
-  virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
+  bool Run(int /* unused */ /*stream_id*/ = 0) override {
     // If this fails, check the contents of "output" for hints.
     CUDA_CHECK(
         cudaProfilerInitialize(config_.c_str(), output_.c_str(), cudaCSV));
@@ -72,7 +72,7 @@ class CudaProfileStartOp : public OperatorBase {
   CudaProfileStartOp(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws) {}
 
-  virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
+  bool Run(int /* unused */ /*stream_id*/ = 0) override {
     CUDA_ENFORCE(cudaProfilerStart());
     return true;
   }
@@ -83,7 +83,7 @@ class CudaProfileStopOp : public OperatorBase {
   CudaProfileStopOp(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws) {}
 
-  virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
+  bool Run(int /* unused */ /*stream_id*/ = 0) override {
     CUDA_ENFORCE(cudaProfilerStop());
     return true;
   }

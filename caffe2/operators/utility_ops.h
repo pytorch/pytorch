@@ -27,7 +27,7 @@ class NanCheckOp final : public Operator<Context> {
 
  private:
   TensorPrinter tensorPrinter_;
-  Tensor scratch_{Context::GetDeviceType()};
+  Tensor scratch_;
 };
 
 struct GetNanCheckGradient : public GradientMakerBase {
@@ -169,8 +169,7 @@ class AliasOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
-    Output(0)->ResizeLike(input);
-    Output(0)->ShareData(input);
+    OutputTensorAlias(0, input);
     return true;
   }
 };
@@ -212,7 +211,7 @@ class FlattenToVecOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
+        input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
@@ -273,7 +272,7 @@ class SumOp : public Operator<Context> {
     for (int i = 1; i < InputSize(); ++i) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
-            "Check failed: output->dims() == Input(i).dims().",
+            "Check failed: output->sizes() == Input(i).sizes().",
             "Description: Input #",
             i,
             ", input dimension:",
@@ -563,10 +562,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     }
     return true;
   }
-  Tensor x_data_host_{CPU};
-  Tensor weights_host_{CPU};
-  Tensor x_data_device_{Context::GetDeviceType()};
-  Tensor weights_device_{Context::GetDeviceType()};
+  Tensor x_data_host_;
+  Tensor weights_host_;
+  Tensor x_data_device_;
+  Tensor weights_device_;
 };
 
 /**
