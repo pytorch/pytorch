@@ -28,8 +28,8 @@ See :class:`~torch.nn.Conv1d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
@@ -58,8 +58,8 @@ See :class:`~torch.nn.Conv2d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
@@ -89,8 +89,8 @@ See :class:`~torch.nn.Conv3d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kT \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
@@ -119,12 +119,12 @@ See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sW,)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padW,)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -152,12 +152,12 @@ See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -187,12 +187,12 @@ See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kT \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kT , kH , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sT, sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padT, padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -232,9 +232,9 @@ input planes.
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
     kernel_size: the size of the window. Can be a single number or a
-      tuple :math:`(kW,)`
+      tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -245,8 +245,9 @@ Args:
         averaging calculation. Default: ``True``
 
 Examples::
+
     >>> # pool of square window of size=3, stride=2
-    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> input = torch.tensor([[[1, 2, 3, 4, 5, 6, 7]]], dtype=torch.float32)
     >>> F.avg_pool1d(input, kernel_size=3, stride=2)
     tensor([[[ 2.,  4.,  6.]]])
 
@@ -263,9 +264,9 @@ input planes.
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple :math:`(kH \times kW)`
+      tuple `(kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -286,9 +287,9 @@ size :math:`sT \times sH \times sW` steps. The number of output features is equa
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple :math:`(kT \times kH \times kW)`
+      tuple `(kT, kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -316,7 +317,7 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number :math:`k` (for a square kernel of :math:`k \times k`)
-                     or a tuple :math:`(kH \times kW)`
+                     or a tuple `(kH, kW)`
         output_size: the target output size of the image of the form :math:`oH \times oW`.
                      Can be a tuple `(oH, oW)` or a single number :math:`oH` for a square image :math:`oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -339,16 +340,12 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
                          "an output_size or an output_ratio")
     if output_size is None:
         _output_ratio = _pair(torch.jit._unwrap_optional(output_ratio))
-        _output_size = [int(input.size(2) * _output_ratio[0]),
-                        int(input.size(3) * _output_ratio[1])]
-    else:
-        _output_size = torch.jit._unwrap_optional(output_size)
+        output_size = [int(input.size(2) * _output_ratio[0]),
+                       int(input.size(3) * _output_ratio[1])]
 
     if _random_samples is None:
         _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
-    else:
-        _random_samples = torch.jit._unwrap_optional(_random_samples)
-    return torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
+    return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
 @weak_script
@@ -365,7 +362,77 @@ fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=4,
     default=False,
     if_true=fractional_max_pool2d_with_indices,
-    if_false=_fractional_max_pool2d)
+    if_false=_fractional_max_pool2d,
+    module_name=__name__,
+    func_name='fractional_max_pool2d')
+
+
+@weak_script
+def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
+                                       output_ratio=None, return_indices=False,
+                                       _random_samples=None):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+    r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
+
+    Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+
+    The max-pooling operation is applied in :math:`kT \times kH \times kW` regions by a stochastic
+    step size determined by the target output size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        kernel_size: the size of the window to take a max over.
+                     Can be a single number :math:`k` (for a square kernel of :math:`k \times k \times k`)
+                     or a tuple `(kT, kH, kW)`
+        output_size: the target output size of the form :math:`oT \times oH \times oW`.
+                     Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
+                      :math:`oH \times oH \times oH`
+        output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
+                      This has to be a number or tuple in the range (0, 1)
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to :func:`~torch.nn.functional.max_unpool3d`.
+
+    Examples::
+        >>> input = torch.randn(20, 16, 50, 32, 16)
+        >>> # pool of cubic window of size=3, and target output size 13x12x11
+        >>> F.fractional_max_pool3d(input, 3, output_size=(13, 12, 11))
+        >>> # pool of cubic window and target output size being half of input size
+        >>> F.fractional_max_pool3d(input, 3, output_ratio=(0.5, 0.5, 0.5))
+
+    .. _Fractional MaxPooling:
+        http://arxiv.org/abs/1412.6071
+    """
+    if output_size is None and output_ratio is None:
+        raise ValueError("fractional_max_pool3d requires specifying either "
+                         "an output_size or an output_ratio")
+    if output_size is None:
+        _output_ratio = _triple(torch.jit._unwrap_optional(output_ratio))
+        output_size = [int(input.size(2) * _output_ratio[0]),
+                       int(input.size(3) * _output_ratio[1]),
+                       int(input.size(4) * _output_ratio[2])]
+
+    if _random_samples is None:
+        _random_samples = torch.rand(input.size(0), input.size(1), 3, dtype=input.dtype, device=input.device)
+    return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
+
+
+@weak_script
+def _fractional_max_pool3d(input, kernel_size, output_size=None,
+                           output_ratio=None, return_indices=False,
+                           _random_samples=None):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    return fractional_max_pool3d_with_indices(input, kernel_size, output_size,
+                                              output_ratio, return_indices,
+                                              _random_samples)[0]
+
+fractional_max_pool3d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=4,
+    default=False,
+    if_true=fractional_max_pool3d_with_indices,
+    if_false=_fractional_max_pool3d,
+    module_name=__name__,
+    func_name='fractional_max_pool3d')
 
 
 @weak_script
@@ -378,11 +445,9 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool1d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
+        stride = torch.jit.annotate(List[int], [])
     return torch.max_pool1d_with_indices(
-        input, kernel_size, _stride, padding, dilation, ceil_mode)
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -397,7 +462,9 @@ max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool1d_with_indices,
-    if_false=_max_pool1d)
+    if_false=_max_pool1d,
+    module_name=__name__,
+    func_name='max_pool1d')
 
 
 @weak_script
@@ -410,10 +477,8 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
     See :class:`~torch.nn.MaxPool2d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
-    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, _stride, padding, dilation, ceil_mode)
+        stride = torch.jit.annotate(List[int], [])
+    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -428,7 +493,9 @@ max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool2d_with_indices,
-    if_false=_max_pool2d)
+    if_false=_max_pool2d,
+    module_name=__name__,
+    func_name='max_pool2d')
 
 
 @weak_script
@@ -441,11 +508,9 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool3d` for details.
     """
     if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
+        stride = torch.jit.annotate(List[int], [])
     return torch._C._nn.max_pool3d_with_indices(
-        input, kernel_size, _stride, padding, dilation, ceil_mode)
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 @weak_script
@@ -460,7 +525,9 @@ max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_index=6,
     default=False,
     if_true=max_pool3d_with_indices,
-    if_false=_max_pool3d)
+    if_false=_max_pool3d,
+    module_name=__name__,
+    func_name='max_pool3d')
 
 
 @weak_script
@@ -474,7 +541,6 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     if output_size is None:
         ret = default_size
     else:
-        output_size = torch.jit._unwrap_optional(output_size)
         if len(output_size) == len(kernel_size) + 2:
             output_size = output_size[2:]
         if len(output_size) != len(kernel_size):
@@ -504,13 +570,18 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _single(kernel_size)
     if stride is not None:
-        _stride = _single(torch.jit._unwrap_optional(stride))
+        _stride = _single(stride)
     else:
         _stride = kernel_size
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
-    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
+    if isinstance(output_size, list):
+        output_size = output_size + [1]
+    else:
+        output_size = output_size + (1,)
+    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
+                                     output_size).squeeze(3)
 
 
 @weak_script
@@ -523,7 +594,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _pair(kernel_size)
     if stride is not None:
-        _stride = _pair(torch.jit._unwrap_optional(stride))
+        _stride = _pair(stride)
     else:
         _stride = kernel_size
     padding = _pair(padding)
@@ -542,7 +613,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     """
     kernel_size = _triple(kernel_size)
     if stride is not None:
-        _stride = _triple(torch.jit._unwrap_optional(stride))
+        _stride = _triple(stride)
     else:
         _stride = kernel_size
     padding = _triple(padding)
@@ -563,7 +634,6 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     """
     kw, kh = utils._pair(kernel_size)
     if stride is not None:
-        stride = torch.jit._unwrap_optional(stride)
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
@@ -581,7 +651,6 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     See :class:`~torch.nn.LPPool1d` for details.
     """
     if stride is not None:
-        stride = torch.jit._unwrap_optional(stride)
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
@@ -614,7 +683,9 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool1d_with_indices,
-    if_false=_adaptive_max_pool1d)
+    if_false=_adaptive_max_pool1d,
+    module_name=__name__,
+    func_name='adaptive_max_pool1d')
 
 
 @weak_script
@@ -644,7 +715,9 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool2d_with_indices,
-    if_false=_adaptive_max_pool2d)
+    if_false=_adaptive_max_pool2d,
+    module_name=__name__,
+    func_name='adaptive_max_pool2d')
 
 
 @weak_script
@@ -674,7 +747,9 @@ adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_index=2,
     default=False,
     if_true=adaptive_max_pool3d_with_indices,
-    if_false=_adaptive_max_pool3d)
+    if_false=_adaptive_max_pool3d,
+    module_name=__name__,
+    func_name='adaptive_max_pool3d')
 
 
 adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
@@ -1141,12 +1216,9 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = (-input).softmax(dim)
     else:
-        dtype = torch.jit._unwrap_optional(dtype)
         ret = (-input).softmax(dim, dtype=dtype)
     return ret
 
@@ -1181,91 +1253,71 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = input.softmax(dim)
     else:
-        dtype = torch.jit._unwrap_optional(dtype)
         ret = input.softmax(dim, dtype=dtype)
     return ret
 
 
 @weak_script
-def _sample_gumbel(shape, eps=1e-10, out=None):
-    # type: (List[int], float, Optional[Tensor]) -> Tensor
-    """
-    Sample from Gumbel(0, 1)
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
-    """
-    if out is None:
-        U = torch.rand(shape)
-    else:
-        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
-    return - torch.log(eps - torch.log(U + eps))
-
-
-@weak_script
-def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
-    # type: (Tensor, float, float) -> Tensor
-    """
-    Draw a sample from the Gumbel-Softmax distribution
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
-    (MIT license)
-    """
-    dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=torch.empty_like(logits))
-    y = logits + gumbel_noise
-    return softmax(y / tau, dims - 1)
-
-
-@weak_script
-def gumbel_softmax(logits, tau=1., hard=False, eps=1e-10):
-    # type: (Tensor, float, bool, float) -> Tensor
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+    # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
-    Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
 
     Args:
-      logits: `[batch_size, num_features]` unnormalized log probabilities
+      logits: `[..., num_features]` unnormalized log probabilities
       tau: non-negative scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
+      dim (int): A dimension along which softmax will be computed. Default: -1.
 
     Returns:
-      Sampled tensor of shape ``batch_size x num_features`` from the Gumbel-Softmax distribution.
+      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
       If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across features
+      be probability distributions that sum to 1 across `dim`.
 
-    Constraints:
+    .. note::
+      This function is here for legacy reasons, may be removed from nn.Functional in the future.
 
-    - Currently only work on 2D input :attr:`logits` tensor of shape ``batch_size x num_features``
+    .. note::
+      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
 
-    Based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
+      It achieves two things:
+      - makes the output value exactly one-hot
+      (since we add then subtract y_soft value)
+      - makes the gradient equal to y_soft gradient
+      (since we strip all other gradients)
+
+    Examples::
+        >>> logits = torch.randn(20, 32)
+        >>> # Sample soft categorical using reparametrization trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=False)
+        >>> # Sample hard categorical using "Straight-through" trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=True)
+
+    .. _Gumbel-Softmax distribution:
+        https://arxiv.org/abs/1611.00712
+        https://arxiv.org/abs/1611.01144
     """
-    shape = logits.size()
-    assert len(shape) == 2
-    y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
+
+    if eps != 1e-10:
+        warnings.warn("`eps` parameter is deprecated and has no effect.")
+
+    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
+
     if hard:
-        _, k = y_soft.max(-1)
-        # this bit is based on
-        # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = torch.zeros(shape, dtype=logits.dtype, device=logits.device).scatter_(-1, k.view(-1, 1), 1.0)
-        # this cool bit of code achieves two things:
-        # - makes the output value exactly one-hot (since we add then
-        #   subtract y_soft value)
-        # - makes the gradient equal to y_soft gradient (since we strip
-        #   all other gradients)
-        y = y_hard - y_soft.detach() + y_soft
+        # Straight through.
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
     else:
-        y = y_soft
-    return y
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
 
 
 @weak_script
@@ -1288,13 +1340,10 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    else:
-        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = input.log_softmax(dim)
     else:
-        _dtype = torch.jit._unwrap_optional(dtype)
-        ret = input.log_softmax(dim, dtype=_dtype)
+        ret = input.log_softmax(dim, dtype=dtype)
     return ret
 
 
@@ -1348,11 +1397,11 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
+        ret = torch.addmm(bias, input, weight.t())
     else:
         output = input.matmul(weight.t())
         if bias is not None:
-            output += torch.jit._unwrap_optional(bias)
+            output += bias
         ret = output
     return ret
 
@@ -1431,7 +1480,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
                  [ 0.6262,  0.2438,  0.7471]]])
     """
     if padding_idx is not None:
-        padding_idx = torch.jit._unwrap_optional(padding_idx)
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
         elif padding_idx < 0:
@@ -1440,7 +1488,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
     else:
         padding_idx = -1
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
@@ -1574,7 +1621,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
         # XXX: equivalent to
         # with torch.no_grad():
         #   torch.nembedding_renorm_
@@ -1594,7 +1640,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 @weak_script
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    # type: (Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
@@ -1692,8 +1738,8 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
 
 @weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
-             reduction='mean'):
-    # type: (Tensor, Tensor, Tensor, Tensor, int, str) -> Tensor
+             reduction='mean', zero_infinity=False):
+    # type: (Tensor, Tensor, Tensor, Tensor, int, str, bool) -> Tensor
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1718,6 +1764,11 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Example::
 
@@ -1728,7 +1779,8 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
-    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
+    return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction),
+                          zero_infinity)
 
 
 @weak_script
@@ -1800,7 +1852,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
         reduction_enum = _Reduction.get_enum(reduction)
-        if reduction is not 'none':
+        if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(
                 input, target, weight, reduction_enum, ignore_index)
         else:
@@ -1855,9 +1907,9 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction is 'none':
+    if reduction == 'none':
         ret = loss
-    if reduction is 'mean':
+    if reduction == 'mean':
         ret = torch.mean(loss)
     else:
         ret = torch.sum(loss)
@@ -2018,7 +2070,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
                          "!= input nelement ({})".format(target.numel(), input.numel()))
 
     if weight is not None:
-        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
@@ -2231,7 +2282,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
     if weight is not None:
-        loss = loss * torch.jit._unwrap_optional(weight)
+        loss = loss * weight
 
     loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
 
@@ -2278,7 +2329,6 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
     if weight is not None:
-        weight = torch.jit._unwrap_optional(weight)
         if weight.dim() != 1:
             raise ValueError('weight must be one-dimensional')
 
@@ -2329,7 +2379,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -2737,28 +2787,21 @@ pdist = _add_docstr(torch.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
-If the input tensor has shape ... B x N x M, the result will be tensor with
-shape ... B x N * (N - 1) / 2. Every dimension prior to the last two are
-treated as independent batches of N vectors, each with M elements. If we use
-ordinal numbers to refer to the vectors in a batch, the last dimension of the
-output will be ordered as:
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
+if the rows are contiguous.
 
-```
-[dist(1, 2), dist(1, 2), ..., dist(1, N), dist(2, 3), ..., dist(N-1, N)]
-```
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
 
-The square verion of pdist that has redundant distances and the diagonal can be
-be computed with
-`torch.norm(inpup[..., None, :] - input[..., None, :, :], p=p, dim=-1)`.
-Appropriately selecting and flattening the upper triangular of the
-last two dimensions will produce identical results as pdist.
-
-This function is similar to
-`scipy.spatial.distance.pdist(input, 'minkowski', p=p)`
-if :math:`p \in (0, \infty)`.
+This function is equivalent to `scipy.spatial.distance.pdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
 
 Args:
-    input: input tensor of shape :math:`... \times N \times M`.
+    input: input tensor of shape :math:`N \times M`.
     p: p value for the p-norm distance to calculate between each vector pair
         :math:`\in [0, \infty]`.
 """)
@@ -2878,11 +2921,11 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
                                 operation won't be differentiable.
     """
     if out is None:
-        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
         ret = input / denom
     else:
-        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
-        ret = torch.div(input, denom, out=torch.jit._unwrap_optional(out))
+        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
+        ret = torch.div(input, denom, out=out)
     return ret
 
 

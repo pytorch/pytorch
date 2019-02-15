@@ -18,6 +18,16 @@ string(
   content
   "${content}")
 
+# https://github.com/protocolbuffers/protobuf/commit/0400cca3236de1ca303af38bf81eab332d042b7c
+# changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
+# build.
+string(
+  REPLACE
+  "static constexpr int kIndexInFileMessages ="
+  "static int const kIndexInFileMessages ="
+  content
+  "${content}")
+
 foreach(ns ${NAMESPACES})
   # Insert "const ::std::string& GetEmptyStringAlreadyInited();" within
   # the namespace and make sure we only do it once in the file. Unfortunately

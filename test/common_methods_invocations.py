@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
 from torch.autograd import Variable, Function, detect_anomaly
@@ -209,6 +209,7 @@ def method_tests():
         ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims'),
+        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),)),
         ('exp', (S, S, S), NO_ARGS),
         ('exp', (), NO_ARGS, 'scalar'),
         ('expm1', (S, S, S), NO_ARGS),
@@ -584,15 +585,13 @@ def method_tests():
         ('index_select', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_mixed_dim', [0]),
         ('index_select', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_dim', [0]),
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
-        ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-        ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
+        ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', [0]),
+        ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', [0]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
-        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
+        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', [0]),
+        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
-        # FIXME: we should compute the derivative w.r.t torch.tensor(2)
-        ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
-            'variable_dim', [0]),
+        ('index_fill', (S, S), (0, index_variable(2, S), ()), 'variable_dim', [0]),
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
         ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
         ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
@@ -662,8 +661,7 @@ def method_tests():
          'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
-        # FIXME: we should compute the derivative w.r.t torch.tensor(1)
-        ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
+        ('fill_', (S, S, S), ((),), 'variable'),
         ('eq_', (S, S, S), ((S, S, S),)),
         ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
         ('eq_', (), ((),), 'scalar'),
@@ -988,7 +986,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if isinstance(args, tuple):
+    if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args
@@ -1023,6 +1021,8 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_det_dim2_null',
     'test_det_rank1',
     'test_det_rank2',
+    # `other` expand_as(self, other) is not used in autograd.
+    'test_expand_as',
     'test_logdet',
     'test_logdet_1x1',
     'test_logdet_symmetric',

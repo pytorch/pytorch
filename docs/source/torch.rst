@@ -259,6 +259,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
+.. autofunction:: cartesian_prod
+.. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: cartesian_prod
 .. autofunction:: combinations

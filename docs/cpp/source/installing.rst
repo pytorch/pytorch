@@ -118,7 +118,7 @@ should now merrily print the tensor (exact output subject to randomness):
 
 .. code-block:: sh
 
-  root@4b5a67132e81:/example-app/build# ./example-app model.pt
+  root@4b5a67132e81:/example-app/build# ./example-app
   0.2063  0.6593  0.0866
   0.0796  0.5841  0.1569
   [ Variable[CPUFloatType]{2,3} ]

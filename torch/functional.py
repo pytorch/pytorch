@@ -4,6 +4,8 @@ from torch._six import inf
 from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
+from collections import Iterable
+from torch._utils import annotate
 from itertools import product
 import math
 import warnings
@@ -141,7 +143,6 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
 
 Examples::
 
@@ -288,7 +289,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length-1}}%
                             \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
                             \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
@@ -633,7 +634,7 @@ def cartesian_prod(*tensors):
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None):
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     Args:
@@ -662,6 +663,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
             :attr:`out` = ``None``. Default: ``False``
         out (Tensor, optional): the output tensor. Ignored if
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
+        dtype (:class:`torch.dtype`, optional): the desired data type of
+            returned tensor. If specified, the input tensor is casted to
+            :attr:'dtype' while performing the operation. Default: None.
+
 
     Example::
 
@@ -675,7 +680,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
         >>> torch.norm(a, float('inf'))
         tensor(4.)
         >>> torch.norm(b, float('inf'))
-        tensor([4., 3., 4.])
+        tensor(4.)
         >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])
@@ -692,26 +697,36 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
     ndim = input.dim()
 
     # catch default case
-    if dim is None and out is None:
+    if dim is None and out is None and dtype is None:
         if p == "fro":
             return torch._C._VariableFunctions.frobenius_norm(input)
         elif p != "nuc":
             return torch._C._VariableFunctions.norm(input, p)
 
     if p == "fro":
+        if dtype is not None:
+            raise ValueError("dtype argument is not supported in frobenius norm")
         if dim is None:
             dim = tuple(range(ndim))
         if out is None:
             return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
         return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
     elif p == "nuc":
+        if dtype is not None:
+            raise ValueError("dtype argument is not supported in nuclear norm")
         if out is None:
             torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
         return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
     else:
-        if out is None:
+        if dim is None:
+            dim = tuple(range(ndim))
+        if out is None and dtype is None:
             return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
-    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
+        elif out is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype)
+        elif dtype is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
+    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
 def chain_matmul(*matrices):

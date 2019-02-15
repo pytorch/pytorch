@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -26,14 +26,14 @@ inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
 }
 
 void sigmoid_cross_entropy_with_logits_op_cpu_impl(
-    const C10Tensor& logits_,
-    const C10Tensor& targets_,
-    const C10Tensor& out_,
+    const at::Tensor& logits_,
+    const at::Tensor& targets_,
+    const at::Tensor& out_,
     bool log_D_trick,
     bool unjoined_lr_loss) {
-  Tensor logits(logits_);
-  Tensor targets(targets_);
-  Tensor out(out_);
+  Tensor logits{C10Tensor(logits_)};
+  Tensor targets{C10Tensor(targets_)};
+  Tensor out{C10Tensor(out_)};
 
   CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
   const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
@@ -74,13 +74,6 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::SigmoidCrossEntropyWithLogits)
-    .kernel(&caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .kernel<decltype(caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl), &caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

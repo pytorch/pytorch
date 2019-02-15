@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/operators/experimental/c10/schemas/add.h"
 #include "caffe2/utils/math.h"
@@ -11,14 +11,14 @@ namespace {
 
 template <class DataType>
 void add_op_cpu_impl(
-    const C10Tensor& A_,
-    const C10Tensor& B_,
-    const C10Tensor& C_,
+    const at::Tensor& A_,
+    const at::Tensor& B_,
+    const at::Tensor& C_,
     bool legacy_broadcast,
-    int axis) {
-  Tensor A(A_);
-  Tensor B(B_);
-  Tensor C(C_);
+    int64_t axis) {
+  Tensor A{C10Tensor(A_)};
+  Tensor B{C10Tensor(B_)};
+  Tensor C{C10Tensor(C_)};
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
@@ -74,13 +74,6 @@ void add_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::Add)
-    .kernel(&caffe2::add_op_cpu_impl<float>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .kernel<decltype(caffe2::add_op_cpu_impl<float>), &caffe2::add_op_cpu_impl<float>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

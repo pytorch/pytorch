@@ -8,6 +8,7 @@ import _ast
 
 path = os.path.dirname(os.path.realpath(__file__))
 rstpath = os.path.join(path, '../docs/source/')
+pypath = os.path.join(path, '../torch/_torch_docs.py')
 r1 = re.compile(r'\.\. autofunction:: (\w*)')
 r2 = re.compile(r'\.\. auto(method|attribute):: (\w*)')
 
@@ -33,8 +34,7 @@ class TestDocCoverage(unittest.TestCase):
                     everything.add(name[0])
         everything -= set(whitelist)
         # get symbols in functional.py and _torch_docs.py
-        pypath = os.path.join(path, '../torch/_torch_docs.py')
-        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch']
+        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate']
         everything2 = set()
         with open(pypath, 'r') as f:
             body = ast.parse(f.read()).body
@@ -60,6 +60,7 @@ class TestDocCoverage(unittest.TestCase):
             self.assertIn(p, everything2, 'in torch.rst but not in python')
         for p in everything2:
             self.assertIn(p, everything, 'in python but not in torch.rst')
+
 
     def test_tensor(self):
         # get symbols documented in tensors.rst

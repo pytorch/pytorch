@@ -1,14 +1,12 @@
-graph(%x : Float(*, *)
-      %scale : Float(*)
-      %shift : Float(*)) {
+graph(%x : Float(*, *),
+      %scale : Float(*),
+      %shift : Float(*)):
   %3 : Float(*, *) = prim::FusionGroup_0(%shift, %x, %scale)
-  return (%3);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*)
-      %1 : Float(*, *)
-      %2 : Float(*)) {
+  return (%3)
+with prim::FusionGroup_0 = graph(%0 : Float(*),
+      %1 : Float(*, *),
+      %2 : Float(*)):
   %3 : int = prim::Constant[value=1]()
   %4 : Float(*, *) = aten::mul(%1, %2)
   %5 : Float(*, *) = aten::add(%4, %0, %3)
-  return (%5);
-}
+  return (%5)

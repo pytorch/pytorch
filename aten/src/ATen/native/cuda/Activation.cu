@@ -82,8 +82,8 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
     // config to run cuda kernel
     int64_t input_numel = input.numel();
@@ -198,8 +198,8 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
     // config to run cuda kernel
     int64_t input_numel = input.numel();

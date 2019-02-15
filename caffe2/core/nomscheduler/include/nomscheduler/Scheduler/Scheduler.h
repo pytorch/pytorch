@@ -29,7 +29,7 @@ class Device {
     numberOfCores_ = numberOfCores;
   }
 
-  // unit : GB
+  // unit: GB
   float getMaxMemory() const {
     return maxMemory_;
   }
@@ -96,7 +96,7 @@ class Task {
 
 // Model a dependency between two tasks. An edge between Task A -> Task B
 // means that Task B depends on the output of Task A, and so Task B must start
-// after task B finishes.
+// after task A finishes.
 // The edge A->B also holds the size of the data that needs to be transferred
 // from task A to task B, i.e. the total size of the blobs produced by A
 // and consumed by B.

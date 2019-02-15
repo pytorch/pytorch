@@ -242,7 +242,7 @@ class SliceOp : public Operator<Context> {
       }
     }
 
-    auto data = Input(0);
+    const auto& data = Input(0);
     auto output = Output(0);
 
     return SliceImpl<SIndex, Context>(

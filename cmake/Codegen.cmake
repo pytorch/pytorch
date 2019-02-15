@@ -34,13 +34,6 @@ endfunction()
 
 ################################################################################
 
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
-
 # ---[ Write the macros file
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/../caffe2/core/macros.h.in
@@ -152,7 +145,7 @@ if (NOT BUILD_ATEN_MOBILE)
   endif()
 
   SET(GEN_COMMAND
-      ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}

@@ -1,5 +1,9 @@
 #include <TH/THGeneral.h>
 
+#ifdef __cplusplus
+#include <c10/core/CPUAllocator.h>
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -155,52 +159,12 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
   torchGCData = data;
 }
 
-static void* THAllocInternal(ptrdiff_t size)
-{
-  void *ptr;
-
-  if (size > 5120)
-  {
-#if (defined(__unix) || defined(__APPLE__)) && (!defined(DISABLE_POSIX_MEMALIGN))
-    if (posix_memalign(&ptr, 64, size) != 0)
-      ptr = NULL;
-/*
-#elif defined(_WIN32)
-    ptr = _aligned_malloc(size, 64);
-*/
-#else
-    ptr = malloc(size);
-#endif
-  }
-  else
-  {
-    ptr = malloc(size);
-  }
-
-  return ptr;
-}
-
 void* THAlloc(ptrdiff_t size)
 {
-  void *ptr;
-
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  if(size == 0)
-    return NULL;
-
-  ptr = THAllocInternal(size);
-
-  if(!ptr && torchGCFunction) {
-    torchGCFunction(torchGCData);
-    ptr = THAllocInternal(size);
-  }
-
-  if(!ptr)
-    THError("$ Torch: not enough memory: you tried to allocate %dGB. Buy new RAM!", size/1073741824);
-
-  return ptr;
+  return c10::alloc_cpu(size);
 }
 
 void* THRealloc(void *ptr, ptrdiff_t size)

@@ -366,7 +366,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
-        >>> with open('tensor.pt') as f:
+        >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
     """

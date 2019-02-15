@@ -16,7 +16,7 @@ struct BatchTensor {
   const char* toString() const {
     return "BatchTensor";
   }
-  at::IntList sizes() const {
+  at::IntArrayRef sizes() const {
     return data.sizes();
   }
   int64_t dim() const {

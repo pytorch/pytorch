@@ -41,6 +41,11 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
+
+    Shape:
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
     """
 
     def __init__(self, *args):
@@ -322,7 +327,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
 
