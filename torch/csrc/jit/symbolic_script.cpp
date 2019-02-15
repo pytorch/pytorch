@@ -97,11 +97,11 @@ const std::vector<std::string> functions = {
             return torch.mean(self, dim, keepdim), backward
 
         def mul(self, other):
-            self_size = self.size()
-            other_size = other.size()
             def backward(grad_output):
-                grad_self = (grad_output * other)._grad_sum_to_size(self_size)
-                grad_other = (grad_output * self)._grad_sum_to_size(other_size)
+                # self & other are used in backward. No need to pass in their size
+                # from forward pass
+                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
+                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
                 return grad_self, grad_other
 
             return self * other, backward
@@ -135,11 +135,10 @@ const std::vector<std::string> functions = {
             return torch.pow(self, exponent), backward
 
         def pow_1(self, exponent):
-            self_size = self.size()
-            exponent_size = exponent.size()
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
-                grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent_size)
+                # self & exponent are used in backward, no need to pass in its size explicitly
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self.size())
+                grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent.size())
                 return grad_self, grad_exponent
 
             return torch.pow(self, exponent), backward
@@ -325,10 +324,11 @@ const std::vector<std::string> functions = {
 
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
-            self_size = self.size()
             def backward(grad_output):
+                # self is used in backward, no need to pass in its size explicitly
                 if output_size[0] == 1 and output_size[1] == 1:
-                    grad_self = grad_output.expand(self_size)
+                    self_size = self.size()
+                    grad_self = grad_output.expand(self.size()) / (self_size[-1] * self_size[-2])
                 else:
                     grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
