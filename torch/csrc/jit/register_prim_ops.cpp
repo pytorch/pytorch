@@ -1005,17 +1005,14 @@ Operation listAppend(const Node* node) {
 }
 
 template <typename TList>
-Operation listReverse(const Node* node) {
-  return [](Stack& stack) {
-    TList a;
-    pop(stack, a);
+int listReverse(Stack& stack) {
+  TList a;
+  pop(stack, a);
 
-    auto& elements = a->elements();
-    std::reverse(elements.begin(), elements.end());
-    push(stack, a);
+  auto& elements = a->elements();
+  std::reverse(elements.begin(), elements.end());
 
-    return 0;
-  };
+  return 0;
 }
 
 template <typename T>
