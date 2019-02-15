@@ -553,10 +553,10 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (!is_weight_constant_ || (!b_quantized_data_ && !b_dequantized_data_) ||
       in_qparams_[0].scale != in_qparams0_scale_old_ ||
       in_qparams_[0].zero_point != in_qparams0_zero_point_old_) {
-    if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(2) &&
-        this->template Input<Int8FCDNNLowPPackedWeightBlob>(2).bias.get()) {
+    if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1) &&
+        this->template Input<Int8FCDNNLowPPackedWeightBlob>(1).bias.get()) {
       const auto& packed_filter =
-          this->template Input<Int8FCDNNLowPPackedWeightBlob>(2);
+          this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
       CAFFE_ENFORCE(!dequantize_output_);
       b_quantized_ = packed_filter.bias;
       b_quantized_data_ = b_quantized_->data();
