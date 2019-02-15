@@ -89,7 +89,6 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   std::vector<std::int32_t> Y_int32_;
   std::vector<dnnlowp::TensorQuantizationParams> filter_qparams_;
-  std::vector<float> filter_scales_;
   std::vector<std::int32_t> filter_zero_points_;
 
   std::vector<float> requantization_multipliers_;
