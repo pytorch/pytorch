@@ -185,13 +185,11 @@ std::unordered_set<string> ToHashSet(
 int64_t GetBlob1stDimSize(
     const ShapeInfo& shape_info,
     const string& blob_name) {
-  CAFFE_ENFORCE(
-      shape_info.shape.dims_size() > 0 && shape_info.shape.dims(0) > 0,
-      "Tensor " + blob_name +
-          " is type BATCH/SEQ, however the batch_size is unknown. " +
-          "Dims size: " + to_string(shape_info.shape.dims_size()) +
-          ", dim[0] = " + to_string(shape_info.shape.dims(0)));
-  return shape_info.shape.dims(0);
+  if (shape_info.shape.dims_size() == 0) {
+    return 0;
+  } else {
+    return shape_info.shape.dims(0);
+  }
 }
 
 // Generates AdjustBatchOps for external inputs/outputs with type BATCH or
@@ -223,21 +221,26 @@ std::unordered_map<std::string, std::string> AddAdjustBatchOps(
                        << input_blob;
           continue;
         }
-        string real_batch_size_blob = "";
+        std::string real_batch_size_blob = "";
+        auto max_batch_size = 0;
         if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
-          real_batch_size_blob = kRealBatchSizeBlob;
+          max_batch_size = GetBlob1stDimSize(shape_info_it->second, input_blob);
+          real_batch_size_blob =
+              kRealBatchSizeBlob + "_" + c10::to_string(max_batch_size);
         } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
+          max_batch_size = GetBlob1stDimSize(shape_info_it->second, input_blob);
           real_batch_size_blob = MakeSeqSizeBlob(input_blob);
         } else {
           continue;
         }
+
         auto output_blob = MakeOutputForAdjustBatchOp(input_blob);
         auto ret = real_batch_size_blobs.emplace(real_batch_size_blob);
         if (post_adjust_inputs.emplace(output_blob).second) {
           input_ops->push_back(MakeAdjustBatchOp(
               input_blob,
               output_blob,
-              GetBlob1stDimSize(shape_info_it->second, input_blob),
+              max_batch_size,
               ret.second ? real_batch_size_blob : "",
               true /* adjust_to_max_batch_size */));
         }
@@ -257,27 +260,36 @@ std::unordered_map<std::string, std::string> AddAdjustBatchOps(
     for (auto& output_blob : *(op.mutable_output())) {
       if (external_outputs.count(output_blob)) {
         auto shape_info_it = shape_hints.find(output_blob);
-        if (shape_info_it == shape_hints.end()) {
-          continue;
-        }
+        CAFFE_ENFORCE(
+            shape_info_it != shape_hints.end(),
+            "Cannot find shape info for ",
+            output_blob,
+            " for AdjustBatchOp insertion");
         if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
-          if (!real_batch_size_blobs.count(kRealBatchSizeBlob)) {
-            continue;
-          }
+          auto max_batch_size =
+              GetBlob1stDimSize(shape_info_it->second, output_blob);
+          std::string real_size_blob =
+              kRealBatchSizeBlob + "_" + c10::to_string(max_batch_size);
+          CAFFE_ENFORCE(
+              real_batch_size_blobs.count(real_size_blob),
+              output_blob,
+              ": Cannot find ",
+              real_size_blob,
+              " to make AdjustBatchOp");
           auto input_blob = MakeInputForAdjustBatchOp(output_blob);
           output_ops->push_back(MakeAdjustBatchOp(
               input_blob,
               output_blob,
-              GetBlob1stDimSize(shape_info_it->second, output_blob),
-              kRealBatchSizeBlob,
+              max_batch_size,
+              real_size_blob,
               false /* adjust_to_max_batch_size */));
           renaming_map[output_blob] = input_blob;
           output_blob = input_blob;
-        } else {
-          CAFFE_ENFORCE(
-              shape_info_it->second.dim_type != ShapeInfo::DimType::SEQ,
-              "Output tensor " + output_blob +
-                  " should never have dim_type SEQ.");
+        } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
+          LOG(WARNING) << "It's unusual that output tesnor " << output_blob
+                       << " is of dim_type SEQ. "
+                       << "AdjustBatchOp won't attached "
+                       << "and it might degrade the performance";
         }
       }
     }
