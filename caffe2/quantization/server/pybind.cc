@@ -22,14 +22,16 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
 
   m.def(
       "ObserveHistogramOfOutput",
-      [](const string& out_file_name, int dump_freq) {
-        AddGlobalNetObserverCreator([out_file_name, dump_freq](NetBase* net) {
-          return make_unique<HistogramNetObserver>(
-              net, out_file_name, 2048, dump_freq);
-        });
+      [](const string& out_file_name, int dump_freq, bool mul_nets) {
+        AddGlobalNetObserverCreator(
+            [out_file_name, dump_freq, mul_nets](NetBase* net) {
+              return make_unique<HistogramNetObserver>(
+                  net, out_file_name, 2048, dump_freq, mul_nets);
+            });
       },
       pybind11::arg("out_file_name"),
-      pybind11::arg("dump_freq") = -1);
+      pybind11::arg("dump_freq") = -1,
+      pybind11::arg("mul_nets") = false);
 
   m.def(
       "RegisterQuantizationParams",
