@@ -1,14 +1,11 @@
-graph(%x.1 : Float(*, *)
-      %y.1 : Long(*, *)
-      %z.1 : Float(*, *)) {
+graph(%x.1 : Float(*, *),
+      %y.1 : Long(*, *),
+      %z.1 : Float(*, *)):
   %3 : bool = prim::Constant[value=1]()
   %x : Float(*, *), %y : Tensor, %z : Tensor = prim::If(%3)
-    block0() {
+    block0():
       -> (%x.1, %y.1, %z.1)
-    }
-    block1() {
+    block1():
       -> (%x.1, %x.1, %y.1)
-    }
   %7 : (Float(*, *), Tensor, Tensor) = prim::TupleConstruct(%x, %y, %z)
-  return (%7);
-}
+  return (%7)

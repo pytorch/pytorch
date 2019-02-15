@@ -66,7 +66,7 @@ trap_add cleanup EXIT
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$JOB_BASE_NAME" != *xla* ]]) ; then
+    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
         git_status=$(git status --porcelain)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -81,7 +81,9 @@ if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
   rm ~/sccache_error.log || true
-  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
+  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+  # https://github.com/pytorch/pytorch/pull/16645
+  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
   sccache --zero-stats
@@ -155,3 +157,11 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
+
+function get_exit_code() {
+  set +e
+  "$@"
+  retcode=$?
+  set -e
+  return $retcode
+}

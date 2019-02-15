@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <torch/csrc/utils/tempfile.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/types.h>
@@ -43,10 +42,3 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
-
-#if !defined(_WIN32)
-TEST(TempFileTest, MatchesExpectedPattern) {
-  torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
-  ASSERT_NE(pattern.name.find("test-pattern-"), std::string::npos);
-}
-#endif // !defined(_WIN32)

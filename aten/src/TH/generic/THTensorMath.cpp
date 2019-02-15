@@ -1041,7 +1041,6 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
   int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
 
-#pragma omp critical(blasgemm)
   /* do the operation */
   THBlas_(gemm)(transpose_m1,
                 transpose_m2,

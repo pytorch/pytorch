@@ -501,13 +501,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, torch::autograd::Variable v) {
-            return n.t_(Symbol::attr(name), v.data());
+            AT_ASSERT(!v.requires_grad());
+            return n.t_(Symbol::attr(name), v);
           })
       .def(
           "t",
           [](Node& n, const char* name) {
-            return torch::autograd::make_variable(
-                n.t(Symbol::attr(name)), /*requires_grad=*/false);
+            return n.t(Symbol::attr(name));
           })
       // Tensors (ts_) -- manually written to unwrap variables into tensors.
       .def(
@@ -518,7 +518,8 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              tensors.push_back(variable.data());
+              AT_ASSERT(!variable.requires_grad());
+              tensors.push_back(variable);
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));
           })
@@ -529,8 +530,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<torch::autograd::Variable> variables;
             variables.reserve(tensors.size());
             for (auto& tensor : tensors) {
-              variables.push_back(torch::autograd::make_variable(
-                  std::move(tensor), /*requires_grad=*/false));
+              variables.push_back(std::move(tensor));
             }
             return variables;
           })
@@ -538,7 +538,7 @@ void initPythonIRBindings(PyObject* module_) {
           "z_",
           [](Node& n, const char* name, at::Tensor v) {
             return n.t_(
-                Symbol::attr(name), autograd::Variable(v.view({})).data());
+                Symbol::attr(name), autograd::Variable(v.view({})).set_requires_grad(false));
           })
       .def(
           "z",
@@ -547,7 +547,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view({})).data();
+              i = autograd::Variable(i.view({})).set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
@@ -583,7 +583,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
-      .def("dim", [](const Type& t) { return t.expect<TensorType>()->dim(); })
+      .def("dim", [](const Type& t) { return t.expect<DimensionedTensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -599,7 +599,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "scalarType",
           [](Type& t) {
-            return toString(t.expect<TensorType>()->scalarType());
+            return toString(t.expect<DimensionedTensorType>()->scalarType());
           })
       .def(
           "__eq__",
@@ -618,10 +618,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
-      .def_static("get", &DynamicType::get);
+  py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "DynamicType")
+      .def_static("get", &TensorType::get);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
+  py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
+      .def_static("get", &StringType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
@@ -638,6 +640,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def("getElementType", &ListType::getElementType);
+  py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
+      .def(py::init([](TypePtr key, TypePtr value) {
+        return DictType::create(key, value);
+      }));
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

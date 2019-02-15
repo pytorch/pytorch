@@ -33,19 +33,6 @@ void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool tak
   gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float> { unbiased, take_sqrt }, WelfordData<float> {});
 }
 
-#ifdef __HIPCC__
-template <>
-void sum_kernel_impl<int16_t, int16_t>(TensorIterator& iter) {
-  // There is a Register Coalescing bug in LLVM causing the hcc
-  // compiler segfaults:
-  // https://bugs.llvm.org/show_bug.cgi?id=39602
-  // To work around it, use int32 as the accumulate type.
-  gpu_reduce_kernel<int16_t, int16_t>(iter, func_wrapper<int16_t> ([]GPU_LAMBDA(int32_t a, int32_t b) -> int32_t {
-    return a + b;
-  }));
-}
-#endif
-
 template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
@@ -64,18 +51,6 @@ void mean_kernel_impl(TensorIterator& iter) {
   float factor = float(iter.num_output_elements()) / iter.numel();
   gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
 }
-
-#ifdef __HIPCC__
-template <>
-void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
-  // There is a Register Coalescing bug in LLVM causing the hcc
-  // compiler segfaults:
-  // https://bugs.llvm.org/show_bug.cgi?id=39602
-  // To work around it, use int32 as the accumulate type.
-  float factor = float(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<int16_t, int16_t>(iter, MeanOps<int32_t, float> {factor});
-}
-#endif // __HIPCC__
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {

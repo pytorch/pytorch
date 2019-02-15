@@ -1,6 +1,5 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : int = prim::Constant[value=1]()
   %2 : Tensor = aten::neg(%x)
   %3 : Tensor = aten::add(%2, %1, %1)
-  return (%3);
-}
+  return (%3)
