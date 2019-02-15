@@ -294,6 +294,26 @@ const std::vector<std::string> functions = {
 
             return torch.var(self, dim, unbiased, keepdim), backward
 
+        def std_0(self,
+                  unbiased: bool=True):
+            std_out = torch.std(self, unbiased)
+            def backward(grad_output):
+                grad_self = torch.var_backward(grad_output / (std_out * 2), self, unbiased)
+                return grad_self, None
+
+            return std_out, backward
+
+        def std_1(self,
+                  dim: List[int],
+                  unbiased: bool,
+                  keepdim: bool):
+            std_out = torch.std(self, dim, unbiased, keepdim)
+            def backward(grad_output):
+                grad_self = torch.var_backward(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                return grad_self, None, None, None
+
+            return std_out, backward
+
         def view(self,
                  size: List[int]):
             self_size = self.size()
@@ -313,7 +333,7 @@ const std::vector<std::string> functions = {
                     grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
 
-            return torch.adaptive_avg_pool2d(self, output_size), backward
+            return torch._adaptive_avg_pool2d(self, output_size), backward
 
         def embedding(weight,
                       indices,

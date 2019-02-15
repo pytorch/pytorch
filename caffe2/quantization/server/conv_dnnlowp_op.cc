@@ -227,13 +227,16 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
   const auto& filter = InputTensorCPU_(FILTER);
   int M = filter.dim32(0);
 
+  bool has_packed_bias =
+      this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) &&
+      this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER).bias.get();
+  bool has_bias = InputSize() == 3 || has_packed_bias;
+
   // Quantize bias
-  if (InputSize() == 3 &&
+  if (has_bias &&
       (!b_quantized_data_ ||
        in_qparams_[INPUT].scale != in_qparams_scale_old_)) {
-    if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) &&
-        this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER)
-            .bias.get()) {
+    if (has_packed_bias) {
       const auto& packed_filter =
           this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
       b_quantized_ = packed_filter.bias;
@@ -532,7 +535,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
   for (int i = 0; i < M / group_; ++i) {
     int32_t row_offset = row_offsets_[i_offset + i];
     row_offset *= -in_qparams_[INPUT].zero_point;
-    if (InputSize() == 3) {
+    if (b_quantized_data_) {
       row_offset += b_quantized_data_[i_offset + i];
     }
     for (int j = 0; j < Y_HxW; ++j) {
@@ -1009,7 +1012,7 @@ void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM_(
       filter_zero_points_.data(),
       packA.getRowOffsetBuffer(),
       column_offsets_->data(),
-      InputSize() == 3 ? b_quantized_data_ : nullptr,
+      b_quantized_data_,
       M,
       group_);
 
@@ -1201,7 +1204,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             filter_zero_points_.data(),
             row_offsets_.data() + tid * row_offset_size_per_thread,
             column_offsets_->data(),
-            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            b_quantized_data_,
             conv_p.OC,
             conv_p.G);
 
@@ -1225,7 +1228,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             filter_zero_points_.data(),
             row_offsets_.data() + tid * row_offset_size_per_thread,
             column_offsets_->data(),
-            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            b_quantized_data_,
             conv_p.OC,
             conv_p.G);
 
