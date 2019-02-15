@@ -1,15 +1,12 @@
-graph(%x : Double(*, *)) {
+graph(%x : Double(*, *)):
   %1 : int = prim::Constant[value=0]()
   %2 : bool = prim::Constant[value=1]()
   %c : Tensor[] = prim::If(%2)
-    block0() {
+    block0():
       %c.1 : Tensor[] = prim::ListConstruct(%x, %x)
       -> (%c.1)
-    }
-    block1() {
+    block1():
       %c.2 : Tensor[] = prim::ListConstruct(%x, %x, %x)
       -> (%c.2)
-    }
   %6 : Tensor = aten::cat(%c, %1)
-  return (%6);
-}
+  return (%6)

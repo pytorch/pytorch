@@ -10,7 +10,7 @@ class IDEEPSigmoidOp final : public IDEEPOperator {
   IDEEPSigmoidOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws) {
   }
-  virtual ~IDEEPSigmoidOp() {}
+  ~IDEEPSigmoidOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -36,7 +36,7 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
   IDEEPSigmoidGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws) {
   }
-  virtual ~IDEEPSigmoidGradientOp() {}
+  ~IDEEPSigmoidGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& Y = Input(OUTPUT);
