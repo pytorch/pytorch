@@ -42,6 +42,10 @@ class TORCH_API DistributedSampler : public Sampler<BatchRequest> {
     epoch_ = epoch;
   }
 
+  size_t epoch() const {
+    return epoch_;
+  }
+
  protected:
   size_t local_sample_count() {
     if (allow_duplicates_) {

@@ -914,6 +914,16 @@ TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
     torch::load(b, stream);
     ASSERT_EQ(b.index(), 7);
   }
+  {
+    samplers::DistributedRandomSampler a(10);
+    a.set_epoch(3); 
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedRandomSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.epoch(), 3);
+  }
 }
 
 TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
