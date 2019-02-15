@@ -10158,7 +10158,6 @@ a")
             def fn():
                 return 4
 
-
         with self.assertRaisesRegex(RuntimeError, "not a function"):
             class M(torch.jit.ScriptModule):
                 def __init__(self):
