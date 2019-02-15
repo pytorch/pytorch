@@ -119,7 +119,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  at::ivalue::DictUnorderedMap elems;
+  at::ivalue::UnorderedMap elems;
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(std::make_pair(

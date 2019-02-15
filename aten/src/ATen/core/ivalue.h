@@ -73,7 +73,7 @@ struct DictEqualTo {
   bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
-using DictUnorderedMap = std::unordered_map<IValue, IValue, DictHash, DictEqualTo>;
+using UnorderedMap = std::unordered_map<IValue, IValue, DictHash, DictEqualTo>;
 
 struct Future;
 struct GenericDict;
@@ -312,7 +312,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
-  const ivalue::DictUnorderedMap& toGenericDictRef() const;
+  const ivalue::UnorderedMap& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -382,7 +382,7 @@ struct CAFFE2_API IValue final {
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
-  IValue(ivalue::DictUnorderedMap v);
+  IValue(ivalue::UnorderedMap v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
     AT_ASSERT(isGenericDict());
@@ -667,26 +667,26 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
  private:
-  DictUnorderedMap elements_;
+  UnorderedMap elements_;
 
  public:
-  GenericDict(DictUnorderedMap elements_)
+  GenericDict(UnorderedMap elements_)
       : elements_(std::move(elements_)) {}
   static c10::intrusive_ptr<GenericDict> create(
-      DictUnorderedMap elements_) {
+      UnorderedMap elements_) {
     return c10::make_intrusive<GenericDict>(std::move(elements_));
   }
-  const DictUnorderedMap& elements() const {
+  const UnorderedMap& elements() const {
     return elements_;
   }
-  operator const DictUnorderedMap&() const {
+  operator const UnorderedMap&() const {
     return elements();
   }
 
-  DictUnorderedMap& elements() {
+  UnorderedMap& elements() {
     return elements_;
   }
-  operator DictUnorderedMap&() {
+  operator UnorderedMap&() {
     return elements();
   }
 };
@@ -805,7 +805,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(ivalue::DictUnorderedMap v)
+inline IValue::IValue(ivalue::UnorderedMap v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
@@ -833,7 +833,7 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-inline const c10::ivalue::DictUnorderedMap& IValue::
+inline const c10::ivalue::UnorderedMap& IValue::
     toGenericDictRef() const {
   return toGenericDict()->elements();
 }
