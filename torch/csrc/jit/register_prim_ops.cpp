@@ -1038,6 +1038,24 @@ int listInsert(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
+int listRemove(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1331,7 +1349,10 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::insert( " decl_type "[](a!) self, int idx,                 \
           " decl_type " el) -> ()",                                         \
-          listClear<Shared<c_type>, c_type::ElemType>)
+          listInsert<Shared<c_type>, c_type::ElemType>),                    \
+      Operator(                                                             \
+          "aten::remove(" decl_type "[](a!) self, " decl_type " el) -> ()", \
+          listRemove<Shared<c_type>>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1354,7 +1375,11 @@ RegisterOperators reg2({
       Operator(                                                        \
           "aten::insert( " decl_type "[](a!) self, int idx,            \
           " decl_type " el) -> ()",                                    \
-          listClear<Shared<c_type>, c_type::ElemType>)
+          listInsert<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::remove(" decl_type "[](a!) self,                      \
+          " decl_type " el) -> ()",                                    \
+          listRemove<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
