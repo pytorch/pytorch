@@ -17,6 +17,7 @@
 #include <ATen/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <limits>

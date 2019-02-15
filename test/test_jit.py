@@ -4022,6 +4022,31 @@ a")
             return a == [1, 2, 3, 4, 5]
         self.checkScript(test_list_insert_out_of_bounds, ())
 
+    def test_mutable_list_remove_not_existing(self):
+        @torch.jit.script
+        def test_list_remove_not_existing():
+            a = [1, 2, 3, 4]
+            a.remove(5)
+
+        with self.assertRaisesRegex(RuntimeError, "list.remove(x): x not in list"):
+            test_list_remove_not_existing()
+
+    def test_mutable_list_remove(self):
+        def test_list_remove():
+            a = [1, 2, 3, 4]
+            a.remove(3)
+
+            return a == [1, 2, 4]
+        self.checkScript(test_list_remove, ())
+
+    def test_mutable_list_remove2(self):
+        def test_list_remove2():
+            a = [1]
+            a.remove(1)
+
+            return len(a) == 0
+        self.checkScript(test_list_remove2, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
