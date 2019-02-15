@@ -3990,6 +3990,38 @@ a")
             return len(a) == 0
         self.checkScript(test_clear, ())
 
+    def test_mutable_list_insert(self):
+        def test_list_insert():
+            a = [1, 2, 3, 4]
+            a.insert(2, 5)
+
+            return a == [1, 2, 5, 3, 4]
+        self.checkScript(test_list_insert, ())
+
+    def test_mutable_list_insert_negative(self):
+        def test_list_insert_negative():
+            a = [1, 2, 3, 4]
+            a.insert(-1, 5)
+
+            return a == [1, 2, 3, 5, 4]
+        self.checkScript(test_list_insert_negative, ())
+
+    def test_mutable_list_insert_neg_out_of_bounds(self):
+        def test_list_insert_neg_out_of_bounds():
+            a = [1, 2, 3, 4]
+            a.insert(-10, 5)
+
+            return a == [5, 1, 2, 3, 4]
+        self.checkScript(test_list_insert_neg_out_of_bounds, ())
+
+    def test_mutable_list_insert_out_of_bounds(self):
+        def test_list_insert_out_of_bounds():
+            a = [1, 2, 3, 4]
+            a.insert(10, 5)
+
+            return a == [1, 2, 3, 4, 5]
+        self.checkScript(test_list_insert_out_of_bounds, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
