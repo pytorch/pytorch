@@ -341,12 +341,10 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       }
     }
 
-    filter_scales_.resize(filter_qparams_.size());
     filter_zero_points_.resize(filter_qparams_.size());
     requantization_params_.resize(filter_qparams_.size());
     requantization_multipliers_.resize(filter_qparams_.size());
     for (int i = 0; i < filter_qparams_.size(); ++i) {
-      filter_scales_[i] = filter_qparams_[i].scale;
       filter_zero_points_[i] = filter_qparams_[i].zero_point;
     }
 
