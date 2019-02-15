@@ -35,11 +35,11 @@ BatchMatMulDNNLowPOp<T>::BatchMatMulDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
-      trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-      trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)),
-      broadcast_(OperatorBase::GetSingleArgument<int>("broadcast", 0)),
+      trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
+      trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
+      broadcast_(this->template GetSingleArgument<int>("broadcast", 0)),
       is_B_constant_(
-          OperatorBase::GetSingleArgument<bool>("constant_B", false)) {}
+          this->template GetSingleArgument<bool>("constant_B", false)) {}
 
 template <typename T>
 bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
@@ -280,7 +280,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
   int num_batches_B = B.numel() / (K * N);
   if (!first_invocation_ && !Bq_packed_.empty() &&
       num_batches_B * N != column_offsets_.size()) {
-    LOG(INFO) << "Operator with output " << OperatorBase::debug_def().output(0)
+    LOG(INFO) << "Operator with output " << this->debug_def().output(0)
               << " does not have constant B";
     is_B_constant_ = false;
     Bq_packed_.clear();
@@ -295,12 +295,12 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
       vector<int8_t> B_quantized_temp(K * N);
       column_offsets_.resize(num_batches_B * N);
       for (int i = 0; i < num_batches_B; ++i) {
-        if (OperatorBase::InputIsType<int8::Int8TensorCPU>(1)) {
+        if (this->template InputIsType<int8::Int8TensorCPU>(1)) {
           B_qparams_.push_back(TensorQuantizationParams());
           B_qparams_[i].scale =
-              OperatorBase::Input<int8::Int8TensorCPU>(1).scale;
+              this->template Input<int8::Int8TensorCPU>(1).scale;
           B_qparams_[i].zero_point =
-              OperatorBase::Input<int8::Int8TensorCPU>(1).zero_point +
+              this->template Input<int8::Int8TensorCPU>(1).zero_point +
               signed_min;
 
           const T* B_data = B.template data<T>() + i * B_quantized_temp.size();
@@ -381,8 +381,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
       } else {
         assert(false);
       }
-      LOG(WARNING) << "BatchMatMul with output "
-                   << OperatorBase::debug_def().output(0)
+      LOG(WARNING) << "BatchMatMul with output " << this->debug_def().output(0)
                    << " falls back to slow path because " << reason;
     }
     B_qparams_.resize(1);

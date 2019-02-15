@@ -11,6 +11,8 @@
 #include <c10/core/Backend.h>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/read_adapter_interface.h"
 
 extern "C" {
 typedef struct mz_zip_archive mz_zip_archive;
@@ -84,7 +86,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace torch { namespace jit {
+namespace caffe2 {
+namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
@@ -97,9 +100,9 @@ constexpr uint64_t kFieldAlignment = 64;
 
 class CAFFE2_API PyTorchStreamReader final {
  public:
-  PyTorchStreamReader(std::string archive_name, std::istream* in=nullptr);
-  PyTorchStreamReader(std::istream* in)
-  : PyTorchStreamReader("archive", in) {}
+  explicit PyTorchStreamReader(const std::string& file_name);
+  explicit PyTorchStreamReader(std::istream* in);
+  explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
@@ -109,15 +112,16 @@ class CAFFE2_API PyTorchStreamReader final {
   ~PyTorchStreamReader();
 
  private:
-   size_t read(uint64_t pos, char* buf, size_t n);
-   void valid(const char* what);
-   size_t getFileID(const std::string& name);
+  void init();
+  size_t read(uint64_t pos, char* buf, size_t n);
+  void valid(const char* what);
+  size_t getFileID(const std::string& name);
 
-   friend size_t istream_read_func(void *pOpaque, uint64_t file_ofs, void *pBuf, size_t n);
-   std::unique_ptr<mz_zip_archive> ar_;
-   std::string archive_name_;
-   std::istream* in_;
-   std::ifstream file_stream_;
+  friend size_t
+  istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
+  std::unique_ptr<mz_zip_archive> ar_;
+  std::string archive_name_;
+  std::unique_ptr<ReadAdapterInterface> in_;
 };
 
 class CAFFE2_API PyTorchStreamWriter final {
@@ -150,4 +154,5 @@ class CAFFE2_API PyTorchStreamWriter final {
    friend size_t ostream_write_func(void *pOpaque, uint64_t file_ofs, const void *pBuf, size_t n);
 };
 
-}}  // namespace torch::jit
+} // namespace serialize
+} // namespace caffe2

@@ -1,4 +1,4 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "0.4"
 graph {
@@ -12,6 +12,16 @@ graph {
     input: "2"
     output: "3"
     op_type: "Not"
+  }
+  node {
+    input: "3"
+    output: "4"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 2
+      type: INT
+    }
   }
   name: "torch-jit-export"
   input {
@@ -53,7 +63,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "4"
     type {
       tensor_type {
         elem_type: 2

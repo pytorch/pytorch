@@ -31,14 +31,12 @@ THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, scalar_t, scalar_
 THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, scalar_t, scalar_t, scalar_t, scalar_t);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, ptrdiff_t size, int shared);
 
-#ifdef __cplusplus
 THC_API THCStorage* THCStorage_(newWithAllocator)(
   THCState *state, ptrdiff_t size,
   at::Allocator* allocator);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
   THCState *state, at::DataPtr&& data, ptrdiff_t size,
   at::Allocator* allocator);
-#endif
 
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);

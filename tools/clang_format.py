@@ -22,7 +22,7 @@ import re
 # (recursively) will be checked.
 CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
 
-CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
+CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
 
 
 def parse_args():
@@ -63,7 +63,7 @@ def get_whitelisted_files():
     for dir in CLANG_FORMAT_WHITELIST:
         for root, dirnames, filenames in os.walk(dir):
             for filename in filenames:
-                if CPP_FILE_REGEX.fullmatch(filename):
+                if CPP_FILE_REGEX.match(filename):
                     matches.append(os.path.join(root, filename))
     return set(matches)
 

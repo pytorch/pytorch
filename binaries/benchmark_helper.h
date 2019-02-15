@@ -82,14 +82,17 @@ void writeTextOutput(
   }
   // remove the last ,
   string str = line.str();
-  str.pop_back();
+  if(str.length() != 0) {
+    str.pop_back();
+  }
   lines.push_back(str);
 
-  auto flags = std::ios::out;
+  // static casts are workaround for MSVC build
+  auto flags = static_cast<std::ios_base::openmode>(std::ios::out);
   if (index != 0) {
-    flags |= std::ios::app;
+    flags |= static_cast<std::ios_base::openmode>(std::ios::app);
   } else {
-    flags |= std::ios::trunc;
+    flags |= static_cast<std::ios_base::openmode>(std::ios::trunc);
   }
   std::ofstream output_file(output_name, flags);
   std::ostream_iterator<std::string> output_iterator(output_file, "\n");

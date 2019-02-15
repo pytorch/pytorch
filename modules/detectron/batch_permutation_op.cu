@@ -50,7 +50,7 @@ template <>
 bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& indices = Input(1);
-  auto* Y = Output(0);
+
 
   CAFFE_ENFORCE(indices.ndim() == 1, "indices must be 1-d");
   CAFFE_ENFORCE(
@@ -62,7 +62,7 @@ bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
       indices.dim32(0),
       ")");
 
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   BatchPermutationKernel<true><<<
       CAFFE_GET_BLOCKS(X.size()),
@@ -84,8 +84,8 @@ template <>
 bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& indices = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
 
   BatchPermutationKernel<false><<<
       CAFFE_GET_BLOCKS(dY.size()),

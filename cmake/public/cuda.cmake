@@ -10,7 +10,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
 # Find CUDA.
-find_package(CUDA 7.0)
+find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
     "Caffe2: CUDA cannot be found. Depending on whether you are building "
@@ -146,6 +146,9 @@ if(CAFFE2_USE_CUDNN)
         "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
   endif()
   message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+  if(CUDNN_VERSION VERSION_LESS "7.0.0")
+    message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
+  endif()
 endif()
 
 # ---[ CUDA libraries wrapper

@@ -30,8 +30,8 @@ namespace {
 Operation createPythonOperation(const Node* op_) {
   AutoGIL gil;
   const PythonOp* op = static_cast<const PythonOp*>(op_);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const py::function func = py::reinterpret_borrow<const py::function>(
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       py::handle(const_cast<PythonOp*>(op)->pyobj.get()));
 
   size_t num_inputs = 0;
@@ -40,7 +40,7 @@ Operation createPythonOperation(const Node* op_) {
       num_inputs++;
   }
 
-  JIT_ASSERT(op->outputs().size() == 1);
+  AT_ASSERT(op->outputs().size() == 1);
 
   return [=](Stack& stack) {
     AutoGIL gil;
@@ -50,8 +50,8 @@ Operation createPythonOperation(const Node* op_) {
     size_t next_tensor = 0;
     for (auto arg_type : op->cconv) {
       if (arg_type == 'c') {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         py_inputs[i] = py::reinterpret_borrow<const py::object>(
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<PythonOp*>(op)->scalar_args[next_scalar++].get());
       } else if (arg_type == 'd') {
         py_inputs[i] =

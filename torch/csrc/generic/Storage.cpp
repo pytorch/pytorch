@@ -40,14 +40,14 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   THPStoragePtr self((THPStorage *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
-  THAllocator* allocator = nullptr;
+  c10::Allocator* allocator = nullptr;
 
   // Internally we allow constructing with a keywoard only argument cdata
   if (kwargs != nullptr) {
     PyObject *allocator_ptr = PyDict_GetItemString(kwargs, "allocator");
     if (allocator_ptr) {
       THPUtils_assert(THPUtils_checkLong(allocator_ptr), "invalid allocator");
-      allocator = (THAllocator*) PyLong_AsVoidPtr(allocator_ptr);
+      allocator = static_cast<c10::Allocator*>(PyLong_AsVoidPtr(allocator_ptr));
       PyDict_DelItemString(kwargs, "allocator");
     }
 

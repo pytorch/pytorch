@@ -89,8 +89,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Shape:
         - input: :math:`(N, in\_features)`
         - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
-        - output: :math:`(N)`
-        - loss: ``Scalar``
+        - output1: :math:`(N)`
+        - output2: ``Scalar``
 
 
     .. _Efficient softmax approximation for GPUs:
@@ -107,7 +107,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         if (cutoffs != sorted(cutoffs)) \
                 or (min(cutoffs) <= 0) \
-                or (max(cutoffs) >= (n_classes - 1)) \
+                or (max(cutoffs) > (n_classes - 1)) \
                 or (len(set(cutoffs)) != len(cutoffs)) \
                 or any([int(c) != c for c in cutoffs]):
 

@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/code_template.h>
@@ -191,6 +189,15 @@ constexpr auto half_support_literal = R"(
       asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
       return val;
     }
+)"
+// MSVC's preprocesor (but not the standard compiler) has a bug
+// where it incorrectly tokenizes raw string literals, ending when it sees a "
+// this causes the #endif in this string literal to be treated as a preprocessor
+// token which, in turn, cause sccache on windows CI to fail.
+// See https://godbolt.org/z/eVTIJq as an example.
+// This workaround uses string-pasting to separate the " and the #endif into different
+// strings
+R"(
   #endif /* defined(__CUDACC__) */
 #endif /* defined(__cplusplus) */
 #undef __HALF_TO_US
@@ -203,5 +210,3 @@ typedef __half half;
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER

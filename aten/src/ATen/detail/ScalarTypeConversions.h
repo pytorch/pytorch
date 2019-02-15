@@ -3,7 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/ScalarType.h>
-#include <c10/Half.h>
+#include <c10/util/Half.h>
 
 namespace at { namespace detail {
 

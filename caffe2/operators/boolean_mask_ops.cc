@@ -52,7 +52,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto* dataOut = Output(0);
   CAFFE_ENFORCE(data.dim() >= 1);
   CAFFE_ENFORCE_EQ(mask.dim(), 1);
-  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
+  CAFFE_ENFORCE(data.size(0) == mask.size(0));
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;

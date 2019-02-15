@@ -250,7 +250,6 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 5, 0)
         test_tensor(x, res)
 
-    @skipIfRocm  # see https://github.com/pytorch/pytorch/pull/12171#issuecomment-431069849
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
         max_nnz = 1
@@ -731,7 +730,6 @@ class TestSparse(TestCase):
                                     "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
-    @skipIfRocm
     def test_unsqueeze(self):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
@@ -819,10 +817,12 @@ class TestSparse(TestCase):
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
 
-    @skipIfRocm
     def test_sparse_addmm(self):
-        def test_shape(m, n, p, nnz):
-            D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
+        def test_shape(m, n, p, nnz, broadcast):
+            if broadcast:
+                D1 = torch.randn((), device=self.device).requires_grad_(True)
+            else:
+                D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
             D2 = torch.randn(m, p, device=self.device).requires_grad_(True)
             S = self._gen_sparse(2, nnz, [n, m])[0]
             S_dense = S.to_dense().requires_grad_(True)
@@ -833,9 +833,9 @@ class TestSparse(TestCase):
                 return torch.sparse.addmm(D1, S, D2)
             gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
-        test_shape(7, 8, 9, 20)
+        test_shape(7, 8, 9, 20, False)
+        test_shape(7, 8, 9, 20, True)
 
-    @skipIfRocm
     def test_sparse_mm(self):
         def test_shape(d1, d2, d3, nnz):
             D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
@@ -997,6 +997,14 @@ class TestSparse(TestCase):
         for i in range(1, 5):
             test_dims += itertools.combinations(range(len(with_size)), i)
 
+        # https://github.com/pytorch/pytorch/issues/16501
+        x = torch.tensor([[1., 0., 0., 1.],
+                          [0., 1., 0., 0.],
+                          [0., 1., 1., 0.],
+                          [0., 1., 0., 2.]]).to_sparse()
+        self.assertEqual(torch.sparse.sum(x, dim=0), torch.sparse.sum(x, dim=-2))
+        self.assertEqual(torch.sum(x.to_dense(), dim=0), torch.sparse.sum(x, dim=0).to_dense())
+
         # not support SparseTensor.sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
         self.assertRaises(RuntimeError, lambda: S.sum())
@@ -1091,7 +1099,6 @@ class TestSparse(TestCase):
             # coalesced.
             self.assertEqual(z._values(), y._values())
 
-    @skipIfRocm
     def test_basic_ops(self):
         self._test_basic_ops_shape(9, 12, [5, 6])
         self._test_basic_ops_shape(9, 12, [10, 10, 10])
@@ -1174,7 +1181,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 0]))
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
 
@@ -1221,7 +1227,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2, 0]))
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()
 
@@ -1273,6 +1278,7 @@ class TestSparse(TestCase):
             self.assertEqual(res.sparse_dim(), len(template_shape_i))
             self.assertEqual(res.dense_dim(), len(template_shape_v))
 
+    @skipIfRocm
     def test_zeros_like(self):
         def test_shape(i_shapes, v_shapes, nnzs):
             for i_dim in range(1, len(i_shapes) + 1):
@@ -1330,7 +1336,6 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
             y.backward(x)
 
-    @skipIfRocm
     def test_log1p(self):
         input = torch.sparse_coo_tensor(
             torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),

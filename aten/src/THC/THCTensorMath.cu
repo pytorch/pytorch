@@ -17,7 +17,7 @@
 #include <thrust/sequence.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/transform.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <cfloat>
@@ -107,19 +107,6 @@ struct NonZeroOp
       return false;
     }
   }
-};
-
-template<typename T, typename accT = T>
-struct LinspaceOp {
-  __host__ __device__ LinspaceOp(accT start, accT step):
-    start_(start), step_(step) { }
-  __device__ __forceinline__ T operator()(ptrdiff_t index) {
-    accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
-    accT value = THCNumerics<accT>::add(start_, increment);
-    return ScalarConvert<accT,T>::to(value);
-  }
-
-  const accT start_, step_;
 };
 
 #include <THC/generic/THCTensorMath.cu>

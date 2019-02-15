@@ -372,8 +372,7 @@ def bce_with_logistic_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
-        pickle=False,
-        decorator=skipIfRocm
+        pickle=False
     )
 
 
@@ -832,6 +831,44 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
+def fractional_max_pool2d_test(test_case):
+    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(1, 3, 5, 7),
+            fullname='FractionalMaxPool2d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                4, 3), _random_samples=random_samples),
+            input_size=(1, 3, 7, 6),
+            fullname='FractionalMaxPool2d_size')
+
+
+def fractional_max_pool3d_test(test_case):
+    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(2, 4, 5, 5, 5),
+            fullname='FractionalMaxPool3d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                4, 4, 4), _random_samples=random_samples),
+            input_size=(2, 4, 7, 7, 7),
+            fullname='FractionalMaxPool3d_size')
+    elif test_case == 'asymsize':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
+                10, 3, 2), _random_samples=random_samples),
+            input_size=(2, 4, 16, 7, 5),
+            fullname='FractionalMaxPool3d_asymsize')
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -874,6 +911,11 @@ new_module_tests = [
     multimarginloss_p_no_reduce_test(),
     multimarginloss_margin_no_reduce_test(),
     multimarginloss_weights_no_reduce_test(),
+    fractional_max_pool2d_test('ratio'),
+    fractional_max_pool2d_test('size'),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -892,7 +934,6 @@ new_module_tests = [
         check_eval=True,
         desc='3d_input',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -912,7 +953,6 @@ new_module_tests = [
         check_eval=True,
         desc='not_affine',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -932,7 +972,6 @@ new_module_tests = [
         check_eval=True,
         desc='3d_input_not_affine',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -1023,7 +1062,6 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -1032,7 +1070,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -1071,7 +1108,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1080,7 +1116,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1089,7 +1124,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1098,7 +1132,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1107,7 +1140,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1116,7 +1148,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1125,7 +1156,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1134,7 +1164,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1143,7 +1172,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1152,7 +1180,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Conv1d',
@@ -1212,8 +1239,6 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1264,8 +1289,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='strided',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1273,8 +1296,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='padding',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1295,14 +1316,11 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1613,8 +1631,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1623,8 +1639,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='sum',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1640,8 +1654,6 @@ new_module_tests = [
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         jacobian_input=False,
         check_gradgrad=False,
-        decorator=skipIfRocm,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
@@ -1649,20 +1661,6 @@ new_module_tests = [
         jacobian_input=False,
         fullname='Embedding_sparse',
         check_gradgrad=False,
-        test_cuda=(not TEST_WITH_ROCM)
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d(
-            2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 5, 5),
-        fullname='FractionalMaxPool2d_ratio',
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
-            4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 7, 7),
-        fullname='FractionalMaxPool2d_size',
-        test_cuda=False,
     ),
     dict(
         module_name='PixelShuffle',
@@ -1782,49 +1780,42 @@ new_module_tests = [
         constructor_args=(12, None, 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_2d',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=((4, 6), None, 'bicubic', False),
         input_size=(1, 2, 2, 3),
         desc='bicubic_tuple_2d',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, 4., 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_2d',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, (2., 2.), 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_shared_2d',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, (2., 1.), 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_skewed_2d',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=((4, 6), None, 'bicubic', True),
         input_size=(1, 2, 4, 4),
         desc='bicubic_tuple_2d_align_corners',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
         constructor_args=(None, (2., 1.), 'bicubic', True),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_skewed_2d_align_corners',
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Upsample',
@@ -1937,10 +1928,22 @@ new_module_tests = [
         input_fn=lambda: torch.rand(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5),
+        desc='one_output',
+    ),
+    dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
         input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
+        desc='single_1x1output',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
@@ -3064,7 +3067,7 @@ class ModuleTest(TestBase):
             test_case.assertEqual(cpu_output, gpu_output, self.precision)
 
             # Run backwards on CPU and GPU and compare results
-            for i in range(5):
+            for _ in range(5):
                 cpu_gradOutput = cpu_output.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)

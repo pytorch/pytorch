@@ -34,6 +34,14 @@ namespace at { namespace native {
 DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
+Tensor index_select_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  Tensor res = at::zeros(sizes, grad.options());
+  if (!keepdim && sizes.size() > 0) {
+    return res.scatter_(dim, indices.unsqueeze(dim), grad.unsqueeze(dim));
+  }
+  return res.scatter_(dim, indices, grad);
+}
+
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
 }
@@ -55,6 +63,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
     }
   }
   return close;
+}
+
+Tensor isnan(const Tensor& self) {
+  return self != self;
 }
 
 bool is_nonzero(const Tensor& self) {
@@ -192,10 +204,6 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
   }
 }
 
-Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.max(dim, keepdim));
-}
-
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_contiguous() && min.is_contiguous() && min_indices.is_contiguous()) {
@@ -233,10 +241,6 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
       return _min_out_cpu(min, min_indices, self, dim, keepdim);
     }
   }
-}
-
-Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.min(dim, keepdim));
 }
 
 // argmax and argmin

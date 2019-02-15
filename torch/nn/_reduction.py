@@ -37,8 +37,6 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
     if reduce is None:
         reduce = True
 
-    size_average = torch.jit._unwrap_optional(size_average)
-    reduce = torch.jit._unwrap_optional(reduce)
     if size_average and reduce:
         ret = 'mean'
     elif reduce:

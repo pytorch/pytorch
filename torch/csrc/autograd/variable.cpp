@@ -48,11 +48,11 @@ int64_t Variable::Impl::numel() const {
   return data_.numel();
 }
 
-IntList Variable::Impl::sizes() const {
+IntArrayRef Variable::Impl::sizes() const {
   return data_.sizes();
 }
 
-IntList Variable::Impl::strides() const {
+IntArrayRef Variable::Impl::strides() const {
   return data_.strides();
 }
 
@@ -90,6 +90,10 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
 
 void* Variable::Impl::slow_data() const {
   return data_.unsafeGetTensorImpl()->slow_data();
+}
+
+bool Variable::Impl::has_storage() const {
+  return data_.has_storage();
 }
 
 const at::Storage& Variable::Impl::storage() const {

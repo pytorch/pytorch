@@ -5,10 +5,10 @@ namespace caffe2 {
 template <typename T, class Context>
 bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // Delegate to local conv operator
-  for (int i = 0; i < OperatorBase::InputSize(); ++i) {
+  for (int i = 0; i < this->InputSize(); ++i) {
     local_input_blobs_[i]->ShareExternal(
-        const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
-        OperatorBase::Inputs()[i]->meta());
+        const_cast<void*>(this->Inputs()[i]->GetRaw()),
+        this->Inputs()[i]->meta());
   }
 
   if (!local_op_->RunOnDeviceWithOrderNCHW()) {
@@ -36,10 +36,10 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 template <typename T, class Context>
 bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // Delegate to local conv operator
-  for (int i = 0; i < OperatorBase::InputSize(); ++i) {
+  for (int i = 0; i < this->InputSize(); ++i) {
     local_input_blobs_[i]->ShareExternal(
-        const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
-        OperatorBase::Inputs()[i]->meta());
+        const_cast<void*>(this->Inputs()[i]->GetRaw()),
+        this->Inputs()[i]->meta());
   }
 
   if (!local_op_->RunOnDeviceWithOrderNHWC()) {

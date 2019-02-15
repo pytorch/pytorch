@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_REDUCE_OPS_H_
-#define CAFFE2_OPERATORS_REDUCE_OPS_H_
+#ifndef CAFFE2_OPERATORS_EXPAND_OP_H_
+#define CAFFE2_OPERATORS_EXPAND_OP_H_
 
 #include <vector>
 
@@ -94,11 +94,14 @@ class ExpandGradientOp final : public Operator<Context> {
         axes.push_back(i);
       }
     }
+    std::vector<int> X_dims = dY_dims;
+    for (const int axis : axes) {
+      X_dims[axis] = 1;
+    }
     math::ReduceSum<T, Context>(
         dY_dims.size(),
         dY_dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.data(),
         T(1),
         dY.template data<T>(),
         dX->template mutable_data<T>(),

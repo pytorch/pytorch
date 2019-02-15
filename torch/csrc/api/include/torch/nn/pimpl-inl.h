@@ -45,3 +45,30 @@ struct is_module_holder_of : is_module_holder_of_impl<
                                  is_module_holder<T>::value,
                                  decay_t<T>,
                                  decay_t<C>> {};
+
+// A collection of templates that allow deducing the return type of the
+// `forward()` method, but only if a module actually has a `forward()` method,
+// and otherwise deduces to the type `void`.
+
+template <bool has_forward_value, typename C, typename... Args>
+struct return_type_of_forward_impl;
+
+template <typename C, typename... Args>
+struct return_type_of_forward_impl<true, C, Args...> {
+  using type = decltype(::std::declval<C>().forward(::std::declval<Args>()...));
+};
+
+template <typename C, typename... Args>
+struct return_type_of_forward_impl<false, C, Args...> {
+  using type = void;
+};
+
+template <typename C, typename... Args>
+using return_type_of_forward = return_type_of_forward_impl<
+    torch::detail::has_forward<C>::value,
+    C,
+    Args...>;
+
+template <typename C, typename... Args>
+using return_type_of_forward_t =
+    typename return_type_of_forward<C, Args...>::type;

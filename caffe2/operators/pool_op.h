@@ -1,7 +1,6 @@
 #ifndef CAFFE2_OPERATORS_POOL_OP_H_
 #define CAFFE2_OPERATORS_POOL_OP_H_
 
-#include <array>
 #include <vector>
 
 #include "caffe2/core/common_omp.h"
@@ -38,180 +37,275 @@ class PoolOp final : public ConvPoolOpBase<Context> {
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
-    const std::vector<int> X_dims = GetDims(X);
-    const std::vector<int> Y_dims = GetDims(*Y);
-    const int image_ndim = ndim - 2;
-    switch (image_ndim) {
-      case 1: {
-        return functor_.template Forward<T, StorageOrder::NCHW, 1>(
-            N,
-            C,
-            {X.dim32(2)},
-            {Y->dim32(2)},
-            {kernel_[0]},
-            {dilation_[0]},
-            {stride_[0]},
-            {pads_[0], pads_[1]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      case 2: {
-        return functor_.template Forward<T, StorageOrder::NCHW, 2>(
-            N,
-            C,
-            {X.dim32(2), X.dim32(3)},
-            {Y->dim32(2), Y->dim32(3)},
-            {kernel_[0], kernel_[1]},
-            {dilation_[0], dilation_[1]},
-            {stride_[0], stride_[1]},
-            {pads_[0], pads_[1], pads_[2], pads_[3]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      case 3: {
-        return functor_.template Forward<T, StorageOrder::NCHW, 3>(
-            N,
-            C,
-            {X.dim32(2), X.dim32(3), X.dim32(4)},
-            {Y->dim32(2), Y->dim32(3), Y->dim32(4)},
-            {kernel_[0], kernel_[1], kernel_[2]},
-            {dilation_[0], dilation_[1], dilation_[2]},
-            {stride_[0], stride_[1], stride_[2]},
-            {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      default: {
-        CAFFE_THROW("Unsupported pooling dim: ", image_ndim);
-        return false;
-      }
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
     }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
+    const std::vector<int> X_HW_dims = GetDims(X);
+    const std::vector<int> Y_HW_dims = GetDims(*Y);
+    return functor_.template Forward<T, StorageOrder::NCHW>(
+        N,
+        C,
+        X_HW_dims,
+        Y_HW_dims,
+        kernel_,
+        dilation_,
+        stride_,
+        pads_,
+        X.template data<T>(),
+        Y->template mutable_data<T>(),
+        &context_);
   }
 
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
-    const int image_ndim = ndim - 2;
-    switch (image_ndim) {
-      case 1: {
-        return functor_.template Forward<T, StorageOrder::NHWC, 1>(
-            N,
-            C,
-            {X.dim32(1)},
-            {Y->dim32(1)},
-            {kernel_[0]},
-            {dilation_[0]},
-            {stride_[0]},
-            {pads_[0], pads_[1]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      case 2: {
-        return functor_.template Forward<T, StorageOrder::NHWC, 2>(
-            N,
-            C,
-            {X.dim32(1), X.dim32(2)},
-            {Y->dim32(1), Y->dim32(2)},
-            {kernel_[0], kernel_[1]},
-            {dilation_[0], dilation_[1]},
-            {stride_[0], stride_[1]},
-            {pads_[0], pads_[1], pads_[2], pads_[3]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      case 3: {
-        return functor_.template Forward<T, StorageOrder::NHWC, 3>(
-            N,
-            C,
-            {X.dim32(1), X.dim32(2), X.dim32(3)},
-            {Y->dim32(1), Y->dim32(2), Y->dim32(3)},
-            {kernel_[0], kernel_[1], kernel_[2]},
-            {dilation_[0], dilation_[1], dilation_[2]},
-            {stride_[0], stride_[1], stride_[2]},
-            {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
-            &context_);
-      }
-      default: {
-        CAFFE_THROW("Unsupported pooling dim: ", image_ndim);
-        return false;
-      }
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
     }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
+    const std::vector<int> X_HW_dims = GetDims(X);
+    const std::vector<int> Y_HW_dims = GetDims(*Y);
+    return functor_.template Forward<T, StorageOrder::NHWC>(
+        N,
+        C,
+        X_HW_dims,
+        Y_HW_dims,
+        kernel_,
+        dilation_,
+        stride_,
+        pads_,
+        X.template data<T>(),
+        Y->template mutable_data<T>(),
+        &context_);
   }
 
  private:
-  Functor functor_;
+  const Functor functor_;
+};
+
+template <typename T, class Context, class Functor>
+class PoolGradientOp final : public ConvPoolOpBase<Context> {
+ public:
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {}
+
+  ~PoolGradientOp() = default;
+
+  bool RunOnDeviceWithOrderNCHW() override {
+    const auto& X = Input(0);
+    const auto& Y = Input(1);
+    const auto& dY = Input(2);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    const int N = X.dim32(0);
+    const int C = X.dim32(1);
+    const std::vector<int> X_HW_dims = GetDims(X);
+    const std::vector<int> Y_HW_dims = GetDims(Y);
+    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    const T* dY_data = dY.template data<T>();
+    const T* X_data = X.template data<T>();
+    const T* Y_data = Y.template data<T>();
+    T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingBackward<T, StorageOrder::NCHW>(
+          N, C, HxW, dY_data, X_data, Y_data, dX_data, &context_);
+    }
+    return functor_.template Backward<T, StorageOrder::NCHW>(
+        N,
+        C,
+        X_HW_dims,
+        Y_HW_dims,
+        kernel_,
+        dilation_,
+        stride_,
+        pads_,
+        dY_data,
+        X_data,
+        Y_data,
+        dX_data,
+        &context_);
+  }
+
+  bool RunOnDeviceWithOrderNHWC() override {
+    const auto& X = Input(0);
+    const auto& Y = Input(1);
+    const auto& dY = Input(2);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    const int ndim = X.dim();
+    const int N = X.dim32(0);
+    const int C = X.dim32(ndim - 1);
+    const std::vector<int> X_HW_dims = GetDims(X);
+    const std::vector<int> Y_HW_dims = GetDims(Y);
+    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    const T* dY_data = dY.template data<T>();
+    const T* X_data = X.template data<T>();
+    const T* Y_data = Y.template data<T>();
+    T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingBackward<T, StorageOrder::NHWC>(
+          N, C, HxW, dY_data, X_data, Y_data, dX_data, &context_);
+    }
+    return functor_.template Backward<T, StorageOrder::NHWC>(
+        N,
+        C,
+        X_HW_dims,
+        Y_HW_dims,
+        kernel_,
+        dilation_,
+        stride_,
+        pads_,
+        dY_data,
+        X_data,
+        Y_data,
+        dX_data,
+        &context_);
+  }
+
+ private:
+  const Functor functor_;
 };
 
 template <class Context>
 struct AveragePoolFunctor {
   explicit AveragePoolFunctor(const OperatorBase& op)
       : count_include_pad(
-            op.GetSingleArgument<bool>("count_include_pad", false)) {}
+            op.template GetSingleArgument<bool>("count_include_pad", false)) {}
 
-  template <typename T, StorageOrder kOrder, int D>
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
   bool Forward(
       int N,
       int C,
-      const std::array<int, D>& X_dims,
-      const std::array<int, D>& Y_dims,
-      const std::array<int, D>& kernel,
-      const std::array<int, D>& dilation,
-      const std::array<int, D>& stride,
-      const std::array<int, 2 * D>& pads,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& kernel,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      const std::vector<int>& pads,
       const T* X,
       T* Y,
-      Context* context);
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingBackward(
+      int N,
+      int C,
+      int HxW,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
+  bool Backward(
+      int N,
+      int C,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& kernel,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      const std::vector<int>& pads,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
 
   const bool count_include_pad;
+  Tensor ones{Context::GetDeviceType()};
 };
 
 template <class Context>
 struct MaxPoolFunctor {
   explicit MaxPoolFunctor(const OperatorBase& /* op */) {}
 
-  template <typename T, StorageOrder kOrder, int D>
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder>
   bool Forward(
       int N,
       int C,
-      const std::array<int, D>& X_dims,
-      const std::array<int, D>& Y_dims,
-      const std::array<int, D>& kernel,
-      const std::array<int, D>& dilation,
-      const std::array<int, D>& stride,
-      const std::array<int, 2 * D>& pads,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& kernel,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      const std::vector<int>& pads,
       const T* X,
       T* Y,
-      Context* context);
-};
+      Context* context) const;
 
-template <typename T, class Context, class PoolType>
-class PoolGradientOp final : public ConvPoolOpBase<Context> {
- public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
-  ~PoolGradientOp() {}
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingBackward(
+      int N,
+      int C,
+      int HxW,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
 
-  bool RunOnDeviceWithOrderNCHW() override;
-  bool RunOnDeviceWithOrderNHWC() override;
-
-  // Input: X, Y, dY
-  // Output: dX
+  template <typename T, StorageOrder kOrder>
+  bool Backward(
+      int N,
+      int C,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& kernel,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      const std::vector<int>& pads,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
 };
 
 } // namespace caffe2

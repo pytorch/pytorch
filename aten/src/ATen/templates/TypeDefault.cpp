@@ -62,7 +62,7 @@ Type & TypeDefault::toBackend(Backend b) const {
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
-static std::vector<int64_t> defaultStrides(IntList sizes) {
+static std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
@@ -71,7 +71,7 @@ static std::vector<int64_t> defaultStrides(IntList sizes) {
   }
   return strides;
 }
-static int64_t computeStorageSize(IntList sizes, IntList strides) {
+static int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   int64_t size = 1;
@@ -83,30 +83,33 @@ static int64_t computeStorageSize(IntList sizes, IntList strides) {
   }
   return size;
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter) const {
   return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
-Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-    return Storage(
+  return Storage(
       typeMeta(),
-      InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
       size,
-      deleter);
+      InefficientStdFunctionContext::makeDataPtr(
+          data, deleter, getDeviceFromPtr(data)),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
 }
 Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
-    return Storage(typeMeta(), size, allocator);
+  // Potentially the storage might be marked as resizable too here
+  return Storage(typeMeta(), size, allocator, /*resizable=*/false);
 }
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));

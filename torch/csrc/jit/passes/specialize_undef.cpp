@@ -18,7 +18,7 @@ void specializeUndef(Graph& g) {
     const auto& tp = input->type();
     if (tp->isSubtypeOf(UndefinedTensorType::get())) {
       state[input] = State::Undefined;
-    } else if (tp->isSubtypeOf(DynamicType::get())) {
+    } else if (tp->isSubtypeOf(TensorType::get())) {
       state[input] = State::Defined;
     } else {
       state[input] = State::Unknown;
@@ -54,7 +54,7 @@ void specializeUndef(Graph& g) {
             // where we do not know if a value is defined since at the top level
             // a gradient graph is composed of Linear nodes and AutogradAdds
             // and LinearNodes only appear in these graphs
-            JIT_ASSERT(state[input] != State::Unknown);
+            AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
           for (auto it = body->nodes().begin(); it != body->nodes().end();) {

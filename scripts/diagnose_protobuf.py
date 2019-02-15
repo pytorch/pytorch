@@ -50,7 +50,7 @@ else:
         print('DEBUG: err: ' + err)
         native_protobuf_installed = False
     else:
-        tmp = re.search('\d\.\d\.\d', out)
+        tmp = re.search(r'\d\.\d\.\d', out)
         if tmp:
             native_version = tmp.group(0)
             native_protobuf_installed = True

@@ -27,12 +27,12 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
-      axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-      axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+      axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+      axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
       b_quantized_(make_shared<vector<int32_t>>()),
       column_offsets_(make_shared<vector<int32_t>>()),
       is_weight_constant_(
-          OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
+          this->template GetSingleArgument<bool>("constant_weight", true)) {
   if (!is_weight_constant_) {
     LOG(INFO) << operator_def.output(0) << " is_weight_constant "
               << is_weight_constant_;
@@ -154,41 +154,78 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       t_begin = chrono::system_clock::now();
     }
     if (!dequantize_output_) {
-      row_offsets_.resize(PackAWithRowOffset<uint8_t>::rowOffsetBufferSize());
-      X_pack_buf_.resize(PackAWithRowOffset<uint8_t>::packedBufferSize());
-      PackAWithRowOffset<uint8_t> packA(
-          matrix_op_t::NoTranspose,
-          M,
-          K,
-          reinterpret_cast<const uint8_t*>(Xdata),
-          K,
-          X_pack_buf_.data(), // buffer for packed matrix
-          1, // group
-          row_offsets_.data());
-
-      DoNothing<> doNothingObj{};
-      ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
-          doNothingObj,
-          &requantization_params_.real_multiplier,
-          out_qparams_.zero_point,
-          in_qparams_[0].zero_point,
-          &in_qparams_[1].zero_point,
-          packA.getRowOffsetBuffer(),
-          column_offsets_->data(),
-          b_quantized_data_,
-          N); // ncols per quant group
-
       Y_int32_.resize(Y->size());
-      fbgemmPacked(
-          packA,
-          *Wq_packed_,
-          reinterpret_cast<uint8_t*>(
-              OutputTensorCPU_(0)->template mutable_data<T>()),
-          Y_int32_.data(),
-          N,
-          outputProcObj,
-          0, // thread_id
-          1); // num_threads
+      DoNothing<> doNothingObj{};
+
+      if (in_qparams_[1].zero_point) {
+        row_offsets_.resize(PackAWithRowOffset<uint8_t>::rowOffsetBufferSize());
+        X_pack_buf_.resize(PackAWithRowOffset<uint8_t>::packedBufferSize());
+
+        PackAWithRowOffset<uint8_t> packA(
+            matrix_op_t::NoTranspose,
+            M,
+            K,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            K,
+            X_pack_buf_.data(), // buffer for packed matrix
+            1, // group
+            row_offsets_.data());
+
+        ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
+            doNothingObj,
+            &requantization_params_.real_multiplier,
+            out_qparams_.zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+            &in_qparams_[1].zero_point,
+            packA.getRowOffsetBuffer(),
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
+            b_quantized_data_,
+            N); // ncols per quant group
+
+        fbgemmPacked(
+            packA,
+            *Wq_packed_,
+            reinterpret_cast<uint8_t*>(
+                OutputTensorCPU_(0)->template mutable_data<T>()),
+            Y_int32_.data(),
+            N,
+            outputProcObj,
+            0, // thread_id
+            1); // num_threads
+      } else {
+        X_pack_buf_.resize(PackAMatrix<uint8_t>::packedBufferSize());
+
+        PackAMatrix<uint8_t> packA(
+            matrix_op_t::NoTranspose,
+            M,
+            K,
+            reinterpret_cast<const uint8_t*>(Xdata),
+            K,
+            X_pack_buf_.data(), // buffer for packed matrix
+            1); // group
+
+        ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
+            doNothingObj,
+            &requantization_params_.real_multiplier,
+            out_qparams_.zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+            &in_qparams_[1].zero_point,
+            nullptr,
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
+            b_quantized_data_,
+            N); // ncols per quant group
+
+        fbgemmPacked(
+            packA,
+            *Wq_packed_,
+            reinterpret_cast<uint8_t*>(
+                OutputTensorCPU_(0)->template mutable_data<T>()),
+            Y_int32_.data(),
+            N,
+            outputProcObj,
+            0, // thread_id
+            1); // num_threads
+      }
     } else {
       // dequantize_output
       float* Y_data = OutputTensorCPU_(0)->template mutable_data<float>();
@@ -216,10 +253,10 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             doNothingObj,
             in_qparams_[0].scale,
             &in_qparams_[1].scale,
-            in_qparams_[0].zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
             &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
-            column_offsets_->data(),
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_dequantized_data_, // bias
             N); // ncols per quant group
 
@@ -251,10 +288,10 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             doNothingObj,
             in_qparams_[0].scale,
             &in_qparams_[1].scale,
-            in_qparams_[0].zero_point,
+            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
             &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
-            column_offsets_->data(),
+            column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_dequantized_data_, // bias
             N); // ncols per quant group
 
@@ -298,12 +335,10 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation
-    StoreMatrixInMatrixMarketFormat(
-        M, K, Xdata, OperatorBase::debug_def().input(0));
+    StoreMatrixInMatrixMarketFormat(M, K, Xdata, this->debug_def().input(0));
 
     // Dump weight
-    StoreMatrixInMatrixMarketFormat(
-        N, K, Wdata, OperatorBase::debug_def().input(1));
+    StoreMatrixInMatrixMarketFormat(N, K, Wdata, this->debug_def().input(1));
   }
 
   if (VLOG_IS_ON(3)) {
@@ -329,8 +364,11 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
-          Y_int32_[i * N + j] -=
-              in_qparams_[0].zero_point * (*column_offsets_)[j] + row_offset;
+          if (!column_offsets_->empty()) {
+            Y_int32_[i * N + j] -=
+                in_qparams_[0].zero_point * (*column_offsets_)[j];
+          }
+          Y_int32_[i * N + j] -= row_offset;
           Ydata[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
                   in_qparams_[1].scale +
               b_dequantized_data_[j];
@@ -348,8 +386,12 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
-          Y_int32_[i * N + j] -=
-              in_qparams_[0].zero_point * (*column_offsets_)[j] + row_offset;
+          if (!column_offsets_->empty()) {
+            // empty column offset means it's folded into bias
+            Y_int32_[i * N + j] -=
+                in_qparams_[0].zero_point * (*column_offsets_)[j];
+          }
+          Y_int32_[i * N + j] -= row_offset;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
           Ydata[i * N + j] = fbgemm::Requantize<T>(
@@ -374,9 +416,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
     VLOG(3) << "@PERF this=" << this
-            << " output=" << OperatorBase::debug_def().output(0) << " " << M
-            << "x" << N << "x" << K << ": " << dt * 1e3 << " ms " << gops
-            << " gops";
+            << " output=" << this->debug_def().output(0) << " " << M << "x" << N
+            << "x" << K << ": " << dt * 1e3 << " ms " << gops << " gops";
   }
 
   return true;
@@ -412,7 +453,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   int signed_min = -(1 << (qfactory_->GetWeightPrecision() - 1));
   if (is_weight_constant_) {
     bool fast_path = is_same<T, uint8_t>::value && GetCpuId().avx2() &&
-        OperatorBase::debug_def().engine() != "DNNLOWP_ACC16";
+        this->debug_def().engine() != "DNNLOWP_ACC16";
 
     if ((fast_path && !Wq_packed_) || (!fast_path && W_quantized_.empty())) {
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -449,14 +490,13 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
           reason = "fbgemm only supports 8-bit integers";
         } else if (!GetCpuId().avx2()) {
           reason = "fbgemm only supports AVX2";
-        } else if (OperatorBase::debug_def().engine() == "DNNLOWP_ACC16") {
+        } else if (this->debug_def().engine() == "DNNLOWP_ACC16") {
           reason = "";
         } else {
           assert(false);
         }
         if (!reason.empty()) {
-          LOG(WARNING) << "Conv with weight "
-                       << OperatorBase::debug_def().input(1)
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(1)
                        << " falls back to slow path because " << reason;
         }
       }
@@ -483,7 +523,13 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     t_begin = chrono::system_clock::now();
   }
   // Pre-compute column_offset
-  if (!is_weight_constant_ || column_offsets_->empty()) {
+  // If input tensor doesn't use dynamic quantization, we fold column_offsets_
+  // into bias.
+  bool first_invocation = !b_quantized_data_ && !b_dequantized_data_;
+  bool fold_col_offset_into_bias =
+      this->template InputIsType<int8::Int8TensorCPU>(0) && !dequantize_output_;
+  if (!is_weight_constant_ ||
+      (first_invocation && !fold_col_offset_into_bias)) {
     if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
       const auto& packed_filter =
           this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
@@ -502,14 +548,11 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
             << " ms";
     t_begin = chrono::system_clock::now();
   }
-  if (Wq_packed_ && !FLAGS_caffe2_dnnlowp_dump_tensors) {
-    // From here, W_quantized_ is not used anymore when we have Wq_packed_
-    vector<T_signed>().swap(W_quantized_);
-  }
 
   // Quantize bias
   if (!is_weight_constant_ || (!b_quantized_data_ && !b_dequantized_data_) ||
-      in_qparams_[0].scale != in_qparams0_scale_old_) {
+      in_qparams_[0].scale != in_qparams0_scale_old_ ||
+      in_qparams_[0].zero_point != in_qparams0_zero_point_old_) {
     if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(2) &&
         this->template Input<Int8FCDNNLowPPackedWeightBlob>(2).bias.get()) {
       const auto& packed_filter =
@@ -553,12 +596,46 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
           b_quantized_data_ = b_quantized_->data();
         }
       }
-      in_qparams0_scale_old_ = in_qparams_[0].scale;
+    }
+    in_qparams0_scale_old_ = in_qparams_[0].scale;
+    in_qparams0_zero_point_old_ = in_qparams_[0].zero_point;
+
+    // If column_offsets_ is empty even when we need column_offsets (asymmetric
+    // quantization in input), it means we need to fuse column_offsets to bias.
+    if (in_qparams_[0].zero_point && column_offsets_->empty() &&
+        b_quantized_data_) {
+      if (b_quantized_->empty()) {
+        b_quantized_->assign(b_quantized_data_, b_quantized_data_ + N);
+        b_quantized_data_ = b_quantized_->data();
+      }
+      vector<int32_t>* column_offset_ptr;
+      vector<int32_t> column_offset_temp;
+      if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
+        const auto& packed_filter =
+            this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
+        column_offset_ptr = packed_filter.column_offsets.get();
+      } else {
+        vector<TensorQuantizationParams> temp_qparams;
+        temp_qparams.push_back(in_qparams_[1]);
+        column_offset_temp.resize(N);
+        ComputeColumnOffsets<T_signed>(
+            K, N, W_quantized_.data(), temp_qparams, column_offset_temp);
+        column_offset_ptr = &column_offset_temp;
+      }
+      for (int i = 0; i < N; ++i) {
+        (*b_quantized_)[i] -=
+            in_qparams_[0].zero_point * (*column_offset_ptr)[i];
+      }
     }
 
     CAFFE_ENFORCE(
         (dequantize_output_ && b_dequantized_data_) ||
         (!dequantize_output_ && b_quantized_data_));
+  }
+
+  if (Wq_packed_ && !FLAGS_caffe2_dnnlowp_dump_tensors) {
+    // From here, W_quantized_ is not used anymore when we have Wq_packed_
+    vector<T_signed>().swap(W_quantized_);
   }
 
   if (VLOG_IS_ON(3)) {

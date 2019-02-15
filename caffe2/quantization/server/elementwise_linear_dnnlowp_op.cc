@@ -25,7 +25,7 @@ ElementwiseLinearDNNLowPOp<T>::ElementwiseLinearDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
-      axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+      axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
 template <typename T>
 bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {

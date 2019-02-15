@@ -1,9 +1,9 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 
-/docs/cpp @goldsborough @ebetica
-/torch/csrc/api/ @ebetica @goldsborough
-/test/cpp/api/ @ebetica @goldsborough
+/docs/cpp @goldsborough @ebetica @yf225
+/torch/csrc/api/ @ebetica @goldsborough @yf225
+/test/cpp/api/ @ebetica @goldsborough @yf225
 /torch/lib/c10d/ @apaszke @pietern @teng-li
 /torch/csrc/distributed/ @apaszke @pietern @teng-li
 /torch/distributed/ @apaszke @pietern @teng-li
