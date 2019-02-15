@@ -17,7 +17,7 @@ class IDEEPSumOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         fallback_sum_(operator_def, ws),
         fallback_add_(operator_def, ws) {}
-  virtual ~IDEEPSumOp() {}
+  ~IDEEPSumOp() override {}
 
   bool RunOnDevice() override {
     itensor::dims input_dims;
