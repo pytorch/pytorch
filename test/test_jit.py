@@ -2783,8 +2783,8 @@ class TestBatched(TestCase):
                 c = c_t.index_select(1, pre_y)
                 iter = int(iter_count[0])
                 idx = torch.cat([idx.narrow(2, 0, iter).index_select(1, pre_y),
-                                torch.fmod(idx_t, vocab_size).unsqueeze(-1),
-                                idx.narrow(2, iter, max_len - iter)], 2)
+                                 torch.fmod(idx_t, vocab_size).unsqueeze(-1),
+                                 idx.narrow(2, iter, max_len - iter)], 2)
                 idx = idx.narrow(2, 0, max_len)
             return idx
 
@@ -3015,6 +3015,53 @@ class TestScript(JitTestCase):
             # type: (List[int]) -> Tuple[Tensor, List[int]]
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
+
+    # to avoid defining sum_list in multiple tests
+    def get_sum_list_fn(self):
+        def sum_list(a):
+            # type: (List[int]) -> int
+            sum = 0
+            for i in a:
+                sum += i
+
+            return sum
+
+        return sum_list
+
+    def test_sum_list_diff_elms(self):
+        self.checkScript(self.get_sum_list_fn(), ([1, 2, 3, 4, 5],))
+
+    def test_sum_list_empty(self):
+        self.checkScript(self.get_sum_list_fn(), ([],))
+
+    def test_sum_list_one(self):
+        self.checkScript(self.get_sum_list_fn(), ([1],))
+
+    def test_sum_list_literal(self):
+
+        def sum_list():
+            # type: () -> int
+            sum = 0
+            for i in [1, 2, 3, 4, 5]:
+                sum += i
+
+            return sum
+
+        self.checkScript(sum_list, ())
+
+    def test_sum_list_wrong_type(self):
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            @torch.jit.script
+            def sum_list(a):
+                # type: (int) -> int
+                sum = 0
+                for i in a:
+                    sum += i
+
+                return sum
+
+            sum_list(1)
 
     def test_bool_list_io(self):
         @torch.jit.script
