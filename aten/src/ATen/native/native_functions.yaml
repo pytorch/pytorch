@@ -1181,6 +1181,9 @@
   variants: function, method
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: kthvalue_out_cpu
+    CUDA: kthvalue_out_cuda
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   matches_jit_signature: True
@@ -1492,6 +1495,9 @@
   variants: function, method
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: mode_out_cpu
+    CUDA: mode_out_cuda
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   matches_jit_signature: True
@@ -3783,12 +3789,18 @@
   variants: method, function
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: sort_out_cpu
+    CUDA: sort_out_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: method, function
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: topk_out_cpu
+    CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor, Tensor)
   matches_jit_signature: True

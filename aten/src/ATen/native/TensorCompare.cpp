@@ -97,66 +97,6 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   return ret;
 }
 
-std::tuple<Tensor, Tensor> kthvalue(const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::kthvalue_out(values, indices, self, k, dim, keepdim);
-}
-
-std::tuple<Tensor &,Tensor &> kthvalue_out(Tensor& values, Tensor& indices,
-                                           const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "kthvalue only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "kthvalue")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(values, indices);
-  } else {
-    return at::legacy::th::_th_kthvalue_out(values, indices, self, k, dim, keepdim);
-  }
-}
-
-std::tuple<Tensor, Tensor> median(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::median_out(values, indices, self, dim, keepdim);
-}
-
-std::tuple<Tensor &,Tensor &> median_out(Tensor& values, Tensor& indices,
-                                         const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "median only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "median")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(values, indices);
-  } else {
-    return at::legacy::th::_th_median_out(values, indices, self, dim, keepdim);
-  }
-}
-
-std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::mode_out(values, indices, self, dim, keepdim);
-}
-
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
-                                       const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(values, indices);
-  } else {
-    return at::legacy::th::_th_mode_out(values, indices, self, dim, keepdim);
-  }
-}
-
 std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_contiguous() && max.is_contiguous() && max_indices.is_contiguous()) {
