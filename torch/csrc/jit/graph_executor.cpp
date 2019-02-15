@@ -221,8 +221,12 @@ struct DifferentiableGraphBackward : public autograd::Function {
         for(at::Tensor tensor : v.toTensorListRef()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
-      } else {
+      } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
+      } else {
+        // Input grad can also be None even if it requires grad
+        // Example: `other` in expand_as(self, other)
+        outputs.emplace_back();
       }
     }
     return outputs;
