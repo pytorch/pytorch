@@ -61,7 +61,6 @@ class TestDocCoverage(unittest.TestCase):
         for p in everything2:
             self.assertIn(p, everything, 'in python but not in torch.rst')
 
-
     def test_tensor(self):
         # get symbols documented in tensors.rst
         whitelist = []
