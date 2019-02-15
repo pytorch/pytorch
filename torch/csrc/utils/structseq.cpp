@@ -10,6 +10,12 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
     std::stringstream ss;
     ss << typ->tp_name << "(\n";
     size_t num_elements = Py_SIZE(obj);
+#if PY_MAJOR_VERSION == 2
+    PyObject *tup;
+    if ((tup = make_tuple(obj)) == NULL) {
+        return NULL;
+    }
+#endif
     for (int i=0; i < num_elements; i++) {
         PyObject *val, *repr;
         const char *cname, *crepr;
@@ -20,12 +26,26 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
                          " for type %.500s", i, typ->tp_name);
             return NULL;
         }
+#if PY_MAJOR_VERSION == 2
+        val = PyTuple_GetItem(tup, i);
+        if (val == NULL) {
+            return NULL;
+        }
+#else
         val = PyStructSequence_GET_ITEM(obj, i);
+#endif
         repr = PyObject_Repr(val);
         if (repr == NULL)
             return NULL;
+#if PY_MAJOR_VERSION == 2
         crepr = PyUnicode_AsUTF8(repr);
+#else
+        crepr = PyString_AsString(repr);
+#endif
         if (crepr == NULL) {
+#if PY_MAJOR_VERSION == 2
+            Py_DECREF(tup);
+#endif
             Py_DECREF(repr);
             return NULL;
         }
