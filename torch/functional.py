@@ -18,6 +18,7 @@ __all__ = [
     'chain_matmul',
     'einsum',
     'broadcast_tensors',
+    'broadcast_to',
     'isfinite',
     'isinf',
     'isnan',
@@ -57,9 +58,9 @@ def broadcast_tensors(*tensors):
 
 def broadcast_to(tensor, shape):
     r""" broadcast_to(tensor, shape) -> Tensor
-    
+
     Broadcast the given tensor to the given shape.
-    
+
     Args:
         tensor (Tensor): tensor to broadcast.
         shape (list(int)): broadcasted shape
