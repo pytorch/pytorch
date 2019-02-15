@@ -1,78 +1,70 @@
 testBlocks
-graph(%a : Tensor
-      %b : Tensor
-      %c : Tensor) {
+graph(%a : Tensor,
+      %b : Tensor,
+      %c : Tensor):
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%a, %b, %2)
   %5 : Tensor = prim::If(%c)
-    block0() {
+    block0():
       %6 : int = prim::Constant[value=1]()
       %7 : Tensor = aten::add(%3, %3, %6)
       -> (%7)
-    }
-    block1() {
+    block1():
       %8 : int = prim::Constant[value=1]()
       %9 : Tensor = aten::add(%b, %3, %8)
       %10 : int = prim::Constant[value=1]()
       %11 : Tensor = aten::add(%9, %3, %10)
       -> (%11)
-    }
   %12 : int = prim::Constant[value=1]()
   %13 : Tensor = aten::add(%5, %3, %12)
-  return (%13);
-}
+  return (%13)
 
-graph(%a : Tensor
-      %b : Tensor
-      %c : Tensor) {
+graph(%a : Tensor,
+      %b : Tensor,
+      %c : Tensor):
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%a, %b, %2)
   %5 : Tensor = prim::If(%c)
-    block0() {
+    block0():
       %8 : int = prim::Constant[value=1]()
       %9 : Tensor = aten::add(%b, %3, %8)
       %10 : int = prim::Constant[value=1]()
       %11 : Tensor = aten::add(%9, %3, %10)
       -> (%11)
-    }
   %12 : int = prim::Constant[value=1]()
   %13 : Tensor = aten::add(%5, %3, %12)
-  return (%13);
-}
+  return (%13)
 
-graph(%a : Tensor
-      %b : Tensor
-      %c : Tensor) {
+graph(%a : Tensor,
+      %b : Tensor,
+      %c : Tensor):
   %3 : int = prim::Constant[value=1]()
   %4 : Tensor = aten::add(%a, %b, %3)
   %5 : Tensor = prim::If(%c)
-    block0() {
+    block0():
       %6 : int = prim::Constant[value=1]()
       %7 : Tensor = aten::add(%b, %4, %6)
       %8 : int = prim::Constant[value=1]()
       %9 : Tensor = aten::add(%7, %4, %8)
       -> (%9)
-    }
   %10 : int = prim::Constant[value=1]()
   %11 : Tensor = aten::add(%5, %4, %10)
-  return (%11);
-}
+  return (%11)
 
 testCreateAutodiffSubgraphs
-graph(%0 : Tensor
-      %1 : Tensor
-      %2 : Tensor
-      %3 : Tensor
-      %4 : Tensor) {
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor,
+      %3 : Tensor,
+      %4 : Tensor):
   %7 : int = prim::Constant[value=1]()
   %23 : Tensor, %24 : Tensor = prim::DifferentiableGraph_0(%2, %1, %4, %0, %3)
-  return (%23, %24);
-}
-with prim::DifferentiableGraph_0 = graph(%13 : Tensor
-      %32 : Tensor
-      %33 : Tensor
-      %35 : Tensor
-      %36 : Tensor) {
+  return (%23, %24)
+with prim::DifferentiableGraph_0 = graph(%13 : Tensor,
+      %32 : Tensor,
+      %33 : Tensor,
+      %35 : Tensor,
+      %36 : Tensor):
   %37 : Tensor = aten::mm(%35, %36)
   %34 : Tensor = aten::mm(%32, %33)
   %30 : int = prim::Constant[value=1]()
@@ -87,102 +79,93 @@ with prim::DifferentiableGraph_0 = graph(%13 : Tensor
   %8 : Tensor = aten::add(%14, %11, %30)
   %4 : Tensor = aten::tanh(%8)
   %2 : Tensor = aten::mul(%20, %4)
-  return (%2, %8);
-}
+  return (%2, %8)
 
 testDifferentiate
-graph(%0 : Float(2, 3, 4)
-      %1 : Float(2, 3, 4)) {
+graph(%0 : Float(2, 3, 4),
+      %1 : Float(2, 3, 4)):
   %2 : Float(2, 3, 4) = aten::mul(%0, %1)
+  %self_size.4 : int[] = aten::size(%0)
+  %other_size.4 : int[] = aten::size(%1)
   %3 : Float(2, 3, 4) = aten::mul(%2, %0)
+  %self_size.2 : int[] = aten::size(%2)
   %4 : int = prim::Constant[value=1]()
   %7 : int[] = aten::size(%3)
   %5 : Float(2, 3, 4) = aten::add(%3, %1, %4)
-  return (%5, %2, %7);
-}
-graph(%0 : Float(2, 3, 4)
-      %1 : Float(2, 3, 4)
-      %2 : Float(2, 3, 4)
-      %3 : Float(2, 3, 4)
-      %4 : Float(2, 3, 4)
-      %5 : int[]) {
-  %7 : int = prim::Constant[value=1]()
-  %6 : int[] = aten::size(%3)
-  %8 : Tensor, %9 : Tensor = prim::GradOf[name="aten::add"](%0)
-    block0() {
-      %10 : Tensor = aten::_grad_sum_to_size(%0, %5)
-      %11 : Float(2, 3, 4) = aten::mul(%0, %7)
-      %12 : Tensor = aten::_grad_sum_to_size(%11, %6)
-      -> (%10, %12)
-    }
-  %grad_self.2 : Tensor, %grad_other.2 : Tensor = prim::GradOf[name="aten::mul"](%8)
-    block0() {
-      %15 : Tensor = aten::mul(%8, %2)
-      %16 : int[] = aten::size(%4)
-      %grad_self.1 : Tensor = aten::_grad_sum_to_size(%15, %16)
-      %18 : Tensor = aten::mul(%8, %4)
-      %19 : int[] = aten::size(%2)
-      %grad_other.1 : Tensor = aten::_grad_sum_to_size(%18, %19)
+  return (%5, %2, %self_size.4, %other_size.4, %self_size.2, %7)
+graph(%0 : Float(2, 3, 4),
+      %1 : Float(2, 3, 4),
+      %2 : Float(2, 3, 4),
+      %3 : Float(2, 3, 4),
+      %4 : Float(2, 3, 4),
+      %self_size.3 : int[],
+      %other_size.3 : int[],
+      %self_size.1 : int[],
+      %8 : int[]):
+  %9 : int = prim::Constant[value=1]()
+  %10 : Tensor, %11 : Tensor = prim::GradOf[name="aten::add"](%0)
+    block0():
+      %12 : Tensor = aten::_grad_sum_to_size(%0, %8)
+      %13 : Float(2, 3, 4) = aten::mul(%0, %9)
+      %14 : Tensor = aten::_grad_sum_to_size(%13, %other_size.3)
+      -> (%12, %14)
+  %grad_self.2 : Tensor, %grad_other.2 : Tensor = prim::GradOf[name="aten::mul"](%10)
+    block0():
+      %17 : Tensor = aten::mul(%10, %2)
+      %grad_self.1 : Tensor = aten::_grad_sum_to_size(%17, %self_size.1)
+      %19 : Tensor = aten::mul(%10, %4)
+      %grad_other.1 : Tensor = aten::_grad_sum_to_size(%19, %self_size.3)
       -> (%grad_self.1, %grad_other.1)
-    }
   %21 : Tensor = prim::AutogradAdd(%1, %grad_self.2)
   %grad_self : Tensor, %grad_other : Tensor = prim::GradOf[name="aten::mul"](%21)
-    block0() {
+    block0():
       %24 : Tensor = aten::mul(%21, %3)
-      %25 : int[] = aten::size(%2)
-      %grad_self.3 : Tensor = aten::_grad_sum_to_size(%24, %25)
-      %27 : Tensor = aten::mul(%21, %2)
-      %28 : int[] = aten::size(%3)
-      %grad_other.3 : Tensor = aten::_grad_sum_to_size(%27, %28)
+      %grad_self.3 : Tensor = aten::_grad_sum_to_size(%24, %self_size.3)
+      %26 : Tensor = aten::mul(%21, %2)
+      %grad_other.3 : Tensor = aten::_grad_sum_to_size(%26, %other_size.3)
       -> (%grad_self.3, %grad_other.3)
-    }
-  %30 : Tensor = prim::AutogradAdd(%grad_other.2, %grad_self)
-  %31 : Tensor = prim::AutogradAdd(%9, %grad_other)
-  return (%30, %31);
-}
+  %28 : Tensor = prim::AutogradAdd(%grad_other.2, %grad_self)
+  %29 : Tensor = prim::AutogradAdd(%11, %grad_other)
+  return (%28, %29)
 
 testDifferentiateWithRequiresGrad
-graph(%0 : Float(*)
-      %1 : Float(*)) {
+graph(%0 : Float(*),
+      %1 : Float(*)):
   %2 : Float(*) = aten::mul(%1, %1)
   %3 : int = prim::Constant[value=1]()
   %4 : Float(*) = aten::add(%2, %1, %3)
+  %39 : int[] = aten::size(%0)
   %6 : Float(*) = aten::add(%4, %0, %3)
   %7 : Float(*) = aten::mul(%6, %0)
+  %self_size.2 : int[] = aten::size(%6)
   %11 : int[] = aten::size(%7)
   %9 : Float(*) = aten::add(%7, %1, %3)
-  return (%4, %9, %6, %11);
-}
-graph(%0 : Float(*)
-      %1 : Float(*)
-      %2 : Float(*)
-      %3 : Float(*)
-      %4 : int[]) {
-  %6 : int = prim::Constant[value=1]()
-  %5 : int[] = aten::size(%2)
-  %7 : Tensor = prim::GradOf[name="aten::add"](%0)
-    block0() {
-      %8 : Tensor = aten::_grad_sum_to_size(%0, %4)
-      -> (%8)
-    }
-  %grad_self : Tensor, %grad_other : Tensor = prim::GradOf[name="aten::mul"](%7)
-    block0() {
-      %11 : Tensor = aten::mul(%7, %2)
-      %12 : int[] = aten::size(%3)
-      %grad_self.1 : Tensor = aten::_grad_sum_to_size(%11, %12)
-      %14 : Tensor = aten::mul(%7, %3)
-      %15 : int[] = aten::size(%2)
-      %grad_other.1 : Tensor = aten::_grad_sum_to_size(%14, %15)
+  return (%4, %9, %39, %6, %self_size.2, %11)
+graph(%0 : Float(*),
+      %1 : Float(*),
+      %2 : Float(*),
+      %3 : int[],
+      %4 : Float(*),
+      %self_size.1 : int[],
+      %6 : int[]):
+  %7 : int = prim::Constant[value=1]()
+  %8 : Tensor = prim::GradOf[name="aten::add"](%0)
+    block0():
+      %9 : Tensor = aten::_grad_sum_to_size(%0, %6)
+      -> (%9)
+  %grad_self : Tensor, %grad_other : Tensor = prim::GradOf[name="aten::mul"](%8)
+    block0():
+      %12 : Tensor = aten::mul(%8, %2)
+      %grad_self.1 : Tensor = aten::_grad_sum_to_size(%12, %self_size.1)
+      %14 : Tensor = aten::mul(%8, %4)
+      %grad_other.1 : Tensor = aten::_grad_sum_to_size(%14, %3)
       -> (%grad_self.1, %grad_other.1)
-    }
-  %17 : Tensor = prim::AutogradAdd(%1, %grad_self)
-  %18 : Tensor = prim::GradOf[name="aten::add"](%17)
-    block0() {
-      %19 : Tensor = aten::mul(%17, %6)
-      %20 : Tensor = aten::_grad_sum_to_size(%19, %5)
-      -> (%20)
-    }
-  %21 : Tensor = prim::AutogradAdd(%grad_other, %18)
-  return (%21);
-}
+  %16 : Tensor = prim::AutogradAdd(%1, %grad_self)
+  %17 : Tensor = prim::GradOf[name="aten::add"](%16)
+    block0():
+      %18 : Tensor = aten::mul(%16, %7)
+      %19 : Tensor = aten::_grad_sum_to_size(%18, %3)
+      -> (%19)
+  %20 : Tensor = prim::AutogradAdd(%grad_other, %17)
+  return (%20)
 
