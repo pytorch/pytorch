@@ -55,6 +55,29 @@ def broadcast_tensors(*tensors):
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
+def broadcast_to(tensor, shape):
+    r""" broadcast_to(tensor, shape) -> Tensor
+    
+    Broadcast the given tensor to the given shape.
+    
+    Args:
+        tensor (Tensor): tensor to broadcast.
+        shape (list(int)): broadcasted shape
+
+    Example::
+        >>> broadcast_to(torch.ones(3), (4, 3)).shape
+        torch.Size([4, 3])
+        >>> broadcast_to(torch.ones(1, 3), (4, 3)).shape
+        torch.Size([4, 3])
+    """
+    delta_len = tensor.dim() - len(shape)
+    if delta_len > 0:
+        # add singleton dimensions
+        tensor = tensor[[slice(None)] * delta_len]
+
+    return tensor.expand(shape)
+
+
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks.
 
