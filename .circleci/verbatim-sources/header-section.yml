@@ -1,0 +1,222 @@
+# IMPORTANT: To update Docker image version, please first update
+# https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/pytorch/DockerVersion.groovy and
+# https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/caffe2/DockerVersion.groovy,
+# and then search and update ":{previous_version}" in this file to the new version number,
+# and **ALSO** update the version number below:
+# PyTorchDockerVersion:282
+# Caffe2DockerVersion:248
+
+docker_config_defaults: &docker_config_defaults
+  user: jenkins
+  aws_auth:
+    # This IAM user only allows read-write access to ECR
+    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
+    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
+
+# This system setup script is meant to run before the CI-related scripts, e.g.,
+# installing Git client, checking out code, setting up CI env, and
+# building/testing.
+setup_linux_system_environment: &setup_linux_system_environment
+  name: Set Up System Environment
+  no_output_timeout: "1h"
+  command: |
+    set -e
+
+    # Set up CircleCI GPG keys for apt, if needed
+    curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
+
+# NOTE: We only perform the merge in build step and not in test step, because
+# all source files will be shared from build to test
+install_official_git_client: &install_official_git_client
+  name: Install Official Git Client
+  no_output_timeout: "1h"
+  command: |
+    set -e
+
+    sudo apt-get -qq update
+    sudo apt-get -qq install openssh-client git
+
+install_doc_push_script: &install_doc_push_script
+  name: Install the doc push script
+  no_output_timeout: "2m"
+  command: |
+    cat >/home/circleci/project/doc_push_script.sh <<EOL
+    # =================== The following code **should** be executed inside Docker container ===================
+
+    # This is where the local pytorch install in the docker image is located
+    pt_checkout="/var/lib/jenkins/workspace"
+
+    # Since we're cat-ing this file, we need to escape all $'s
+    echo "doc_push_script.sh: Invoked with \$*"
+
+    git clone https://yf225:${GITHUB_PYTORCHBOT_TOKEN}@github.com/pytorch/pytorch.github.io -b site
+    pushd pytorch.github.io
+
+    set -ex
+
+    # Argument 1: Where to copy the built documentation to
+    # (pytorch.github.io/$install_path)
+    install_path="\$1"
+    if [ -z "\$install_path" ]; then
+    echo "error: doc_push_script.sh: install_path (arg1) not specified"
+      exit 1
+    fi
+
+    # Argument 2: What version of the docs we are building.
+    version="\$2"
+    if [ -z "\$version" ]; then
+    echo "error: doc_push_script.sh: version (arg2) not specified"
+      exit 1
+    fi
+
+    is_master_doc=false
+    if [ "\$version" == "master" ]; then
+      is_master_doc=true
+    fi
+
+    # Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
+    dry_run=false
+    if [ "\$3" != "" ]; then
+      dry_run=true
+    fi
+
+    echo "install_path: \$install_path  version: \$version  dry_run: \$dry_run"
+
+    export LC_ALL=C
+    export PATH=/opt/conda/bin:$PATH
+
+    rm -rf pytorch || true
+
+    # Get all the documentation sources, put them in one place
+    pushd "\$pt_checkout"
+    git clone https://github.com/pytorch/vision
+    pushd vision
+    conda install -q pillow
+    time python setup.py install
+    popd
+    pushd docs
+    rm -rf source/torchvision
+    cp -a ../vision/docs/source source/torchvision
+
+    # Build the docs
+    pip -q install -r requirements.txt || true
+    if [ "\$is_master_doc" = true ]; then
+      make html
+    else
+      make html-stable
+    fi
+
+    # Move them into the docs repo
+    popd
+    popd
+    git rm -rf "\$install_path" || true
+    mv "\$pt_checkout/docs/build/html" "\$install_path"
+
+    # Add the version handler by search and replace.
+    # XXX: Consider moving this to the docs Makefile or site build
+    if [ "\$is_master_doc" = true ]; then
+      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
+    else
+      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\$version \&#x25BC</a>@g"
+    fi
+
+    git add "\$install_path" || true
+    git status
+    git config user.email "soumith+bot@pytorch.org"
+    git config user.name "pytorchbot"
+    # If there aren't changes, don't make a commit; push is no-op
+    git commit -m "auto-generating sphinx docs" || true
+    git status
+
+    if [ "\$dry_run" = false ]; then
+      echo "Pushing to pytorch.github.io:site"
+      git push origin site
+    else
+      echo "Skipping push due to dry_run"
+    fi
+
+    popd
+    # =================== The above code **should** be executed inside Docker container ===================
+    EOL
+    chmod +x /home/circleci/project/doc_push_script.sh
+
+# `setup_ci_environment` has to be run **after** the ``checkout`` step because
+# it writes into the checkout directory and otherwise CircleCI will complain
+# that
+#   Directory (/home/circleci/project) you are trying to checkout to is not empty and not git repository
+setup_ci_environment: &setup_ci_environment
+  name: Set Up CI Environment After Checkout
+  no_output_timeout: "1h"
+  command: |
+    set -e
+
+    # Set up NVIDIA docker repo
+    curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+
+    sudo apt-get -qq update
+    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get -qq install \
+      linux-headers-$(uname -r) \
+      linux-image-generic \
+      moreutils \
+      nvidia-docker2 \
+      expect-dev
+
+    sudo pkill -SIGHUP dockerd
+
+    sudo pip -q install awscli==1.16.35
+
+    if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+      wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
+      sudo /bin/bash ./NVIDIA-Linux-x86_64-410.79.run -s --no-drm
+      nvidia-smi
+    fi
+
+    if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
+      echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
+      echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
+      echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
+      echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
+      if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+        echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
+      fi
+      export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+      export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+      export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+      echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
+
+      if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+        # This IAM user allows write access to S3 bucket for sccache & bazels3cache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+      else
+        # This IAM user allows write access to S3 bucket for sccache
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+      fi
+    fi
+
+    # This IAM user only allows read-write access to ECR
+    export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
+    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
+    eval $(aws ecr get-login --region us-east-1 --no-include-email)
+
+macos_brew_update: &macos_brew_update
+  name: Brew update and install moreutils, expect and libomp
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    pwd
+    ls -lah
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libomp

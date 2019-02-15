@@ -1604,9 +1604,8 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
-         const std::vector<std::string>& external_inputs,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
-         bool infer_shapes,
+         const std::vector<int>& black_list,
          int max_batch_size,
          int max_seq_size,
          bool debug_builder,
@@ -1622,18 +1621,17 @@ void addGlobalMethods(py::module& m) {
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
         OnnxifiTransformerOptions opts;
-        opts.infer_shapes = infer_shapes;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        ts.Transform(
-            GetCurrentWorkspace(),
-            &pred_net,
-            external_inputs,
-            tensor_shapes,
-            std::unordered_set<int>());
+        Workspace* curr_ws = GetCurrentWorkspace();
+        std::unordered_set<int> blacklist_set(
+            black_list.begin(), black_list.end());
+        auto weight_names = curr_ws->Blobs();
+        ts.transform(
+            curr_ws, &pred_net, weight_names, tensor_shapes, blacklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
