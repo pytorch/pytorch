@@ -78,6 +78,54 @@ class TestNumericalEquivalence(test_util.TestCase):
             )
 
 
+@unittest.skipIf(not CAFFE_FOUND, 'No Caffe installation found.')
+class TestTranslateReluLayer(test_util.TestCase):
+    def test(self):
+        # If the relu layer has negative_slope param, it will become a caffe2
+        # LeakyRelu op.
+        leakyrelu_net_str = """
+        name: 'test_leakyrelu'
+        input: 'data'
+        input_shape {
+        dim: 1 dim: 3 dim: 256 dim: 256
+        }
+        layer {
+        name: 'leakyrelu'
+        type: 'ReLU'
+        bottom: 'data'
+        top: 'top'
+        relu_param {
+        negative_slope: 0.5
+        }
+        }
+        """
+        relu_net_str = """
+        name: 'test_relu'
+        input: 'data'
+        input_shape {
+        dim: 1 dim: 3 dim: 256 dim: 256
+        }
+        layer {
+        name: 'relu'
+        type: 'ReLU'
+        bottom: 'data'
+        top: 'top'
+        }
+        """
+
+        # (key, value) = (caffe2_op name, caffe_net_def)
+        net_test_case = {'LeakyRelu': leakyrelu_net_str, 'Relu': relu_net_str}
+
+        for caffe2_op_name in net_test_case:
+            caffe_net_def = caffe_pb2.NetParameter()
+            text_format.Merge(net_test_case[caffe2_op_name], caffe_net_def)
+            caffe_pretrained = caffe_pb2.NetParameter()
+            caffe2_net, _ = caffe_translator.TranslateModel(
+                caffe_net_def, caffe_pretrained, is_test=True)
+
+            self.assertEqual(caffe2_net.op[0].type, caffe2_op_name)
+
+
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         print(
