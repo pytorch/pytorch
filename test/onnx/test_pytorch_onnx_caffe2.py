@@ -1047,7 +1047,7 @@ class TestCaffe2Backend(unittest.TestCase):
         class ReshapeModel(torch.nn.Module):
             def forward(self, input):
                 return input.reshape(1, 1)
-        
+
         x = torch.randn(1, requires_grad=True)
         self.run_model_test(ReshapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
@@ -1056,7 +1056,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 y = torch.randn(3, 1, 2, 1, requires_grad=False)
                 return input.reshape_as(y)
-        
+
         x = torch.randn(2, 3, requires_grad=True)
         self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
