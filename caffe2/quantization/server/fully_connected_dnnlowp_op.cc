@@ -29,6 +29,9 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
     : BaseType(operator_def, ws),
       axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
       axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
+      quantize_channelwise_(this->template GetSingleArgument<bool>(
+          "quantize_channelwise",
+          false)),
       b_quantized_(make_shared<vector<int32_t>>()),
       column_offsets_(make_shared<vector<int32_t>>()),
       is_weight_constant_(
@@ -36,6 +39,10 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
   if (!is_weight_constant_) {
     LOG(INFO) << operator_def.output(0) << " is_weight_constant "
               << is_weight_constant_;
+  }
+  if (this->debug_def().engine() == "DNNLOWP_ROWWISE" ||
+      this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+    quantize_channelwise_ = true;
   }
 
   VLOG(2) << "DNNLOWP FC with output " << operator_def.output(0);
@@ -157,7 +164,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       Y_int32_.resize(Y->size());
       DoNothing<> doNothingObj{};
 
-      if (in_qparams_[1].zero_point) {
+      if (quantize_channelwise_ || filter_qparams_[0].zero_point) {
         row_offsets_.resize(PackAWithRowOffset<uint8_t>::rowOffsetBufferSize());
         X_pack_buf_.resize(PackAWithRowOffset<uint8_t>::packedBufferSize());
 
@@ -171,27 +178,54 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             1, // group
             row_offsets_.data());
 
-        ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
-            doNothingObj,
-            &requantization_params_.real_multiplier,
-            out_qparams_.zero_point,
-            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
-            &in_qparams_[1].zero_point,
-            packA.getRowOffsetBuffer(),
-            column_offsets_->empty() ? nullptr : column_offsets_->data(),
-            b_quantized_data_,
-            N); // ncols per quant group
+        if (quantize_channelwise_) {
+          ReQuantizeOutput<
+              false /* FUSE_RELU */,
+              QuantizationGranularity::OUT_CHANNEL>
+              outputProcObj(
+                  doNothingObj,
+                  requantization_multipliers_.data(),
+                  out_qparams_.zero_point,
+                  column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+                  filter_zero_points_.data(),
+                  packA.getRowOffsetBuffer(),
+                  column_offsets_->empty() ? nullptr : column_offsets_->data(),
+                  b_quantized_data_,
+                  N);
 
-        fbgemmPacked(
-            packA,
-            *Wq_packed_,
-            reinterpret_cast<uint8_t*>(
-                OutputTensorCPU_(0)->template mutable_data<T>()),
-            Y_int32_.data(),
-            N,
-            outputProcObj,
-            0, // thread_id
-            1); // num_threads
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              reinterpret_cast<uint8_t*>(
+                  OutputTensorCPU_(0)->template mutable_data<T>()),
+              Y_int32_.data(),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        } else {
+          ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
+              doNothingObj,
+              requantization_multipliers_.data(),
+              out_qparams_.zero_point,
+              column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+              filter_zero_points_.data(),
+              packA.getRowOffsetBuffer(),
+              column_offsets_->empty() ? nullptr : column_offsets_->data(),
+              b_quantized_data_,
+              N);
+
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              reinterpret_cast<uint8_t*>(
+                  OutputTensorCPU_(0)->template mutable_data<T>()),
+              Y_int32_.data(),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        }
       } else {
         X_pack_buf_.resize(PackAMatrix<uint8_t>::packedBufferSize());
 
@@ -206,14 +240,14 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
         ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
             doNothingObj,
-            &requantization_params_.real_multiplier,
+            requantization_multipliers_.data(),
             out_qparams_.zero_point,
             column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
-            &in_qparams_[1].zero_point,
+            filter_zero_points_.data(),
             nullptr,
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
-            N); // ncols per quant group
+            N);
 
         fbgemmPacked(
             packA,
@@ -249,26 +283,53 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
-        ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
-            doNothingObj,
-            in_qparams_[0].scale,
-            &in_qparams_[1].scale,
-            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
-            &in_qparams_[1].zero_point,
-            packA.getRowOffsetBuffer(),
-            column_offsets_->empty() ? nullptr : column_offsets_->data(),
-            b_dequantized_data_, // bias
-            N); // ncols per quant group
 
-        fbgemmPacked(
-            packA,
-            *Wq_packed_,
-            Y_data,
-            reinterpret_cast<int32_t*>(Y_data),
-            N,
-            outputProcObj,
-            0, // thread_id
-            1); // num_threads
+        if (quantize_channelwise_) {
+          ReQuantizeForFloat<
+              false /* FUSE_RELU*/,
+              QuantizationGranularity::OUT_CHANNEL>
+              outputProcObj(
+                  doNothingObj,
+                  in_qparams_[0].scale,
+                  filter_scales_.data(),
+                  column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+                  filter_zero_points_.data(),
+                  packA.getRowOffsetBuffer(),
+                  column_offsets_->empty() ? nullptr : column_offsets_->data(),
+                  b_dequantized_data_, // bias
+                  N);
+
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              Y_data,
+              reinterpret_cast<int32_t*>(Y_data),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        } else {
+          ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
+              doNothingObj,
+              in_qparams_[0].scale,
+              filter_scales_.data(),
+              column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+              filter_zero_points_.data(),
+              packA.getRowOffsetBuffer(),
+              column_offsets_->empty() ? nullptr : column_offsets_->data(),
+              b_dequantized_data_, // bias
+              N);
+
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              Y_data,
+              reinterpret_cast<int32_t*>(Y_data),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        }
       } else {
         // Input quantized and output float
         row_offsets_.resize(PackAWithRowOffset<uint8_t>::rowOffsetBufferSize());
@@ -284,26 +345,53 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
-        ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
-            doNothingObj,
-            in_qparams_[0].scale,
-            &in_qparams_[1].scale,
-            column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
-            &in_qparams_[1].zero_point,
-            packA.getRowOffsetBuffer(),
-            column_offsets_->empty() ? nullptr : column_offsets_->data(),
-            b_dequantized_data_, // bias
-            N); // ncols per quant group
 
-        fbgemmPacked(
-            packA,
-            *Wq_packed_,
-            Y_data,
-            reinterpret_cast<int32_t*>(Y_data),
-            N,
-            outputProcObj,
-            0, // thread_id
-            1); // num_threads
+        if (quantize_channelwise_) {
+          ReQuantizeForFloat<
+              false /* FUSE_RELU*/,
+              QuantizationGranularity::OUT_CHANNEL>
+              outputProcObj(
+                  doNothingObj,
+                  in_qparams_[0].scale,
+                  filter_scales_.data(),
+                  column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+                  filter_zero_points_.data(),
+                  packA.getRowOffsetBuffer(),
+                  column_offsets_->empty() ? nullptr : column_offsets_->data(),
+                  b_dequantized_data_, // bias
+                  N);
+
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              Y_data,
+              reinterpret_cast<int32_t*>(Y_data),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        } else {
+          ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
+              doNothingObj,
+              in_qparams_[0].scale,
+              filter_scales_.data(),
+              column_offsets_->empty() ? 0 : in_qparams_[0].zero_point,
+              filter_zero_points_.data(),
+              packA.getRowOffsetBuffer(),
+              column_offsets_->empty() ? nullptr : column_offsets_->data(),
+              b_dequantized_data_, // bias
+              N);
+
+          fbgemmPacked(
+              packA,
+              *Wq_packed_,
+              Y_data,
+              reinterpret_cast<int32_t*>(Y_data),
+              N,
+              outputProcObj,
+              0, // thread_id
+              1); // num_threads
+        }
       }
     } // dequantize_output
   } else {
@@ -361,16 +449,17 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         for (int k = 0; k < K; ++k) {
           row_offset += Xdata[i * K + k];
         }
-        row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
           if (!column_offsets_->empty()) {
             Y_int32_[i * N + j] -=
                 in_qparams_[0].zero_point * (*column_offsets_)[j];
           }
-          Y_int32_[i * N + j] -= row_offset;
+          int quant_group = quantize_channelwise_ ? j : 0;
+          Y_int32_[i * N + j] -=
+              row_offset * filter_qparams_[quant_group].zero_point;
           Ydata[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
-                  in_qparams_[1].scale +
+                  filter_qparams_[quant_group].scale +
               b_dequantized_data_[j];
         }
       }
@@ -383,7 +472,6 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         for (int k = 0; k < K; ++k) {
           row_offset += Xdata[i * K + k];
         }
-        row_offset *= in_qparams_[1].zero_point;
 
         for (int j = 0; j < N; ++j) {
           if (!column_offsets_->empty()) {
@@ -391,11 +479,13 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             Y_int32_[i * N + j] -=
                 in_qparams_[0].zero_point * (*column_offsets_)[j];
           }
-          Y_int32_[i * N + j] -= row_offset;
+          int quant_group = quantize_channelwise_ ? j : 0;
+          Y_int32_[i * N + j] -=
+              row_offset * filter_qparams_[quant_group].zero_point;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
           Ydata[i * N + j] = fbgemm::Requantize<T>(
-              Y_int32_[i * N + j], requantization_params_);
+              Y_int32_[i * N + j], requantization_params_[quant_group]);
         }
       }
     }
@@ -459,13 +549,25 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
         const auto& packed_filter =
             this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
-        CAFFE_ENFORCE_EQ(packed_filter.qparams.size(), 1);
-        in_qparams_[1] = packed_filter.qparams[0];
+        filter_qparams_ = packed_filter.qparams;
+        if (quantize_channelwise_) {
+          CAFFE_ENFORCE_EQ(filter_qparams_.size(), N);
+        } else {
+          CAFFE_ENFORCE_EQ(filter_qparams_.size(), 1);
+        }
       } else {
-        vector<TensorQuantizationParams> temp_qparams(1);
+        filter_qparams_.resize(quantize_channelwise_ ? N : 1);
         QuantizeWeight<T>(
-            InputBlob(1), K, N, temp_qparams, W_quantized_, qfactory_.get());
-        in_qparams_[1] = temp_qparams[0];
+            InputBlob(1), K, N, filter_qparams_, W_quantized_, qfactory_.get());
+      }
+
+      filter_scales_.resize(filter_qparams_.size());
+      filter_zero_points_.resize(filter_qparams_.size());
+      requantization_params_.resize(filter_qparams_.size());
+      requantization_multipliers_.resize(filter_qparams_.size());
+      for (int i = 0; i < filter_qparams_.size(); ++i) {
+        filter_scales_[i] = filter_qparams_[i].scale;
+        filter_zero_points_[i] = filter_qparams_[i].zero_point;
       }
 
       if (fast_path) {
@@ -481,8 +583,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
               N,
               W.raw_data(),
               reinterpret_cast<const int8_t*>(W_quantized_.data()),
-              K, // ld
-              in_qparams_[1].zero_point);
+              K); // ld
         }
       } else {
         string reason;
@@ -504,16 +605,17 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   } // is_weight_constant_
   else {
     // !is_weight_constant_
-    in_qparams_[1] = GetInputTensorQuantizationParamsOf(
+    filter_qparams_.resize(1);
+    filter_qparams_[0] = GetInputTensorQuantizationParamsOf(
         this, 1, qfactory_.get(), true /*weight*/);
-    in_qparams_[1].zero_point += signed_min;
+    filter_qparams_[0].zero_point += signed_min;
 
     W_quantized_.resize(W.size());
     fbgemm::Quantize<T_signed>(
         W.template data<float>(),
         W_quantized_.data(),
         W_quantized_.size(),
-        in_qparams_[1]);
+        filter_qparams_[0]);
   }
 
   if (VLOG_IS_ON(3)) {
@@ -535,10 +637,8 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
           this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
       column_offsets_ = packed_filter.column_offsets;
     } else {
-      vector<TensorQuantizationParams> temp_qparams;
-      temp_qparams.push_back(in_qparams_[1]);
       ComputeColumnOffsets<T_signed>(
-          K, N, W_quantized_.data(), temp_qparams, *column_offsets_);
+          K, N, W_quantized_.data(), filter_qparams_, *column_offsets_);
     }
   }
   if (VLOG_IS_ON(3)) {
@@ -570,7 +670,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         CAFFE_ENFORCE_LE(
             std::abs(
                 bias_qparams.scale -
-                in_qparams_[0].scale * in_qparams_[1].scale),
+                in_qparams_[0].scale * filter_qparams_[0].scale),
             1e-4);
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
         b_quantized_data_ = bias.template data<int32_t>();
@@ -590,7 +690,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
             (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[j],
                 0,
-                in_qparams_[0].scale * in_qparams_[1].scale,
+                in_qparams_[0].scale * filter_qparams_[0].scale,
                 32);
           }
           b_quantized_data_ = b_quantized_->data();
@@ -615,11 +715,9 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
             this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
         column_offset_ptr = packed_filter.column_offsets.get();
       } else {
-        vector<TensorQuantizationParams> temp_qparams;
-        temp_qparams.push_back(in_qparams_[1]);
         column_offset_temp.resize(N);
         ComputeColumnOffsets<T_signed>(
-            K, N, W_quantized_.data(), temp_qparams, column_offset_temp);
+            K, N, W_quantized_.data(), filter_qparams_, column_offset_temp);
         column_offset_ptr = &column_offset_temp;
       }
       for (int i = 0; i < N; ++i) {
@@ -648,10 +746,14 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (!dequantize_output_ && !requantization_param_selected_) {
     GetOutputQuantizationParams_();
 
-    float real_multiplier =
-        in_qparams_[0].scale * in_qparams_[1].scale / out_qparams_.scale;
-    requantization_params_ = qfactory_->ChooseRequantizationMultiplier(
-        real_multiplier, out_qparams_);
+    for (int i = 0; i < filter_qparams_.size(); ++i) {
+      float real_multiplier =
+          in_qparams_[0].scale * filter_qparams_[i].scale / out_qparams_.scale;
+      requantization_params_[i] = qfactory_->ChooseRequantizationMultiplier(
+          real_multiplier, out_qparams_);
+      requantization_multipliers_[i] =
+          requantization_params_[i].real_multiplier;
+    }
     requantization_param_selected_ = true;
   } else {
     if (measure_quantization_error_) {
@@ -682,6 +784,20 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP,
+    FullyConnectedDNNLowPOp<uint8_t>);
+
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    DNNLOWP_ROWWISE,
+    FullyConnectedDNNLowPOp<uint8_t>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    DNNLOWP_ROWWISE_16,
+    FullyConnectedDNNLowPOp<uint16_t>);
+
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    Int8FC,
+    DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
 
 } // namespace caffe2
