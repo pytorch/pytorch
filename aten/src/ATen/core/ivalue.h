@@ -751,35 +751,33 @@ DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 
-template<typename Elem>
+template <typename Elem>
 inline std::vector<Elem> to_list(std::vector<IValue>& list) {
-  std::vector<Elem> converted_list;
-  std::transform(
-      list.begin(), list.end(), std::back_inserter(converted_list), [
-      ](IValue ivalue) -> Elem {
-        return ivalue.to<Elem>();
-      });
-  return std::move(converted_list);
+  return fmap(list, [](IValue ivalue) { return ivalue.to<Elem>(); });
 }
 
-template<typename Elem>
+template <typename Elem>
 inline std::vector<Elem> to_list(const std::vector<IValue>& list) {
-  std::vector<Elem> converted_list;
-  std::transform(
-      list.begin(), list.end(), std::back_inserter(converted_list), [
-      ](IValue ivalue) -> Elem {
-        return ivalue.to<Elem>();
-      });
-  return std::move(converted_list);
+  return fmap(list, [](IValue ivalue) { return ivalue.to<Elem>(); });
 }
 
-template<typename T>
+template <typename Elem>
+struct is_vector : std::false_type {};
+
+template <typename Elem, typename Allocator>
+struct is_vector<std::vector<Elem, Allocator>> : std::true_type {};
+
+template <typename T>
 inline T IValue::to() && {
+  static_assert(
+      is_vector<T>(), "Generic IValue::to only supports GenericLists");
   return std::move(to_list<typename T::value_type>(toGenericListRef()));
 }
 
-template<typename T>
-inline T IValue::to() const & {
+template <typename T>
+inline T IValue::to() const& {
+  static_assert(
+      is_vector<T>(), "Generic IValue::to only supports GenericLists");
   return std::move(to_list<typename T::value_type>(toGenericListRef()));
 }
 
