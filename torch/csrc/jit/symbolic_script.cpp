@@ -323,10 +323,14 @@ const std::vector<std::string> functions = {
 
             return torch.view(self, size), backward
 
-        def _adaptive_avg_pool2d(self,
+        def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
+                if output_size[0] == 1 and output_size[1] == 1:
+                    grad_self = grad_output.expand(self_size)
+                else:
+                    grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
 
             return torch._adaptive_avg_pool2d(self, output_size), backward
