@@ -311,8 +311,7 @@ const std::vector<std::string> functions = {
 
             return torch.adaptive_avg_pool2d(self, output_size), backward
 
-        def batch_norm(self,
-                       input : Tensor,
+        def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        running_mean : Optional[Tensor],
