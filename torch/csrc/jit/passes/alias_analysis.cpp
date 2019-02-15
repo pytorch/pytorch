@@ -319,9 +319,6 @@ void AliasDb::analyzeImpl(Node* node) {
       // These ops do nothing
       return;
     default:
-      if (aliasAnalysisHasSpecialCaseFor(node->kind())) {
-        std::cout << "MISSING " << node->kind().toQualString() << "\n";
-      }
       AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
