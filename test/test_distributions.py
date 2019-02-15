@@ -36,7 +36,7 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -50,7 +50,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  NegativeBinomial, Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 Weibull, constraints, kl_divergence)
+                                 VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -63,7 +63,9 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
+from torch.distributions.von_mises import _log_modified_bessel_fn
 from torch.nn.functional import softmax
+from torch import optim
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -424,6 +426,16 @@ EXAMPLES = [
             'low': torch.tensor([1.0, 1.0], requires_grad=True),
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
+    ]),
+    Example(VonMises, [
+        {
+            'loc': torch.tensor(1.0, requires_grad=True),
+            'concentration': torch.tensor(10.0, requires_grad=True)
+        },
+        {
+            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
+            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
+        }
     ]),
     Example(Weibull, [
         {
@@ -1360,6 +1372,55 @@ class TestDistributions(TestCase):
         self.assertEqual(high.grad, rand)
         low.grad.zero_()
         high.grad.zero_()
+
+    def _fit_vonmises_params_from_samples(self, samples, n_iter):
+        assert samples.dim() == 1
+        samples_count = samples.size(0)
+        samples_cs = samples.cos().sum()
+        samples_ss = samples.sin().sum()
+        mu = torch.atan2(samples_ss / samples_count, samples_cs / samples_count)
+        samples_r = (samples_cs ** 2 + samples_ss ** 2).sqrt() / samples_count
+        # From Banerjee, Arindam, et al.
+        # "Clustering on the unit hypersphere using von Mises-Fisher distributions."
+        # Journal of Machine Learning Research 6.Sep (2005): 1345-1382.
+        # By mic (https://stats.stackexchange.com/users/67168/mic),
+        # Estimating kappa of von Mises distribution, URL (version: 2015-06-12):
+        # https://stats.stackexchange.com/q/156692
+        kappa = (samples_r * 2 - samples_r ** 3) / (1 - samples_r ** 2)
+        lr = 1e-2
+        kappa.requires_grad = True
+        bfgs = optim.LBFGS([kappa], lr=lr)
+
+        def bfgs_closure():
+            bfgs.zero_grad()
+            obj = (_log_modified_bessel_fn(kappa, order=1)
+                   - _log_modified_bessel_fn(kappa, order=0))
+            obj = (obj - samples_r.log()).abs()
+            obj.backward()
+            return obj
+
+        for i in range(n_iter):
+            bfgs.step(bfgs_closure)
+        return mu, kappa.detach()
+
+    def test_vonmises_sample(self):
+        for loc in [-math.pi / 2.0, 0.0, math.pi / 2.0]:
+            for concentration in [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]:
+                n_samples = int(2e6)
+                n_iter = 50
+                prob = VonMises(loc, concentration)
+                samples = prob.sample((n_samples,))
+                mu, kappa = self._fit_vonmises_params_from_samples(samples, n_iter=n_iter)
+                self.assertLess(abs(loc - mu), 0.1)
+                self.assertLess(abs(concentration - kappa), concentration * 0.1)
+
+    def test_vonmises_logprob(self):
+        concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
+        for concentration in concentrations:
+            grid = torch.arange(0., 2 * math.pi, 1e-4)
+            prob = VonMises(0.0, concentration).log_prob(grid).exp()
+            norm = prob.mean().item() * 2 * math.pi
+            self.assertLess(abs(norm - 1), 1e-3)
 
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
@@ -3132,6 +3193,27 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_vonmises_shape_tensor_params(self):
+        von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
+        self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
+        self.assertEqual(von_mises._event_shape, torch.Size(()))
+        self.assertEqual(von_mises.sample().size(), torch.Size((2,)))
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
+
+    def test_vonmises_shape_scalar_params(self):
+        von_mises = VonMises(0., 1.)
+        self.assertEqual(von_mises._batch_shape, torch.Size())
+        self.assertEqual(von_mises._event_shape, torch.Size())
+        self.assertEqual(von_mises.sample().size(), torch.Size())
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_2).size(),
+                         torch.Size((3, 2, 3)))
+
     def test_weibull_scale_scalar_params(self):
         weibull = Weibull(1, 1)
         self.assertEqual(weibull._batch_shape, torch.Size())
@@ -3883,6 +3965,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.uniform(random_var, positive_var)
             ),
             (
+                VonMises(random_var, positive_var),
+                scipy.stats.vonmises(positive_var, loc=random_var)
+            ),
+            (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             )
@@ -3900,8 +3986,9 @@ class TestAgainstScipy(TestCase):
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
+            if isinstance(pytorch_dist, (Cauchy, HalfCauchy, VonMises)):
                 # Cauchy, HalfCauchy distributions' standard deviation is nan, skipping check
+                # VonMises variance is circular and scipy doesn't produce a correct result
                 continue
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
@@ -4504,6 +4591,7 @@ class TestJit(TestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                VonMises  # Variance is not Euclidean
             ]
             if Dist in xfail:
                 continue
@@ -4548,6 +4636,7 @@ class TestJit(TestCase):
             if Dist not in xfail:
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
+    @skipIfRocm
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
