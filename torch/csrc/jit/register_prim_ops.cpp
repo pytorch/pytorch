@@ -1025,9 +1025,9 @@ int listInsert(Stack& stack) {
   const int64_t list_size = elements.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
-  if (normalized_idx >= list_size) {
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
     if (idx < 0) {
-      elements.push_front(elem);
+      elements.insert(elements.begin(), elem);
     } else {
       elements.push_back(elem);
     }
