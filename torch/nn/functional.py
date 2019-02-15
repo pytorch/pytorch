@@ -28,8 +28,8 @@ See :class:`~torch.nn.Conv1d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
@@ -58,8 +58,8 @@ See :class:`~torch.nn.Conv2d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
@@ -89,8 +89,8 @@ See :class:`~torch.nn.Conv3d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kT \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
@@ -119,12 +119,12 @@ See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sW,)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padW,)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -152,12 +152,12 @@ See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -187,12 +187,12 @@ See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 .. include:: cudnn_deterministic.rst
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kT \times kH \times kW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kT , kH , kW)`
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sT, sH, sW)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padT, padH, padW)``. Default: 0
     output_padding: additional size added to one side of each dimension in the
@@ -232,9 +232,9 @@ input planes.
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
+    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
     kernel_size: the size of the window. Can be a single number or a
-      tuple :math:`(kW,)`
+      tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -245,8 +245,9 @@ Args:
         averaging calculation. Default: ``True``
 
 Examples::
+
     >>> # pool of square window of size=3, stride=2
-    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> input = torch.tensor([[[1, 2, 3, 4, 5, 6, 7]]], dtype=torch.float32)
     >>> F.avg_pool1d(input, kernel_size=3, stride=2)
     tensor([[[ 2.,  4.,  6.]]])
 
@@ -263,9 +264,9 @@ input planes.
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple :math:`(kH \times kW)`
+      tuple `(kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -286,9 +287,9 @@ size :math:`sT \times sH \times sW` steps. The number of output features is equa
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple :math:`(kT \times kH \times kW)`
+      tuple `(kT, kH, kW)`
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
@@ -316,7 +317,7 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number :math:`k` (for a square kernel of :math:`k \times k`)
-                     or a tuple :math:`(kH \times kW)`
+                     or a tuple `(kH, kW)`
         output_size: the target output size of the image of the form :math:`oH \times oW`.
                      Can be a tuple `(oH, oW)` or a single number :math:`oH` for a square image :math:`oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -382,7 +383,7 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number :math:`k` (for a square kernel of :math:`k \times k \times k`)
-                     or a tuple :math:`(kT \times kH \times kW)`
+                     or a tuple `(kT, kH, kW)`
         output_size: the target output size of the form :math:`oT \times oH \times oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
                       :math:`oH \times oH \times oH`
@@ -2378,7 +2379,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -2920,10 +2921,10 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
                                 operation won't be differentiable.
     """
     if out is None:
-        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
         ret = input / denom
     else:
-        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
+        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
         ret = torch.div(input, denom, out=out)
     return ret
 

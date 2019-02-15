@@ -59,6 +59,10 @@
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
+- func: index_select_backward(Tensor grad, int64_t dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
+
+- func: select_backward(Tensor grad, int[] input_sizes, int64_t dim, int64_t index) -> Tensor
+
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function
@@ -1320,6 +1324,8 @@
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
+- func: logsumexp_backward(Tensor grad, Tensor self, Tensor res, int[1] dim, bool keepdim) -> Tensor
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   matches_jit_signature: True
 
@@ -1391,6 +1397,8 @@
 
 - func: mean(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+
+- func: sum_backward(Tensor grad, int[] sizes, int[] dims, bool keepdim) -> Tensor
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   matches_jit_signature: True
@@ -1610,6 +1618,8 @@
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: permute_backwards(Tensor grad, int[] fwd_dims) -> Tensor
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   matches_jit_signature: True
@@ -1885,10 +1895,14 @@
   variants: function, method
   device_guard: False
 
+- func: _safe_size(int[] sizes, int[] dim) -> int64_t
+
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   matches_jit_signature: True
   variants: function, method
   device_guard: False
+
+- func: slice_backward(Tensor grad, int[] input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) -> Tensor
 
 - func: slogdet(Tensor self) -> (Tensor, Tensor)
   matches_jit_signature: True
@@ -1979,6 +1993,10 @@
   matches_jit_signature: True
   variants: function, method
   device_guard: False
+
+- func: unsqueeze_to(Tensor self, int[] sizes) -> Tensor
+
+- func: unsqueeze_to(Tensor self, int64_t dim, int[] sizes) -> Tensor
 
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
@@ -2275,6 +2293,10 @@
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+
+- func: var_backward(Tensor grad, Tensor self, bool unbiased) -> Tensor
+
+- func: var_backward(Tensor grad, Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   matches_jit_signature: True
@@ -4144,17 +4166,13 @@
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   matches_jit_signature: True
   python_module: nn
+
+- func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
 
-- func: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: adaptive_avg_pool2d_backward_out_cpu
-    CUDA: adaptive_avg_pool2d_backward_out_cuda
-
-- func: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   matches_jit_signature: True
   python_module: nn
   dispatch:

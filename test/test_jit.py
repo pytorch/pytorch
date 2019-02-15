@@ -3,6 +3,8 @@ import torch
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.parallel as dp
+import torch.optim as optim
 import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
@@ -886,9 +888,9 @@ class TestJit(JitTestCase):
         traced = torch.jit.trace(f, (x,))
         f(x)
         graph = traced.graph_for(x)
-        # There should be 4 int constants for the right sides of operators, plus two
-        # for alpha arguments for add and sub
-        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
+        # There should be 4 int constants for the right sides of operators, plus one
+        # for the alpha argument for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant') == 5)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -3970,6 +3972,24 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear_empty, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear, ())
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -4185,36 +4205,71 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_is_none_dispatch(self):
-        class Test(torch.jit.ScriptModule):
-            __constants__ = ['b']
 
-            def __init__(self, b=None):
-                super(Test, self).__init__()
-                self.b = b
+        @torch.jit.script
+        def test_lhs_none_rhs_none():
+            # LHS, RHS both alwaysNone, dispatch always_none_branch
+            # only emit one prim::Constant
+            if None is None:
+                return 1
+            elif None is not None:
+                return 2
+            else:
+                return 3
 
-            @torch.jit.script_method
-            def forward(self, input, opt=None):
-                # type: (Tensor, Optional[Tensor]) -> Tensor
-                x = input
-                if self.b is not None:
-                    x = self.b(input)
+        self.assertTrue(str(test_lhs_none_rhs_none.graph).count(': int = prim::Constant') == 1)
 
-                if self.b is None:
-                    x = input + 2
+        @torch.jit.script
+        def test_lhs_opt_rhs_none(lhs=None):
+            # type: (Optional[Tensor]) -> int
+            # LHS maybeNone: emit normal if stmt that contains 3 constants
+            if lhs is not None:
+                return 2
+            elif lhs is None:
+                return 1
+            else:
+                return 3
 
-                if opt is not None:
-                    opt = torch.jit._unwrap_optional(opt)
-                    x = opt + x
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-                if opt is None:
-                    x = x + 4
+        @torch.jit.script
+        def test_lhs_none_rhs_opt(rhs=None):
+            # type: (Optional[Tensor]) -> int
+            # RHS maybeNone, emit normal if stmt that contains 3 constants
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
 
-                return x
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-        inputs = torch.zeros(1, 2)
-        self.assertExpectedGraph(Test().graph)
-        out = Test()(inputs)
-        self.assertEqual(out, inputs + 6)
+        @torch.jit.script
+        def test_lhs_never_rhs_none(lhs):
+            # LHS neverNone, RHS alwaysNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if lhs is None:
+                return 1
+            elif lhs is not None:
+                return 2
+            else:
+                return 3
+
+        self.assertTrue(str(test_lhs_never_rhs_none.graph).count(': int = prim::Constant') == 1)
+
+        @torch.jit.script
+        def test_lhs_none_rhs_never(rhs):
+            # LHS alwaysNone, RHS neverNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
+
+        self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
@@ -4489,7 +4544,7 @@ a")
             if x is None:
                 res = res + 1
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_tensor_none
@@ -4504,7 +4559,7 @@ a")
             if x is None:
                 res = res + 1.0
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_other_none
@@ -4979,6 +5034,39 @@ a")
                     self.assertEqual(a.device, s(b, "t.to('cpu', dtype=torch.int32, non_blocking=non_blocking)").device)
                     self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32)").dtype)
                     self.assertEqual(b.device, s(b, "t.to(dtype=torch.int32)").device)
+
+        # Test AD: aten::to(Tensor self, int dtype, bool non_blocking, bool copy) -> Tensor
+        t = torch.tensor(5).float().requires_grad_()
+        out_ref = t.to(torch.float32)
+        out = s(t, "t.to(torch.float32)")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Device? device, int? dtype, bool non_blocking, bool copy) -> Tensor
+        out_ref = t.to('cpu')
+        out = s(t, "t.to('cpu')")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Tensor other, bool non_blocking, bool copy) -> Tensor
+        @torch.jit.script
+        def func2(t, t_ref):
+            return t.to(t_ref)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        t_ref = torch.tensor(4).double()
+        out_ref = t.to(t_ref)
+        out = func2(t, t_ref)
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_tensor_number_math_cuda(self):
@@ -10619,6 +10707,7 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',
@@ -12751,6 +12840,123 @@ class TestAsync(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+
+class TestDataParallel(JitTestCase):
+    class Mpy(torch.nn.Module):
+        def __init__(self):
+            super(TestDataParallel.Mpy, self).__init__()
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
+
+        def forward(self, input):
+            return self.m(input)
+
+    class Mpy1(torch.nn.Module):
+        def __init__(self, block):
+            super(TestDataParallel.Mpy1, self).__init__()
+            self.m = block
+
+        def forward(self, input):
+            return self.m.forward(input)
+
+    class Mpy2(torch.nn.Module):
+        def __init__(self, block1, block2):
+            super(TestDataParallel.Mpy2, self).__init__()
+            self.m1 = block1
+            self.m2 = block2
+
+        def forward(self, input):
+            x = self.m1.forward(input)
+            return self.m2(x)
+
+    class Msm(torch.jit.ScriptModule):
+
+        __constants__ = ['m']
+
+        def __init__(self):
+            super(TestDataParallel.Msm, self).__init__(False)
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
+
+        @torch.jit.script_method
+        def forward(self, input):
+            return self.m(input)
+
+    class Msm1(torch.jit.ScriptModule):
+        def __init__(self, block):
+            super(TestDataParallel.Msm1, self).__init__(False)
+            self.block = block
+
+        @torch.jit.script_method
+        def forward(self, input):
+            x = self.block(input)
+            return x
+
+    def check_replicas(self, module, replicas, input_shape=(2, 2)):
+        input = torch.randn(input_shape).cuda()
+        expected_output = module(input).data
+        for i, replica in enumerate(replicas):
+            for p in replica.parameters():
+                self.assertEqual(p.get_device(), i)
+            for b in replica.buffers():
+                self.assertEqual(b.get_device(), i)
+            replica_input = input.cuda(i)
+            self.assertEqual(replica(replica_input).data, expected_output)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_python_submodule_exception(self):
+        module = self.Msm1(self.Mpy()).cuda()
+        msg = "Cannot replicate.*"
+        with self.assertRaisesRegex(Exception, msg):
+            dp.replicate(module, {0, 1})
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_python_submodule_script(self):
+        module = self.Mpy1(self.Msm()).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_shared_module(self):
+        s = self.Msm()
+        p1 = self.Mpy1(s)
+        module = self.Mpy2(p1, s).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_traced_module(self):
+        module = torch.jit.trace(self.Mpy1(self.Mpy()), torch.ones(2, 2)).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_tensor_sharing(self):
+        module = self.Msm1(self.Msm()).cuda()
+        replica = dp.replicate(module, {0, 1})
+        optimizer = optim.SGD(module.parameters(), lr=1, momentum=1)
+        x = torch.ones(2, 2, requires_grad=True).cuda()
+        first_forward = module.forward(x)
+        first_forward.sum().backward()
+        optimizer.step()
+        second_forward = module.forward(first_forward)
+
+        # replica which is on the same GPU has a shallow copy of the original
+        # params and buffers
+        r0_forward = replica[0].forward(x)
+        self.assertEqual(second_forward, r0_forward)
+
+        # replca which is on a different GPU has a deep copy of the original
+        # params and buffers
+        x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
+        r1_forward = replica[1].forward(x1)
+        self.assertEqual(first_forward, r1_forward)
 
 
 for test in autograd_method_tests():

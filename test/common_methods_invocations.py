@@ -209,6 +209,7 @@ def method_tests():
         ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims'),
+        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),)),
         ('exp', (S, S, S), NO_ARGS),
         ('exp', (), NO_ARGS, 'scalar'),
         ('expm1', (S, S, S), NO_ARGS),
@@ -1020,6 +1021,8 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_det_dim2_null',
     'test_det_rank1',
     'test_det_rank2',
+    # `other` expand_as(self, other) is not used in autograd.
+    'test_expand_as',
     'test_logdet',
     'test_logdet_1x1',
     'test_logdet_symmetric',
