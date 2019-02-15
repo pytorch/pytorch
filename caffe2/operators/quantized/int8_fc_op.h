@@ -15,9 +15,8 @@ namespace int8 {
 
 class Int8FCOp final : public Operator<CPUContext> {
  public:
-  template <class... Args>
-  explicit Int8FCOp(Args&&... args)
-      : Operator<CPUContext>(std::forward<Args>(args)...), ws_(ws) {
+  explicit Int8FCOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {
     createSharedBuffer<CPUContext>(ws_);
   }
 

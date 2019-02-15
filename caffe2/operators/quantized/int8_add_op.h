@@ -15,9 +15,8 @@ namespace int8 {
 template <Activation Ac>
 class Int8AddOp final : public Operator<CPUContext> {
  public:
-  template <class... Args>
-  explicit Int8AddOp(Args&&... args)
-      : Operator<CPUContext>(std::forward<Args>(args)...), ws_(ws) {}
+  explicit Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8AddOp() {
     if (this->qnnpackOperator_ != nullptr) {
