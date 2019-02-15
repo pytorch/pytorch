@@ -1515,3 +1515,8 @@ def flatten(g, input, start_dim, end_dim):
     shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
     p = _reshape_from_tensor(g, input, shape)
     return p
+
+
+@parse_args('v')
+def nonzero(g, input):
+    return g.op('NonZero', input)

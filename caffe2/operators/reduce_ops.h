@@ -29,13 +29,13 @@ class ReduceOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-
     const int ndim = X.dim();
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
-      for (auto& axis: axes_) {
+      for (auto& axis : axes_) {
         axis = X.canonical_axis_index(axis);
       }
       std::sort(axes_.begin(), axes_.end());
@@ -45,24 +45,29 @@ class ReduceOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int64_t> Y_dims;
-    Y_dims.reserve(ndim);
+    std::vector<int64_t> output_dims;
+    output_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
       if (cur_axis < axes_.size() && i == axes_[cur_axis]) {
         if (keep_dims_) {
-          Y_dims.push_back(1);
+          output_dims.push_back(1);
         }
         ++cur_axis;
       } else {
-        Y_dims.push_back(X_dims[i]);
+        output_dims.push_back(X_dims[i]);
       }
     }
-    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    auto* Y = Output(0, output_dims, at::dtype<T>());
+
+    std::vector<int> Y_dims = X_dims;
+    for (const int axis : axes_) {
+      Y_dims[axis] = 1;
+    }
+
     return reducer_.template Forward<T>(
         X_dims,
-        axes_,
+        Y_dims,
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
@@ -71,7 +76,7 @@ class ReduceOp final : public Operator<Context> {
  private:
   std::vector<int> axes_;
   const int keep_dims_;
-  Reducer reducer_{};
+  const Reducer reducer_{};
 };
 
 template <typename InputTypes, class Context, class Reducer>
@@ -98,7 +103,7 @@ class ReduceGradientOp final : public Operator<Context> {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
-      for (auto& axis: axes_) {
+      for (auto& axis : axes_) {
         axis = X.canonical_axis_index(axis);
       }
       std::sort(axes_.begin(), axes_.end());
@@ -126,23 +131,22 @@ class ReduceGradientOp final : public Operator<Context> {
 
  private:
   std::vector<int> axes_;
-  Reducer reducer_{};
+  const Reducer reducer_{};
 };
 
 template <class Context>
 struct MinReducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceMin<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
@@ -165,16 +169,15 @@ template <class Context>
 struct MaxReducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceMax<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
@@ -197,16 +200,15 @@ template <class Context>
 struct SumReducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceSum<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
@@ -240,16 +242,15 @@ template <class Context>
 struct MeanReducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceMean<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
@@ -287,16 +288,15 @@ template <class Context>
 struct L1Reducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceL1<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
@@ -319,16 +319,15 @@ template <class Context>
 struct L2Reducer {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
+      const std::vector<int>& X_dims,
+      const std::vector<int>& Y_dims,
       const T* X_data,
       T* Y_data,
       Context* context) const {
     math::ReduceL2<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.size(),
+        X_dims.data(),
+        Y_dims.data(),
         T(1),
         X_data,
         Y_data,
