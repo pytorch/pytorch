@@ -737,17 +737,15 @@ def get_hip_file_path(filepath):
     #
     #   - If the file name contains "CUDA", replace it with "HIP", AND
     #
-    # If NONE of the above occurred, then append "_hip" to the end of
-    # the filename (before the extension).
+    # If NONE of the above occurred, then insert "hip" in the file path
+    # as the direct parent folder of the file
     #
-    # Furthermore, ALWAYS replace '.cu' with '.hip'.
+    # Furthermore, ALWAYS replace '.cu' with '.hip', because those files
+    # contain CUDA kernels that needs to be hipified and processed with
+    # hcc compiler
     #
     # This isn't set in stone; we might adjust this to support other
     # naming conventions.
-    #
-    # In the near future, we intend to also change cu/cuh file extension
-    # to hcc/hcch rather than cc; however, the hcc compiler does not
-    # currently support this file extension.
 
     if ext == '.cu':
         ext = '.hip'

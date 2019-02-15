@@ -844,7 +844,7 @@ class AsyncErrorOp final : public Operator<CPUContext> {
     return true;
   }
 
-  ~AsyncErrorOp() {
+  ~AsyncErrorOp() override {
     if (thread_) {
       thread_->join();
     }
@@ -989,7 +989,7 @@ class SyncErrorOp final : public Operator<CPUContext> {
     }
   }
 
-  ~SyncErrorOp() {}
+  ~SyncErrorOp() override {}
 
  private:
   bool fail_;

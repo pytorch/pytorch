@@ -14,10 +14,32 @@ parser.add_argument(
     '--out-of-place-only',
     action='store_true',
     help="Whether to only run hipify out-of-place on source files")
+
+parser.add_argument(
+    '--project-directory',
+    type=str,
+    default='',
+    help="The root of the project.",
+    required=False)
+
+parser.add_argument(
+    '--output-directory',
+    type=str,
+    default='',
+    help="The Directory to Store the Hipified Project",
+    required=False)
+
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
+
+if args.project_directory:
+    proj_dir = args.project_directory
+
+out_dir = proj_dir
+if args.output_directory:
+    out_dir = args.output_directory
 
 includes = [
     "caffe2/operators/*",
@@ -99,7 +121,7 @@ if not args.out_of_place_only:
 
 hipify_python.hipify(
     project_directory=proj_dir,
-    output_directory=proj_dir,
+    output_directory=out_dir,
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,

@@ -464,10 +464,15 @@ class ScriptModuleSerializer final {
 
   ScriptModuleSerializer(std::ostream* ofs);
 
-  void serialize(const script::Module& module);
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
  private:
-  void convertModel(const script::Module& module, torch::ModelDef* model_def);
+  void convertModel(
+      const script::Module& module,
+      torch::ModelDef* model_def,
+      const script::ExtraFilesMap& extra_files);
 
   // add a tensor to the tensorTable
   // returns the offset into the tensor table
@@ -513,9 +518,11 @@ ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
     : ofs_(), writer_(ofs) {}
 
-void ScriptModuleSerializer::serialize(const script::Module& module) {
+void ScriptModuleSerializer::serialize(
+    const script::Module& module,
+    const script::ExtraFilesMap& extra_files) {
   torch::ModelDef model_def;
-  convertModel(module, &model_def);
+  convertModel(module, &model_def, extra_files);
   std::string output;
   // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
   // be consistent with MessageToJsonString
@@ -540,7 +547,8 @@ void ScriptModuleSerializer::serialize(const script::Module& module) {
 
 void ScriptModuleSerializer::convertModel(
     const script::Module& module,
-    torch::ModelDef* model_def) {
+    torch::ModelDef* model_def,
+    const script::ExtraFilesMap& extra_files) {
   model_def->set_producer_name("pytorch");
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
@@ -548,6 +556,12 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
+
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -885,14 +899,20 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
-void ExportModule(const script::Module& module, std::ostream& out) {
+void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(&out);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
-void ExportModule(const script::Module& module, const std::string& filename) {
+void ExportModule(
+    const script::Module& module,
+    const std::string& filename,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
 } // namespace jit

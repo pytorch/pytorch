@@ -1,5 +1,5 @@
-graph(%input : Tensor
-      %opt.1 : Tensor?) {
+graph(%input : Tensor,
+      %opt.1 : Tensor?):
   %2 : None = prim::None()
   %3 : int = prim::Constant[value=1]()
   %4 : int = prim::Constant[value=2]()
@@ -7,23 +7,18 @@ graph(%input : Tensor
   %x.1 : Tensor = aten::add(%input, %4, %3)
   %7 : bool = aten::__isnot__(%opt.1, %2)
   %opt.4 : Tensor?, %x.3 : Tensor = prim::If(%7)
-    block0() {
+    block0():
       %opt.2 : Tensor = prim::unchecked_unwrap_optional(%opt.1)
       %opt.3 : Tensor = aten::_unwrap_optional(%opt.2)
       %x.2 : Tensor = aten::add(%opt.3, %x.1, %3)
       -> (%opt.3, %x.2)
-    }
-    block1() {
+    block1():
       -> (%opt.1, %x.1)
-    }
   %13 : bool = aten::__is__(%opt.4, %2)
   %x : Tensor = prim::If(%13)
-    block0() {
+    block0():
       %x.4 : Tensor = aten::add(%x.3, %5, %3)
       -> (%x.4)
-    }
-    block1() {
+    block1():
       -> (%x.3)
-    }
-  return (%x);
-}
+  return (%x)
