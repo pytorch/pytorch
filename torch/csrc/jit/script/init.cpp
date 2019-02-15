@@ -834,7 +834,23 @@ void initJitScriptBindings(PyObject* module) {
             return ss.str();
           })
       .def("apply", &Module::apply)
-      .def("_copy_into", &Module::copy_into);
+      .def("_copy_into", &Module::copy_into)
+      .def(
+          "_copy_method",
+          [](std::shared_ptr<Module> m,
+            std::string name,
+            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
+            std::shared_ptr<Module> orig) {
+              std::vector<at::Tensor*> member_inputs;
+              for (auto& p : params) {
+                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+                AT_ASSERT(np != nullptr);
+                member_inputs.push_back(np->slot());
+              }
+
+              Method* orig_method = orig->find_method(name);
+              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+          });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def("graph", [&](Method& self) { return self.graph(); })
