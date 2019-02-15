@@ -34,7 +34,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&yDesc_));
   }
 
-  ~CuDNNTransposeOp() {
+  ~CuDNNTransposeOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(xDesc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(yDesc_));
   }
