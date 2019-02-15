@@ -86,7 +86,7 @@ size_t assertFind(
   auto pos = search_range.file_ptr()->find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
     auto range = SourceRange(
-        std::make_shared<std::string>(search_range.file_ptr()),
+        std::make_shared<std::string>(search_range.file()),
         search_range.start(),
         sub.size());
     std::stringstream ss;
@@ -115,7 +115,7 @@ void assertNotFind(
   auto pos = range.file_ptr()->find(sub, range.start());
   if (pos != std::string::npos && (pos + sub.size()) <= range.end()) {
     auto found_range = SourceRange(
-        std::make_shared<std::string>(range.file_ptr()), pos, sub.size() + pos);
+        std::make_shared<std::string>(range.file()), pos, sub.size() + pos);
     std::stringstream ss;
     ss << "Expected to not find ";
     printQuotedString(ss, sub);
