@@ -1004,15 +1004,54 @@ Operation listAppend(const Node* node) {
 }
 
 template <typename TList>
+int listPop(Stack& stack) {
+  TList list;
+  int64_t idx;
+  pop(stack, list, idx);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (list_size == 0) {
+    AT_ERROR("pop from empty list");
+  }
+
+  push(stack, std::move(getItem(list, idx)));
+  elements.erase(elements.begin() + normalized_idx);
+
+  return 0;
+}
+
+template <>
+int listPop<Shared<BoolList>>(Stack& stack) {
+  Shared<BoolList> list;
+  int64_t idx;
+  pop(stack, list, idx);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (list_size == 0) {
+    AT_ERROR("pop from empty list");
+  }
+
+  push(stack, getBoolItem(elements, idx));
+  elements.erase(elements.begin() + normalized_idx);
+
+  return 0;
+}
+
+template <typename TList>
 int listClear(Stack& stack) {
   TList a;
   pop(stack, a);
 
   a->elements().clear();
-  push(stack, a);
-
   return 0;
 }
+
 
 template <typename T>
 Operation listSelect(const Node* node) {
@@ -1303,7 +1342,12 @@ RegisterOperators reg2({
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
-          listClear<Shared<c_type>>)
+          listClear<Shared<c_type>>),                                       \
+      Operator(                                                             \
+        "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
+        -> " decl_type  "(*)",                                              \
+        listPop<Shared<c_type>>)
+
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1322,7 +1366,11 @@ RegisterOperators reg2({
           listSetItem<Shared<c_type>, c_type::ElemType>),              \
       Operator(                                                        \
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
-          listClear<Shared<c_type>>)
+          listClear<Shared<c_type>>),                                  \
+      Operator(                                                        \
+          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
+          -> " decl_type, listPop<Shared<c_type>>)
+
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
