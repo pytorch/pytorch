@@ -23,9 +23,9 @@ namespace samplers {
 /// `Sampler` performs a rounding operation based on the `allow_duplicates`
 /// parameter to decide the local sample count.
 template <typename BatchRequest = std::vector<size_t>>
-class TORCH_API DistributedSampler : public Sampler<BatchRequest> {
+class DistributedSampler : public Sampler<BatchRequest> {
  public:
-  DistributedSampler(
+  TORCH_API DistributedSampler(
       size_t size,
       size_t num_replicas = 1,
       size_t rank = 0,
@@ -38,11 +38,11 @@ class TORCH_API DistributedSampler : public Sampler<BatchRequest> {
 
   /// Set the epoch for the current enumeration. This can be used to alter the
   /// sample selection and shuffling behavior.
-  void set_epoch(size_t epoch) {
+  TORCH_API void set_epoch(size_t epoch) {
     epoch_ = epoch;
   }
 
-  size_t epoch() const {
+  TORCH_API size_t epoch() const {
     return epoch_;
   }
 
@@ -64,7 +64,7 @@ class TORCH_API DistributedSampler : public Sampler<BatchRequest> {
 
 /// Select samples randomly. The sampling order is shuffled at each `reset()`
 /// call.
-class TORCH_API DistributedRandomSampler : public DistributedSampler<> {
+class DistributedRandomSampler : public DistributedSampler<> {
  public:
   DistributedRandomSampler(
       size_t size,
@@ -73,19 +73,19 @@ class TORCH_API DistributedRandomSampler : public DistributedSampler<> {
       bool allow_duplicates = true);
 
   /// Resets the `DistributedRandomSampler` to a new set of indices.
-  void reset(optional<size_t> new_size = nullopt) override;
+  TORCH_API void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
-  optional<std::vector<size_t>> next(size_t batch_size) override;
+  TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;
 
   /// Serializes the `DistributedRandomSampler` to the `archive`.
-  void save(serialize::OutputArchive& archive) const override;
+  TORCH_API void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `DistributedRandomSampler` from the `archive`.
-  void load(serialize::InputArchive& archive) override;
+  TORCH_API void load(serialize::InputArchive& archive) override;
 
   /// Returns the current index of the `DistributedRandomSampler`.
-  size_t index() const noexcept;
+  TORCH_API size_t index() const noexcept;
 
  private:
   void populate_indices();
@@ -97,7 +97,7 @@ class TORCH_API DistributedRandomSampler : public DistributedSampler<> {
 };
 
 /// Select samples sequentially.
-class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
+class DistributedSequentialSampler : public DistributedSampler<> {
  public:
   DistributedSequentialSampler(
       size_t size,
@@ -106,19 +106,19 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
       bool allow_duplicates = true);
 
   /// Resets the `DistributedSequentialSampler` to a new set of indices.
-  void reset(optional<size_t> new_size = nullopt) override;
+  TORCH_API void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
-  optional<std::vector<size_t>> next(size_t batch_size) override;
+  TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;
 
   /// Serializes the `DistributedSequentialSampler` to the `archive`.
-  void save(serialize::OutputArchive& archive) const override;
+  TORCH_API void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `DistributedSequentialSampler` from the `archive`.
   void load(serialize::InputArchive& archive) override;
 
   /// Returns the current index of the `DistributedSequentialSampler`.
-  size_t index() const noexcept;
+  TORCH_API size_t index() const noexcept;
 
  private:
   void populate_indices();
