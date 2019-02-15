@@ -11,7 +11,7 @@ namespace jit {
 Value* insertConstant(
     Graph& g,
     const IValue& val,
-    c10::TypePtr result_type,
+    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);

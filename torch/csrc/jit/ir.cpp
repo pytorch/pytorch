@@ -1318,7 +1318,7 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
-    TypePtr result_type,
+    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(

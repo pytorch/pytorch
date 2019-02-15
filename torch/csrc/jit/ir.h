@@ -1077,7 +1077,7 @@ struct Graph {
   // from the ivalue, as with a None that is set to t?, use result_type
   TORCH_API Value* insertConstant(
       IValue val,
-      TypePtr result_type = nullptr,
+      const TypePtr& result_type = nullptr,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
