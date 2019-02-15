@@ -142,6 +142,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'VonMises',
     'Weibull',
     'TransformedDistribution',
     'biject_to',

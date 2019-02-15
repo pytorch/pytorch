@@ -50,7 +50,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  NegativeBinomial, Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 Weibull, constraints, kl_divergence)
+                                 VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -3023,6 +3023,27 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_vonmises_shape_tensor_params(self):
+        von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
+        self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
+        self.assertEqual(von_mises._event_shape, torch.Size(()))
+        self.assertEqual(von_mises.sample().size(), torch.Size((2,)))
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
+
+    def test_vonmises_shape_scalar_params(self):
+        von_mises = VonMises(0., 1.)
+        self.assertEqual(von_mises._batch_shape, torch.Size())
+        self.assertEqual(von_mises._event_shape, torch.Size())
+        self.assertEqual(von_mises.sample().size(), torch.Size())
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_2).size(),
+                         torch.Size((3, 2, 3)))
+
     def test_weibull_scale_scalar_params(self):
         weibull = Weibull(1, 1)
         self.assertEqual(weibull._batch_shape, torch.Size())
@@ -3773,6 +3794,10 @@ class TestAgainstScipy(TestCase):
                 Uniform(random_var, random_var + positive_var),
                 scipy.stats.uniform(random_var, positive_var)
             ),
+            (
+                VonMises(random_var, positive_var),
+                scipy.stats.vonmises(positive_var, loc=random_var)
+            )
             (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
