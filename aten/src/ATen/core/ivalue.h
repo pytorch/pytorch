@@ -771,14 +771,14 @@ template <typename T>
 inline T IValue::to() && {
   static_assert(
       is_vector<T>(), "Generic IValue::to only supports GenericLists");
-  return std::move(to_list<typename T::value_type>(toGenericListRef()));
+  return to_list<typename T::value_type>(toGenericListRef());
 }
 
 template <typename T>
 inline T IValue::to() const& {
   static_assert(
       is_vector<T>(), "Generic IValue::to only supports GenericLists");
-  return std::move(to_list<typename T::value_type>(toGenericListRef()));
+  return to_list<typename T::value_type>(toGenericListRef());
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
