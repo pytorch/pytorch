@@ -328,12 +328,12 @@ const std::vector<std::string> functions = {
             self_size = self.size()
             def backward(grad_output):
                 if output_size[0] == 1 and output_size[1] == 1:
-                    grad_self = grad_output.expand(self_size)
+                    grad_self = grad_output.expand(self_size) / (self_size[-1] * self_size[-2])
                 else:
                     grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
 
-            return torch._adaptive_avg_pool2d(self, output_size), backward
+            return torch.adaptive_avg_pool2d(self, output_size), backward
 
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
