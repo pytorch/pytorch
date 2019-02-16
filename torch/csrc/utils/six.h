@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/structseq.h>
 
 namespace six {
 
@@ -57,7 +58,6 @@ inline bool isTuple(PyObject* obj) {
 
 inline PyObject *toTuple(PyStructSequence *obj) {
 #if PY_MAJOR_VERSION == 2
-  PyObject *torch::utils::structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high);
   return torch::utils::structseq_slice(obj, 0, Py_SIZE(obj));
 #else
   Py_INCREF(obj);
