@@ -1118,6 +1118,26 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
+template <>
+int listRemove<Shared<GenericList>, IValue>(Stack& stack) {
+  Shared<GenericList> list;
+  IValue elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const IValue& b) {
+    return b.isAliasOf(elem);
+  });
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
