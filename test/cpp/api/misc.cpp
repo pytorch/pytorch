@@ -42,12 +42,3 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
-
-TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
-  auto tensor = torch::empty({3, 4}, torch::requires_grad());
-  ASSERT_THROWS_WITH(
-      tensor.fill_(1),
-      "a leaf Variable that requires grad "
-      "has been used in an in-place operation");
-  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
-}
