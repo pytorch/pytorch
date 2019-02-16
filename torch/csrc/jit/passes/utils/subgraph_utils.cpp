@@ -71,7 +71,6 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
       // enable more optimizations
       if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
-        nv->setType(input->type()); // Need to retain type information on Nones
         inputsMap[input] = nv;
       } else {
         // The common case: this is a regular input, so just register it with

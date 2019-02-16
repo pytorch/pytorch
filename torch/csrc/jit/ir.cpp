@@ -637,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->mustBeNone();
+  return node_->kind() == prim::None;
 }
 
 std::string Value::uniqueNameBase() const {
@@ -753,12 +753,6 @@ bool Node::matches(
     }
   }
   return true;
-}
-
-bool Node::mustBeNone() const {
-  return kind_ == prim::Constant && !this->hasAttributes() &&
-      (output()->type()->cast<OptionalType>() ||
-       output()->type() == NoneType::get());
 }
 
 void Node::dump() const {
@@ -1185,7 +1179,7 @@ Node* Graph::createUndefined() {
 }
 
 Node* Graph::createNone(TypePtr typ) {
-  Node* n = create(prim::Constant);
+  Node* n = create(prim::None);
   n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
@@ -1318,11 +1312,10 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
-    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), result_type, std::move(loc), std::move(scope));
+      *this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {

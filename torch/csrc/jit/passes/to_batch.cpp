@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
@@ -524,6 +524,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
     } else if (n->kind().is_prim()) {
       switch (n->kind()) {
         case prim::Constant:
+        case prim::None:
           visitConstant(n, block, res_block);
           break;
         case prim::NumToTensor:

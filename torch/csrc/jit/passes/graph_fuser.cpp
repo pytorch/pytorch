@@ -138,7 +138,7 @@ c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->mustBeNone() ||
+  if (tensor->node()->kind() == prim::None ||
       tensor->node()->kind() == prim::Undefined) {
     return false;
   }
