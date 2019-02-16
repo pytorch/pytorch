@@ -9,6 +9,7 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 whitelist = [
     'max', 'max_out', 'min', 'min_out', 'median', 'median_out',
     'mode', 'mode_out', 'kthvalue', 'kthvalue_out', 'svd', 'svd_out',
+    'gels', 'trtrs', 'btrifact', 'btrifact_with_info',
 ]
 
 
