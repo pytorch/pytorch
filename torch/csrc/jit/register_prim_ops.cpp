@@ -1014,6 +1014,7 @@ int listReverse(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
 int listPop(Stack& stack) {
   TList list;
   int64_t idx;
