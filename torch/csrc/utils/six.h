@@ -35,6 +35,9 @@ inline bool isTuple(PyObject* obj) {
 
 // toTuple: enable PyTuple API for PyStructSequence
 //
+// The input of this function is assumed to be either a tuple or a structseq. The caller
+// is responsible for this check.
+//
 // On Python 3, structseq is a subtype of tuple, so these APIs could be used directly.
 //
 // But on Python 2, structseq is not a subtype of tuple, so we need to manually create a
