@@ -133,7 +133,7 @@ bool FunctionParameter::check(PyObject* obj) {
     }
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
-      if (six::isTuple(obj) || PyList_Check(obj)) {
+      if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
       }
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
