@@ -16,8 +16,12 @@ class SyncBatchNorm(Function):
         mean_l = list(mean_all.unbind(0))
         invstd_l = list(invstd_all.unbind(0))
         # using all_gather instead of all reduce so we can calculate mean/var in one go
-        torch.distributed.all_gather(mean_l, mean, process_group)
-        torch.distributed.all_gather(invstd_l, invstd, process_group)
+        mean_all_reduce = torch.distributed.all_gather(mean_l, mean, process_group, async_op=True)
+        invstd_all_reduce = torch.distributed.all_gather(invstd_l, invstd, process_group, async_op=True)
+
+        # wait on the async communication to finish
+        mean_all_reduce.wait()
+        invstd_all_reduce.wait()
 
         # calcualte global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats(
@@ -61,11 +65,16 @@ class SyncBatchNorm(Function):
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
             # TODO: move div_ into batch_norm_backward_elemt kernel
-            torch.distributed.all_reduce(
-                mean_dy, torch.distributed.ReduceOp.SUM, process_group)
+            mean_dy_all_reduce = torch.distributed.all_reduce(
+                mean_dy, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
+            mean_dy_xmu_all_reduce = torch.distributed.all_reduce(
+                mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
+
+            # wait on the async communication to finish
+            mean_dy_all_reduce.wait()
+            mean_dy_xmu_all_reduce.wait()
+
             mean_dy.div_(world_size)
-            torch.distributed.all_reduce(
-                mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group)
             mean_dy_xmu.div_(world_size)
             # backward pass for gradient calculation
             grad_input = torch.batch_norm_backward_elemt(

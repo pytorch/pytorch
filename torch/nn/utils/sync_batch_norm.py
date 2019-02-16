@@ -26,20 +26,20 @@ def convert_sync_batchnorm(module, process_group=None):
         >>> sync_bn_module = convert_sync_batchnorm(module, process_group)
 
     """
-    mod = module
+    module_output = module
     if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-        mod = torch.nn.SyncBatchNorm(module.num_features,
+        module_output = torch.nn.SyncBatchNorm(module.num_features,
                                      module.eps, module.momentum,
                                      module.affine,
                                      module.track_running_stats,
                                      process_group)
         if module.affine:
-            mod.weight.data = module.weight.data.clone().detach()
-            mod.bias.data = module.bias.data.clone().detach()
-        mod.running_mean = module.running_mean
-        mod.running_var = module.running_var
-        mod.num_batches_tracked = module.num_batches_tracked
+            module_output.weight.data = module.weight.data.clone().detach()
+            module_output.bias.data = module.bias.data.clone().detach()
+        module_output.running_mean = module.running_mean
+        module_output.running_var = module.running_var
+        module_output.num_batches_tracked = module.num_batches_tracked
     for name, child in module.named_children():
-        mod.add_module(name, convert_sync_batchnorm(child))
+        module_output.add_module(name, convert_sync_batchnorm(child))
     del module
-    return mod
+    return module_output

@@ -1374,27 +1374,6 @@ class _DistTestBase(object):
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
-    def _convert_syncbn_model(self, module, process_group=None):
-        mod = module
-        if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            mod = nn.SyncBatchNorm(
-                module.num_features,
-                module.eps,
-                module.momentum,
-                module.affine,
-                module.track_running_stats,
-                process_group
-            )
-            mod.running_mean = module.running_mean
-            mod.running_var = module.running_var
-            if module.affine:
-                mod.weight.data = module.weight.data.clone().detach()
-                mod.bias.data = module.bias.data.clone().detach()
-        for name, child in module.named_children():
-            mod.add_module(name, self._convert_syncbn_model(child))
-        del module
-        return mod
-
     def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
@@ -1407,7 +1386,7 @@ class _DistTestBase(object):
         model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
-        model_DDP = self._convert_syncbn_model(copy.deepcopy(model))
+        model_DDP = nn.utils.convert_sync_batchnorm(copy.deepcopy(model))
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset

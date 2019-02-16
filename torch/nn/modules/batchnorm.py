@@ -418,9 +418,6 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('expected at least 3D input (got {}D input)'
                              .format(input.dim()))
 
-    def _specify_process_group(self, process_group):
-        self.process_group = process_group
-
     def _specify_ddp_gpu_num(self, gpu_size):
         if gpu_size > 1:
             raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
