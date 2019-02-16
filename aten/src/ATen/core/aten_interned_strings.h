@@ -139,7 +139,6 @@ _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
-_(aten, _th_any) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_clamp) \
@@ -517,6 +516,7 @@ _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, pdist) \
+_(aten, cdist) \
 _(aten, permute) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
@@ -906,6 +906,7 @@ _(attr, padding_mode) \
 _(attr, padding_value) \
 _(attr, params) \
 _(attr, pdist) \
+_(attr, cdist) \
 _(attr, periodic) \
 _(attr, pivot) \
 _(attr, pivots) \

@@ -270,6 +270,13 @@ class PoissonNLLLoss(_Loss):
         >>> target = torch.randn(5, 2)
         >>> output = loss(log_input, target)
         >>> output.backward()
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+          the same shape as the input
     """
     __constants__ = ['log_input', 'full', 'eps', 'reduction']
 
@@ -350,10 +357,10 @@ class KLDivLoss(_Loss):
 
 
     Shape:
-        - input: :math:`(N, *)` where `*` means, any number of additional
+        - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
-        - target: :math:`(N, *)`, same shape as the input
-        - output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
           the same shape as the input
 
     """
@@ -571,6 +578,8 @@ class BCEWithLogitsLoss(_Loss):
          - Input: :math:`(N, *)` where `*` means, any number of additional
            dimensions
          - Target: :math:`(N, *)`, same shape as the input
+         - Output: scalar. If `reduce` is False, then :math:`(N, *)`, same
+           shape as input.
 
      Examples::
 
@@ -640,8 +649,9 @@ class HingeEmbeddingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of dimensions. The sum operation
+          operates over all the elements.
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
     """
     __constants__ = ['margin', 'reduction']
@@ -697,7 +707,7 @@ class MultiLabelMarginLoss(_Loss):
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
-        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -797,8 +807,9 @@ class SoftMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
 
     """
@@ -938,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']
@@ -1207,6 +1218,11 @@ class CTCLoss(_Loss):
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
 
     Example::
@@ -1239,13 +1255,15 @@ class CTCLoss(_Loss):
     """
     __constants__ = ['blank', 'reduction']
 
-    def __init__(self, blank=0, reduction='mean'):
+    def __init__(self, blank=0, reduction='mean', zero_infinity=False):
         super(CTCLoss, self).__init__(reduction=reduction)
         self.blank = blank
+        self.zero_infinity = zero_infinity
 
     @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
-        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
+                          self.zero_infinity)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

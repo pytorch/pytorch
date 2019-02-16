@@ -216,9 +216,13 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
 VECTOR_IMPLEMENT_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+VECTOR_IMPLEMENT_FUNCTION(abs,)
+#endif /* unsigned, so identity */
 
 
 /* floating point only now */

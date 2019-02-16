@@ -1,10 +1,10 @@
 // Taken from https://github.com/skarupke/flat_hash_map/blob/2c4687431f978f02a3780e24b8b701d22aa32d9c/flat_hash_map.hpp
 // with fixes applied:
-// - https://github.com/skarupke/flat_hash_map/pull/8
 // - https://github.com/skarupke/flat_hash_map/pull/25
 // - https://github.com/skarupke/flat_hash_map/pull/26
 // - replace size_t with uint64_t to fix it for 32bit
 // - add "GCC diagnostic" pragma to ignore -Wshadow
+// - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems to have issues with it otherwise
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -293,9 +293,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal
     using Entry = detailv3::sherwood_v3_entry<T>;
     using AllocatorTraits = std::allocator_traits<EntryAlloc>;
     using EntryPointer = typename AllocatorTraits::pointer;
-    struct convertible_to_iterator;
 
 public:
+    struct convertible_to_iterator;
 
     using value_type = T;
     using size_type = uint64_t;
@@ -521,7 +521,6 @@ public:
             if (it->has_value())
                 return { it };
         }
-        return end();
     }
     const_iterator begin() const
     {
@@ -530,7 +529,6 @@ public:
             if (it->has_value())
                 return { it };
         }
-        return end();
     }
     const_iterator cbegin() const
     {
@@ -924,6 +922,7 @@ private:
         return static_cast<Equal &>(*this)(lhs, rhs);
     }
 
+public:
     struct convertible_to_iterator
     {
         EntryPointer it;

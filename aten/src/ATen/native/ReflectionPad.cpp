@@ -55,7 +55,7 @@ inline void reflection_pad1d_out_loop(
 }
 
 void reflection_pad1d_out_template(
-    Tensor& output, const Tensor& input_, IntList padding) {
+    Tensor& output, const Tensor& input_, IntArrayRef padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
@@ -160,7 +160,7 @@ inline void reflection_pad1d_backward_out_loop(
 
 void reflection_pad1d_backward_out_template(
     Tensor& grad_input, const Tensor& grad_output_, const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
@@ -273,7 +273,7 @@ inline void reflection_pad2d_out_loop(
 }
 
 void reflection_pad2d_out_template(
-    Tensor &output, const Tensor &input_, IntList padding) {
+    Tensor &output, const Tensor &input_, IntArrayRef padding) {
   int dim_w = 2;
   int dim_h = 1;
   int dim_slices = 0;
@@ -409,7 +409,7 @@ inline void reflection_pad2d_backward_out_loop(
 
 void reflection_pad2d_backward_out_template(
     Tensor &grad_input, const Tensor &grad_output_,
-    const Tensor &input, IntList padding) {
+    const Tensor &input, IntArrayRef padding) {
   int dim_w = 2;
   int dim_h = 1;
   int dim_plane = 0;
@@ -472,12 +472,12 @@ void reflection_pad2d_backward_out_template(
 } // namespace
 
 Tensor& reflection_pad1d_out_cpu(
-    Tensor& output, const Tensor& input, IntList padding) {
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
 
-Tensor reflection_pad1d_cpu(const Tensor& input, IntList padding) {
+Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
@@ -487,7 +487,7 @@ Tensor& reflection_pad1d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad1d_backward_out_template(
@@ -498,7 +498,7 @@ Tensor& reflection_pad1d_backward_out_cpu(
 Tensor reflection_pad1d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   auto grad_input = at::zeros_like(input);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
@@ -506,12 +506,12 @@ Tensor reflection_pad1d_backward_cpu(
 }
 
 Tensor& reflection_pad2d_out_cpu(
-    Tensor& output, const Tensor& input, IntList padding) {
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
 
-Tensor reflection_pad2d_cpu(const Tensor& input, IntList padding) {
+Tensor reflection_pad2d_cpu(const Tensor& input, IntArrayRef padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad2d_out_template(output, input, padding);
   return output;
@@ -521,7 +521,7 @@ Tensor& reflection_pad2d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad2d_backward_out_template(
@@ -532,7 +532,7 @@ Tensor& reflection_pad2d_backward_out_cpu(
 Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   auto grad_input = at::zeros_like(input);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);

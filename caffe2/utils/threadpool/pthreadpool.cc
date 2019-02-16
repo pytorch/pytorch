@@ -34,7 +34,8 @@ struct compute_1d_tiled_context {
   size_t tile;
 };
 
-static void compute_1d_tiled(const struct compute_1d_tiled_context* context, size_t linear_index) {
+static void compute_1d_tiled(void* context_, size_t linear_index) {
+  const struct compute_1d_tiled_context* context = (compute_1d_tiled_context*) context_;
   const size_t tile_index = linear_index;
   const size_t index = tile_index * context->tile;
   const size_t tile = min(context->tile, context->range - index);
@@ -72,9 +73,10 @@ struct compute_2d_context {
   caffe2::FixedDivisor<int32_t> range_j;
 };
 
-static void compute_2d(const struct compute_2d_context* context, size_t linear_index) {
+static void compute_2d(void* context_, size_t linear_index) {
   DCHECK_LE(linear_index, std::numeric_limits<int32_t>::max());
 
+  const struct compute_2d_context* context = static_cast<compute_2d_context*>(context_);
   int32_t q;
   int32_t r;
   context->range_j.DivMod(static_cast<int32_t>(linear_index), &q, &r);
@@ -116,10 +118,11 @@ struct compute_2d_tiled_context {
   size_t tile_j;
 };
 
-static void compute_2d_tiled(const struct compute_2d_tiled_context* context, size_t linear_index) {
+static void compute_2d_tiled(void* context_, size_t linear_index) {
   int32_t q;
   int32_t r;
 
+  const struct compute_2d_tiled_context* context = static_cast<compute_2d_tiled_context*>(context_);
   context->tile_range_j.DivMod(linear_index, &q, &r);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
@@ -179,9 +182,10 @@ struct compute_3d_tiled_context {
 };
 
 static void compute_3d_tiled(
-    const struct compute_3d_tiled_context* context,
+    void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_k;
+  const struct compute_3d_tiled_context* context = static_cast<compute_3d_tiled_context*>(context_);
   context->tile_range_k.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_k);
   int32_t tile_index_i, tile_index_j;
@@ -270,9 +274,10 @@ struct compute_4d_tiled_context {
 };
 
 static void compute_4d_tiled(
-    const struct compute_4d_tiled_context* context,
+    void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_kl;
+  const struct compute_4d_tiled_context* context = static_cast<compute_4d_tiled_context*>(context_);
   context->tile_range_kl.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_kl);
   int32_t tile_index_i, tile_index_j;

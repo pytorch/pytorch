@@ -23,6 +23,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace caffe2 {
 
@@ -202,7 +203,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // FinishDeviceComputation must be called on the same cpu thread as
   // SwitchToDevice()
   void FinishDeviceComputation() override {
-    cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_));
+    CUDA_ENFORCE(cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_)));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
       CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
@@ -338,66 +339,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
   static ThreadLocalCUDAObjects& getCudaObjects();
-};
-
-/**
- * An allocator that does the CPU memory allocation with pinned memory.
- *
- * This is needed because if we want to do any asynchronous cuda memcpy,
- * the underlying CPU memory also needs to be allocated into pinned memory
- * space. As a result, whenever Caffe2 is built with GPU and there is
- * GPU present during runtime, at global initialization time we will set
- * the CPU memory allocator to allocate pinned memory.
- */
-struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
-  PinnedCPUAllocator() {}
-  ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
-    void* data;
-    at::DataPtr data_ptr;
-    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    if (IsNUMAEnabled()) {
-      data_ptr = baseAllocator_.allocate(nbytes);
-      data = data_ptr.get();
-      CAFFE_ENFORCE(data);
-      CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
-    } else {
-      CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
-      data_ptr = {data, data, &Delete, at::Device(CPU)};
-    }
-    memset(data, 0, nbytes);
-    return data_ptr;
-  }
-
-  at::DeleterFnPtr raw_deleter() const override {
-    return &Delete;
-  }
-
- private:
-  static void Delete(void* data) {
-    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
-    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
-    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
-    // But, if one calls CPUContext::New() before any cuda allocations,
-    // PinnedCPUAllocator can still delete the corresponding memory.
-    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    if (IsNUMAEnabled()) {
-      CUDA_ENFORCE(cudaHostUnregister(data));
-      DefaultCPUAllocator::Delete(data);
-    } else {
-      cudaError_t err = cudaFreeHost(data);
-      if (err == cudaErrorInvalidValue) {
-        free(data);
-        // Calling cudaGetLastError will reset the cuda error.
-        cudaGetLastError();
-      } else {
-        // For all other errors, still do a cuda check.
-        CUDA_ENFORCE(err);
-      }
-    }
-  }
-
-  DefaultCPUAllocator baseAllocator_;
 };
 
 using TensorCUDA = Tensor;

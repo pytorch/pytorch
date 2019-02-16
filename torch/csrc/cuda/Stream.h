@@ -12,7 +12,7 @@ struct THCPStream {
 };
 extern PyObject *THCPStreamClass;
 
-bool THCPStream_init(PyObject *module);
+void THCPStream_init(PyObject *module);
 
 inline bool THCPStream_Check(PyObject* obj) {
   return THCPStreamClass && PyObject_IsInstance(obj, THCPStreamClass);

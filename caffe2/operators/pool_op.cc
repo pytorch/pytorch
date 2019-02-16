@@ -572,10 +572,10 @@ bool AveragePoolFunctor<CPUContext>::
         const float* X,
         float* Y,
         CPUContext* context) const {
-  const std::array<int, 2> dims = {N * C, HxW};
-  const int axis = 1;
+  const std::array<int, 2> X_dims = {N * C, HxW};
+  const std::array<int, 2> Y_dims = {N * C, 1};
   math::ReduceMean<float, CPUContext>(
-      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+      2, X_dims.data(), Y_dims.data(), 1.0f, X, Y, context);
   return true;
 }
 
@@ -720,10 +720,10 @@ bool MaxPoolFunctor<CPUContext>::
         const float* X,
         float* Y,
         CPUContext* context) const {
-  const std::array<int, 2> dims = {N * C, HxW};
-  const int axis = 1;
+  const std::array<int, 2> X_dims = {N * C, HxW};
+  const std::array<int, 2> Y_dims = {N * C, 1};
   math::ReduceMax<float, CPUContext>(
-      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+      2, X_dims.data(), Y_dims.data(), 1.0f, X, Y, context);
   return true;
 }
 
@@ -997,14 +997,24 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
         "X",
         "*(type: Tensor`<float>`)* Input data tensor of shape NCHW or NHWC.");
     schema.Output(0, "Y", "*(type: Tensor`<float>`)* Output data tensor.");
-    /*
-    schema.Arg("kernel", "*(type: int)* Size of the window to take an average
-    over."); schema.Arg("stride", "*(type: int)* Stride of the window.");
-    schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both
-    sides."); schema.Arg("dilation", "*(type: int)* Parameter that controls
-    the stride of elements in the window."); schema.Arg("order", "*(type:
-    string; default: 'NCHW')* Order of the blob dimensions.");
-    */
+    // schema.Arg(
+    //     "kernel", "*(type: int)* Size of the window to take an average
+    //     over.");
+    // schema.Arg("stride", "*(type: int)* Stride of the window.");
+    // schema.Arg(
+    //     "pad",
+    //     "*(type: int)* Implicit zero padding to be added on both sides.");
+    // schema.Arg(
+    //     "dilation",
+    //     "*(type: int)* Parameter that controls the stride of elements in the
+    //     " "window.");
+    // schema.Arg(
+    //     "order",
+    //     "*(type: string; default: 'NCHW')* Order of the blob dimensions.");
+    // schema.Arg(
+    //     "count_include_pad",
+    //     "*(type: bool; default: False)* When True, will include the "
+    //     "zero-padding in the averaging.");
   };
 }
 

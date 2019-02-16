@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Optional.h>
@@ -10,6 +10,10 @@ typedef SSIZE_T ssize_t;
 
 namespace torch {
 namespace jit {
+
+namespace onnx {
+using namespace ::c10::onnx;
+}
 
 bool isRNN(const Node* node) {
   auto k = node->kind();
@@ -35,11 +39,11 @@ bool isNopTranspose(const std::vector<int64_t>& perm) {
 std::vector<int64_t> composeTransposes(
     const std::vector<int64_t>& t1,
     const std::vector<int64_t>& t2) {
-  JIT_ASSERT(t1.size() == t2.size());
+  AT_ASSERT(t1.size() == t2.size());
   std::vector<int64_t> ret;
   ret.reserve(t1.size());
   for (const auto& i : t2) {
-    JIT_ASSERT(i < int64_t(t1.size()));
+    AT_ASSERT(i < int64_t(t1.size()));
     ret.push_back(t1[i]);
   }
   return ret;
@@ -73,7 +77,7 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(at::IntList from, at::IntList to) {
+c10::optional<size_t> fusibleExpandTo(at::IntArrayRef from, at::IntArrayRef to) {
   if (from.size() > to.size()) {
     return c10::nullopt;
   }
@@ -97,7 +101,7 @@ void fuseBroadcast(Block* b) {
 
     auto& broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
-      JIT_ASSERT(!n->hasAttribute(attr::axis));
+      AT_ASSERT(!n->hasAttribute(attr::axis));
     }
 
     for (size_t position : broadcast_positions) {
@@ -368,7 +372,7 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
 
   Node* gather_indices = graph->create(onnx::Constant, 1);
   gather_indices->insertBefore(n);
-  gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(1)));
+  gather_indices->t_(attr::value, autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -384,20 +388,20 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   hidden_size->insertBefore(n);
   hidden_size->t_(
       attr::value,
-      at::full(
+      autograd::make_variable(at::full(
           {1},
           n->i(attr::hidden_size),
-          at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+          at::kLong))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node* num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);
   num_directions->t_(
       attr::value,
-      scalar_to_tensor(at::Scalar(
+      autograd::make_variable(scalar_to_tensor(at::Scalar(
           n->hasAttribute(attr::direction) &&
                   n->s(attr::direction) == "bidirectional"
               ? 2
-              : 1)));
+              : 1))));
 
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
@@ -411,12 +415,11 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
-  Node* constant_fill = graph->create(onnx::ConstantFill, 1);
-  constant_fill->insertBefore(n);
-  constant_fill->i_(attr::input_as_shape, 1);
-  constant_fill->addInput(concated_dims->outputs()[0]);
+  Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
+  constant_of_shape->insertBefore(n);
+  constant_of_shape->addInput(concated_dims->outputs()[0]);
+  n->replaceInput(input_index, constant_of_shape->outputs()[0]);
 
-  n->replaceInput(input_index, constant_fill->outputs()[0]);
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
   }
@@ -493,7 +496,7 @@ static void speculateOps(Block* block) {
 static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
   node->removeInput(i);
   for (auto* to_val : to) {
-    JIT_ASSERT(to_val->owningGraph() == node->owningGraph());
+    AT_ASSERT(to_val->owningGraph() == node->owningGraph());
     node->insertInput(i++, to_val);
   }
 }

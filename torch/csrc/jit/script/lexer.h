@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
@@ -39,6 +39,7 @@ namespace script {
   _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_DICT, "dict", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
@@ -79,6 +80,7 @@ namespace script {
   _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
   _(TK_NOTHING, "nothing", "")                   \
+  _(TK_DICT_LITERAL, "dict-literal", "")         \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
@@ -117,7 +119,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      JIT_ASSERT(kind == 0);
+      AT_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -489,7 +491,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    JIT_ASSERT(file);
+    AT_ASSERT(file);
     if (!shared.match(
             *file,
             pos,

@@ -1,7 +1,7 @@
 #ifndef TH_HALF_H
 #define TH_HALF_H
 
-#include <ATen/core/Half.h>
+#include <c10/util/Half.h>
 
 #define THHalf at::Half
 
