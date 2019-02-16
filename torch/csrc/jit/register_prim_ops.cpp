@@ -120,7 +120,6 @@ RegisterOperators reg({
             return 0;
           };
         }),
-
     Operator(
         "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {

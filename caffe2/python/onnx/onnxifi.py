@@ -22,7 +22,8 @@ def onnxifi_caffe2_net(
         max_batch_size=1,
         max_seq_size=1,
         debug=False,
-        use_onnx=True):
+        use_onnx=True,
+        black_list=None):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
@@ -31,6 +32,7 @@ def onnxifi_caffe2_net(
         shape_hints[k] = v
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
                              shape_hints,
+                             black_list if black_list else [],
                              max_batch_size,
                              max_seq_size,
                              debug,
