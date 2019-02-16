@@ -7111,11 +7111,22 @@ class _TestTorchMixin(object):
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
 
-        # test max
-        ret = a.max(dim=0)
+        # test max, min, median, mode
+        for f in ['max', 'min', 'median', 'mode']:
+            ret = getattr(a, f)(dim=0)
+            self.assertEqual(ret.values, ret[0])
+            self.assertEqual(ret.indices, ret[1])
+            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            self.assertEqual(ret1.values, ret1[0])
+            self.assertEqual(ret1.indices, ret1[1])
+            self.assertEqual(ret1.values, ret[0])
+            self.assertEqual(ret1.indices, ret[1])
+
+        # test kthvalue
+        ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])
