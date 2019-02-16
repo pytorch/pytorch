@@ -211,8 +211,8 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // Note: NoneType is NOT a subtype of any optional.
 // instead NoneType is convertable in schema matching to any Optional[T]
 // it is handled this way because it is not possible to match None to Optional[T]
-// and extract T. Intead, we always create an instance of the prim::None instruction
-// with a particular type: v: Optional[int] = prim::None()
+// and extract T. Intead, we always create a None constant instruction
+// with a particular type: v: Optional[int] = None()
 struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
