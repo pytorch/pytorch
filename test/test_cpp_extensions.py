@@ -640,6 +640,11 @@ class TestMSNPUTensor(common.TestCase):
 
         b = torch.zeros(5, 5, device='msnpu')
         self.assertEqual(msnpu_extension.get_test_int(), 0)
+        self.assertEqual(torch.get_default_dtype(), b.dtype)
+
+        c = torch.zeros((5, 5), dtype=torch.int64, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+        self.assertEqual(torch.int64, c.dtype)
 
     def test_add(self):
         a = torch.zeros(5, 5, device='msnpu')
