@@ -44,22 +44,40 @@ except ImportError:
     pass
 
 if platform.system() == 'Windows':
+    IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
+
+    if IS_CONDA:
+        from ctypes import windll, c_wchar_p
+        from ctypes.wintypes import DWORD, HMODULE
+
+        AddDllDirectory = windll.kernel32.AddDllDirectory
+        AddDllDirectory.restype = DWORD
+        AddDllDirectory.argtypes = [c_wchar_p]
+
+    def add_extra_dll_dir(extra_dll_dir):
+        if _dl_flags.path.isdir(extra_dll_dir):
+            _dl_flags.environ['PATH'] = extra_dll_dir + os.pathsep + _dl_flags.environ['PATH']
+
+            if IS_CONDA:
+                AddDllDirectory(extra_dll_dir)
+
     # first get nvToolsExt PATH
     def get_nvToolsExt_path():
         NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
         if _dl_flags.path.exists(NVTOOLEXT_HOME):
-            return NVTOOLEXT_HOME + '\\bin\\x64\\'
+            return _dl_flags.path.join(NVTOOLEXT_HOME, 'bin', 'x64')
         else:
             return ''
 
-    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library\\bin')
-    th_dll_path = _dl_flags.path.dirname(__file__) + '\\lib\\'
+    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
+    th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
 
-    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
+    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path()]
 
     # then add the path to env
-    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
+    for p in dll_paths:
+        add_extra_dll_dir(p)
 
 else:
     # first check if the os package has the required flags
