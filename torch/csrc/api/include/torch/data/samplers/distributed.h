@@ -66,7 +66,7 @@ class DistributedSampler : public Sampler<BatchRequest> {
 /// call.
 class DistributedRandomSampler : public DistributedSampler<> {
  public:
-  DistributedRandomSampler(
+  TORCH_API DistributedRandomSampler(
       size_t size,
       size_t num_replicas = 1,
       size_t rank = 0,
@@ -99,7 +99,7 @@ class DistributedRandomSampler : public DistributedSampler<> {
 /// Select samples sequentially.
 class DistributedSequentialSampler : public DistributedSampler<> {
  public:
-  DistributedSequentialSampler(
+  TORCH_API DistributedSequentialSampler(
       size_t size,
       size_t num_replicas = 1,
       size_t rank = 0,
@@ -115,7 +115,7 @@ class DistributedSequentialSampler : public DistributedSampler<> {
   TORCH_API void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `DistributedSequentialSampler` from the `archive`.
-  void load(serialize::InputArchive& archive) override;
+  TORCH_API void load(serialize::InputArchive& archive) override;
 
   /// Returns the current index of the `DistributedSequentialSampler`.
   TORCH_API size_t index() const noexcept;
