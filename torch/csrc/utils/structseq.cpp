@@ -13,6 +13,7 @@
  */
 
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/six.h"
 #include "structmember.h"
 #include <sstream>
 
@@ -20,8 +21,7 @@ namespace torch {
 namespace utils {
 
 #if PY_MAJOR_VERSION == 2
-static PyObject*
-structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
+PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
 {
     PyTupleObject *np;
     Py_ssize_t i;
@@ -43,22 +43,20 @@ structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
     return (PyObject *) np;
 }
 
-PyObject *make_tuple(PyStructSequence *obj) {
-    return structseq_slice(obj, 0, Py_SIZE(obj));
-}
+#define PyUnicode_AsUTF8 PyString_AsString
 #endif
 
 PyObject *returned_structseq_repr(PyStructSequence *obj) {
     PyTypeObject *typ = Py_TYPE(obj);
+    PyObject *tup = six::toTuple(obj);
+    if (tup == nullptr) {
+        return nullptr;
+    }
+
     std::stringstream ss;
     ss << typ->tp_name << "(\n";
     size_t num_elements = Py_SIZE(obj);
-#if PY_MAJOR_VERSION == 2
-    PyObject *tup;
-    if ((tup = make_tuple(obj)) == nullptr) {
-        return nullptr;
-    }
-#endif
+
     for (int i=0; i < num_elements; i++) {
         PyObject *val, *repr;
         const char *cname, *crepr;
@@ -69,36 +67,34 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
                          " for type %.500s", i, typ->tp_name);
             return nullptr;
         }
-#if PY_MAJOR_VERSION == 2
+
         val = PyTuple_GetItem(tup, i);
         if (val == nullptr) {
             return nullptr;
         }
-#else
-        val = PyStructSequence_GET_ITEM(obj, i);
-#endif
+
         repr = PyObject_Repr(val);
-        if (repr == nullptr)
-            return nullptr;
-#if PY_MAJOR_VERSION == 2
-        crepr = PyString_AsString(repr);
-#else
-        crepr = PyUnicode_AsUTF8(repr);
-#endif
-        if (crepr == nullptr) {
-#if PY_MAJOR_VERSION == 2
+        if (repr == nullptr) {
             Py_DECREF(tup);
-#endif
+            return nullptr;
+        }
+
+        crepr = PyUnicode_AsUTF8(repr);
+        if (crepr == nullptr) {
             Py_DECREF(repr);
+            Py_DECREF(tup);
             return nullptr;
         }
 
         ss << cname << '=' << crepr;
         if (i < num_elements - 1)
             ss << ",\n";
+
+        Py_DECREF(repr);
     }
     ss << ")";
 
+    Py_DECREF(tup);
     return PyUnicode_FromString(ss.str().c_str());
 }
 
