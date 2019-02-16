@@ -3807,7 +3807,7 @@ class TestAgainstScipy(TestCase):
             (
                 VonMises(random_var, positive_var),
                 scipy.stats.vonmises(positive_var, loc=random_var)
-            )
+            ),
             (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
@@ -3826,8 +3826,9 @@ class TestAgainstScipy(TestCase):
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
+            if isinstance(pytorch_dist, (Cauchy, HalfCauchy, VonMises)):
                 # Cauchy, HalfCauchy distributions' standard deviation is nan, skipping check
+                # VonMises variance is circular and scipy doesn't produce a correct result
                 continue
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
