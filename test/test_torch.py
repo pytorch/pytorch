@@ -21,6 +21,7 @@ from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
+from collections import namedtuple
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
@@ -7109,41 +7110,25 @@ class _TestTorchMixin(object):
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
     def test_namedtuple_return(self):
+        op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
+        operators = [
+            op(operators=['max', 'min', 'median', 'mode'], input=(0,),
+               names=('values', 'indices'), hasout=True),
+            op(operators=['kthvalue'], input=(1, 0),
+               names=('values', 'indices'), hasout=True),
+            op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
+        ]
+
         a = torch.randn(5, 5)
-
-        # test max, min, median, mode
-        for f in ['max', 'min', 'median', 'mode']:
-            ret = getattr(a, f)(dim=0)
-            self.assertEqual(ret.values, ret[0])
-            self.assertEqual(ret.indices, ret[1])
-            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
-            self.assertEqual(ret1.values, ret1[0])
-            self.assertEqual(ret1.indices, ret1[1])
-            self.assertEqual(ret1.values, ret[0])
-            self.assertEqual(ret1.indices, ret[1])
-
-        # test kthvalue
-        ret = a.kthvalue(1, dim=0)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test svd
-        ret = a.svd()
-        self.assertEqual(ret.U, ret[0])
-        self.assertEqual(ret.S, ret[1])
-        self.assertEqual(ret.V, ret[2])
-        ret1 = torch.svd(a, out=tuple(ret))
-        self.assertEqual(ret1.U, ret1[0])
-        self.assertEqual(ret1.S, ret1[1])
-        self.assertEqual(ret1.V, ret1[2])
-        self.assertEqual(ret1.U, ret[0])
-        self.assertEqual(ret1.S, ret[1])
-        self.assertEqual(ret1.V, ret[2])
+        for op in operators:
+            for f in op.operators:
+                ret = getattr(a, f)(*op.input)
+                for i, name in enumerate(op.names):
+                    self.assertEqual(getattr(ret, name), ret[i])
+                if op.hasout:
+                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
+                    for i, name in enumerate(op.names):
+                        self.assertEqual(getattr(ret, name), ret[i])
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
