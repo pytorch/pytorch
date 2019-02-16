@@ -46,6 +46,8 @@ structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
 static PyObject *make_tuple(PyStructSequence *obj) {
     return structseq_slice(obj, 0, Py_SIZE(obj));
 }
+
+#define PyUnicode_AsUTF8 PyString_AsString
 #endif
 
 PyObject *returned_structseq_repr(PyStructSequence *obj) {
@@ -53,12 +55,14 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
     std::stringstream ss;
     ss << typ->tp_name << "(\n";
     size_t num_elements = Py_SIZE(obj);
+
 #if PY_MAJOR_VERSION == 2
     PyObject *tup;
     if ((tup = make_tuple(obj)) == nullptr) {
         return nullptr;
     }
 #endif
+
     for (int i=0; i < num_elements; i++) {
         PyObject *val, *repr;
         const char *cname, *crepr;
@@ -69,6 +73,7 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
                          " for type %.500s", i, typ->tp_name);
             return nullptr;
         }
+
 #if PY_MAJOR_VERSION == 2
         val = PyTuple_GetItem(tup, i);
         if (val == nullptr) {
@@ -77,21 +82,14 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
 #else
         val = PyStructSequence_GET_ITEM(obj, i);
 #endif
+
         repr = PyObject_Repr(val);
         if (repr == nullptr)
-            return nullptr;
-#if PY_MAJOR_VERSION == 2
-        crepr = PyString_AsString(repr);
-#else
+            goto fail2;
+
         crepr = PyUnicode_AsUTF8(repr);
-#endif
-        if (crepr == nullptr) {
-#if PY_MAJOR_VERSION == 2
-            Py_DECREF(tup);
-#endif
-            Py_DECREF(repr);
-            return nullptr;
-        }
+        if (crepr == nullptr)
+            goto fail1;
 
         ss << cname << '=' << crepr;
         if (i < num_elements - 1)
@@ -99,7 +97,17 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
     }
     ss << ")";
 
+
+    Py_DECREF(repr);
     return PyUnicode_FromString(ss.str().c_str());
+
+fail1:
+    Py_DECREF(repr);
+fail2:
+#if PY_MAJOR_VERSION == 2
+    Py_DECREF(tup);
+#endif
+    return nullptr
 }
 
 }
