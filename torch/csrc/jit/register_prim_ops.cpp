@@ -121,7 +121,6 @@ RegisterOperators reg({
             return 0;
           };
         }),
-
     Operator(
         "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
@@ -827,7 +826,7 @@ RegisterOperators reg({
                 "DictConstruct must have an even number of inputs");
           }
           return [=](Stack& stack) {
-            c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+            c10::ivalue::UnorderedMap vals;
             for (size_t i = 0; i < num_inputs; i += 2) {
               auto val = pop(stack);
               auto key = pop(stack);
@@ -1005,13 +1004,51 @@ Operation listAppend(const Node* node) {
 }
 
 template <typename TList>
+int listPop(Stack& stack) {
+  TList list;
+  int64_t idx;
+  pop(stack, list, idx);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (list_size == 0) {
+    AT_ERROR("pop from empty list");
+  }
+
+  push(stack, std::move(getItem(list, idx)));
+  elements.erase(elements.begin() + normalized_idx);
+
+  return 0;
+}
+
+template <>
+int listPop<Shared<BoolList>>(Stack& stack) {
+  Shared<BoolList> list;
+  int64_t idx;
+  pop(stack, list, idx);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (list_size == 0) {
+    AT_ERROR("pop from empty list");
+  }
+
+  push(stack, getBoolItem(elements, idx));
+  elements.erase(elements.begin() + normalized_idx);
+
+  return 0;
+}
+
+template <typename TList>
 int listClear(Stack& stack) {
   TList a;
   pop(stack, a);
 
   a->elements().clear();
-  push(stack, a);
-
   return 0;
 }
 
@@ -1039,7 +1076,7 @@ int listInsert(Stack& stack) {
   return 0;
 }
 
-template <typename TList>
+template <typename TList, typename TElement>
 int listRemove(Stack& stack) {
   TList list;
   TElement elem;
@@ -1047,6 +1084,30 @@ int listRemove(Stack& stack) {
 
   auto& elements = list->elements();
   auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    if (!cmp_result.is_nonzero()) {
+      return false;
+    }
+    return true;
+  });
 
   if (pos != elements.end()) {
     elements.erase(pos);
@@ -1352,8 +1413,14 @@ RegisterOperators reg2({
           " decl_type " el) -> ()",                                         \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
-          "aten::remove(" decl_type "[](a!) self, " decl_type " el) -> ()", \
-          listRemove<Shared<c_type>>)
+          "aten::remove(" decl_type "[](a!) self,                           \
+          " decl_type " el) -> ()",                                         \
+          listRemove<Shared<c_type>, c_type::ElemType>),                    \
+      Operator(                                                             \
+        "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
+        -> " decl_type  "(*)",                                              \
+        listPop<Shared<c_type>>)
+
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1380,7 +1447,11 @@ RegisterOperators reg2({
       Operator(                                                        \
           "aten::remove(" decl_type "[](a!) self,                      \
           " decl_type " el) -> ()",                                    \
-          listRemove<Shared<c_type>>)
+          listRemove<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
+          -> " decl_type, listPop<Shared<c_type>>)
+
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
