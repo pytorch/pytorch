@@ -28,8 +28,8 @@ inline PyObject *toTuple(PyStructSequence *obj) {
   // create a new tuple object on python 2, or increase
   // the ref count of the current object on python 3.
 #if PY_MAJOR_VERSION == 2
-  PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high);
-  return structseq_slice(obj, 0, Py_SIZE(obj));
+  PyObject *torch::utils::structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high);
+  return torch::utils::structseq_slice(obj, 0, Py_SIZE(obj));
 #else
   Py_INCREF(obj);
   return (PyObject *)obj;
