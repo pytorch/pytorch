@@ -1933,10 +1933,10 @@ Args:
     out (tuple, optional): the optional destination tensor
 
 Returns:
-    (Tensor, Tensor): A tuple containing:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
 
-        - **X** (*Tensor*): the least squares solution
-        - **qr** (*Tensor*): the details of the QR factorization
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
 
 .. note::
 
@@ -5205,9 +5205,9 @@ Args:
         1 and not referenced from :math:`A`. Default: False.
 
 Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
+    A namedtuple (solution, cloned_coefficient) where `cloned_coefficient` is a clone
+    of :math:`A` and `solution` is the solution to :math:`AX = b` (or whatever variant
+    of the system of equations, depending on the keyword arguments.)
 
 Shape:
     - A: :math:`(N, N)`
@@ -5226,9 +5226,9 @@ Examples::
     tensor([[-0.0210,  2.3513, -1.5492],
             [ 1.5429,  0.7403, -1.0243]])
     >>> torch.trtrs(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]]))
+    torch.return_types.trtrs(solution=tensor([[ 1.7841,  2.9046, -2.5405],
+        [ 1.9320,  0.9270, -1.2826]]), cloned_coefficient=tensor([[ 1.1527, -1.0753],
+        [ 0.0000,  0.7986]]))
 """)
 
 add_docstr(torch.trunc,
@@ -5400,7 +5400,7 @@ Arguments:
     pivot (bool, optional): controls whether pivoting is done
 
 Returns:
-    A tuple containing factorization and pivots.
+    A namedtuple (LU, pivot) containing factorization and pivots.
 
 Example::
 
@@ -5434,8 +5434,9 @@ Arguments:
     pivot (bool, optional): controls whether pivoting is done
 
 Returns:
-    A tuple containing factorization, pivots, and an `IntTensor` where non-zero
-    values indicate whether factorization for each minibatch sample succeeds.
+    A namedtuple (LU, pivot, info) containing factorization, pivots, and
+    an `IntTensor` where non-zero values indicate whether factorization
+    for each minibatch sample succeeds.
 
 Example::
 

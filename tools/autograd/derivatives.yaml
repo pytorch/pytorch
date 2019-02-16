@@ -837,7 +837,7 @@
   self: grad.triu(diagonal)
 
 - name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: trtrs_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+  self, A: trtrs_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)

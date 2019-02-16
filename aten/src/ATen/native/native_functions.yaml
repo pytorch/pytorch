@@ -3586,15 +3586,15 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) ->(Tensor(a!), Tensor(b!))
+- func: gels(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) QR) ->(Tensor(a!) solution, Tensor(b!) QR)
 
-- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   matches_jit_signature: True
   variants: method, function
 
-- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) ->(Tensor(a!), Tensor(b!))
+- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) ->(Tensor(a!) solution, Tensor(b!) cloned_coefficient)
 
-- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
+- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   matches_jit_signature: True
   variants: method, function
 
@@ -3682,15 +3682,15 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: btrifact(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots) ->(Tensor(a!), Tensor(b!))
+- func: btrifact(Tensor self, *, bool pivot=True, Tensor(a!) LU, Tensor(b!) pivots) ->(Tensor(a!) LU, Tensor(b!) pivot)
 
-- func: btrifact(Tensor self, *, bool pivot=True) -> (Tensor, Tensor)
+- func: btrifact(Tensor self, *, bool pivot=True) -> (Tensor LU, Tensor pivot)
   matches_jit_signature: True
   variants: method, function
 
-- func: btrifact_with_info(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots, Tensor(c!) info) ->(Tensor(a!), Tensor(b!), Tensor(c!))
+- func: btrifact_with_info(Tensor self, *, bool pivot=True, Tensor(a!) LU, Tensor(b!) pivots, Tensor(c!) info) ->(Tensor(a!) LU, Tensor(b!) pivot, Tensor(c!) info)
 
-- func: btrifact_with_info(Tensor self, *, bool pivot=True) -> (Tensor, Tensor, Tensor)
+- func: btrifact_with_info(Tensor self, *, bool pivot=True) -> (Tensor LU, Tensor pivot, Tensor info)
   matches_jit_signature: True
   variants: method, function
 
