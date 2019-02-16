@@ -1222,9 +1222,9 @@ Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
 
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
-  const auto& idx = pop(stack).toStringRef();
+  auto idx = pop(stack);
   auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value;
+  dict[idx] = value.toStringRef();
   push(stack, dict);
   return 0;
 }
