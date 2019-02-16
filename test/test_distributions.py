@@ -425,6 +425,16 @@ EXAMPLES = [
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
     ]),
+    Example(VonMises, [
+        {
+            'loc': torch.tensor(1.0, requires_grad=True),
+            'concentration': torch.tensor(10.0, requires_grad=True)
+        },
+        {
+            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
+            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
+        }
+    ]),
     Example(Weibull, [
         {
             'scale': torch.randn(5, 5).abs().requires_grad_(),
@@ -4420,6 +4430,7 @@ class TestJit(TestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                VonMises  # Variance is not Euclidean
             ]
             if Dist in xfail:
                 continue

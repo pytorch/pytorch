@@ -4,9 +4,8 @@ import math
 
 import torch
 from torch.distributions import constraints
+from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-
-from pyro.distributions import TorchDistribution
 
 
 def _eval_poly(y, coef):
@@ -53,7 +52,7 @@ def _log_modified_bessel_fn(x, order=0):
     return result
 
 
-class VonMises(TorchDistribution):
+class VonMises(Distribution):
     """
     A circular von Mises distribution.
 
