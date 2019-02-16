@@ -1189,11 +1189,11 @@
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
-- func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
+- func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: function, method
 
-- func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+- func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   matches_jit_signature: True
@@ -1409,17 +1409,17 @@
 
 - func: sum_backward(Tensor grad, int[] sizes, int[] dims, bool keepdim) -> Tensor
 
-- func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+- func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: function, method
 
-- func: median(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+- func: median(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
-- func: min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+- func: min(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: function, method
 
-- func: min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) ->(Tensor(a!), Tensor(b!))
+- func: min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
 - func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   matches_jit_signature: True
@@ -1504,11 +1504,11 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   matches_jit_signature: True
 
-- func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
+- func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: function, method
 
-- func: mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
+- func: mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   matches_jit_signature: True
@@ -4326,13 +4326,15 @@
     CPU: fractional_max_pool2d_backward_cpu
     CUDA: fractional_max_pool2d_backward_cuda
 
-- func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) ->(Tensor(a!) output, Tensor(b!) indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
     CUDA: fractional_max_pool3d_out_cuda
 
-- func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+# Return: (Tensor output, Tensor indices)
+- func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_cpu
@@ -4351,7 +4353,8 @@
     CPU: fractional_max_pool3d_backward_cpu
     CUDA: fractional_max_pool3d_backward_cuda
 
-- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) ->(Tensor(a!) output, Tensor(b!) indices)
+# Return: (Tensor output, Tensor indices)
+- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
