@@ -243,6 +243,7 @@ struct PythonPrintPass {
     switch (n->kind()) {
       case prim::Constant:
       case prim::Undefined:
+      case prim::None:
         return true;
       default:
         return false;
@@ -599,10 +600,10 @@ struct PythonPrintPass {
     if (node->kind() == prim::PythonOp) {
       auto value = static_cast<const PythonOp*>(node);
       if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        out << "ops.prim.IgnoredPythonOp()\n";
-        return;
+          // Op has been marked as ignored, so insert an error in its place
+          indent();
+          out << "ops.prim.IgnoredPythonOp()\n";
+          return;
       }
     }
     switch (node->kind()) {
@@ -704,36 +705,6 @@ struct PythonPrintPass {
     }
   }
 
-  void printNone(std::ostream& stmt, const Node* node) {
-    if (node->output()->type()->isSubtypeOf(NoneType::get())) {
-      stmt << "None";
-      return;
-    }
-    // XXX - when None has an Optional[T] type, we must ensure that type
-    // can be recovered on parsing. It cannot be recovered if it will be
-    // matched to schema with free variables. If it is used only in places
-    // where there is schema and the scheme has no free variables, then we
-    // can recover it without annotation. Otherwise, we annotate None with
-    // the right optional type
-    const auto& uses = node->output()->uses();
-    bool all_usable_schema =
-        std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-          if (auto schema = u.user->maybeSchema()) {
-            if (u.offset >= schema->arguments().size()) {
-              return false;
-            }
-            return !schema->arguments().at(u.offset).type()->hasFreeVariables();
-          }
-          return false;
-        });
-
-    if (all_usable_schema) {
-      stmt << "None";
-    } else {
-      stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
-    }
-  }
-
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(std::ostream& stmt, Node* node) {
     switch (node->kind()) {
@@ -750,13 +721,42 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
-      case prim::Constant:
-      case prim::Undefined: {
-        if (node->kind() == prim::Constant && !node->mustBeNone()) {
-          IValue v = toIValue(node->output()).value();
-          printConstant(stmt, v);
+      case prim::Constant: {
+        IValue v = toIValue(node->output()).value();
+        printConstant(stmt, v);
+      } break;
+      case prim::Undefined:
+      case prim::None: {
+        if (node->output()->type()->isSubtypeOf(NoneType::get())) {
+          stmt << "None";
+          break;
+        }
+        // XXX - when None has an Optional[T] type, we must ensure that type
+        // can be recovered on parsing. It cannot be recovered if it will be
+        // matched to schema with free variables. If it is used only in places
+        // where there is schema and the scheme has no free variables, then we
+        // can recover it without annotation. Otherwise, we annotate None with
+        // the right optional type
+        const auto& uses = node->output()->uses();
+        bool all_usable_schema =
+            std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+              if (auto schema = u.user->maybeSchema()) {
+                if (u.offset >= schema->arguments().size()) {
+                  return false;
+                }
+                return !schema->arguments()
+                            .at(u.offset)
+                            .type()
+                            ->hasFreeVariables();
+              }
+              return false;
+            });
+
+        if (all_usable_schema) {
+          stmt << "None";
         } else {
-          printNone(stmt, node);
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", None)";
         }
       } break;
       case prim::ImplicitTensorToNum: {
@@ -804,8 +804,7 @@ struct PythonPrintPass {
         if (node->inputs().size() == 0 &&
             !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
             !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
+          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
         } else {
           printDict(stmt, node->inputs());
         }
@@ -1073,6 +1072,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ListConstruct,
       prim::DictConstruct,
       prim::ListUnpack,
+      prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,

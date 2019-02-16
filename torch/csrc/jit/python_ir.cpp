@@ -88,10 +88,7 @@ std::vector<Node*> findAllNodes(
   return ret;
 }
 
-std::vector<Node*> findAllNodes(
-    Block* block,
-    Symbol kind,
-    bool recurse = true) {
+std::vector<Node*> findAllNodes(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findAllNodes(blocks, kind, recurse);
 }
@@ -294,19 +291,13 @@ void initPythonIRBindings(PyObject* module_) {
           "findNode",
           [](Graph& g, const std::string& kind, bool recurse) {
             return findNode(g.block(), Symbol::fromQualString(kind), recurse);
-          },
-          "Find Node",
-          py::arg("kind"),
-          py::arg("recurse") = true)
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
             return findAllNodes(
                 g.block(), Symbol::fromQualString(kind), recurse);
-          },
-          "Find all nodes",
-          py::arg("kind"),
-          py::arg("recurse") = true)
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
@@ -389,27 +380,20 @@ void initPythonIRBindings(PyObject* module_) {
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
-      .def(
-          "nodes",
-          [](Block& b) {
-            return py::make_iterator(b.nodes().begin(), b.nodes().end());
-          })
+      .def("nodes", [](Block& b) {
+        return py::make_iterator(b.nodes().begin(), b.nodes().end());
+      })
       .def(
           "findNode",
           [](Block& b, const std::string& kind, bool recurse) {
             return findNode(&b, Symbol::fromQualString(kind), recurse);
-          },
-          "Find Node",
-          py::arg("kind"),
-          py::arg("recurse") = true)
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Block& b, const std::string& kind, bool recurse) {
             return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
-          },
-          "Find all nodes",
-          py::arg("kind"),
-          py::arg("recurse") = true);
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true);
+
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
@@ -450,19 +434,13 @@ void initPythonIRBindings(PyObject* module_) {
           "findNode",
           [](Node& n, const std::string& kind, bool recurse) {
             return findNode(n.blocks(), Symbol::fromQualString(kind), recurse);
-          },
-          "Find Node",
-          py::arg("kind"),
-          py::arg("recurse") = true)
+          }, "Find Node", py::arg("kind"), py::arg("recurse") = true)
       .def(
           "findAllNodes",
           [](Node& n, const std::string& kind, bool recurse) {
             return findAllNodes(
                 n.blocks(), Symbol::fromQualString(kind), recurse);
-          },
-          "Find all nodes",
-          py::arg("kind"),
-          py::arg("recurse") = true)
+          }, "Find all nodes",  py::arg("kind"), py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)
@@ -487,7 +465,6 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(n.blocks().begin(), n.blocks().end());
           })
       .NS(addBlock)
-      .NS(mustBeNone)
 
 #define AS(name) def(#name, &Node::name)
       // methods from Attributes
@@ -529,7 +506,9 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "t",
-          [](Node& n, const char* name) { return n.t(Symbol::attr(name)); })
+          [](Node& n, const char* name) {
+            return n.t(Symbol::attr(name));
+          })
       // Tensors (ts_) -- manually written to unwrap variables into tensors.
       .def(
           "ts_",
@@ -559,8 +538,7 @@ void initPythonIRBindings(PyObject* module_) {
           "z_",
           [](Node& n, const char* name, at::Tensor v) {
             return n.t_(
-                Symbol::attr(name),
-                autograd::Variable(v.view({})).set_requires_grad(false));
+                Symbol::attr(name), autograd::Variable(v.view({})).set_requires_grad(false));
           })
       .def(
           "z",
@@ -605,11 +583,7 @@ void initPythonIRBindings(PyObject* module_) {
             return s.str();
           })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
-      .def(
-          "dim",
-          [](const Type& t) {
-            return t.expect<DimensionedTensorType>()->dim();
-          })
+      .def("dim", [](const Type& t) { return t.expect<DimensionedTensorType>()->dim(); })
       .def(
           "sizes",
           [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
@@ -670,11 +644,6 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
       }));
-  py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
-      m, "OptionalType")
-      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
-      .def_static("ofTensor", &OptionalType::ofTensor)
-      .def("getElementType", &OptionalType::getElementType);
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
