@@ -825,7 +825,7 @@ RegisterOperators reg({
                 "DictConstruct must have an even number of inputs");
           }
           return [=](Stack& stack) {
-            c10::ivalue::DictUnorderedMap<IValue, IValue> vals;
+            c10::ivalue::UnorderedMap vals;
             for (size_t i = 0; i < num_inputs; i += 2) {
               auto val = pop(stack);
               auto key = pop(stack);
