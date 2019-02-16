@@ -53,10 +53,10 @@ class IRParser {
 struct ParsedLiteral {
   AttributeKind k = AttributeKind::t;
 
-  long i;
+  int64_t i;
   std::string s;
   double f;
-  std::vector<long> is;
+  std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
 };
@@ -73,7 +73,7 @@ void parseIR(const std::string& str, torch::jit::Graph* graph) {
 }
 
 TypePtr parseType(const std::string& s) {
-  if (s == "Tensor" || s == "NoType") {
+  if (s == "Tensor") {
     return TensorType::get();
   }
   if (s == "int") {
@@ -97,7 +97,7 @@ VarWithType IRParser::parseVarWithType() {
   } else {
     r.name = L.expect(TK_NUMBER).text();
   }
-  r.type = "NoType";
+  r.type = "Tensor";
   if (L.nextIf(':')) {
     r.type = L.expect(TK_IDENT).text();
   }
@@ -152,8 +152,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       L.next();
       return r;
     default:
-      std::cout << "Could not parse literal " << token.text() << std::endl;
-      abort();
+      throw ErrorReport(token.range)
+          << "Could not parse literal" << token.text();
   }
 }
 
@@ -170,12 +170,12 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
  *   coefs = [1.2, 3.4, 0.6]
  */
 void IRParser::parseAttr(Node* n) {
-  std::string attrname = "attr::" + L.expect(TK_IDENT).text();
+  std::string attrname = L.expect(TK_IDENT).text();
   L.expect('=');
   if (L.cur().kind == '[') {
     // list
     AttributeKind k = AttributeKind::ts;
-    std::vector<long> is;
+    std::vector<int64_t> is;
     std::vector<std::string> ss;
     std::vector<double> fs;
     int elem_num = 0;
@@ -198,43 +198,40 @@ void IRParser::parseAttr(Node* n) {
           k = AttributeKind::fs;
           break;
         default:
-          std::cout << "Unexpected attr type.\n";
-          abort();
+          throw ErrorReport(L.cur().range) << "Unexpected attr type";
       }
     });
     switch (k) {
       case AttributeKind::ts:
-        n->ts_(Symbol::fromQualString(attrname), {});
+        n->ts_(Symbol::attr(attrname), {});
         break;
       case AttributeKind::ss:
-        n->ss_(Symbol::fromQualString(attrname), ss);
+        n->ss_(Symbol::attr(attrname), ss);
         break;
       case AttributeKind::fs:
-        n->fs_(Symbol::fromQualString(attrname), fs);
+        n->fs_(Symbol::attr(attrname), fs);
         break;
       case AttributeKind::is:
-        n->is_(Symbol::fromQualString(attrname), is);
+        n->is_(Symbol::attr(attrname), is);
         break;
       default:
-        std::cout << "Unexpected type of list.\n";
-        abort();
+        throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
   } else {
     // scalar
     ParsedLiteral r = parseScalarLiteral(n);
     switch (r.k) {
       case AttributeKind::s:
-        n->s_(Symbol::fromQualString(attrname), r.s);
+        n->s_(Symbol::attr(attrname), r.s);
         break;
       case AttributeKind::i:
-        n->i_(Symbol::fromQualString(attrname), r.i);
+        n->i_(Symbol::attr(attrname), r.i);
         break;
       case AttributeKind::f:
-        n->f_(Symbol::fromQualString(attrname), r.f);
+        n->f_(Symbol::attr(attrname), r.f);
         break;
       default:
-        std::cout << "Unexpected attr type.\n";
-        abort();
+        throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
     return;
   }
@@ -263,14 +260,15 @@ void IRParser::parseBlocks(Node* parentNode) {
   L.expect(TK_DEDENT);
 }
 
+static bool isNumber(const std::string& s) {
+  return s.find_first_not_of("0123456789") == std::string::npos;
+}
+
 void IRParser::parseBlockInputs(Block* b) {
   parseList('(', ',', ')', [&] {
     VarWithType v = parseVarWithType();
     // If the name is a number, don't use it
-    std::string uniq_name = v.name;
-    if (uniq_name.find_first_not_of("0123456789") == std::string::npos) {
-      uniq_name = "";
-    }
+    std::string uniq_name = isNumber(v.name) ? "" : v.name;
     vmap[v.name] = b->addInput(uniq_name);
     vmap[v.name]->setType(parseType(v.type));
   });
@@ -366,10 +364,7 @@ void IRParser::parseGraphInputs() {
   parseList('(', ',', ')', [&] {
     VarWithType v = parseVarWithType();
     // If the name is a number, don't use it
-    std::string uniq_name = v.name;
-    if (uniq_name.find_first_not_of("0123456789") == std::string::npos) {
-      uniq_name = "";
-    }
+    std::string uniq_name = isNumber(v.name) ? "" : v.name;
     vmap[v.name] = g->addInput(uniq_name);
     vmap[v.name]->setType(parseType(v.type));
   });
