@@ -1565,6 +1565,44 @@ class TestAutograd(TestCase):
 
             gradcheck(ctc_after_softmax, [x])
 
+    def _test_sparse_gather(self, size_x, size_ind, dim):
+        if len(size_x) > 0:
+            x = torch.ones(*size_x, requires_grad=True)
+        else:
+            x = torch.randn((), requires_grad=True)
+        if len(size_ind) > 0 and len(size_x) > 0:
+            ind = torch.randint(x.size(dim), size_ind)
+        elif len(size_ind) == 0:
+            ind = torch.tensor(0, dtype=torch.int64)
+        else:  # x is a scalar
+            ind = torch.tensor([0], dtype=torch.int64)
+        out = torch.gather(x, dim, ind, sparse=False)
+        grad = torch.rand_like(out)
+        out.backward(grad)
+        grad_dense = x.grad.clone()
+        x.grad = None
+        out = torch.gather(x, dim, ind, sparse=True)
+        out.backward(grad)
+        self.assertEqual(grad_dense, x.grad.to_dense())
+
+    def test_sparse_gather_dim0(self):
+        self._test_sparse_gather((10, 10), (5, 10), 0)
+
+    def test_sparse_gather_dim1(self):
+        self._test_sparse_gather((10, 10, 5), (10, 5, 5), 1)
+
+    def test_sparse_gather_dim_neg(self):
+        self._test_sparse_gather((10, 10, 5), (10, 10, 2), -1)
+
+    def test_sparse_gather_ind_scalar(self):
+        self._test_sparse_gather((10,), (), 0)
+
+    def test_sparse_gather_x_scalar(self):
+        self._test_sparse_gather((), (1,), 0)
+
+    def test_sparse_gather_both_scalar(self):
+        self._test_sparse_gather((), (), 0)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
