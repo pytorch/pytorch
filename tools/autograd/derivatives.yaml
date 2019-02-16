@@ -411,7 +411,7 @@
   self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: le_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -521,10 +521,10 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -538,7 +538,7 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Tensor other)
   self: grad * other
@@ -1083,7 +1083,7 @@
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, result1)
 
 - name: fractional_max_pool3d(Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor random_samples)
-  self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, indices)
+  self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, result1)
 
 - name: max_pool2d_with_indices(Tensor self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)

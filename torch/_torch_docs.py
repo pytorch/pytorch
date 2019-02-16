@@ -2242,13 +2242,11 @@ add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the :attr:`k` th smallest element of the given :attr:`input` tensor
-along a given dimension.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
+smallest element of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each element found.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
-
-A tuple of `(values, indices)` is returned, where the `indices` is the indices
-of the kth-smallest element in the original `input` tensor in dimension `dim`.
 
 If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where
@@ -2270,14 +2268,14 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.kthvalue(x, 4)
-    (tensor(4.), tensor(3))
+    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
 
     >>> x=torch.arange(1.,7.).resize_(2,3)
     >>> x
     tensor([[ 1.,  2.,  3.],
             [ 4.,  5.,  6.]])
-    >>> torch.kthvalue(x,2,0,True)
-    (tensor([[ 4.,  5.,  6.]]), tensor([[ 1,  1,  1]]))
+    >>> torch.kthvalue(x, 2, 0, True)
+    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """)
 
 add_docstr(torch.le,
@@ -2793,9 +2791,9 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the median value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the median value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the median
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each median value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -2820,7 +2818,7 @@ Example::
             [-0.2751,  0.7303,  0.2192,  0.3321,  0.2488],
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
-    (tensor([-0.3982,  0.2270,  0.2488,  0.4742]), tensor([ 1,  4,  4,  3]))
+    torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
 """)
 
 add_docstr(torch.min,
@@ -2842,9 +2840,10 @@ Example::
 
 .. function:: min(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the minimum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-minimum value found (argmin).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each minimum value found
+(argmin).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2866,7 +2865,7 @@ Example::
             [ 0.2457,  0.0384,  1.0128,  0.7015],
             [-0.1153,  2.9849,  2.1458,  0.5788]])
     >>> torch.min(a, 1)
-    (tensor([-1.1899, -1.4644,  0.0384, -0.1153]), tensor([ 2,  0,  1,  0]))
+    torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
 .. function:: min(input, other, out=None) -> Tensor
 
@@ -2994,10 +2993,10 @@ add_docstr(torch.mode,
            r"""
 mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns a mode value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`, i.e. a value which appears most often
-in that row. Also returns an index location of the returned mode value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`, i.e. a value which appears most often
+in that row, and ``indices`` is the index location of each mode value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -3022,7 +3021,7 @@ Example::
     tensor([6, 5, 1, 0, 2])
     >>> b = a + (torch.randn(50, 1) * 5).long()
     >>> torch.mode(b, 0)
-    (tensor([6, 5, 1, 0, 2]), tensor([2, 2, 2, 2, 2]))
+    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
 """)
 
 add_docstr(torch.mul,
@@ -4601,6 +4600,8 @@ Example::
                           [5.45, -0.27,  4.85,  0.74, 10.00, -6.02],
                           [3.16,  7.98,  3.01,  5.80,  4.27, -5.31]]).t()
 
+    >>> torch.svd(a).__class__
+    <class 'torch.return_types.svd'>
     >>> u, s, v = torch.svd(a)
     >>> u
     tensor([[-0.5911,  0.2632,  0.3554,  0.3143,  0.2299],
