@@ -1743,7 +1743,7 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         graph_str = str(constant_prop.graph)
-        self.assertTrue(graph_str.count("prim::None") == 0)
+        self.assertTrue(graph_str.count("prim::Constant") == 1)
 
     def test_constant_prop_if_inline(self):
         @torch.jit.script
@@ -3627,9 +3627,9 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
-        self.assertTrue(graph_str.count("int? = prim::None") == 1)
-        self.assertTrue(graph_str.count("None = prim::None") == 1)
+        self.assertTrue(graph_str.count("bool? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("int? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("None = prim::Constant") == 1)
 
     def test_literal(self):
         def func1(a, b):
