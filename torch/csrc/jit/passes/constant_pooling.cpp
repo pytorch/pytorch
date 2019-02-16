@@ -26,7 +26,7 @@ void ConstantPooling(
       continue;
     }
 
-    if (node->kind() != prim::Constant) {
+    if (node->kind() != prim::Constant && node->kind() != prim::None) {
       continue;
     }
 
