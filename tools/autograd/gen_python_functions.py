@@ -140,11 +140,13 @@ ${name}(${py_formal_args})""")
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
-    'Tensor', 'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,double,int64_t>',
+    'Tensor',
+    'std::tuple<Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,int64_t>',
+    'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void'
 }
