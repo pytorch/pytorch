@@ -29,10 +29,10 @@ def convert_sync_batchnorm(module, process_group=None):
     module_output = module
     if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
         module_output = torch.nn.SyncBatchNorm(module.num_features,
-                                     module.eps, module.momentum,
-                                     module.affine,
-                                     module.track_running_stats,
-                                     process_group)
+                                               module.eps, module.momentum,
+                                               module.affine,
+                                               module.track_running_stats,
+                                               process_group)
         if module.affine:
             module_output.weight.data = module.weight.data.clone().detach()
             module_output.bias.data = module.bias.data.clone().detach()
