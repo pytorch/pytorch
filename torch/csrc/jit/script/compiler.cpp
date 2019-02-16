@@ -1232,14 +1232,28 @@ struct to_ir {
       c10::optional<Expr> max_trip_count,
       c10::optional<Expr> cond,
       const List<Stmt>& body,
-      c10::optional<Ident> itr_ident) {
+      c10::optional<Ident> itr_ident,
+      bool in_list = false) {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = ensureInt(
-            max_trip_count->range(), emitExpr(max_trip_count.value()));
+        if (in_list) {
+          auto listArg = emitExpr(max_trip_count.value());
+
+          max_trip_count_val = emitBuiltinCall(
+              max_trip_count->range(),
+              *graph,
+              aten::len,
+              c10::nullopt,
+              {listArg},
+              {},
+              /*required=*/true);
+        } else {
+          max_trip_count_val = ensureInt(
+              max_trip_count->range(), emitExpr(max_trip_count.value()));
+        }
       } else {
         max_trip_count_val = materializeConstant(
             std::numeric_limits<int64_t>::max(),
@@ -1261,11 +1275,23 @@ struct to_ir {
 
     {
       pushFrame(body_block);
+      WithInsertPoint guard(body_block);
       if (itr_ident) {
+        if (in_list) {
+          // set user's iterator variable to the current element
+          auto listArg = emitExpr(max_trip_count.value());
+          trip_count = emitBuiltinCall(
+              max_trip_count->range(),
+              *graph,
+              aten::select,
+              c10::nullopt,
+              {listArg, trip_count},
+              {},
+              /*required=*/true);
+        }
         environment_stack->setVar(
             itr_ident->range(), itr_ident->name(), trip_count);
       }
-      WithInsertPoint guard(body_block);
       emitStatements(body);
 
       // Also emit the conditional
@@ -1353,6 +1379,13 @@ struct to_ir {
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
     // be unrolled
     auto sv = emitSugaredExpr(itrs[0], 1);
+    // check if a value is simple and list-like
+    if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
+      if (siv->getValue()->type()->kind() == TypeKind::ListType) {
+        return emitLoopCommon(
+            stmt.range(), {itrs[0]}, {}, body, {target}, true);
+      }
+    }
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
@@ -2241,7 +2274,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
-        for(size_t i = 0; i < key_trees.size(); ++i) {
+        for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
         }
@@ -2262,7 +2295,9 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
+        return graph
+            ->insertNode(graph->createDict(key_type, value_type, keys, values))
+            ->output();
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
