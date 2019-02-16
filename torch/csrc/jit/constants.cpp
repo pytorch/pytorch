@@ -11,7 +11,6 @@ namespace jit {
 Value* insertConstant(
     Graph& g,
     const IValue& val,
-    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);
@@ -65,6 +64,8 @@ Value* insertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
+    n->destroy();
+    n = g.create(prim::None);
     n->output()->setType(NoneType::get());
   } else {
     throw constant_not_supported_error(
@@ -74,13 +75,6 @@ Value* insertConstant(
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
   if (scope)
     n->setScope(*scope);
-  if (result_type) {
-    auto inferred_type = n->output()->type();
-    // Retain more type information in case of tensor constant
-    if (!(inferred_type->isSubtypeOf(TensorType::get()) && result_type->isSubtypeOf(inferred_type))) {
-      n->output()->setType(result_type);
-    }
-  }
   return g.insertNode(n)->output();
 }
 
@@ -150,11 +144,6 @@ RegisterOperators reg({
             auto d = c10::Device(node->s(attr::value));
             return [d](Stack& stack) {
               push(stack, d);
-              return 0;
-            };
-          } else if (node->mustBeNone()) {
-            return [](Stack& stack) {
-              push(stack, IValue());
               return 0;
             };
           } else {

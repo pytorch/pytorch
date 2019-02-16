@@ -1,7 +1,6 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/scope.h>
 #include <torch/csrc/jit/source_range.h>
 
@@ -28,7 +27,6 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
 TORCH_API Value* insertConstant(
     Graph& g,
     const IValue& val,
-    const c10::TypePtr& result_type = nullptr,
     c10::optional<SourceRange> loc = c10::nullopt,
     c10::optional<ScopePtr> scope = c10::nullopt);
 
