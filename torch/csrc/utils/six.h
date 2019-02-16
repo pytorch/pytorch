@@ -57,8 +57,8 @@ inline bool isTuple(PyObject* obj) {
 
 inline PyObject *toTuple(PyStructSequence *obj) {
 #if PY_MAJOR_VERSION == 2
-  PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high);
-  return structseq_slice(obj, 0, Py_SIZE(obj));
+  PyObject *torch::utils::structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high);
+  return torch::utils::structseq_slice(obj, 0, Py_SIZE(obj));
 #else
   Py_INCREF(obj);
   return (PyObject *)obj;
