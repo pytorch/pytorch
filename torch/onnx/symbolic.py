@@ -231,7 +231,7 @@ _onnx_opset_version = 9
 # used to represent "missing" optional inputs
 def unused(g):
     n = g.op("prim::Constant")
-    n.output().setType(OptionalType.ofTensor())
+    n.setType(OptionalType.ofTensor())
     return n
 
 
