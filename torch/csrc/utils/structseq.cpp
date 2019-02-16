@@ -43,7 +43,7 @@ structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
     return (PyObject *) np;
 }
 
-static PyObject *make_tuple(PyStructSequence *obj) {
+PyObject *make_tuple(PyStructSequence *obj) {
     return structseq_slice(obj, 0, Py_SIZE(obj));
 }
 #endif
