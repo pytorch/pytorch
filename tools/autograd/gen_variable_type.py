@@ -486,8 +486,27 @@ def emit_body(declaration):
             return False
         return True
 
+    def find_args_with_derivatives(differentiable_inputs):
+        """Find arguments that have derivative definitions"""
+        if func is None:
+            return differentiable_inputs
+        names = set(name for d in func['derivatives'] for name in d['var_names'])
+        differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
+        if len(differentiable) != len(names):
+            missing = names - set(arg['name'] for arg in differentiable)
+            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
+        return differentiable
+
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
+    args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
+    not_args_with_derivatives = []
+    if func:
+        for not_derivative in func['not_derivatives']:
+            not_args_with_derivatives += not_derivative['var_names']
+#    args_with_derivatives = list(filter(lambda x: x not in func['not_derivatives'], args_with_derivatives))
+#    if name == "_s_where":
+#        import pdb; pdb.set_trace()
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if func is not None and func.get('output_differentiability') is not None:
@@ -568,8 +587,7 @@ def emit_body(declaration):
 
         return setup
 
-    def setup_derivative():
-        args_with_derivatives = find_args_with_derivatives()
+    def setup_derivative(differentiable_inputs):
 
         env = {}
         env['args_with_derivatives'] = reference_args(args_with_derivatives)
@@ -598,17 +616,6 @@ def emit_body(declaration):
         body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
         return body
 
-    def find_args_with_derivatives():
-        """Find arguments that have derivative definitions"""
-        if func is None:
-            return differentiable_inputs
-        names = set(name for d in func['derivatives'] for name in d['var_names'])
-        differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
-        if len(differentiable) != len(names):
-            missing = names - set(arg['name'] for arg in differentiable)
-            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
-        return differentiable
-
     def emit_check_no_requires_grad(tensor_args, args_with_derivatives):
         """Checks that arguments without derivatives don't require grad"""
         body = []
@@ -616,6 +623,8 @@ def emit_body(declaration):
             if arg in args_with_derivatives:
                 continue
             name = arg['name']
+            if name in not_args_with_derivatives:
+                continue
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
@@ -847,7 +856,7 @@ def emit_body(declaration):
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
-        body.extend(setup_derivative())
+        body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
     pre_record_trace, post_record_trace = emit_record_trace(env)

@@ -29,8 +29,8 @@ def load_derivatives(path, declarations):
 
 
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_gradients, signature,
-                             declaration, output_differentiability):
+def create_autograd_function(name, derivatives, args_with_gradients, not_derivatives,
+                             signature, declaration, output_differentiability):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
@@ -40,13 +40,14 @@ def create_autograd_function(name, derivatives, args_with_gradients, signature,
         'args_with_gradients': args_with_gradients,
         'signature': signature,
         'derivatives': derivatives,
+        'not_derivatives': not_derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
         'output_differentiability': output_differentiability,
     }
 
 
-def create_derivative(declaration, formula, var_names):
+def create_derivative(arguments, returns, name, formula, var_names):
     def transform_return(r):
         # In-place functions take in and return self. Call the modified version
         # "output" so that it can be referred to in derivative definitions.
@@ -55,18 +56,17 @@ def create_derivative(declaration, formula, var_names):
             r['name'] = 'result'
         return r
 
-    returns = [transform_return(r) for r in declaration['returns']]
-    arguments = declaration['arguments']
+    returns = [transform_return(r) for r in returns]
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
 
     # Check that the referenced gradients in the formula are in bounds
     for i in used_gradient_indices(formula):
-        if i >= len(declaration['returns']):
+        if i >= len(returns):
             raise RuntimeError(
                 "Out of bounds grads access: derivative formula for {} "
                 "used grads[{}], but the forward only returns {} outputs."
-                .format(declaration['name'], i, len(declaration['returns'])))
+                .format(name, i, len(returns)))
 
     return {
         'formula': formula,
@@ -144,15 +144,25 @@ def process_definition(defn, declarations_by_signature):
 
         # Set up the derivative information
         derivatives = []
+        not_derivatives = []
+        not_args_with_gradients = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            derivatives.append(create_derivative(declaration, formula, names))
+            if formula == 'none':
+                derivative = create_derivative(declaration['arguments'], declaration['returns'], declaration['name'], formula, names)
+                not_derivatives.append(derivative)
+                not_args_with_gradients += derivative['var_names']
+            else:
+                derivatives.append(create_derivative(declaration['arguments'], declaration['returns'], declaration['name'], formula, names))
+#        if defn_name == '_s_where':
+#            import pdb; pdb.set_trace()
+        args_with_gradients = list(filter(lambda x: x['name'] not in not_args_with_gradients, args_with_gradients))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_gradients
+        return derivatives, args_with_gradients, not_derivatives
 
     def unzip(xs):
         return zip(*xs)
@@ -195,8 +205,8 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, args_with_gradients = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_gradients,
+    derivatives, args_with_gradients, not_derivatives = set_up_derivatives(defn_name, defn, canonical)
+    return create_autograd_function(defn_name, derivatives, args_with_gradients, not_derivatives,
                                     signature, canonical, output_differentiability)
 
 
