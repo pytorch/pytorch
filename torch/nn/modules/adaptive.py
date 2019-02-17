@@ -75,7 +75,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Args:
         in_features (int): Number of features in the input tensor
         n_classes (int): Number of classes in the dataset
-        cutoffs (Sequence): Cutoffs used to assign targets to their buckets.
+        cutoffs (Sequence): Cutoffs used to assign targets to their buckets
         div_value (float, optional): value used as an exponent to compute sizes
             of the clusters. Default: 4.0
         head_bias (bool, optional): If ``True``, adds a bias term to the ‘head’ of the
