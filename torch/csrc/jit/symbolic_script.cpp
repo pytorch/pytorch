@@ -7,6 +7,145 @@ std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
 
+        ####     HELPER FUNCTIONS           ###
+        ####     PREFIX: ___                ###
+        ####     SCHEMA NOT SAVED IN CACHE  ###
+
+        def ___unsqueeze_multiple(t,
+                                  dims: List[int],
+                                  n_dims: int):
+            seen = [False] * n_dims
+            for i in range(len(dims)):
+                seen[dims[i]] = True
+
+            for d in range(n_dims):
+                if seen[d]:
+                    t = t.unsqueeze(d)
+            return t
+
+        def ___sum_backward(grad,
+                            sizes: List[int],
+                            dims: List[int],
+                            keepdim: bool):
+            if not keepdim and len(sizes) > 0:
+                if len(dims) == 1:
+                    return grad.unsqueeze(dims[0]).expand(sizes)
+                else:
+                    res = ___unsqueeze_multiple(grad, dims, len(sizes))
+                    return res.expand(sizes)
+            else:
+                return grad.expand(sizes)
+
+        def ___logsumexp_backward(grad, self, result,
+                                  dim: List[int],
+                                  keepdim: bool):
+            if not keepdim and self.dim() != 0:
+                n_dims = len(self.size())
+                grad = ___unsqueeze_multiple(grad, dim, n_dims)
+                result = ___unsqueeze_multiple(result, dim, n_dims)
+            return grad * (self - result).exp()
+
+        def ___bool_to_int(b: bool):
+            # FIXME: torchscript: int - bool
+            if b:
+                i = 1
+            else:
+                i = 0
+            return i
+
+        def ___var_backward_0(grad, self, unbiased: bool):
+            b = ___bool_to_int(unbiased)
+
+            # FIXME: torchscript: div(float, float)
+            return  grad * (self - self.mean()) * 2.0 / (self.numel() - b)
+
+        def ___safe_size(sizes: List[int],
+                         dims: List[int]):
+            if len(sizes) == 0:
+                return 1
+
+            size = 1
+            for i in range(len(dims)):
+                d = dims[i]
+                size *= sizes[d]
+
+            return size
+
+        def ___var_backward_1(grad,
+                              self,
+                              dim: List[int],
+                              unbiased: bool,
+                              keepdim: bool):
+            if self.dim() == 0:
+                return ___var_backward_0(grad, self, unbiased)
+            self_size = self.size()
+            b = ___bool_to_int(unbiased)
+            if not keepdim and self.dim() > 1:
+                grad = ___unsqueeze_multiple(grad, dim, len(self_size))
+
+            # FIXME: torchscript: div(float, float)
+            return grad * (self - self.mean(dim, True)) * 2.0 / (___safe_size(self_size, dim) - b)
+
+        def ___index_select_backward(grad,
+                                     dim: int,
+                                     indices,
+                                     sizes: List[int],
+                                     keepdim: bool):
+            if not keepdim and len(sizes) > 0:
+                grad = grad.unsqueeze(dim)
+                indices = indices.unsqueeze(dim)
+
+            # FIXME: torchscript: torch.zeros(sizes, grad.options())
+            return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
+
+        def ___permute_backward(grad,
+                                fwd_dims: List[int]):
+            ndims = len(fwd_dims)
+            dims = [0] * ndims
+
+            for i in range(ndims):
+                dims[fwd_dims[i]] = i
+
+            return grad.permute(dims)
+
+        def ___select_backward(grad,
+                               input_sizes: List[int],
+                               dim: int,
+                               index: int):
+            # FIXME: torchscript: torch.zeros(sizes, grad.options())
+            grad_input = torch.zeros(input_sizes).to(grad)
+            grad_input.select(dim, index).copy_(grad)
+            return grad_input
+
+        def ___slice_backward(grad,
+                              input_sizes: List[int],
+                              dim: int,
+                              start: int,
+                              end: int,
+                              step: int):
+            # FIXME: torchscript: torch.zeros(sizes, grad.options())
+            grad_input = torch.zeros(input_sizes).to(grad)
+            grad_input.slice(dim, start, end, step).copy_(grad)
+            return grad_input
+
+        def ___unsqueeze_to_0(self,
+                              sizes: List[int]):
+            ndims = len(sizes)
+            for i in range(ndims):
+                if sizes[i] == 1:
+                    self = self.unsqueeze(i)
+
+            return self
+
+        def ___unsqueeze_to_1(self,
+                              dim: int,
+                              sizes: List[int]):
+            if len(sizes) > 0 and sizes[dim] == 1:
+                return self.unsqueeze(dim)
+            return self
+
+        ####       TORCH FUNCTIONS           ###
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):
@@ -61,7 +200,7 @@ const std::vector<std::string> functions = {
             result0, result1 = torch.kthvalue(self, k, dim, keepdim)
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.index_select_backward(grad_output, dim, result1, self_size, keepdim)
+                grad_self = ___index_select_backward(grad_output, dim, result1, self_size, keepdim)
                 return grad_self, None, None, None
 
             return result0, result1, backward
@@ -72,7 +211,7 @@ const std::vector<std::string> functions = {
             result = torch.logsumexp(self, dim, keepdim)
             self_dim = self.dim()
             def backward(grad_output):
-                grad_self = torch.logsumexp_backward(grad_output, self, result, dim, keepdim)
+                grad_self = ___logsumexp_backward(grad_output, self, result, dim, keepdim)
                 return grad_self, None, None
 
             return result, backward
@@ -91,7 +230,7 @@ const std::vector<std::string> functions = {
                    keepdim: bool):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.sum_backward(grad_output, self_size, dim, keepdim) / torch._safe_size(self_size, dim)
+                grad_self = ___sum_backward(grad_output, self_size, dim, keepdim) / ___safe_size(self_size, dim)
                 return grad_self, None, None
 
             return torch.mean(self, dim, keepdim), backward
@@ -121,7 +260,7 @@ const std::vector<std::string> functions = {
         def permute(self,
                     dims: List[int]):
             def backward(grad_output):
-                grad_self = torch.permute_backwards(grad_output, dims)
+                grad_self = ___permute_backward(grad_output, dims)
                 return grad_self, None
 
             return torch.permute(self, dims), backward
@@ -177,10 +316,22 @@ const std::vector<std::string> functions = {
                    index: int):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.select_backward(grad_output, self_size, dim, index)
+                grad_self = ___select_backward(grad_output, self_size, dim, index)
                 return grad_self, None, None
 
             return torch.select(self, dim, index), backward
+
+        def slice(self,
+                  dim: int,
+                  start: int,
+                  end: int,
+                  step: int):
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = ___slice_backward(grad_output, self_size, dim, start, end, step)
+                return grad_self, None, None, None, None
+
+            return torch.slice(self, dim, start, end, step), backward
 
         def sqrt(self):
             result = torch.sqrt(self)
@@ -193,7 +344,7 @@ const std::vector<std::string> functions = {
         def squeeze_0(self):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.unsqueeze_to(grad_output, self_size)
+                grad_self = ___unsqueeze_to_0(grad_output, self_size)
                 return grad_self
 
             return torch.squeeze(self), backward
@@ -202,7 +353,7 @@ const std::vector<std::string> functions = {
                       dim: int):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.unsqueeze_to(grad_output, dim, self_size)
+                grad_self = ___unsqueeze_to_1(grad_output, dim, self_size)
                 return grad_self, None
 
             return torch.squeeze(self, dim), backward
@@ -254,14 +405,14 @@ const std::vector<std::string> functions = {
             return self.to(other, non_blocking=non_blocking, copy=copy), backward
 
         def topk(self,
-                 k,
+                 k: int,
                  dim: int = -1,
                  largest: bool = True,
                  sorted: bool = True):
             result0, result1 = torch.topk(self, k, dim, largest, sorted)
             self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.index_select_backward(grad_output, dim, result1, self_size, True)
+                grad_self = ___index_select_backward(grad_output, dim, result1, self_size, True)
                 return grad_self, None, None, None, None
 
             return result0, result1, backward
@@ -278,7 +429,7 @@ const std::vector<std::string> functions = {
         def var_0(self,
                   unbiased: bool=True):
             def backward(grad_output):
-                grad_self = torch.var_backward(grad_output, self, unbiased)
+                grad_self = ___var_backward_0(grad_output, self, unbiased)
                 return grad_self, None
 
             return torch.var(self, unbiased), backward
@@ -288,7 +439,7 @@ const std::vector<std::string> functions = {
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
-                grad_self = torch.var_backward(grad_output, self, dim, unbiased, keepdim)
+                grad_self = ___var_backward_1(grad_output, self, dim, unbiased, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
@@ -297,7 +448,7 @@ const std::vector<std::string> functions = {
                   unbiased: bool=True):
             std_out = torch.std(self, unbiased)
             def backward(grad_output):
-                grad_self = torch.var_backward(grad_output / (std_out * 2), self, unbiased)
+                grad_self = ___var_backward_0(grad_output / (std_out * 2), self, unbiased)
                 return grad_self, None
 
             return std_out, backward
@@ -308,7 +459,7 @@ const std::vector<std::string> functions = {
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
-                grad_self = torch.var_backward(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                grad_self = ___var_backward_1(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -321,6 +472,8 @@ const std::vector<std::string> functions = {
                 return grad_self, None
 
             return torch.view(self, size), backward
+
+        ####         NN FUNCTIONS           ###
 
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
@@ -420,8 +573,16 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   return schema_string;
 }
 
+bool isHelperFunction(const std::string& method_name) {
+  std::string helper_prefix = "___";
+  return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
+}
+
 void loadModule(const std::shared_ptr<script::Module>& module) {
   for (const auto& method_ : module->get_methods()) {
+    if (isHelperFunction(method_.key()))
+      continue;
+
     const auto& method = method_.value();
     GradientPair pair;
     pair.forward = method->graph();
