@@ -499,6 +499,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // Debugging stuff
   if (opts_.debug) {
     WriteProtoToTextFile(
+        net,
+        "debug_original_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+    WriteProtoToTextFile(
         onnxifi_net,
         "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
     WriteProtoToTextFile(
@@ -903,6 +906,11 @@ void OnnxifiTransformer::transform(
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
+
+  if (opts_.debug) {
+    WriteProtoToTextFile(*pred_net, "debug_full_pred_net.pb_txt");
+    WriteProtoToTextFile(net_opt, "debug_full_opt_net.pb_txt");
+  }
   pred_net->Swap(&net_opt);
 }
 
