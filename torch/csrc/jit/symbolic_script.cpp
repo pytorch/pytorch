@@ -144,6 +144,17 @@ const std::vector<std::string> functions = {
                 return self.unsqueeze(dim)
             return self
 
+        def ___adaptive_avg_pool2d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2])
+            else:
+                grad_self = torch._adaptive_avg_pool2d_backward(grad, self)
+
+            return grad_self
+
         ####       TORCH FUNCTIONS           ###
 
         def _dim_arange(like,
@@ -321,17 +332,16 @@ const std::vector<std::string> functions = {
 
             return torch.select(self, dim, index), backward
 
-        def slice(self,
-                  dim: int,
-                  start: int,
-                  end: int,
-                  step: int):
-            self_size = self.size()
-            def backward(grad_output):
-                grad_self = ___slice_backward(grad_output, self_size, dim, start, end, step)
-                return grad_self, None, None, None, None
+        #def slice(self,
+        #          dim: int=0,
+        #          start: int=0,
+        #          end: int=9223372036854775807,
+        #          step: int=1):
+        #    def backward(grad_output):
+        #        grad_self = ___slice_backward(grad_output, self.size(), dim, start, end, step)
+        #        return grad_self, None, None, None, None
 
-            return torch.slice(self, dim, start, end, step), backward
+        #    return torch.slice(self, dim, start, end, step), backward
 
         def sqrt(self):
             result = torch.sqrt(self)
@@ -479,11 +489,7 @@ const std::vector<std::string> functions = {
                                 output_size: List[int]):
             def backward(grad_output):
                 # self is used in backward, no need to pass in its size explicitly
-                if output_size[0] == 1 and output_size[1] == 1:
-                    self_size = self.size()
-                    grad_self = grad_output.expand(self.size()) / (self_size[-1] * self_size[-2])
-                else:
-                    grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
+                grad_self = ___adaptive_avg_pool2d_backward(grad_output, self, output_size)
                 return grad_self, None
 
             return torch.adaptive_avg_pool2d(self, output_size), backward
@@ -539,6 +545,94 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return torch.softmax(self, dim, dtype), backward
+
+        def ___interpolate_backward(grad,
+                                    input,
+                                    mode: str,
+                                    align_corners: bool):
+            output_size = grad.size()[2:]
+            input_size = input.size()
+            input_dim = len(input_size)
+            if input_dim == 3 and mode == 'nearest':
+                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size)
+            elif input_dim == 4 and mode == 'nearest':
+                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size)
+            elif input_dim == 5 and mode == 'nearest':
+                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size)
+            elif input_dim == 3 and mode == 'linear':
+                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners)
+            elif input_dim == 4 and mode == 'bilinear':
+                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners)
+            elif input_dim == 5 and mode == 'trilinear':
+                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners)
+            elif input_dim == 4 and mode == 'bicubic':
+                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners)
+            elif input_dim == 3 and mode == 'area':
+                output_size_2d = [1, output_size[0]]
+                grad_input = ___adaptive_avg_pool2d_backward(grad.unsqueeze(2), input, output_size_2d).squeeze(2)
+            elif input_dim == 4 and mode == 'area':
+                grad_input = ___adaptive_avg_pool2d_backward(grad, input, output_size)
+            elif input_dim == 5 and mode == 'area':
+                grad_input = torch.adaptive_avg_pool3d_backward(grad, input)
+            else:
+                # NEVER REACH HERE
+                grad_input = torch.zeros_like(input)
+
+            return grad_input
+
+        def __interpolate_0(input,
+                            size: Optional[int],
+                            scale_factor: Optional[List[float]],
+                            mode: str='nearest',
+                            align_corners: Optional[bool]):
+            def backward(grad_output):
+                if align_corners is None:
+                    align_corners = False
+                grad_self = ___interpolate_backward(grad_output, input, mode, align_corners)
+                return grad_self, None, None, None, None
+
+            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
+
+        def __interpolate_1(input,
+                            size: Optional[List[int]],
+                            scale_factor: Optional[List[float]],
+                            mode: str='nearest',
+                            align_corners: Optional[bool]):
+            def backward(grad_output):
+                if align_corners is None:
+                    align_corners = False
+                grad_self = ___interpolate_backward(grad_output, input, mode, align_corners)
+                return grad_self, None, None, None, None
+
+            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
+
+        def __interpolate_2(input,
+                            size: Optional[int],
+                            scale_factor: Optional[float],
+                            mode: str='nearest',
+                            align_corners: Optional[bool]):
+            def backward(grad_output):
+                if align_corners is None:
+                    align_corners = False
+                grad_self = ___interpolate_backward(grad_output, input, mode, align_corners)
+                return grad_self, None, None, None, None
+
+            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
+
+        def __interpolate_3(input,
+                            size: Optional[List[int]],
+                            scale_factor: Optional[float],
+                            mode: str='nearest',
+                            align_corners: Optional[bool]):
+            def backward(grad_output):
+                if align_corners is None:
+                    align_corners = False
+                grad_self = ___interpolate_backward(grad_output, input, mode, align_corners)
+                return grad_self, None, None, None, None
+
+            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
+
+
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
