@@ -114,8 +114,10 @@ void updateOutput(
         __syncthreads();
 
         // Perform a single "dot" operation for each thread
-        for (int64_t idy = tidy; within_N && idy < lim; idy += blockDim.y) {
-            outVal += s_values[idy] * weight[weightStride * s_keys[idy]];
+        if( within_N ) {
+            for (int64_t idy = tidy; idy < lim; idy += blockDim.y) {
+                outVal += s_values[idy] * weight[weightStride * s_keys[idy]];
+            }
         }
         __syncthreads();
     }
