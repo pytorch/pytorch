@@ -55,9 +55,9 @@ struct ParsedLiteral {
 
   AttributeKind k = AttributeKind::t;
 
-  int64_t i;
-  std::string s;
-  double f;
+  int64_t i = 0;
+  std::string s = "";
+  double f = 0.0;
   std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
