@@ -10849,6 +10849,8 @@ DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_batch_norm',
     'test_nn_embedding',
     'test_nn_log_softmax',
+    'test_nn_softmax',
+    'test_nn_softmax_with_all_args',
     'test_nn_threshold',
     'test_nn_nll_loss',
 }

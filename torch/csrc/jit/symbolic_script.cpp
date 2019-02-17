@@ -524,6 +524,21 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
+        def softmax_0(self, dim: int):
+            result = torch.softmax(self, dim)
+            def backward(grad_output):
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                return grad_self, None
+
+            return result, backward
+
+        def softmax_1(self, dim: int, dtype: int):
+            result = torch.softmax(self, dim, dtype)
+            def backward(grad_output):
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                return grad_self, None, None
+
+            return torch.softmax(self, dim, dtype), backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
