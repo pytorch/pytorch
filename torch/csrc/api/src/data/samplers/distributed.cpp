@@ -20,7 +20,6 @@ DistributedRandomSampler::DistributedRandomSampler(
       begin_index_(0),
       end_index_(0),
       sample_index_(0) {
-  populate_indices();
   // shuffle first time.
   reset(size_);
 }
@@ -52,17 +51,18 @@ void DistributedRandomSampler::reset(optional<size_t> new_size) {
 }
 
 void DistributedRandomSampler::populate_indices() {
+  size_t num_local_samples = local_sample_count();
   size_t sample_count =
-      num_replicas_ == 1 ? size_ : local_sample_count() * num_replicas_;
+      num_replicas_ == 1 ? size_ : num_local_samples * num_replicas_;
   all_indices_.resize(sample_count);
   std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
   for (size_t i = size_; i < sample_count; ++i) {
     // we may have added duplicate samples to make all
     // replicas to have the same number of samples.
-    all_indices_[i] = i % size_;
+    all_indices_[i] = i - size_;
   }
-  begin_index_ = rank_ * local_sample_count();
-  end_index_ = begin_index_ + local_sample_count();
+  begin_index_ = rank_ * num_local_samples;
+  end_index_ = begin_index_ + num_local_samples;
   sample_index_ = begin_index_;
 }
 
@@ -78,13 +78,15 @@ void DistributedRandomSampler::save(serialize::OutputArchive& archive) const {
 }
 
 void DistributedRandomSampler::load(serialize::InputArchive& archive) {
-  auto tensor = torch::empty(1, torch::kInt64);
-  archive.read("sample_index_", tensor, /*is_buffer=*/true);
-  sample_index_ = tensor.item<int64_t>();
-
-  tensor = torch::empty(1, torch::kInt64);
+  auto tensor = torch::empty(1, torch::kInt64);  
   archive.read("epoch_", tensor, /*is_buffer=*/true);
   epoch_ = tensor.item<int64_t>();
+  // call reset() after loading epoch_ to populate indices.
+  reset(size_);
+
+  tensor = torch::empty(1, torch::kInt64);
+  archive.read("sample_index_", tensor, /*is_buffer=*/true);
+  sample_index_ = tensor.item<int64_t>();
 }
 
 size_t DistributedRandomSampler::index() const noexcept {
