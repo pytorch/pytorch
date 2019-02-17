@@ -1,4 +1,4 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : int = prim::Constant[value=3]()
   %2 : int = prim::Constant[value=4]()
   %3 : int = prim::Constant[value=6]()
@@ -9,5 +9,4 @@ graph(%x : Tensor) {
   %8 : Tensor = aten::zeros(%7, %3, %4, %5)
   %9 : Tensor = aten::mm(%x, %8)
   %10 : Tensor = aten::add(%9, %6, %6)
-  return (%10);
-}
+  return (%10)

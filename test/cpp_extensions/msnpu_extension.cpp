@@ -15,9 +15,18 @@ Tensor get_dummy_tensor() {
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor zeros_override(IntList size, const TensorOptions & options) {
+Tensor get_dtype_tensor(caffe2::TypeMeta dtype) {
+  auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+      Storage(
+          dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
+      MSNPUTensorId(),
+      false);
+  return Tensor(std::move(tensor_impl));
+}
+
+Tensor zeros_override(IntArrayRef size, const TensorOptions & options) {
   test_int = 0;
-  return get_dummy_tensor();
+  return get_dtype_tensor(options.dtype());
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
@@ -31,7 +40,7 @@ Tensor sum_override(const Tensor & self) {
 }
 
 // needed for sum backwards
-Tensor expand_override(const Tensor & self, IntList size, bool implicit) {
+Tensor expand_override(const Tensor & self, IntArrayRef size, bool implicit) {
   return get_dummy_tensor();
 }
 
@@ -63,7 +72,7 @@ Tensor ones_like_override(const Tensor & self, const TensorOptions & options) {
 void init_msnpu_extension() {
   register_extension_backend_op(
     Backend::MSNPU,
-    "zeros(IntList size, TensorOptions options) -> Tensor", &zeros_override);
+    "zeros(IntArrayRef size, TensorOptions options) -> Tensor", &zeros_override);
   register_extension_backend_op(
     Backend::MSNPU,
     "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
@@ -72,7 +81,7 @@ void init_msnpu_extension() {
     "sum(Tensor self) -> Tensor", &sum_override);
   register_extension_backend_op(
     Backend::MSNPU,
-    "expand(Tensor self, IntList size, bool implicit) -> Tensor",
+    "expand(Tensor self, IntArrayRef size, bool implicit) -> Tensor",
     &expand_override);
   register_extension_backend_op(
     Backend::MSNPU,

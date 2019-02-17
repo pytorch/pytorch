@@ -51,6 +51,11 @@ class AliasTracker {
     return wildcardWriters_;
   }
 
+  // Get the values that represent the memory locations that `v` may point to.
+  // Return values are guaranteed to be "fresh" tensors--they do not point to
+  // anything else.
+  ValueSet getMemoryLocations(const Value* v) const;
+
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Value* a, const Value* b) const;
 

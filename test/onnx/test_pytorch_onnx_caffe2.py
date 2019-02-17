@@ -664,9 +664,16 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
-    @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_false(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=False)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_true(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=True)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d_no_padding(self):
@@ -1035,6 +1042,23 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape(self):
+        class ReshapeModel(torch.nn.Module):
+            def forward(self, input):
+                return input.reshape(1, 1)
+
+        x = torch.randn(1, requires_grad=True)
+        self.run_model_test(ReshapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape_as(self):
+        class ReshapeAsModel(torch.nn.Module):
+            def forward(self, input):
+                y = torch.randn(3, 1, 2, 1, requires_grad=False)
+                return input.reshape_as(y)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

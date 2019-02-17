@@ -34,7 +34,36 @@ struct Fan {
   int64_t in;
   int64_t out;
 };
+
+double calculate_kaiming_std(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+  Fan fan(tensor);
+  const auto gain = calculate_gain(nonlinearity, a);
+  double std = 0.0;
+  if (mode == FanMode::FanIn) {
+    std = gain / std::sqrt(fan.in);
+  } else {
+    std = gain / std::sqrt(fan.out);
+  }
+  return std;
+}
 } // namespace
+
+double calculate_gain(Nonlinearity nonlinearity, double param) {
+  if (nonlinearity == Nonlinearity::Tanh) {
+    return 5.0 / 3.0;
+  } else if (nonlinearity == Nonlinearity::ReLU) {
+    return std::sqrt(2.0);
+  } else if (nonlinearity == Nonlinearity::LeakyReLU) {
+    return std::sqrt(2.0 / (1 + pow(param, 2)));
+  }
+
+  return 1.0;
+}
 
 Tensor constant_(Tensor tensor, Scalar value) {
   NoGradGuard guard;
@@ -144,6 +173,29 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
 Tensor uniform_(Tensor tensor, double low, double high) {
   NoGradGuard guard;
   return tensor.uniform_(low, high);
+}
+
+Tensor kaiming_uniform_(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
+  // Calculate uniform bounds from standard deviation
+  const auto bound = std::sqrt(3.0) * std;
+  return tensor.uniform_(-bound, bound);
+}
+
+Tensor kaiming_normal_(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+
+  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
+  return tensor.normal_(0, std);
 }
 
 Tensor xavier_normal_(Tensor tensor, double gain) {

@@ -118,8 +118,15 @@ fi
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
-  patch -p1 < xla/pytorch.patch
+  ./xla/scripts/apply_patches.sh
 fi
+
+
+# check that setup.py would fail with bad arguments
+echo "The next three invocations are expected to fail with invalid command error messages."
+( ! get_exit_code python setup.py bad_argument )
+( ! get_exit_code python setup.py clean] )
+( ! get_exit_code python setup.py clean bad_argument )
 
 # ppc64le build fails when WERROR=1
 # set only when building other architectures

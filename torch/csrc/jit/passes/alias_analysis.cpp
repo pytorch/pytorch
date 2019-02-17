@@ -7,10 +7,11 @@ namespace torch {
 namespace jit {
 namespace {
 bool shouldAnnotate(const TypePtr& type) {
-  return type->isSubtypeOf(DynamicType::get()) ||
+  return type->isSubtypeOf(TensorType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
       type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
+      type->kind() == TypeKind::FutureType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -110,6 +111,12 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return aliasTracker_->mayAlias(a, b);
 }
 
+void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
+  for (auto node : b->nodes()) {
+    getWritesImpl(node, ret, recurseBlocks);
+  }
+}
+
 void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   for (const auto input : n->inputs()) {
     if (writesTo(n, input)) {
@@ -124,14 +131,20 @@ void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
 
   if (recurseBlocks) {
     for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getWritesImpl(node, ret, recurseBlocks);
-      }
+      getWritesImpl(block, ret, recurseBlocks);
     }
   }
 }
 
-ValueSet AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+// Get all writes by all nodes in a block, recursively exploring sub-blocks
+ValueSet AliasDb::getWrites(Block* b) const {
+  ValueSet writes;
+  getWritesImpl(b, writes, /*recurseBlocks=*/true);
+  return writes;
+}
+
+std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
+    const {
   ValueSet writes;
   getWritesImpl(n, writes, recurseBlocks);
   return writes;
@@ -198,14 +211,14 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       inputType = inputType->cast<OptionalType>()->getElementType();
     }
 
-    if (inputType->isSubtypeOf(DynamicType::get())) {
+    if (inputType->isSubtypeOf(TensorType::get())) {
       tensors.push_back(input);
     } else if (inputType->kind() == TypeKind::ListType) {
       auto containedType = inputType->containedTypes().at(0);
       // All tensor subtypes may alias to each other, so we should consider all
       // lists of them to alias to each other.
-      if (containedType->isSubtypeOf(DynamicType::get())) {
-        containedType = DynamicType::get();
+      if (containedType->isSubtypeOf(TensorType::get())) {
+        containedType = TensorType::get();
       }
       listTypes[containedType->kind()].push_back(input);
     } else if (inputType->kind() == TypeKind::TupleType) {
@@ -253,8 +266,6 @@ void AliasDb::analyze(Node* node) {
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
   // These nodes are not schematized, so we need to handle them specially
-  // TODO do the thing that python_printer does to force operator writers to
-  // register aliasing information
   switch (node->kind()) {
     case prim::If:
       return analyzeIf(node);
@@ -263,6 +274,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::FusionGroup:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
+    case prim::fork:
+      return analyzeFork(node);
+    case aten::wait:
+      return analyzeWait(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
@@ -300,7 +315,13 @@ void AliasDb::analyzeImpl(Node* node) {
       // If the node has a schema, fall through and analyze it normally
       break;
     }
+    case prim::Print:
+      // These ops do nothing
+      return;
+    default:
+      AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
+
 
   const auto& schema = node->schema();
   if (schema.is_vararg() || schema.is_varret()) {
@@ -482,6 +503,72 @@ void AliasDb::analyzeExtractor(Node* node) {
 void AliasDb::analyzeChunk(Node* node) {
   for (auto output : node->outputs()) {
     makeAliasOf(output, node->input());
+  }
+}
+
+// Propagate aliasing and write information from the subgraph outputs to the
+// outputs of the corresponding aten::wait() calls, since that's where the
+// values will eventually emerge.
+void AliasDb::analyzeFork(Node* node) {
+  const auto subgraph = node->g(attr::Subgraph).get();
+  subgraphToOwner_.insert({subgraph, node});
+
+  const auto subgraphBlock = subgraph->block();
+  mapAliases(subgraphBlock->inputs(), node->inputs());
+  analyze(subgraphBlock);
+
+  // Give the future that the fork emits a fresh value
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
+void AliasDb::analyzeWait(Node* node) {
+  const auto fut = node->input();
+  AT_ASSERT(fut->type()->kind() == TypeKind::FutureType);
+
+  if (aliasTracker_->isWildcard(fut)) {
+    for (const auto output : node->outputs()) {
+      aliasTracker_->setWildcard(output);
+    }
+    return;
+  }
+
+  const auto originFuts = aliasTracker_->getMemoryLocations(fut);
+  for (const auto originFut : originFuts) {
+    const auto subgraphNode = originFut->node();
+
+    const auto subgraph = subgraphNode->g(attr::Subgraph).get();
+    const auto subgraphWrites = getWrites(subgraph->block());
+
+    // Retrieve aliasing info from the subgraph
+    mapAliases(node->outputs(), subgraph->outputs());
+
+    // Propagate write information to the `wait` node.
+    //
+    // We need to do this for all writes in the entire subgraph, so that we
+    // disallow reorders past a call to "aten::wait".
+    //
+    // Consider the following Fork where the subgraph writes to %a:
+    //
+    //   %c : Future[Tensor] = prim::Fork(%a, %b) <-- writes to %a
+    //   ...
+    //   aten::wait(%c)
+    //   aten::use(%a)   <-- we can't move this node before the `wait` safely!
+    //
+    // Say we define the "live interval" of a fork the interval between the
+    // `fork` and its first corresponding `wait` (inclusive).
+    //
+    // Any writes in the subgraph can happen at any point in the live interval,
+    // so it's not safe to re-order any reads to those memory locations from
+    // outside the live interval to inside.
+    //
+    // In reality, any reads *inside* the live interval are undefined behavior,
+    // since the writes may or may not have been executed yet. But we'll let
+    // users do that and shoot themselves in the foot for now.
+    for (const auto write : subgraphWrites) {
+      aliasTracker_->registerWrite(write, node);
+    }
   }
 }
 
@@ -882,5 +969,56 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
     return c10::nullopt;
   }
 }
+
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+  // WARNING: by adding a case to this list, you are asserting that you have
+  // added a case for the unschematized node in AliasDb::analyze
+  const static std::unordered_set<Symbol> handled = {
+    prim::If,
+    prim::Loop,
+    prim::FusionGroup,
+    prim::DifferentiableGraph,
+    prim::Constant,
+    prim::DictConstruct,
+    prim::ListConstruct,
+    prim::TupleConstruct,
+    prim::Undefined,
+    prim::FusedConcat,
+    prim::MMTreeReduce,
+    prim::MMBatchSide,
+    prim::None,
+    prim::BroadcastSizes,
+    prim::ChunkSizes,
+    prim::Function,
+    prim::TupleUnpack,
+    prim::TupleIndex,
+    prim::DictIndex,
+    prim::TupleSlice,
+    prim::ListUnpack,
+    prim::PythonOp,
+    prim::ConstantChunk,
+    prim::BroadcastingChunk,
+    aten::add,
+    aten::sub,
+    aten::mul,
+    aten::div,
+  };
+
+  // Operators that should not be used by alias analysis
+  const static std::unordered_set<Symbol> purposefully_not_handled = {
+    prim::Print,
+    prim::Load,
+    prim::Store,
+    prim::Drop,
+    at::onnx::Reshape,
+    at::onnx::Shape,
+    prim::AnyDefined,
+    prim::AutogradAdd,
+    prim::fork, // TODO: fork aliasing / futures
+  };
+
+  return handled.count(symbol) || purposefully_not_handled.count(symbol);
+}
+
 } // namespace jit
 } // namespace torch

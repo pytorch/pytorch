@@ -2,6 +2,7 @@
 
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
@@ -248,6 +249,40 @@ void testTopologicalMove() {
   }
 }
 
+namespace {
+Node* insertIf(
+    Graph& g,
+    Value* condValue,
+    std::function<std::vector<Value*>()> trueInst,
+    std::function<std::vector<Value*>()> falseInst) {
+  auto if_ = g.insertNode(g.create(prim::If, 0));
+  if_->addInput(condValue); // condition value
+  auto trueBlock = if_->addBlock();
+  auto falseBlock = if_->addBlock();
+  {
+    // Mutate in true block
+    WithInsertPoint g(trueBlock);
+    auto outputs = trueInst();
+    for (auto output : outputs) {
+      trueBlock->registerOutput(output);
+    }
+  }
+  {
+    WithInsertPoint g(falseBlock);
+    auto outputs = falseInst();
+    for (auto output : outputs) {
+      falseBlock->registerOutput(output);
+    }
+  }
+
+  AT_ASSERT(trueBlock->outputs().size() == falseBlock->outputs().size());
+  for (auto output : trueBlock->outputs()) {
+    if_->addOutput()->setType(output->type());
+  }
+  return if_;
+}
+} // namespace
+
 void testAliasAnalysis() {
   {
     auto graph = std::make_shared<Graph>();
@@ -309,19 +344,15 @@ void testAliasAnalysis() {
     auto a = graph->insert(aten::rand, {constant});
     auto b = graph->insert(aten::rand, {constant});
 
-    auto if_ = graph->insertNode(graph->create(prim::If));
-    if_->addInput(constant); // condition value
-    auto trueBlock = if_->addBlock();
-    auto falseBlock = if_->addBlock();
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto aMut = graph->insert(aten::add_, {a, b});
+          return {aMut};
+        },
+        [&]() -> std::vector<Value*> { return {a}; });
 
-    {
-      // Mutate in true block
-      WithInsertPoint g(trueBlock);
-      auto aMut = graph->insert(aten::add_, {a, b});
-      trueBlock->registerOutput(aMut);
-    }
-
-    falseBlock->registerOutput(a);
     auto c = graph->insert(aten::add, {a, b});
 
     graph->lint();
@@ -330,6 +361,94 @@ void testAliasAnalysis() {
     // may write to `a`.
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
+  }
+  {
+    // test fork/wait
+
+    // a = rand(1)
+    // fut = fork(a)
+    //    Subgraph is: return a.add_(1)
+    // ... some unrelated code
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+
+    auto forkNode = graph->insertNode(graph->create(prim::fork));
+    auto forkBlock = forkNode->addBlock();
+    {
+      WithInsertPoint g(forkBlock);
+      auto aMut = graph->insert(aten::add_, {a, constant});
+      forkBlock->registerOutput(aMut);
+      forkNode->output()->setType(FutureType::create(aMut->type()));
+    }
+    script::lambdaLiftFork(forkNode);
+
+    auto fut = forkNode->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
+  }
+  {
+    // test fork/wait in an if statement
+
+    // a = rand(1)
+    // if 1:
+    //   fut = fork(a)
+    //     Subgraph is: return a.add_(1)
+    // else:
+    //   fut = fork(a)
+    //     Subgraph is: return a.sub_(1)
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::add_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        },
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::sub_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        });
+
+    auto fut = if_->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
 }
 
