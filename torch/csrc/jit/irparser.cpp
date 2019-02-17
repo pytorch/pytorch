@@ -51,6 +51,8 @@ class IRParser {
 };
 
 struct ParsedLiteral {
+  ParsedLiteral() = default;
+
   AttributeKind k = AttributeKind::t;
 
   int64_t i;
@@ -62,7 +64,7 @@ struct ParsedLiteral {
 };
 
 struct VarWithType {
-  VarWithType(){};
+  VarWithType() = default;
   std::string name;
   std::string type;
 };
