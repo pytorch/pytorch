@@ -4163,6 +4163,14 @@ a")
             return a == [1, 2, 4]
         self.checkScript(test_list_remove, ())
 
+    def test_mutable_list_remove_tensor(self):
+        def test_list_remove_tensor():
+            a = [torch.ones(1), torch.zeros(1), torch.ones(2)]
+            a.remove(torch.zeros(1))
+
+            return len(a) == 2
+        self.checkScript(test_list_remove_tensor, ())
+
     def test_mutable_list_remove2(self):
         def test_list_remove2():
             a = [1]
