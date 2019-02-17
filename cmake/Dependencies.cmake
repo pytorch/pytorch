@@ -179,7 +179,7 @@ if(USE_QNNPACK)
       set(USE_QNNPACK OFF)
     endif()
   else()
-    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin|Windows)$"))
       message(WARNING
         "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
         "Supported platforms are Android, iOS, Linux, and macOS. "
