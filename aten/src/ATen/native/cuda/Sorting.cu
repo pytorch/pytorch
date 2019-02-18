@@ -6,6 +6,11 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
+#include <thrust/extrema.h>
+#include <thrust/inner_product.h>
+#include <thrust/execution_policy.h>
+#include <thrust/sequence.h>
+
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
