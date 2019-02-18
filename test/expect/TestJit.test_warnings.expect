@@ -1,15 +1,12 @@
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : string = prim::Constant[value="x is less than 2"]()
   %2 : int = prim::Constant[value=2]()
   %3 : Tensor = aten::lt(%x, %2)
   %4 : bool = prim::Bool(%3)
    = prim::If(%4)
-    block0() {
+    block0():
        = aten::warn(%1, %2)
       -> ()
-    }
-    block1() {
+    block1():
       -> ()
-    }
-  return (%x);
-}
+  return (%x)

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
@@ -484,8 +485,16 @@ void registerOperator(Operator&& op) {
   if (op.schema().is_varret()) {
     Symbol s = Symbol::fromQualString(op.schema().name());
     if (!printerHasSpecialCaseFor(s)) {
-      std::cout << c10::str(
-          "missing special case in python printer for non-schematized operator ",
+      AT_ERROR(
+          "Missing special case in python printer for non-schematized"
+          " operator ",
+          op.schema().name(),
+          ". File a bug to add a case for this operator.\n");
+    }
+    if (!aliasAnalysisHasSpecialCaseFor(s)) {
+      AT_ERROR(
+          "Missing special case in alias analysis for non-schematized"
+          " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }

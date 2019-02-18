@@ -1,4 +1,3 @@
-graph(%x : Double(1)
-      %y : Double(1)) {
-  return (%x);
-}
+graph(%x : Double(1),
+      %y : Double(1)):
+  return (%x)

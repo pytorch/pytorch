@@ -1,16 +1,14 @@
-graph(%x : Float(*, *)
-      %y : Float(*, *)
-      %z : Float(*, *)) {
+graph(%x : Float(*, *),
+      %y : Float(*, *),
+      %z : Float(*, *)):
   %3 : int = prim::Constant[value=1]()
   %w : Float(*, *) = prim::FusionGroup_0(%x, %y)
   %5 : Float(*, *) = aten::add(%w, %z, %3)
-  return (%5);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)) {
+  return (%5)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Float(*, *)):
   %2 : int = prim::Constant[value=1]()
   %x1 : Float(*, *) = aten::add(%0, %1, %2)
   %y1 : Float(*, *) = aten::sub(%0, %1, %2)
   %w : Float(*, *) = prim::FusedConcat[dim=0](%x1, %y1)
-  return (%w);
-}
+  return (%w)
