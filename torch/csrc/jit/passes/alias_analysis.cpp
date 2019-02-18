@@ -266,8 +266,6 @@ void AliasDb::analyze(Node* node) {
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
   // These nodes are not schematized, so we need to handle them specially
-  // TODO do the thing that python_printer does to force operator writers to
-  // register aliasing information
   switch (node->kind()) {
     case prim::If:
       return analyzeIf(node);
@@ -317,7 +315,13 @@ void AliasDb::analyzeImpl(Node* node) {
       // If the node has a schema, fall through and analyze it normally
       break;
     }
+    case prim::Print:
+      // These ops do nothing
+      return;
+    default:
+      AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
+
 
   const auto& schema = node->schema();
   if (schema.is_vararg() || schema.is_varret()) {
@@ -965,5 +969,56 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
     return c10::nullopt;
   }
 }
+
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+  // WARNING: by adding a case to this list, you are asserting that you have
+  // added a case for the unschematized node in AliasDb::analyze
+  const static std::unordered_set<Symbol> handled = {
+    prim::If,
+    prim::Loop,
+    prim::FusionGroup,
+    prim::DifferentiableGraph,
+    prim::Constant,
+    prim::DictConstruct,
+    prim::ListConstruct,
+    prim::TupleConstruct,
+    prim::Undefined,
+    prim::FusedConcat,
+    prim::MMTreeReduce,
+    prim::MMBatchSide,
+    prim::None,
+    prim::BroadcastSizes,
+    prim::ChunkSizes,
+    prim::Function,
+    prim::TupleUnpack,
+    prim::TupleIndex,
+    prim::DictIndex,
+    prim::TupleSlice,
+    prim::ListUnpack,
+    prim::PythonOp,
+    prim::ConstantChunk,
+    prim::BroadcastingChunk,
+    aten::add,
+    aten::sub,
+    aten::mul,
+    aten::div,
+  };
+
+  // Operators that should not be used by alias analysis
+  const static std::unordered_set<Symbol> purposefully_not_handled = {
+    prim::Print,
+    prim::Load,
+    prim::Store,
+    prim::Drop,
+    at::onnx::Reshape,
+    at::onnx::Shape,
+    prim::AnyDefined,
+    prim::AutogradAdd,
+    prim::fork, // TODO: fork aliasing / futures
+  };
+
+  return handled.count(symbol) || purposefully_not_handled.count(symbol);
+}
+
 } // namespace jit
 } // namespace torch
