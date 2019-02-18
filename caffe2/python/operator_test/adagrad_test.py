@@ -139,7 +139,7 @@ class TestAdagrad(serial.SerializedTestCase):
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
