@@ -64,26 +64,16 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
-template <typename scalar_t>
-void quick_sort(
+template <typename scalar_t, typename ComparisonOp>
+void quick_sort_impl(
     TensorAccessor<scalar_t, 1> arr,
     TensorAccessor<int64_t, 1> idx,
-    bool descending) {
+    ComparisonOp gt_or_nan) {
   auto ARR_SWAP = [&](int64_t i, int64_t j) { std::swap(arr[i], arr[j]); };
   auto BOTH_SWAP = [&](int64_t i, int64_t j) {
     std::swap(arr[i], arr[j]);
     std::swap(idx[i], idx[j]);
   };
-
-  // Emulate NumPy behavior of putting NaNs
-  // at the end of an ascending list.
-  auto gt_or_nan =
-      (descending
-       ? [](scalar_t x,
-            scalar_t y) -> bool { return ((y != y && x == x) || (x < y)); }
-       : [](scalar_t x, scalar_t y) -> bool {
-           return ((x != x && y == y) || (x > y));
-         });
 
   int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid,
       stack = 0, sz_right, sz_left;
@@ -184,6 +174,25 @@ void quick_sort(
       arr[j - 1] = piv;
       idx[j - 1] = pid;
     }
+  }
+}
+
+template <typename scalar_t>
+void quick_sort(
+    TensorAccessor<scalar_t, 1> arr,
+    TensorAccessor<int64_t, 1> idx,
+    bool descending) {
+  // ComparisonOp emulates NumPy behavior of putting NaNs
+  // at the end of an ascending list.
+  // We would use a lambda within quick_sort, if it were not for
+  // https://stackoverflow.com/questions/27989031/msvc-error-when-using-capture-less-lambda-expressions-as-second-and-third-operan
+  if (descending) {
+    quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
+	return ((y != y && x == x) || (x < y)); });
+  } else {
+    quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
+           return ((x != x && y == y) || (x > y));
+         });
   }
 }
 
