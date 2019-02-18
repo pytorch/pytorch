@@ -814,7 +814,7 @@ class TestCuda(TestCase):
         device_name_None = torch.cuda.get_device_name(None)
         self.assertEqual(current_device_name, device_name_None)
 
-        #Testing the behaviour for No argument
+        # Testing the behaviour for No argument
         device_name_no_argument = torch.cuda.get_device_name()
         self.assertEqual(current_device_name, device_name_no_argument)
 
@@ -825,7 +825,7 @@ class TestCuda(TestCase):
         device_capability_None = torch.cuda.get_device_capability(None)
         self.assertEqual(current_device_capability, device_capability_None)
 
-        #Testing the behaviour for No argument
+        # Testing the behaviour for No argument
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
