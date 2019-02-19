@@ -5,11 +5,11 @@
 #include <stdlib.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
-#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
 #include <thrust/inner_product.h>
-#include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/sort.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -2239,6 +2239,44 @@ void kthvalue_cuda_template(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+// this does not reduce to median with dim beause we don't want to copy twice
+template <typename scalar_t>
+Tensor median_cuda_template(const Tensor& self) {
+  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  if (self.dim() == 0 && self.numel() == 1) {
+    return self.clone();
+  }
+  auto self_copy = self.clone().view(-1);
+  auto values = at::empty({1}, self.options());
+  auto indices = at::empty({1}, self.options().dtype(kLong));
+  AT_CHECK(
+      self.dim() <= MAX_TENSORINFO_DIMS,
+      "cannot operate on more than ",
+      MAX_TENSORINFO_DIMS,
+      " dimensions");
+
+  // Based on required index size, run the algorithm with the
+  // appropriate index type
+  if (cuda::detail::canUse32BitIndexMath(self) &&
+      cuda::detail::canUse32BitIndexMath(values) &&
+      cuda::detail::canUse32BitIndexMath(indices)) {
+    run_launcher<scalar_t, uint32_t>(
+        values,
+        indices,
+        self_copy,
+        0,
+        KthValueLauncher((self_copy.size(0) + 1) / 2)); // KthValue is 1-based
+  } else {
+    run_launcher<scalar_t, uint64_t>(
+        values,
+        indices,
+        self_copy,
+        0,
+        KthValueLauncher((self_copy.size(0) + 1) / 2)); // KthValue is 1-based
+  }
+  return values.view({});
+}
+
 } // namespace
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
@@ -2252,6 +2290,12 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     kthvalue_cuda_template<scalar_t>(values, indices, self, k, dim, keepdim);
   });
   return std::forward_as_tuple(values, indices);
+}
+
+Tensor median_cuda(const Tensor& self) {
+  return AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "median", [&] {
+    return median_cuda_template<scalar_t>(self);
+    });
 }
 
 std::tuple<Tensor&, Tensor&> topk_out_cuda(

@@ -188,11 +188,12 @@ void quick_sort(
   // https://stackoverflow.com/questions/27989031/msvc-error-when-using-capture-less-lambda-expressions-as-second-and-third-operan
   if (descending) {
     quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
-	return ((y != y && x == x) || (x < y)); });
+      return ((y != y && x == x) || (x < y));
+    });
   } else {
     quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
-           return ((x != x && y == y) || (x > y));
-         });
+      return ((x != x && y == y) || (x > y));
+    });
   }
 }
 
@@ -364,10 +365,7 @@ std::tuple<Tensor&, Tensor&> mode_out_cpu(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> mode(
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
+std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::mode_out(values, indices, self, dim, keepdim);
@@ -454,10 +452,24 @@ std::tuple<Tensor, Tensor> median(
   return std::make_tuple(values, indices);
 }
 
-Tensor median(const Tensor& self) {
-  AT_CHECK(self.dim() == 1, "tensor must have one dimension");
-  AT_CHECK(self.size(0) > 0, "tensor must nor be empty");
-  return std::get<0>(at::median(self, /*dim=*/0, /*keepdim=*/false));
+// this does not reduce to median with dim beause we don't want to copy twice
+Tensor median_cpu(const Tensor& self) {
+  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  if (self.dim() == 0 && self.numel() == 1) {
+    return self.clone();
+  }
+  auto tmp_values = self.clone().view(-1);
+  auto result = at::empty({1}, self.options());
+  AT_DISPATCH_ALL_TYPES(self.type(), "median", [&] {
+    // note, quick_select is 0 based while kthvalue is not
+    int64_t k = (tmp_values.size(0) - 1) / 2;
+    auto val_accessor = tmp_values.accessor<scalar_t, 1>();
+    quick_select_template(val_accessor, k, [&](int64_t i, int64_t j) {
+      std::swap(val_accessor[i], val_accessor[j]);
+    });
+    result.fill_(tmp_values[k]);
+  });
+  return result.view({});
 }
 
 std::tuple<Tensor&, Tensor&> topk_out_cpu(
