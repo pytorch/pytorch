@@ -845,8 +845,8 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout2d` for details.
 
@@ -870,8 +870,8 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout3d` for details.
 
@@ -1504,10 +1504,11 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
-    r"""Computes sums, means or maxes of 'bags' of embeddings, without instantiating the
+    r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
+
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -1534,25 +1535,25 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-          - If :attr:`input` is 2D of shape ``B x N``,
+          - If :attr:`input` is 2D of shape `(B, N)`,
 
             it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
             this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
             :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-          - If :attr:`input` is 1D of shape ``N``,
+          - If :attr:`input` is 1D of shape `(N)`,
 
             it will be treated as a concatenation of multiple bags (sequences).
             :attr:`offsets` is required to be a 1D tensor containing the
             starting index positions of each bag in :attr:`input`. Therefore,
-            for :attr:`offsets` of shape ``B``, :attr:`input` will be viewed as
+            for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
             having ``B`` bags. Empty bags (i.e., having 0-length) will have
             returned vectors filled by zeros.
 
         - :attr:`weight` (Tensor): the learnable weights of the module of
-          shape ``(num_embeddings x embedding_dim)``
+          shape `(num_embeddings, embedding_dim)`
 
-        - :attr:`output`: aggregated embedding values of shape ``B x embedding_dim``
+        - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
     Examples::
 
