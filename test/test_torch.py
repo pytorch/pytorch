@@ -3455,6 +3455,7 @@ class _TestTorchMixin(object):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+            full1d = cast(torch.randn(*dims_full).flatten().float())
             small = cast(torch.randn(*dims_small).float())
             large = cast(torch.randn(*dims_large).float())
             small_expanded = small.expand(*dims_full)
@@ -3471,8 +3472,7 @@ class _TestTorchMixin(object):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            # TODO: fix masked_scatter and masked_fill broadcasting
-            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
+            if hasattr(large_expanded, fn):
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
@@ -3482,6 +3482,10 @@ class _TestTorchMixin(object):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
+                    elif fn == "masked_scatter":
+                        return myfn(t1 < 0.5, full1d)
+                    elif fn == "masked_fill":
+                        return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3509,7 +3513,7 @@ class _TestTorchMixin(object):
                     elif fn == "masked_select":
                         return fntorch(t1, t2 < 0)
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                        return fntorch(t1, t2 < 0.5, full1d)
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
@@ -3540,7 +3544,7 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
+                    return t0_fn(t1 < 0.5, full1d)
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
                 elif fn == "map":
@@ -7103,11 +7107,22 @@ class _TestTorchMixin(object):
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
 
-        # test max
-        ret = a.max(dim=0)
+        # test max, min, median, mode
+        for f in ['max', 'min', 'median', 'mode']:
+            ret = getattr(a, f)(dim=0)
+            self.assertEqual(ret.values, ret[0])
+            self.assertEqual(ret.indices, ret[1])
+            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            self.assertEqual(ret1.values, ret1[0])
+            self.assertEqual(ret1.indices, ret1[1])
+            self.assertEqual(ret1.values, ret[0])
+            self.assertEqual(ret1.indices, ret[1])
+
+        # test kthvalue
+        ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])

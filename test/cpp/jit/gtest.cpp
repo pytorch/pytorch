@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_alias_analysis.h>
+#include <test/cpp/jit/test_irparser.h>
 #include <test/cpp/jit/test_misc.h>
+#include <test/cpp/jit/test_netdef_converter.h>
 
 using namespace torch;
 using namespace torch::jit;
@@ -33,6 +35,9 @@ JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
 JIT_TEST(AliasAnalysis)
 JIT_TEST(AliasTracker)
+JIT_TEST(IRParser)
+
+JIT_TEST(NetDefConverter)
 
 JIT_TEST(THNNConv)
 JIT_TEST(ATenNativeBatchNorm)

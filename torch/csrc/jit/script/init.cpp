@@ -168,6 +168,21 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Method& m,
+      const c10::optional<size_t>& size_hint = {}) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << kind() << " cannot be used as a tuple";
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+    throw ErrorReport(loc) << ss.str();
+  }
+
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name) {
     try {
