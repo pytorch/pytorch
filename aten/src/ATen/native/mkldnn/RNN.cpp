@@ -615,9 +615,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn(
     bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
     const Tensor& fn_dropout_state) {
 
-  AT_CHECK(!fn_dropout_state.defined() && fn_dropout == 0, "rnn: mkldnn doesn't support dropout");
-  AT_CHECK(fn_batch_sizes.size() == 0, "rnn: mkldnn doesn't support packed input format");
-
   auto input = input_r;
 
   RNNParams fn;
@@ -694,7 +691,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     std::array<bool, 4> output_mask) {
 
   AT_CHECK(!fn_dropout_state.defined() && fn_dropout == 0, "rnn: mkldnn doesn't support dropout");
-  AT_CHECK(fn_batch_sizes.size() == 0, "rnn: mkldnn doesn't support packed input format");
 
   auto input = input_r;
   auto output = output_r;
