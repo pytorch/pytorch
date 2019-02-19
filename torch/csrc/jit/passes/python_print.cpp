@@ -242,7 +242,6 @@ struct PythonPrintPass {
   bool isConstantLike(Node* n) {
     switch (n->kind()) {
       case prim::Constant:
-      case prim::Undefined:
       case prim::None:
         return true;
       default:
@@ -725,7 +724,6 @@ struct PythonPrintPass {
         IValue v = toIValue(node->output()).value();
         printConstant(stmt, v);
       } break;
-      case prim::Undefined:
       case prim::None: {
         if (node->output()->type()->isSubtypeOf(NoneType::get())) {
           stmt << "None";
@@ -1080,7 +1078,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
-      prim::Undefined,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your

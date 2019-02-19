@@ -37,7 +37,7 @@ void specializeUndef(Graph& g) {
         // then the gradOutputs are also zero and will be represented as
         // undefined nodes
         if (all_undefined) {
-          auto undef = g.createUndefined()->insertAfter(n)->output();
+          auto undef = g.createNone(TensorType::get())->insertAfter(n)->output();
           for (auto o : n->outputs()) {
             o->replaceAllUsesWith(undef);
           }
@@ -94,7 +94,7 @@ void specializeUndef(Graph& g) {
           state[n->output()] = State::Unknown;
         }
       } break;
-      case prim::Undefined: {
+      case prim::None: {
         state[n->output()] = State::Undefined;
       } break;
       default:

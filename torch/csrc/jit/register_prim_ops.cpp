@@ -409,14 +409,6 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::Undefined() -> Tensor",
-        [](const Node* node) {
-          return [](Stack& stack) {
-            stack.emplace_back(at::Tensor());
-            return 0;
-          };
-        }),
-    Operator(
         prim::None,
         [](const Node* node) {
           return [](Stack& stack) {

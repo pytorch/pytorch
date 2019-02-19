@@ -282,7 +282,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::DictConstruct:
     case prim::ListConstruct:
     case prim::TupleConstruct:
-    case prim::Undefined:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
@@ -982,7 +981,6 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
     prim::DictConstruct,
     prim::ListConstruct,
     prim::TupleConstruct,
-    prim::Undefined,
     prim::FusedConcat,
     prim::MMTreeReduce,
     prim::MMBatchSide,

@@ -50,7 +50,7 @@ struct TopoMoveTestFixture {
     for (const auto name : inputNames) {
       inputs.push_back(nodes.at(name)->output());
     }
-    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
+    auto node = graph->appendNode(graph->create(prim::Constant, inputs));
     node->output()->setUniqueName(name);
     nodes[name] = node;
 
@@ -62,7 +62,7 @@ struct TopoMoveTestFixture {
       }
 
       auto block = node->blocks().at(0);
-      block->appendNode(graph->create(prim::Undefined, blockDeps));
+      block->appendNode(graph->create(prim::Constant, blockDeps));
     }
   }
 
@@ -530,9 +530,9 @@ void testAliasTracker() {
     /**
      * Test writer tracking
      */
-    auto n1 = graph->appendNode(graph->create(prim::Undefined));
-    auto n2 = graph->appendNode(graph->create(prim::Undefined));
-    auto n3 = graph->appendNode(graph->create(prim::Undefined));
+    auto n1 = graph->appendNode(graph->create(prim::Constant));
+    auto n2 = graph->appendNode(graph->create(prim::Constant));
+    auto n3 = graph->appendNode(graph->create(prim::Constant));
     t.registerWrite(a, n1);
     t.registerWrite(f, n2);
     // We should report those writes accurately

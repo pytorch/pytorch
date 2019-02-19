@@ -438,10 +438,6 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::Undefined: {
-        setUnshapedType(node);
-        return;
-      }
       default:
         break; // fall-through
     }
