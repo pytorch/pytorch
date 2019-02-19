@@ -106,7 +106,7 @@ class Conv1d(_ConvNd):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters,
           of size
-          :math:`\left\lfloor\frac{C_\text{out}}{C_\text{in}}\right\rfloor`
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
 
     .. note::
 
@@ -150,7 +150,8 @@ class Conv1d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            (out_channels, in_channels, kernel_size). The values of these weights are sampled from
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
+            The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
             :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
@@ -227,7 +228,7 @@ class Conv2d(_ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
-          :math:`\left\lfloor\frac{C_\text{out}}{C_\text{in}}\right\rfloor`.
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -278,7 +279,8 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (out_channels, in_channels, kernel_size[0], kernel_size[1]).
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -408,7 +410,8 @@ class Conv3d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
@@ -517,7 +520,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note
+      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
@@ -547,7 +550,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
          It is up to the user to add proper padding.
 
     .. note::
-        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
         are initialized with same parameters, they are inverses of each other in
@@ -565,7 +568,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
             will be added to both sides of the input. Default: 0
         output_padding (int or tuple, optional): Additional size added to one side
             of the output shape. Default: 0
@@ -583,8 +586,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (in_channels, out_channels, kernel_size[0], kernel_size[1]). The values
-                         of these weights are sampled from
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size})`. The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
@@ -625,7 +628,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note
+      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
@@ -662,7 +665,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
          It is up to the user to add proper padding.
 
     .. note::
-        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
         are initialized with same parameters, they are inverses of each other in
@@ -680,7 +683,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
             will be added to both sides of each dimension in the input. Default: 0
         output_padding (int or tuple, optional): Additional size added to one side
             of each dimension in the output shape. Default: 0
@@ -701,7 +704,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -770,7 +774,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note
+      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
@@ -807,7 +811,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
          It is up to the user to add proper padding.
 
     .. note::
-        The :attr:`padding` argument effectively adds ``kernel_size - 1 - padding``
+        The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
@@ -825,7 +829,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): ``kernel_size - 1 - padding`` zero-padding
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
             will be added to both sides of each dimension in the input. Default: 0
         output_padding (int or tuple, optional): Additional size added to one side
             of each dimension in the output shape. Default: 0
@@ -850,7 +854,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
+                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
