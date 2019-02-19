@@ -33,6 +33,7 @@ const std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Short", at::kShort},
   {"Int", at::kInt},
   {"Long", at::kLong},
+  {"Bool", at::kBool},
 };
 
 std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
