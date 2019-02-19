@@ -953,16 +953,16 @@ def glu(input, dim=-1):
     The gated linear unit. Computes:
 
     .. math ::
+        \text{GLU}(a, b) = a \otimes \sigma(b)
 
-        H = A \times \sigma(B)
-
-    where `input` is split in half along `dim` to form `A` and `B`.
+    where `input` is split in half along `dim` to form `a` and `b`, :math:`\sigma`
+    is the sigmoid function and :math:`\otimes` is the element-wise product between matrices.
 
     See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
 
     Args:
         input (Tensor): input tensor
-        dim (int): dimension on which to split the input
+        dim (int): dimension on which to split the input. Default: -1
     """
     if input.dim() == 0:
         raise RuntimeError("glu does not suppport scalars because halving size must be even")
@@ -1139,7 +1139,7 @@ In-place version of :func:`~rrelu`.
 logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
 logsigmoid(input) -> Tensor
 
-Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
+Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
 
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
@@ -1211,8 +1211,8 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
@@ -1233,7 +1233,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
     It is applied to all slices along dim, and will re-scale them so that the elements
-    lie in the range `(0, 1)` and sum to 1.
+    lie in the range `[0, 1]` and sum to 1.
 
     See :class:`~torch.nn.Softmax` for more details.
 
@@ -1241,9 +1241,8 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
-
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
 
     .. note::
         This function doesn't work directly with NLLLoss,
@@ -1335,8 +1334,8 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
