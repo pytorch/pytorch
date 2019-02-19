@@ -2725,14 +2725,6 @@ def generate_tests():
                 setattr(TestCuda, test_name, test_fn)
 
 
-def load_tests(loader, tests, pattern):
-    test_suite = unittest.TestSuite()
-    for test_group in tests:
-        for test in test_group:
-            if 'test_triu_tril' not in str(test):
-                test_suite.addTest(test)
-    return test_suite
-
 if __name__ == '__main__':
     if TEST_CUDA:
         load_ignore_file()
