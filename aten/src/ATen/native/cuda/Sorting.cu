@@ -1,23 +1,23 @@
 #include <ATen/ATen.h>
-#include <ATen/native/SortingUtils.h>
-#include <assert.h>
-#include <c10/macros/Macros.h>
-#include <stdlib.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/extrema.h>
-#include <thrust/inner_product.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/native/SortingUtils.h>
+#include <c10/macros/Macros.h>
+#include <assert.h>
+#include <stdlib.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
 #include <THC/THCThrustAllocator.cuh>
+
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
+#include <thrust/device_vector.h>
+#include <thrust/extrema.h>
+#include <thrust/inner_product.h>
+#include <thrust/sequence.h>
 
 namespace at {
 namespace native {
@@ -2385,14 +2385,14 @@ std::tuple<Tensor&, Tensor&> sort_out_cuda(
     // We sort k/v pairs in-place; copy unsorted self to output
     values.copy_(self);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "sort", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "sort", [&] {
       sortKeyValueInplace<scalar_t>(values, indices, dim, descending);
     });
 
   } else {
     // Otherwise, fall back upon Thrust, which handles all other cases
     // (potentially slowly, with extra copies/memory allocations)
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "sort", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "sort", [&] {
       sortViaThrust<scalar_t>(values, indices, self, dim, descending);
     });
   }
