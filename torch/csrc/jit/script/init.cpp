@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -955,6 +956,17 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+
+  py::class_<testing::FileCheck>(m, "FileCheck")
+      .def(py::init<>())
+      .def("check", &testing::FileCheck::check)
+      .def("check_not", &testing::FileCheck::check_not)
+      .def("check_same", &testing::FileCheck::check_same)
+      .def("check_next", &testing::FileCheck::check_next)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("check_dag", &testing::FileCheck::check_dag)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("run", &testing::FileCheck::run);
 }
 
 } // namespace script
