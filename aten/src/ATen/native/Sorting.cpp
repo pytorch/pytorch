@@ -438,7 +438,8 @@ std::tuple<Tensor&, Tensor&> median_out(
     int64_t dim,
     bool keepdim) {
   // note: kthvalue counts from 1..n
-  at::kthvalue_out(values, indices, self, (self.size(dim) + 1) / 2, dim);
+  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
   return std::forward_as_tuple(values, indices);
 }
 
