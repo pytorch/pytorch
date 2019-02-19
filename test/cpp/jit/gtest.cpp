@@ -41,6 +41,7 @@ JIT_TEST(NetDefConverter)
 
 JIT_TEST(THNNConv)
 JIT_TEST(ATenNativeBatchNorm)
+JIT_TEST(NoneSchemaMatch)
 
 #define JIT_TEST_CUDA(name)    \
   TEST(JitTest, name##_CUDA) { \
