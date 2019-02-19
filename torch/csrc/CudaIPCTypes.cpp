@@ -15,7 +15,7 @@ void BadIPCPatternError() {
 }
 
 struct CudaIPCGlobalEntities {
-  std::mutex mutex;
+  std::mutex mutex_;
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
@@ -29,7 +29,7 @@ struct CudaIPCGlobalEntities {
     }
   };
   void safe_clean_current_file() {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex_);
     if (next_available_ref_counters_file_ != nullptr &&
         next_available_ref_counters_file_->offsets_in_use() == 0) {
       ref_counters_files_.erase(next_available_ref_counters_file_->handle());
@@ -108,7 +108,7 @@ void CudaIPCSentDataDelete(void* ptr) {
 }
 
 void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
-  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex_);
   cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);
   if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() ==
           0 &&
@@ -118,7 +118,7 @@ void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
 }
 
 bool CudaIPCHaveRefCounter() {
-  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex_);
   return cuda_ipc_global_entities.next_available_ref_counters_file_ != nullptr;
 }
 
@@ -128,7 +128,7 @@ void CudaIPCCreateRefCounter(
     at::DataPtr data_ptr) {
   auto rc = std::make_shared<CudaIPCRefCountersFile>(
       handle, size, std::move(data_ptr));
-  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex);
+  std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex_);
   cuda_ipc_global_entities.ref_counters_files_[handle] = rc;
   cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
 }

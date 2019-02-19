@@ -57,7 +57,7 @@ def send_tensor(queue, event, tp):
 
 
 def send_and_delete_tensors(queue, event, tp, count):
-    for i in range(5):
+    for i in range(count):
         t = torch.full([5], i).type(tp)
         queue.put(t)
         del t
@@ -230,6 +230,8 @@ class TestMultiprocessing(TestCase):
             t2 = q.get()
             self.assertTrue(t1.eq(1).all())
             self.assertTrue(id(t1.storage()) == id(t2.storage()))
+            # We need to delete this tensors to allow producer (child process)
+            # collect them properly
             del t1, t2
             e.set()
             p.join(1)
@@ -359,48 +361,47 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
     def test_cuda_small_tensors(self):
-        with leak_checker(self):
-            # Check multiple small tensors which will likely use the same
-            # underlying cached allocation
-            ctx = mp.get_context('spawn')
-            tensors = []
-            for i in range(5):
-                device = i % 2
-                tensors += [torch.arange(i * 5., (i + 1) * 5).cuda(device)]
+        # Check multiple small tensors which will likely use the same
+        # underlying cached allocation
+        ctx = mp.get_context('spawn')
+        tensors = []
+        for i in range(5):
+            device = i % 2
+            tensors += [torch.arange(i * 5., (i + 1) * 5).cuda(device)]
 
-            inq = ctx.Queue()
-            outq = ctx.Queue()
-            inq.put(tensors)
-            p = ctx.Process(target=sum_tensors, args=(inq, outq))
-            p.start()
+        inq = ctx.Queue()
+        outq = ctx.Queue()
+        inq.put(tensors)
+        p = ctx.Process(target=sum_tensors, args=(inq, outq))
+        p.start()
 
-            results = []
-            for _ in range(5):
-                results.append(outq.get())
-            p.join()
+        results = []
+        for _ in range(5):
+            results.append(outq.get())
+        p.join()
 
-            for i, _tensor in enumerate(tensors):
-                v, device, tensor_size, storage_size = results[i]
-                self.assertEqual(v, torch.arange(i * 5., (i + 1) * 5).sum())
-                self.assertEqual(device, i % 2)
-                self.assertEqual(tensor_size, 5)
+        for i, _tensor in enumerate(tensors):
+            v, device, tensor_size, storage_size = results[i]
+            self.assertEqual(v, torch.arange(i * 5., (i + 1) * 5).sum())
+            self.assertEqual(device, i % 2)
+            self.assertEqual(tensor_size, 5)
 
-            # Collect current process (producer) files, make sure nothing holds
-            # ref to the sent tensors
-            del _tensor
-            del tensors
+        # Collect current process (producer) files, make sure nothing holds
+        # ref to the sent tensors
+        del _tensor
+        del tensors
 
-            # We need to collect, as CUDA MP implementation holds one shared
-            # memory 'file'for performance reason
-            torch.cuda.ipc_collect()
+        # We need to collect, as CUDA MP implementation holds one shared
+        # memory 'file'for performance reason
+        torch.cuda.ipc_collect()
 
-            # You might think this should be the case, but it's not!  After
-            # data from the CUDA caching allocator goes through IPC, the
-            # size of the storage is the size of the *cached cudaMalloc for
-            # the entire memory block* of the storage, not just the storage.
-            # See Note [CUDA IPC and the caching allocator] for more info
-            #
-            # self.assertEqual(storage_size, 5)
+        # You might think this should be the case, but it's not!  After
+        # data from the CUDA caching allocator goes through IPC, the
+        # size of the storage is the size of the *cached cudaMalloc for
+        # the entire memory block* of the storage, not just the storage.
+        # See Note [CUDA IPC and the caching allocator] for more info
+        #
+        # self.assertEqual(storage_size, 5)
 
     @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
