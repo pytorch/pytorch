@@ -527,7 +527,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/testing/init.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
