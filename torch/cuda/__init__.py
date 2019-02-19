@@ -265,7 +265,7 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device):
+def get_device_name(device=None):
     r"""Gets the name of a device.
 
     Arguments:
@@ -277,7 +277,7 @@ def get_device_name(device):
     return get_device_properties(device).name
 
 
-def get_device_capability(device):
+def get_device_capability(device=None):
     r"""Gets the cuda capability of a device.
 
     Arguments:
