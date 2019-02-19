@@ -27,4 +27,24 @@ void THTensor_(zero)(THTensor *r_)
   THTensor_(fill)(r_, 0);
 }
 
+void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
+{
+  scalar_t *r__data;
+  int64_t i, sz;
+
+  THArgCheck(n > 0, 1, "invalid argument");
+
+  if(m <= 0)
+    m = n;
+
+  THTensor_(resize2d)(r_, n, m);
+  THTensor_(zero)(r_);
+
+  i = 0;
+  r__data = r_->data<scalar_t>();
+  sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
+  for(i = 0; i < sz; i++)
+    r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
+}
+
 #endif
