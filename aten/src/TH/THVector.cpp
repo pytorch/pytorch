@@ -25,7 +25,7 @@
 #include <TH/THGenerateBoolType.h>
 
 #include <TH/generic/THVectorDispatch.cpp>
-#include <TH/THGenerateBoolType.h>
+#include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THVectorDispatch.cpp>
-#include <TH/THGenerateAllTypes.h>
+#include <TH/THGenerateBoolType.h>

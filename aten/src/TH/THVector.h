@@ -13,5 +13,4 @@
 
 #include <TH/generic/THVector.h>
 #include <TH/THGenerateBoolType.h>
-
 #endif // TH_VECTOR_INC
