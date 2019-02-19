@@ -1224,7 +1224,7 @@ int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
   auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value.toStringRef();
+  dict[idx] = value;
   push(stack, dict);
   return 0;
 }
