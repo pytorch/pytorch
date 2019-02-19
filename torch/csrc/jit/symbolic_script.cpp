@@ -98,6 +98,12 @@ const std::vector<std::string> functions = {
             # FIXME: torchscript: torch.zeros(sizes, grad.options())
             return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
 
+        def ___mm_backward_self(grad, mat2):
+            return grad.mm(mat2.t())
+
+        def ___mm_backward_mat2(grad, self):
+            return self.t().mm(grad)
+
         def ___permute_backward(grad,
                                 fwd_dims: List[int]):
             ndims = len(fwd_dims)
@@ -155,6 +161,37 @@ const std::vector<std::string> functions = {
 
             return grad_self
 
+        def ___adaptive_avg_pool1d_backward(grad,
+                                            input,
+                                            output_size: List[int]):
+            output_size_2d = [1, output_size[0]]
+            grad_input = ___adaptive_avg_pool2d_backward(grad.unsqueeze(2), input.unsqueeze(2), output_size_2d).squeeze(2)
+            return grad_input
+
+        def ___infer_size(a: List[int],
+                          b: List[int]):
+            dimsA = len(a)
+            dimsB = len(b)
+
+            ndim = dimsA if dimsA > dimsB else dimsB
+            expand_sizes = [0] * ndim
+
+            for i in range(ndim):
+                idx = - i + ndim - 1
+                sizeA = a[i] if dimsA + i >= 0 else 1
+                sizeB = b[i] if dimsB + i >= 0 else 1
+
+                # Assert sizeA == sizeB or sizeA == 1 or sizeB == 1
+                expand_sizes[i] = sizeB if sizeA == 1 else sizeA
+
+            return expand_sizes
+
+        def ___bmm_backward_self(grad, mat2):
+            return grad.bmm(mat2.transpose(1, 2))
+
+        def ___bmm_backward_mat2(grad, self):
+            return self.transpose(1, 2).bmm(grad)
+
         ####       TORCH FUNCTIONS           ###
 
         def _dim_arange(like,
@@ -164,17 +201,32 @@ const std::vector<std::string> functions = {
 
             return torch._dim_arange(like, dim), backward
 
+        def bmm(self, mat2):
+            def backward(grad_output):
+                grad_self = ___bmm_backward_self(grad_output, mat2)
+                grad_mat2 = ___bmm_backward_mat2(grad_output, self)
+                return grad_self, grad_mat2
+            return torch.bmm(self, mat2), backward
+
         def contiguous(self):
             def backward(grad_output):
                 return None
 
             return self.contiguous(), backward
 
+        def dot(self, tensor):
+            def backward(grad_output):
+                grad_self = grad_output * tensor
+                grad_tensor = grad_output * self
+                return grad_self, grad_tensor
+
+            return torch.dot(self, tensor), backward
+
         def erf(self):
             def backward(grad_output):
                 # Precomputed constant C = 2.0 / math.sqrt(math.pi)
                 C = 1.1283791670955126
-                grad_self =  C * torch.exp(- self.pow(2)) * grad_output
+                grad_self =  C * torch.exp(- self * self) * grad_output
                 return grad_self
 
             return torch.erf(self), backward
@@ -246,6 +298,14 @@ const std::vector<std::string> functions = {
 
             return torch.mean(self, dim, keepdim), backward
 
+        def mm(self, mat2):
+            def backward(grad_output):
+                grad_self = ___mm_backward_self(grad_output, mat2)
+                grad_mat2 = ___mm_backward_mat2(grad_output, self)
+                return grad_self, grad_mat2
+
+            return torch.mm(self, mat2), backward
+
         def mul(self, other):
             def backward(grad_output):
                 # self & other are used in backward. No need to pass in their size
@@ -255,6 +315,14 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return self * other, backward
+
+        def mv(self, vec):
+            def backward(grad_output):
+                grad_self = grad_output.ger(vec)
+                grad_vec = self.t().mv(grad_output)
+                return grad_self, grad_vec
+
+            return torch.mv(self, vec), backward
 
         def nonzero(self):
             def backward(grad_output):
@@ -484,6 +552,13 @@ const std::vector<std::string> functions = {
             return torch.view(self, size), backward
 
         ####         NN FUNCTIONS           ###
+        def adaptive_avg_pool1d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = ___adaptive_avg_pool1d_backward(grad_output, self, output_size)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool1d(self, output_size), backward
 
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
@@ -493,6 +568,14 @@ const std::vector<std::string> functions = {
                 return grad_self, None
 
             return torch.adaptive_avg_pool2d(self, output_size), backward
+
+        def adaptive_avg_pool3d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool3d(self, output_size), backward
 
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
@@ -568,8 +651,7 @@ const std::vector<std::string> functions = {
             elif input_dim == 4 and mode == 'bicubic':
                 grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners)
             elif input_dim == 3 and mode == 'area':
-                output_size_2d = [1, output_size[0]]
-                grad_input = ___adaptive_avg_pool2d_backward(grad.unsqueeze(2), input, output_size_2d).squeeze(2)
+                grad_input = ___adaptive_avg_pool1d_backward(grad, input, output_size)
             elif input_dim == 4 and mode == 'area':
                 grad_input = ___adaptive_avg_pool2d_backward(grad, input, output_size)
             elif input_dim == 5 and mode == 'area':

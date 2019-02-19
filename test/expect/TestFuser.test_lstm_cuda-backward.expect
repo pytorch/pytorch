@@ -41,16 +41,16 @@ graph(%0 : Float(*, *),
   %43 : Tensor = aten::_grad_sum_to_size(%40, %14)
   %44 : Tensor = aten::_grad_sum_to_size(%40, %15)
   %45 : Float(*, *) = aten::t(%13)
-  %46 : Float(*, *) = aten::mm(%44, %45)
+  %grad_self.7 : Float(*, *) = aten::mm(%44, %45)
   %47 : Float(*, *) = aten::t(%10)
-  %48 : Float(*, *) = aten::mm(%47, %44)
-  %grad_self.7 : Float(*, *) = aten::t(%48)
+  %grad_mat2.1 : Float(*, *) = aten::mm(%47, %44)
+  %grad_self.9 : Float(*, *) = aten::t(%grad_mat2.1)
   %50 : Float(*, *) = aten::t(%12)
-  %51 : Float(*, *) = aten::mm(%43, %50)
+  %grad_self.11 : Float(*, *) = aten::mm(%43, %50)
   %52 : Float(*, *) = aten::t(%11)
-  %53 : Float(*, *) = aten::mm(%52, %43)
-  %grad_self.9 : Float(*, *) = aten::t(%53)
-  return (%grad_other.5, %41, %42, %46, %grad_self.7, %51, %grad_self.9)
+  %grad_mat2.3 : Float(*, *) = aten::mm(%52, %43)
+  %grad_self.13 : Float(*, *) = aten::t(%grad_mat2.3)
+  return (%grad_other.5, %41, %42, %grad_self.7, %grad_self.9, %grad_self.11, %grad_self.13)
 with prim::FusionGroup_0 = graph(%0 : Float(*, *),
       %1 : Float(*, *),
       %2 : Float(*, *),

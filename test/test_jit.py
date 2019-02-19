@@ -10845,7 +10845,9 @@ EXCLUDE_SCRIPT_MODULES = {
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
+    'test_nn_adaptive_avg_pool1d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_adaptive_avg_pool3d',
     'test_nn_batch_norm',
     'test_nn_embedding',
     'test_nn_log_softmax',
@@ -12471,8 +12473,6 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
         if test_name not in EXCLUDE_SCRIPT:
             disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-            import pdb
-            pdb.set_trace()
 
             def run_test():
                 script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
