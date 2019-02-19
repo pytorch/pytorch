@@ -4149,18 +4149,14 @@ class _TestTorchMixin(object):
                         assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
                         exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
                         self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
+                        x_nc_is_contiguous = x_nc.is_contiguous()
                         if upper:
                             self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
                         else:
                             self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
 
-                        # any 3-dimensional tensor should be fine
-                        if len(shape) <= 3 or s == -2:
-                            self.assertFalse(x_nc.is_contiguous(),
-                                             "x_nc should remain non-contiguous")
-                        elif s < -3:
-                            self.assertTrue(x_nc.is_contiguous(),
-                                            "x_nc should become contiguous")
+                        self.assertTrue(x_nc.is_contiguous() == x_nc_is_contiguous,
+                                        "contiguity of x_nc should not be changed")
 
                     # expanded tensors
                     expanded_size = (x.size(0),) + x.size()
