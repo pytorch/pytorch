@@ -7190,7 +7190,7 @@ class _TestTorchMixin(object):
         self.assertEqual(empty.view(0, 3, 0, 1).view(0), empty)
 
         # test size inference with empty tensors
-        self.assertEqual(empty.view(-1), torch.Size([0]))
+        self.assertEqual(empty.view(-1).size(), torch.Size([0]))
         self.assertEqual(empty.view(10, 3, -1).size(), torch.Size([10, 3, 0]))
 
         with self.assertRaisesRegex(RuntimeError, r"because the unspecified dimension size -1 can be any value"):
