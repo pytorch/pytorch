@@ -5,7 +5,7 @@
 
 namespace torch {
 
-void BadIPCPatternError() {
+void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
   if (not warned) {
     LOG(WARNING)
@@ -25,7 +25,7 @@ struct CudaIPCGlobalEntities {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
     if (next_available_ref_counters_file_ != nullptr) {
-      BadIPCPatternError();
+      warnProducerTerminatedBeforeSharedTensorsReleased();
     }
   };
   void safe_clean_current_file() {
@@ -57,7 +57,7 @@ int64_t CudaIPCSentData::counter_value() {
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   collect();
   if (shared_blocks_.size() > 0) {
-    BadIPCPatternError();
+    warnProducerTerminatedBeforeSharedTensorsReleased();
   }
 }
 

@@ -214,6 +214,8 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     resizable_ = false;
   }
 
+  // This method can be used only after storage construction and cannot be used
+  // to modify storage status
   void set_received_cuda(bool received_cuda) {
     received_cuda_ = received_cuda;
   }

@@ -158,6 +158,8 @@ class leak_checker(object):
         return self
 
     def __exit__(self, *args):
+        if torch.cuda.is_available():
+            torch.cuda.ipc_collect()
         if args[0] is None:
             # Check that the 10th available file-descriptor at the end of the
             # test is no more than 4 higher than the 10th available at the
@@ -241,8 +243,6 @@ class TestMultiprocessing(TestCase):
             for _ in range(repeat):
                 test_fill()
                 test_receive()
-            if TEST_CUDA_IPC:
-                torch.cuda.ipc_collect()
 
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
@@ -392,7 +392,7 @@ class TestMultiprocessing(TestCase):
         del tensors
 
         # We need to collect, as CUDA MP implementation holds one shared
-        # memory 'file'for performance reason
+        # memory 'file' for performance reason
         torch.cuda.ipc_collect()
 
         # You might think this should be the case, but it's not!  After
