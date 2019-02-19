@@ -1,4 +1,4 @@
-## @package onnx
+# @package onnx
 # Module caffe2.python.onnx.tests.onnx_backend_test
 
 from __future__ import absolute_import
@@ -54,6 +54,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_where.*'  # Needs implementation
                      '|test_shrink.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
+                     '|test_tfidfvectorizer.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -78,6 +79,7 @@ if 'JENKINS_URL' in os.environ:
 if workspace.has_hip_support:
     # TODO: Investigate flakiness in ROCM Softmax (it sometimes give NaN).
     backend_test.exclude(r'test_softmax_.*_cuda')
+    backend_test.exclude(r'test_logsoftmax_.*_cuda')
 
 # import all test cases at global scope to make them visible to python.unittest
 globals().update(backend_test

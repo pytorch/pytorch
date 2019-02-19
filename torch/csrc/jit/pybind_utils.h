@@ -1,14 +1,14 @@
 #pragma once
 
-#include <torch/csrc/Device.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/stack.h>
-#include <ATen/core/jit_type.h>
-#include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/six.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -115,13 +115,26 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
+inline IValue createGenericDict(
+    py::handle obj,
+    const TypePtr& key_type,
+    const TypePtr& value_type) {
+  at::ivalue::UnorderedMap elems;
+  elems.reserve(py::len(obj));
+  for (auto key : obj) {
+    elems.insert(std::make_pair(
+        toIValue(key, key_type), toIValue(obj[key], value_type)));
+  }
+  return at::ivalue::GenericDict::create(std::move(elems));
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::DynamicType:
     case TypeKind::TensorType:
+    case TypeKind::DimensionedTensorType:
     case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
@@ -184,24 +197,24 @@ inline IValue toIValue(
             std::vector<double> repeated(*N, value);
             return repeated;
           }
+        case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-        case TypeKind::DynamicType:
           return py::cast<std::vector<at::Tensor>>(obj);
         default:
           return createGenericList(obj, elem_type);
       }
     }
+    case TypeKind::DictType: {
+      const auto& dict_type = type->expect<DictType>();
+      return createGenericDict(
+          obj, dict_type->getKeyType(), dict_type->getValueType());
+    }
     case TypeKind::OptionalType: {
-      const auto& elem_type = type->expect<OptionalType>()->getElementType();
       // check if it's a none obj since optional accepts NoneType
       if (obj == Py_None) {
-        if (elem_type->isSubtypeOf(DynamicType::get())) {
-          // return undefined tensor for Optional[Tensor]
-          return at::Tensor();
-        } else {
-          // for other optional types, return an IValue() to denote a None
-          return {};
-        }
+        // check if it's a none obj since optional accepts NoneType
+        // return an IValue() to denote a NoneType
+        return {};
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
     }
@@ -301,6 +314,15 @@ inline py::object toPyObject(IValue&& ivalue) {
     return t;
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDict();
+    const auto& elements = dict->elements();
+    py::dict py_dict;
+    for (auto pair : elements) {
+      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+    }
+    return py_dict;
+
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

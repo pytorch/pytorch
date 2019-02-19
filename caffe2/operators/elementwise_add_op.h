@@ -47,15 +47,14 @@ struct AddFunctor {
     const std::vector<int> C_dims =
         elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);
-    std::vector<int> A_axes;
-    std::vector<int> B_axes;
-    elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
-        A_dims, B_dims, &A_axes, &B_axes);
+    std::vector<int> A_back_dims;
+    std::vector<int> B_back_dims;
+    elementwise_ops_utils::ComputeBinaryBroadcastBackwardDims(
+        A_dims, B_dims, &A_back_dims, &B_back_dims);
     math::ReduceSum(
         C_dims.size(),
         C_dims.data(),
-        A_axes.size(),
-        A_axes.data(),
+        A_back_dims.data(),
         TGrad(1),
         dC,
         dA,
@@ -63,8 +62,7 @@ struct AddFunctor {
     math::ReduceSum(
         C_dims.size(),
         C_dims.data(),
-        B_axes.size(),
-        B_axes.data(),
+        B_back_dims.data(),
         TGrad(1),
         dC,
         dB,

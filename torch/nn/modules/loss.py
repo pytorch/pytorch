@@ -707,7 +707,7 @@ class MultiLabelMarginLoss(_Loss):
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
-        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -949,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']
@@ -1218,6 +1218,11 @@ class CTCLoss(_Loss):
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
 
     Example::
@@ -1250,13 +1255,15 @@ class CTCLoss(_Loss):
     """
     __constants__ = ['blank', 'reduction']
 
-    def __init__(self, blank=0, reduction='mean'):
+    def __init__(self, blank=0, reduction='mean', zero_infinity=False):
         super(CTCLoss, self).__init__(reduction=reduction)
         self.blank = blank
+        self.zero_infinity = zero_infinity
 
     @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
-        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
+                          self.zero_infinity)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

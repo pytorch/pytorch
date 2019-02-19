@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
@@ -158,8 +159,17 @@ struct SchemaParser {
       value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
-      value = DynamicType::get();
+      value = TensorType::get();
       alias_info = parseAliasAnnotation();
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+      L.next();
+      L.expect('(');
+      auto key_type = parseType().first;
+      L.expect(',');
+      auto value_type = parseType().first;
+      alias_info = parseAliasAnnotation();
+      L.expect(')');
+      value = DictType::create(key_type, value_type);
     } else {
       auto value_alias = parseBaseType();
       value = value_alias.first;
@@ -205,11 +215,11 @@ struct SchemaParser {
       alias_info = std::move(container);
     }
     if (is_return) {
-      // optionally named return values
+      // optionally field names in return values
       if (L.cur().kind == TK_IDENT) {
         name = L.next().text();
       } else {
-        name = "ret" + std::to_string(idx);
+        name = "";
       }
     } else {
       name = L.expect(TK_IDENT).text();
@@ -305,7 +315,7 @@ struct SchemaParser {
       c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
-      case TypeKind::DynamicType:
+      case TypeKind::TensorType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       } break;
@@ -475,8 +485,16 @@ void registerOperator(Operator&& op) {
   if (op.schema().is_varret()) {
     Symbol s = Symbol::fromQualString(op.schema().name());
     if (!printerHasSpecialCaseFor(s)) {
-      std::cout << c10::str(
-          "missing special case in python printer for non-schematized operator ",
+      AT_ERROR(
+          "Missing special case in python printer for non-schematized"
+          " operator ",
+          op.schema().name(),
+          ". File a bug to add a case for this operator.\n");
+    }
+    if (!aliasAnalysisHasSpecialCaseFor(s)) {
+      AT_ERROR(
+          "Missing special case in alias analysis for non-schematized"
+          " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
@@ -492,7 +510,6 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
-
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

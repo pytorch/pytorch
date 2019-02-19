@@ -1,60 +1,61 @@
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %alpha : Float(*)
-      %beta_i : Float(*)
-      %beta_h : Float(*)
-      %bias : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %alpha : Float(*),
+      %beta_i : Float(*),
+      %beta_h : Float(*),
+      %bias : Float(*)):
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %bias, %beta_h, %beta_i, %alpha, %hx, %w_hh, %x, %w_ih)
   %11 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%11);
-}
-with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
-      %1 : Float(*)
-      %2 : Float(*)
-      %3 : Float(*)
-      %4 : Float(*)
-      %5 : Float(*, *)
-      %6 : Float(*, *)
-      %7 : Float(*, *)
-      %8 : Float(*, *)) {
+  return (%11)
+with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *),
+      %1 : Float(*),
+      %2 : Float(*),
+      %3 : Float(*),
+      %4 : Float(*),
+      %5 : Float(*, *),
+      %6 : Float(*, *),
+      %7 : Float(*, *),
+      %8 : Float(*, *)):
   %9 : Float(*, *) = aten::t(%8)
   %Wx.1 : Float(*, *) = aten::mm(%7, %9)
   %11 : Float(*, *) = aten::t(%6)
   %Uz.1 : Float(*, *) = aten::mm(%5, %11)
   %13 : Float(*, *) = aten::mul(%4, %Wx.1)
-  %14 : int[] = aten::size(%1)
-  %15 : Tensor[] = prim::ListConstruct(%1, %2, %Uz.1, %13, %3, %Wx.1)
-  %16 : Tensor[] = aten::broadcast_tensors(%15)
-  %17 : Tensor, %18 : Tensor, %19 : Tensor, %20 : Tensor, %21 : Tensor, %22 : Tensor = prim::ListUnpack(%16)
-  %23 : int[] = aten::size(%3)
-  %24 : int[] = aten::size(%Wx.1)
-  %25 : int[] = prim::BroadcastSizes(%23, %24)
-  %26 : int[] = aten::size(%13)
-  %27 : int[] = aten::size(%Uz.1)
-  %28 : int[] = prim::BroadcastSizes(%26, %27)
-  %29 : int[] = aten::size(%2)
-  %30 : int[] = prim::BroadcastSizes(%29, %27)
-  %31 : int[] = prim::BroadcastSizes(%28, %25)
-  %32 : int[] = prim::BroadcastSizes(%31, %30)
-  %hy : Float(*, *), %34 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_0(%0, %22, %21, %20, %19, %18, %17)
-  %40 : int[] = aten::size(%0)
-  %41 : int[] = aten::size(%cellgate.1)
-  %42 : int[] = aten::size(%forgetgate.1)
-  %43 : int[] = aten::size(%ingate.1)
-  %44 : int[] = prim::BroadcastSizes(%42, %40)
-  %45 : int[] = prim::BroadcastSizes(%43, %41)
-  return (%hy, %cy, %Wx.1, %Uz.1, %13, %28, %25, %31, %30, %32, %14, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %44, %45, %34);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Tensor
-      %2 : Tensor
-      %3 : Tensor
-      %4 : Tensor
-      %5 : Tensor
-      %6 : Tensor) {
+  %self_size.14 : int[] = aten::size(%4)
+  %other_size.14 : int[] = aten::size(%Wx.1)
+  %self_size.12 : int[] = aten::size(%13)
+  %other_size.12 : int[] = aten::size(%Uz.1)
+  %self_size.10 : int[] = aten::size(%3)
+  %self_size.8 : int[] = aten::size(%2)
+  %20 : int[] = aten::size(%1)
+  %21 : Tensor[] = prim::ListConstruct(%1, %2, %Uz.1, %13, %3, %Wx.1)
+  %22 : Tensor[] = aten::broadcast_tensors(%21)
+  %23 : Tensor, %24 : Tensor, %25 : Tensor, %26 : Tensor, %27 : Tensor, %28 : Tensor = prim::ListUnpack(%22)
+  %29 : int[] = prim::BroadcastSizes(%self_size.10, %other_size.14)
+  %30 : int[] = prim::BroadcastSizes(%self_size.12, %other_size.12)
+  %31 : int[] = prim::BroadcastSizes(%self_size.8, %other_size.12)
+  %32 : int[] = prim::BroadcastSizes(%30, %29)
+  %33 : int[] = prim::BroadcastSizes(%32, %31)
+  %hy : Float(*, *), %35 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_0(%0, %28, %27, %26, %25, %24, %23)
+  %41 : int[] = aten::size(%0)
+  %42 : int[] = aten::size(%35)
+  %43 : int[] = aten::size(%outgate.1)
+  %44 : int[] = aten::size(%cellgate.1)
+  %45 : int[] = aten::size(%forgetgate.1)
+  %46 : int[] = aten::size(%ingate.1)
+  %47 : int[] = prim::BroadcastSizes(%45, %41)
+  %48 : int[] = prim::BroadcastSizes(%46, %44)
+  return (%hy, %cy, %Wx.1, %Uz.1, %13, %self_size.14, %other_size.14, %self_size.12, %other_size.12, %self_size.10, %30, %29, %self_size.8, %32, %31, %33, %20, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %45, %46, %44, %47, %48, %35, %43, %42)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Tensor,
+      %2 : Tensor,
+      %3 : Tensor,
+      %4 : Tensor,
+      %5 : Tensor,
+      %6 : Tensor):
   %7 : Float(*, *), %8 : Float(*, *), %9 : Float(*, *), %10 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%6)
   %11 : Float(*, *), %12 : Float(*, *), %13 : Float(*, *), %14 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%5)
   %15 : Float(*, *), %16 : Float(*, *), %17 : Float(*, *), %18 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%4)
@@ -95,5 +96,4 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %cy : Float(*, *) = aten::add(%60, %61, %31)
   %63 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate.1, %63)
-  return (%hy, %63, %cy, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1);
-}
+  return (%hy, %63, %cy, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1)

@@ -102,6 +102,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
+    The minimum cuda capability that we support is 3.5.
     """
 
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
@@ -221,7 +222,7 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx is -1:
+        if self.idx == -1:
             return
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:
@@ -264,7 +265,7 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device):
+def get_device_name(device=None):
     r"""Gets the name of a device.
 
     Arguments:
@@ -276,7 +277,7 @@ def get_device_name(device):
     return get_device_properties(device).name
 
 
-def get_device_capability(device):
+def get_device_capability(device=None):
     r"""Gets the cuda capability of a device.
 
     Arguments:
@@ -550,7 +551,7 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -612,6 +613,9 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -620,6 +624,7 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
+torch._storage_classes.add(BoolStorage)
 
 from . import sparse
 from . import profiler

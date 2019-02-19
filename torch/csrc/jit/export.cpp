@@ -5,10 +5,10 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/onnx/onnx.h>
 
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -57,42 +57,42 @@ void validateBlock(
   throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
-    IR_IF(node, PythonOp)
-    auto py_node = static_cast<torch::jit::PythonOp*>(value);
-    FAIL_EXPORT(
-        "Couldn't export Python operator " + py_node->name() +
-        "\n\nDefined at:\n" + getNodeStackTraceString(node))
-    IR_ELSE()
-    // Special error messages for certain types of operators
-    if (node->kind() == aten::expand) {
-      if (operator_export_type ==
-          onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-        WithInsertPoint guard(node);
-        auto* new_node = b->owningGraph()->insertNode(b->owningGraph()->create(
-            Symbol(::c10::onnx::ATen),
-            node->inputs(),
-            node->outputs().size()));
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-          node->output(i)->replaceAllUsesWith(new_node->output(i));
+    if (node->kind() == prim::PythonOp) {
+      auto py_node = static_cast<PythonOp*>(node);
+      FAIL_EXPORT(
+          "Couldn't export Python operator " + py_node->name() +
+          "\n\nDefined at:\n" + getNodeStackTraceString(node))
+    } else {
+      // Special error messages for certain types of operators
+      if (node->kind() == aten::expand) {
+        if (operator_export_type ==
+            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+          WithInsertPoint guard(node);
+          auto* new_node =
+              b->owningGraph()->insertNode(b->owningGraph()->create(
+                  Symbol(::c10::onnx::ATen),
+                  node->inputs(),
+                  node->outputs().size()));
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(new_node->output(i));
+          }
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
-        new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+      }
+      if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
+        FAIL_EXPORT(
+            "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
+            getNodeStackTraceString(node));
+      }
+      bool is_aten_enabled = operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
+        FAIL_EXPORT(
+            "Couldn't export operator " + node->kind().toDisplayString() +
+            "\n\nDefined at:\n" + getNodeStackTraceString(node));
       }
     }
-    if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
-      FAIL_EXPORT(
-          "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
-          getNodeStackTraceString(node));
-    }
-    bool is_aten_enabled = operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-        operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-    if (!node->kind().is_onnx() && !is_aten_enabled &&
-        node->kind() != prim::Undefined) {
-      FAIL_EXPORT(
-          "Couldn't export operator " + node->kind().toDisplayString() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node));
-    }
-    IR_END()
 #undef FAIL_EXPORT
   }
 }
@@ -235,8 +235,8 @@ void EncoderBase::EncodeBlock(
   for (auto node : block->nodes()) {
     bool is_raw_export =
         operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::Undefined && !is_raw_export) {
-      // Undefined nodes are used to implement optional inputs. One
+    if (node->mustBeNone() && !is_raw_export) {
+      // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
       continue;
@@ -248,7 +248,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->kind() == prim::Undefined && !is_raw_export) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());
@@ -463,10 +463,15 @@ class ScriptModuleSerializer final {
 
   ScriptModuleSerializer(std::ostream* ofs);
 
-  void serialize(const script::Module& module);
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
  private:
-  void convertModel(const script::Module& module, torch::ModelDef* model_def);
+  void convertModel(
+      const script::Module& module,
+      torch::ModelDef* model_def,
+      const script::ExtraFilesMap& extra_files);
 
   // add a tensor to the tensorTable
   // returns the offset into the tensor table
@@ -512,9 +517,11 @@ ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
     : ofs_(), writer_(ofs) {}
 
-void ScriptModuleSerializer::serialize(const script::Module& module) {
+void ScriptModuleSerializer::serialize(
+    const script::Module& module,
+    const script::ExtraFilesMap& extra_files) {
   torch::ModelDef model_def;
-  convertModel(module, &model_def);
+  convertModel(module, &model_def, extra_files);
   std::string output;
   // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
   // be consistent with MessageToJsonString
@@ -539,7 +546,8 @@ void ScriptModuleSerializer::serialize(const script::Module& module) {
 
 void ScriptModuleSerializer::convertModel(
     const script::Module& module,
-    torch::ModelDef* model_def) {
+    torch::ModelDef* model_def,
+    const script::ExtraFilesMap& extra_files) {
   model_def->set_producer_name("pytorch");
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
@@ -547,6 +555,12 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
+
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -884,14 +898,20 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
-void ExportModule(const script::Module& module, std::ostream& out) {
+void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(&out);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
-void ExportModule(const script::Module& module, const std::string& filename) {
+void ExportModule(
+    const script::Module& module,
+    const std::string& filename,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
 } // namespace jit

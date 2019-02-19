@@ -91,8 +91,8 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "float";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     return calcScalarTypeName(tt->scalarType());
   }
   // something went wrong with the type analysis during shape propagation
@@ -114,8 +114,8 @@ static std::string typeCastedValueName(
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     if (tt->scalarType() != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -225,7 +225,7 @@ static std::string encodeRHS(const Node* n) {
   TemplateEnv env;
   size_t i = 0;
   auto outtype =
-      n->output()->type()->expect<c10::TensorType const>()->scalarType();
+      n->output()->type()->expect<c10::DimensionedTensorType const>()->scalarType();
   for (auto in : n->inputs()) {
     // PyTorch converts (scalar) argument types to result before applying the
     // operator e.g. 1.4-torch.tensor(3) = -2

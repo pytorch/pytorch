@@ -10,5 +10,9 @@ namespace jit {
 // On Windows will noop, NYI
 TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
+TORCH_API bool trackSingleGradSumToSizeToOutputs(
+    Value* gradSumToSizeOutput,
+    std::vector<int64_t>* outputGradSumToSizes);
+
 } // namespace jit
 } // namespace torch

@@ -1,12 +1,14 @@
 #include <torch/csrc/jit/graph_executor.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -106,7 +108,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
     variable_list outputs;
     outputs.reserve(num_outputs());
     for (size_t i = 0; i < num_outputs(); ++i) {
-      if (should_compute_output(i)) {
+      // Input grad can also be None even if it requires grad
+      // Example: `other` in expand_as(self, other)
+      if (should_compute_output(i) && !stack[i].isNone()) {
         auto output = std::move(stack[i]).toTensor();
         const auto& edge = next_edge(i);
         if (output.defined()) {
@@ -193,7 +197,12 @@ struct DifferentiableGraphOp {
         // Note: we have to set this up in place, or we have to throw away and
         // reallocate variables that were already created in wrapTensors. We
         // should add an API for this.
-        Variable output = outputs[idx].toTensor();
+
+        // XXX: undefined tensor syntax in autograd
+        Variable output;
+        if (!outputs[idx].isNone()) {
+          output = outputs[idx].toTensor();
+        }
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.

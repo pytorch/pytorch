@@ -18,6 +18,9 @@
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
@@ -75,23 +78,18 @@ std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
 
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
-  bool use_newlines;
+  std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      bool use_newlines = false)
-      : values(values), use_newlines(use_newlines) {}
+      const std::string& delim = ", ")
+      : values(values), delim(delim) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
-      if (l.use_newlines) {
-        // TODO: Indent here is hard-coded for "graph(": un-hard-code it
-        out << "\n      ";
-      } else {
-        out << ", ";
-      }
+      out << l.delim;
     }
     printValueRef(out, n);
     out << " : ";
@@ -113,17 +111,17 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "]";
 }
 
-static std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while (pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
+static void printStrList(
+    std::ostream& out,
+    const std::vector<std::string>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    printQuotedString(out, item);
   }
-  return s;
+  out << "]";
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
@@ -141,10 +139,10 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      out << "\"" << escapeString(s(name)) << "\"";
+      printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
-      printPrimList(out, ss(name));
+      printStrList(out, ss(name));
       break;
     case AttributeKind::t: {
       at::Tensor tensor = t(name);
@@ -250,13 +248,12 @@ std::ostream& Node::print(
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
-                           << const_value_list_with_types(b->inputs(), false)
-                           << ") {\n";
+                           << const_value_list_with_types(b->inputs())
+                           << "):\n";
     for (auto nested : b->nodes()) {
       nested->print(out, level + 2, groups);
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
-    indent(out, level + 1) << "}\n";
   }
   return out;
 }
@@ -266,12 +263,13 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
+  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+      << "):\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
     n->print(out, 1, &groups);
   }
-  out << "  return (" << g.outputs() << ");\n}\n";
+  out << "  return (" << g.outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -368,37 +366,47 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  IR_IF(this, Constant)
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(Return)
-  // Return uses is zero
-  AT_ASSERT(outputs().size() == 0);
-  IR_ELSEIF(Param)
-  // Param inputs is zero
-  AT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIFM_CONST(PythonOp)
-  // Python operator cconv is correct
-  size_t n_scalars = 0, n_tensors = 0;
-  for (auto c : value->cconv) {
-    if (c == 'c') {
-      n_scalars++;
-    } else if (c == 'd') {
-      n_tensors++;
-    } else {
-      AT_ASSERT(0);
+  switch (kind()) {
+    case prim::Constant:
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::Return:
+      // Return uses is zero
+      AT_ASSERT(outputs().size() == 0);
+      break;
+    case prim::Param:
+      // Param inputs is zero
+      AT_ASSERT(inputs_.size() == 0);
+      break;
+    case prim::PythonOp: {
+      // Python operator cconv is correct
+      size_t n_scalars = 0, n_tensors = 0;
+      auto* value = static_cast<const PythonOp*>(this);
+      for (auto c : value->cconv) {
+        if (c == 'c') {
+          n_scalars++;
+        } else if (c == 'd') {
+          n_tensors++;
+        } else {
+          AT_ASSERT(0);
+        }
+        AT_ASSERT(static_cast<bool>(value->pyobj));
+      }
+      AT_ASSERT(n_scalars == value->scalar_args.size());
+      AT_ASSERT(n_tensors == inputs_.size());
+      break;
     }
-    AT_ASSERT(static_cast<bool>(value->pyobj));
+    case prim::Eval:
+      // TODO: add invariants
+      // TODO: It's not good for these ops to be top-level, it makes cases
+      // longer.
+      break;
+    case prim::FusionGroup:
+      checkSameDevice(this);
+      // TODO: Typecheck the parameters
+      g(attr::Subgraph)->lint();
+      break;
   }
-  AT_ASSERT(n_scalars == value->scalar_args.size());
-  AT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIF(Eval)
-  // TODO: add invariants
-  // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(FusionGroup)
-  checkSameDevice(value);
-  // TODO: Typecheck the parameters
-  value->g(attr::Subgraph)->lint();
-  IR_END()
 }
 
 // TODO: When lint fails, give better indication about which
@@ -629,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->kind() == prim::None;
+  return node_->mustBeNone();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -747,6 +755,12 @@ bool Node::matches(
   return true;
 }
 
+bool Node::mustBeNone() const {
+  return kind_ == prim::Constant && !this->hasAttributes() &&
+      (output()->type()->cast<OptionalType>() ||
+       output()->type() == NoneType::get());
+}
+
 void Node::dump() const {
   std::cout << *this << "\n";
 }
@@ -806,6 +820,7 @@ bool Node::isNondeterministic() const {
 bool Node::hasSideEffects() const {
   switch (kind_) {
     case prim::PythonOp:
+    case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
     case aten::warn:
@@ -1170,7 +1185,7 @@ Node* Graph::createUndefined() {
 }
 
 Node* Graph::createNone(TypePtr typ) {
-  Node* n = create(prim::None);
+  Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
@@ -1181,9 +1196,11 @@ Node* Graph::createFusionGroup() {
   return n;
 }
 
-Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+Node* Graph::createTuple(
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types));
+  auto tt = TupleType::create(std::move(types), std::move(field_names));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1238,6 +1255,33 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   return n;
 }
 
+Node* Graph::createDict(
+    const TypePtr& key_type,
+    const TypePtr& value_type,
+    at::ArrayRef<Value*> keys,
+    at::ArrayRef<Value*> values) {
+  AT_ASSERT(keys.size() == values.size());
+  auto n = create(prim::DictConstruct, 1);
+  for (size_t i = 0; i < keys.size(); ++i) {
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+
+    n->addInput(keys[i]);
+    n->addInput(values[i]);
+  }
+  n->output()->setType(DictType::create(key_type, value_type));
+  return n;
+}
+
+Node* Graph::createDictIndex(Value* dict, Value* index) {
+  auto dict_type = dict->type()->expect<DictType>();
+  AT_ASSERT(index->type()->isSubtypeOf(dict_type->getKeyType()));
+
+  auto n = create(prim::DictIndex, {dict, index});
+  n->output()->setType(dict_type->getValueType());
+  return n;
+}
+
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
@@ -1274,10 +1318,11 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
+    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+      *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {
@@ -1319,7 +1364,7 @@ void Graph::freeBlock(Block* b) {
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
-  // small peephole optimization to ensure IntList attributes can still turn
+  // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
   if (v->node()->kind() == prim::TupleConstruct) {
     return v->node()->inputs();
