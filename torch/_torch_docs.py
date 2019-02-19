@@ -3124,8 +3124,9 @@ Args:
 Example::
 
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
-    >>> torch.multinomial(weights, 4)
-    tensor([ 1,  2,  0,  0])
+    >>> torch.multinomial(weights, 2)
+    tensor([1, 2])
+    >>> torch.multinomial(weights, 4) # ERROR!
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """)
