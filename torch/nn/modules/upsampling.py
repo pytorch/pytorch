@@ -23,7 +23,7 @@ class Upsample(Module):
 
     Args:
         size (tuple, optional): a tuple of ints `([optional D_out], [optional H_out], W_out)` output sizes
-        scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
+        scale_factor (float or Tuple[float], optional): the multiplier for the image height / width / depth
         mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear`,
             `bicubic` and `trilinear`. Default: `nearest`
         align_corners (bool, optional): if True, the corner pixels of the input

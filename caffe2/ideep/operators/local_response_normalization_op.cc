@@ -19,7 +19,7 @@ class IDEEPLRNOp final : public IDEEPOperator {
     DCHECK_GT(alpha_, 0);
     DCHECK_GT(beta_, 0);
   }
-  virtual ~IDEEPLRNOp() {}
+  ~IDEEPLRNOp() override {}
 
   bool RunOnDevice() override {
     auto& X = Input(INPUT);
@@ -58,7 +58,7 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
     DCHECK_GT(alpha_, 0);
     DCHECK_GT(beta_, 0);
   }
-  virtual ~IDEEPLRNGradientOp() {}
+  ~IDEEPLRNGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
