@@ -9,7 +9,8 @@
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
 #   - An argument can be flagged as 'not_differentiable'. That means this
-#     argument may not be used in derivative calculations.
+#     argument cannot have a derivative defined and must not be used in any
+#     derivative calculations.
 #   - Optional entry with key 'output_differentiability' and value a list of the
 #     same length as the number of outputs from the forward function. The list
 #     should contain only booleans, specifying whether each of the output Tensor
