@@ -1,4 +1,3 @@
-graph(%x : Double(2, 3, 4)) {
+graph(%x : Double(2, 3, 4)):
   %1 : Double(2, 3, 4) = aten::contiguous(%x)
-  return (%1);
-}
+  return (%1)

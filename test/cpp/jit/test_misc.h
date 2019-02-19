@@ -848,7 +848,24 @@ void testDifferentiate(std::ostream& out = std::cout) {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  std::vector<size_t> expected_captured_outputs = {1, 2};
+  // With add/mul implemented using torchscript, we passes sizes of
+  // self & other instead passing the tensors themselve.
+  // The forward graph is now
+  //graph(%0 : Float(2, 3, 4)
+  //      %1 : Float(2, 3, 4)) {
+  //  %2 : Float(2, 3, 4) = aten::mul(%0, %1)
+  //  %self_size.4 : int[] = aten::size(%0)
+  //  %other_size.4 : int[] = aten::size(%1)
+  //  %3 : Float(2, 3, 4) = aten::mul(%2, %0)
+  //  %self_size.2 : int[] = aten::size(%2)
+  //  %4 : int = prim::Constant[value=1]()
+  //  %7 : int[] = aten::size(%3)
+  //  %5 : Float(2, 3, 4) = aten::add(%3, %1, %4)
+  //  return (%5, %2, %self_size.4, %other_size.4, %self_size.2, %7);
+  //}
+  // Thus all the sizes info added in forward outputs are saved
+  // in grad_spec.df_input_caputered_outputs.
+  std::vector<size_t> expected_captured_outputs = {1, 2, 3, 4, 5};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
   ASSERT_EQ(grad_spec.f_real_outputs, 1);
@@ -880,12 +897,29 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   PropagateInputShapes(graph);
   PropagateRequiresGrad(graph);
 
+  // With add/mul implemented using torchscript, we passes sizes of
+  // self & other instead passing the tensors themselve.
+  // The forward graph is now
+  // graph(%0 : Float(*)
+  //       %1 : Float(*)) {
+  //   %2 : Float(*) = aten::mul(%1, %1)
+  //   %3 : int = prim::Constant[value=1]()
+  //   %4 : Float(*) = aten::add(%2, %1, %3)
+  //   %39 : int[] = aten::size(%0)
+  //   %6 : Float(*) = aten::add(%4, %0, %3)
+  //   %7 : Float(*) = aten::mul(%6, %0)
+  //   %self_size.2 : int[] = aten::size(%6)
+  //   %11 : int[] = aten::size(%7)
+  //   %9 : Float(*) = aten::add(%7, %1, %3)
+  //   return (%4, %9, %39, %6, %self_size.2, %11);
+  // }
+
   auto grad_spec = differentiate(graph);
-  std::vector<size_t> expected_input_vjps = {1, 2}; // for e and %4 = (d + a)
+  std::vector<size_t> expected_input_vjps = {1, 3}; // for e and %6 = (d + a)
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
   ASSERT_EQ(grad_spec.f_real_outputs, 2);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, std::vector<size_t>({0}));
-  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
+  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3, 4, 5}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";

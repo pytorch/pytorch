@@ -3455,6 +3455,7 @@ class _TestTorchMixin(object):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+            full1d = cast(torch.randn(*dims_full).flatten().float())
             small = cast(torch.randn(*dims_small).float())
             large = cast(torch.randn(*dims_large).float())
             small_expanded = small.expand(*dims_full)
@@ -3471,8 +3472,7 @@ class _TestTorchMixin(object):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            # TODO: fix masked_scatter and masked_fill broadcasting
-            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
+            if hasattr(large_expanded, fn):
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
@@ -3482,6 +3482,10 @@ class _TestTorchMixin(object):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
+                    elif fn == "masked_scatter":
+                        return myfn(t1 < 0.5, full1d)
+                    elif fn == "masked_fill":
+                        return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3509,7 +3513,7 @@ class _TestTorchMixin(object):
                     elif fn == "masked_select":
                         return fntorch(t1, t2 < 0)
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                        return fntorch(t1, t2 < 0.5, full1d)
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
@@ -3540,7 +3544,7 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
+                    return t0_fn(t1 < 0.5, full1d)
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
                 elif fn == "map":
@@ -6440,9 +6444,9 @@ class _TestTorchMixin(object):
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[err_idx]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[conv_fn(torch.LongTensor([err_idx]))]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[[err_idx]]
 
         if TEST_NUMPY:
@@ -7107,11 +7111,22 @@ class _TestTorchMixin(object):
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
 
-        # test max
-        ret = a.max(dim=0)
+        # test max, min, median, mode
+        for f in ['max', 'min', 'median', 'mode']:
+            ret = getattr(a, f)(dim=0)
+            self.assertEqual(ret.values, ret[0])
+            self.assertEqual(ret.indices, ret[1])
+            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            self.assertEqual(ret1.values, ret1[0])
+            self.assertEqual(ret1.indices, ret1[1])
+            self.assertEqual(ret1.values, ret[0])
+            self.assertEqual(ret1.indices, ret[1])
+
+        # test kthvalue
+        ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])
@@ -7785,6 +7800,7 @@ class _TestTorchMixin(object):
         long = torch.LongStorage().element_size()
         float = torch.FloatStorage().element_size()
         double = torch.DoubleStorage().element_size()
+        bool = torch.BoolStorage().element_size()
 
         self.assertEqual(byte, torch.ByteTensor().element_size())
         self.assertEqual(char, torch.CharTensor().element_size())
@@ -7801,10 +7817,12 @@ class _TestTorchMixin(object):
         self.assertGreater(long, 0)
         self.assertGreater(float, 0)
         self.assertGreater(double, 0)
+        self.assertGreater(bool, 0)
 
         # These tests are portable, not necessarily strict for your system.
         self.assertEqual(byte, 1)
         self.assertEqual(char, 1)
+        self.assertEqual(bool, 1)
         self.assertGreaterEqual(short, 2)
         self.assertGreaterEqual(int, 2)
         self.assertGreaterEqual(int, short)
@@ -8872,6 +8890,75 @@ class _TestTorchMixin(object):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+        f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 8)
+        self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
+        self.assertEqual(bools.type(), 'torch.BoolStorage')
+
+        f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 19)
+
+        f = bytearray(b'\0x4A')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 4)
+        self.assertEqual(bools.tolist(), [False, True, True, True])
+
+    def test_storage_casts(self):
+        storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.IntStorage')
+
+        floatStorage = storage.float()
+        self.assertEqual(floatStorage.size(), 6)
+        self.assertEqual(floatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(floatStorage.type(), 'torch.FloatStorage')
+        self.assertEqual(floatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        halfStorage = storage.half()
+        self.assertEqual(halfStorage.size(), 6)
+        self.assertEqual(halfStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
+        self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        longStorage = storage.long()
+        self.assertEqual(longStorage.size(), 6)
+        self.assertEqual(longStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(longStorage.type(), 'torch.LongStorage')
+        self.assertEqual(longStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        shortStorage = storage.short()
+        self.assertEqual(shortStorage.size(), 6)
+        self.assertEqual(shortStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(shortStorage.type(), 'torch.ShortStorage')
+        self.assertEqual(shortStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        doubleStorage = storage.double()
+        self.assertEqual(doubleStorage.size(), 6)
+        self.assertEqual(doubleStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(doubleStorage.type(), 'torch.DoubleStorage')
+        self.assertEqual(doubleStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        charStorage = storage.char()
+        self.assertEqual(charStorage.size(), 6)
+        self.assertEqual(charStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(charStorage.type(), 'torch.CharStorage')
+        self.assertEqual(charStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        byteStorage = storage.byte()
+        self.assertEqual(byteStorage.size(), 6)
+        self.assertEqual(byteStorage.tolist(), [255, 0, 1, 2, 3, 4])
+        self.assertEqual(byteStorage.type(), 'torch.ByteStorage')
+        self.assertEqual(byteStorage.int().tolist(), [255, 0, 1, 2, 3, 4])
+
+        boolStorage = storage.bool()
+        self.assertEqual(boolStorage.size(), 6)
+        self.assertEqual(boolStorage.tolist(), [True, False, True, True, True, True])
+        self.assertEqual(boolStorage.type(), 'torch.BoolStorage')
+        self.assertEqual(boolStorage.int().tolist(), [1, 0, 1, 1, 1, 1])
+
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
@@ -8913,7 +9000,10 @@ class _TestTorchMixin(object):
         for t in torch._storage_classes:
             if t.is_cuda and not torch.cuda.is_available():
                 continue
-            obj = t(100).fill_(1)
+            if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
+                obj = t(100).fill_(True)
+            else:
+                obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
 

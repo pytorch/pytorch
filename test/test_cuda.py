@@ -377,8 +377,8 @@ tests = [
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
     ('std', small_3d, lambda t: []),
-    ('std', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('std', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('std', small_3d, lambda t: [1], 'dim', types, False),
+    ('std', small_3d, lambda t: [-1], 'neg_dim', types, False),
     ('var', small_3d, lambda t: []),
     ('var', small_3d, lambda t: [1], 'dim'),
     ('var', small_3d, lambda t: [-1], 'neg_dim'),
@@ -387,14 +387,14 @@ tests = [
     ('numel', small_3d, lambda t: [],),
     ('narrow', small_3d, lambda t: [1, 3, 2],),
     ('narrow', small_3d, lambda t: [-1, 3, 2], 'neg_dim'),
-    ('nonzero', small_3d, lambda t: [], '', types, False, skipIfRocm),
+    ('nonzero', small_3d, lambda t: [], '', types, False),
     ('norm', small_3d, lambda t: []),
     ('norm', small_3d, lambda t: [3], '3_norm'),
     ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
     ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False, skipIfRocm),
+    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False),
     ('put_', new_t(2, 3), lambda t: [long_type(t)([]), t([])], 'empty'),
     ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
     ('prod', small_2d_oneish, lambda t: []),
@@ -422,7 +422,7 @@ tests = [
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [2], 'dim'),
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [-2], 'neg_dim'),
     ('t', new_t(1, 2), lambda t: [],),
-    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])], '', types, False, skipIfRocm),
+    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])], '', types, False),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
     ('to_list', small_3d, lambda t: [],),
@@ -806,6 +806,28 @@ class TestCuda(TestCase):
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
             pass
+
+    def test_cuda_get_device_name(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_name = torch.cuda.get_device_name(current_device)
+        device_name_None = torch.cuda.get_device_name(None)
+        self.assertEqual(current_device_name, device_name_None)
+
+        # Testing the behaviour for No argument
+        device_name_no_argument = torch.cuda.get_device_name()
+        self.assertEqual(current_device_name, device_name_no_argument)
+
+    def test_cuda_get_device_capability(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_capability = torch.cuda.get_device_capability(current_device)
+        device_capability_None = torch.cuda.get_device_capability(None)
+        self.assertEqual(current_device_capability, device_capability_None)
+
+        # Testing the behaviour for No argument
+        device_capability_no_argument = torch.cuda.get_device_capability()
+        self.assertEqual(current_device_capability, device_capability_no_argument)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):
@@ -1968,6 +1990,10 @@ class TestCuda(TestCase):
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
+
+    def test_reduction_gpu_memory_accessing(self):
+        x = torch.ones(512, 8, dtype=torch.float32, device='cuda')
+        torch.sum(x, 0)
 
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')

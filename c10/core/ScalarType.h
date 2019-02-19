@@ -24,7 +24,8 @@ _(float,Float,d)   /* 6 */ \
 _(double,Double,d) /* 7 */ \
 _(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
 _(std::complex<float>,ComplexFloat,z)   /* 9 */ \
-_(std::complex<double>,ComplexDouble,z) /* 10 */
+_(std::complex<double>,ComplexDouble,z) /* 10 */ \
+_(bool,Bool,i) /* 11 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -185,6 +186,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto b1 = ScalarType::Bool;
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
@@ -195,15 +197,16 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8 */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
-    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8 },
-    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8 },
-    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8 },
-    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8 },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
+            /* u1  i1  i2  i4  i8  f2  f4  f8  b1 */
+    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, u1 },
+    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, i1 },
+    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, i2 },
+    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8, i4 },
+    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8, i8 },
+    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, f2 },
+    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, f4 },
+    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, f8 },
+    /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, b1 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

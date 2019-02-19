@@ -27,6 +27,19 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   }
 }
 
+// kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
+// supports at most one output that requires grad. Thus we need to remove
+// the grad for index that doesn't require grad.
+bool needTrimGrad(Node* n) {
+  static OperatorSet need_trim_grad_ops = {
+      "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
+  };
+  if (need_trim_grad_ops.find(n)) {
+    return true;
+  }
+  return false;
+}
+
 bool isDifferentiable(Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
@@ -194,15 +207,20 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     auto fw_graph = compiled_graphs->forward;
     new_outputs = inlineCallTo(
         *graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
-      new_outputs.at(i)->setType(node->outputs()[i]->type());
-      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    auto outputs = node->outputs();
+    AT_ASSERT(new_outputs.size() == outputs.size() + 1);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      new_outputs.at(i)->setType(outputs[i]->type());
+      outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
   }
 
   // Use backward graph to construct reverse_block
   auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
+  if (needTrimGrad(node)) {
+    grad_vec.erase(grad_vec.begin()+1, grad_vec.end());
+  }
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
@@ -578,35 +596,6 @@ class GradientHelper {
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim),
               nullptr};
 
-    } else if (node->matches(
-                   "aten::cat(Tensor[] tensors, int dim) -> Tensor",
-                   /*const_inputs=*/attr::dim)) {
-      int dim = *node->get<int64_t>(attr::dim);
-      auto tensor_inputs = inputs;
-      tensor_inputs.pop_back();
-      const auto& first_sizes = tensor_inputs.at(0).sizes();
-      const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
-        return var.sizes() == first_sizes;
-      };
-
-      // NB: this is a specialization for the common case where all inputs are
-      // of equal sizes. We can use a single split operation to handle that.
-      if (std::all_of(
-              tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
-        auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
-        tensor_grads.emplace_back(nullptr); // for attr::dim
-        return tensor_grads;
-      } else {
-        size_t offset = 0;
-        auto grad = grads.at(0);
-        std::vector<SymbolicVariable> tensor_grads;
-        for (auto input : tensor_inputs) {
-          tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
-          offset += input.sizes()[dim];
-        }
-        tensor_grads.emplace_back(nullptr); // for attr::dim
-        return tensor_grads;
-      }
     } else if (comparison_ops.find(node)) {
       return {nullptr, nullptr};
 
@@ -775,6 +764,11 @@ static std::vector<Value*> linearGradientForNode(
     Node* node,
     ArrayRef<Value*> grad_values) {
   auto& graph = *node->owningGraph();
+
+  // FIXME: In case forward has multi outputs, we only support one requires grad
+  if (needTrimGrad(node)) {
+    grad_values = grad_values.at(0);
+  }
   auto linear = graph.insertNode(graph.create(prim::GradOf, {grad_values}, 0));
   // to make reading gradient graphs easier, remember the name of the forward op
   linear->s_(attr::name, node->kind().toDisplayString());
