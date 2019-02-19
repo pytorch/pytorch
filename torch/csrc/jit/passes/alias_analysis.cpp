@@ -285,7 +285,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::DictConstruct:
     case prim::ListConstruct:
     case prim::TupleConstruct:
-    case prim::Undefined:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
@@ -975,36 +974,32 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // WARNING: by adding a case to this list, you are asserting that you have
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {
-      prim::If,
-      prim::Loop,
-      prim::FusionGroup,
-      prim::DifferentiableGraph,
-      prim::Constant,
-      prim::DictConstruct,
-      prim::ListConstruct,
-      prim::TupleConstruct,
-      prim::Undefined,
-      prim::FusedConcat,
-      prim::MMTreeReduce,
-      prim::MMBatchSide,
-      prim::None,
-      prim::BroadcastSizes,
-      prim::ChunkSizes,
-      prim::Function,
-      prim::TupleUnpack,
-      prim::TupleIndex,
-      prim::DictIndex,
-      prim::TupleSlice,
-      prim::ListUnpack,
-      prim::PythonOp,
-      prim::ConstantChunk,
-      prim::BroadcastingChunk,
-      prim::fork,
-      aten::wait,
-      aten::add,
-      aten::sub,
-      aten::mul,
-      aten::div,
+    prim::If,
+    prim::Loop,
+    prim::FusionGroup,
+    prim::DifferentiableGraph,
+    prim::Constant,
+    prim::DictConstruct,
+    prim::ListConstruct,
+    prim::TupleConstruct,
+    prim::FusedConcat,
+    prim::MMTreeReduce,
+    prim::MMBatchSide,
+    prim::BroadcastSizes,
+    prim::ChunkSizes,
+    prim::Function,
+    prim::TupleUnpack,
+    prim::TupleIndex,
+    prim::DictIndex,
+    prim::TupleSlice,
+    prim::ListUnpack,
+    prim::PythonOp,
+    prim::ConstantChunk,
+    prim::BroadcastingChunk,
+    aten::add,
+    aten::sub,
+    aten::mul,
+    aten::div,
   };
 
   // Operators that should not be used by alias analysis

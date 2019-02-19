@@ -359,14 +359,6 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "prim::Undefined() -> Tensor",
-        [](const Node* node) {
-          return [](Stack& stack) {
-            stack.emplace_back(at::Tensor());
-            return 0;
-          };
-        }),
-    Operator(
         prim::Print,
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();

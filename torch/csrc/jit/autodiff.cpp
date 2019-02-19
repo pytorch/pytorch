@@ -122,8 +122,7 @@ bool isDifferentiable(Node* n) {
   // perf "aten::atan2(Tensor self) -> Tensor", "aten::max(Tensor self) ->
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
-  if (n->kind() == prim::Constant || n->kind() == prim::Undefined ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
+  if (n->kind() == prim::Constant || n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
   if (differentiable_ops.find(n))
     return true;
@@ -712,7 +711,7 @@ class GradientHelper {
         node->matches(
             "aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
       auto graph = node->owningGraph();
-      auto total_weight = graph->insertNode(graph->createUndefined());
+      auto total_weight = graph->insertNode(graph->createNone(TensorType::get()));
       auto weight = graph->insertNode(graph->createNone(TensorType::get()));
       auto backward_value = graph->insert(
           aten::nll_loss_backward,
@@ -741,8 +740,7 @@ class GradientHelper {
            node->namedInput(attr::self)});
       return {backward_value->node()->output(0), nullptr};
 
-    } else if (
-        node->kind() == prim::Constant || node->kind() == prim::Undefined) {
+    } else if (node->kind() == prim::Constant) {
       return {};
     }
     throw std::runtime_error(
@@ -828,7 +826,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   const auto get_grad = [&](Value* v) -> Value* {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
-      auto undef = graph.insertNode(graph.createUndefined());
+      auto undef = graph.insertNode(graph.createNone(TensorType::get()));
       std::tie(it, std::ignore) = grad_map.emplace(v, undef->output());
     }
     return it->second;
@@ -941,7 +939,7 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
     AT_ASSERT(
         top_node->kind() == prim::GradOf ||
         top_node->kind() == prim::AutogradAdd ||
-        top_node->kind() == prim::Undefined);
+        top_node->mustBeNone());
     if (top_node->kind() != prim::GradOf)
       continue;
     Block* grad_body = top_node->blocks().at(0);

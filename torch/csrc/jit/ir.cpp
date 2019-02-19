@@ -1193,10 +1193,6 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
-}
-
 Node* Graph::createNone(TypePtr typ) {
   Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));

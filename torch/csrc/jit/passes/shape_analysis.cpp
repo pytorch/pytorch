@@ -440,10 +440,6 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::Undefined: {
-        setUnshapedType(node);
-        return;
-      }
       case aten::_unwrap_optional: {
         auto input_ivalue = toIValue(node->input());
         if (input_ivalue && input_ivalue->isNone()) {

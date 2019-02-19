@@ -1493,10 +1493,10 @@ void testSchemaParser() {
 void testTopologicalIndex() {
   {
     Graph graph;
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
-    auto node4 = graph.create(prim::Undefined);
+    auto node1 = graph.create(prim::Constant);
+    auto node2 = graph.create(prim::Constant);
+    auto node3 = graph.create(prim::Constant);
+    auto node4 = graph.create(prim::Constant);
 
     graph.appendNode(node4);
     graph.prependNode(node1);
@@ -1521,12 +1521,12 @@ void testTopologicalIndex() {
     //      \      ...
     //      C    block2
     auto block1 = node3->addBlock();
-    auto A = graph.create(prim::Undefined);
+    auto A = graph.create(prim::Constant);
     block1->appendNode(A);
-    auto B = graph.create(prim::Undefined);
+    auto B = graph.create(prim::Constant);
     block1->appendNode(B);
     auto block2 = B->addBlock();
-    auto C = graph.create(prim::Undefined);
+    auto C = graph.create(prim::Constant);
     block2->appendNode(C);
 
     // Check isAfter on different block levels
@@ -1536,7 +1536,7 @@ void testTopologicalIndex() {
 
     // make sure things don't blow up on deletions
     node2->destroy();
-    auto node2p = graph.create(prim::Undefined);
+    auto node2p = graph.create(prim::Constant);
     node2p->insertAfter(node1);
     ASSERT_TRUE(node1->isBefore(node2p));
     ASSERT_TRUE(node2p->isBefore(node3));
@@ -1546,11 +1546,11 @@ void testTopologicalIndex() {
     Graph graph;
     std::map<size_t, Node*> nodes;
 
-    auto anchor = graph.create(prim::Undefined);
+    auto anchor = graph.create(prim::Constant);
     graph.appendNode(anchor);
     // Inserting to the same place a lot will trigger reindexing
     for (auto i = 0; i < 100; ++i) {
-      auto n = graph.create(prim::Undefined);
+      auto n = graph.create(prim::Constant);
       n->insertAfter(anchor);
       nodes[i] = n;
     }

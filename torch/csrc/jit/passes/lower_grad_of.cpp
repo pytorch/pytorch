@@ -19,7 +19,7 @@ void LowerGradOf(Graph& g) {
       if_stat->addBlock()->cloneFrom(
           it->blocks().at(0), [](Value* v) { return v; });
       auto else_block = if_stat->addBlock();
-      auto undef = g.createUndefined()
+      auto undef = g.createNone(TensorType::get())
                        ->insertBefore(else_block->return_node())
                        ->output();
       for (size_t i = 0; i < it->outputs().size(); ++i) {
