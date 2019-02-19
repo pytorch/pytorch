@@ -830,7 +830,7 @@ class Softmin(Module):
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range [0,1] and sum to 1
+    lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
 
@@ -920,8 +920,7 @@ class LogSoftmax(Module):
         - Output: :math:`(*)`, same shape as the input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
-            along dim will sum to 1).
+        dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:
         a Tensor of the same dimension and shape as the input with
