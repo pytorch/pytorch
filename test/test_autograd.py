@@ -1576,7 +1576,7 @@ class TestAutograd(TestCase):
             ind = torch.tensor(0, dtype=torch.int64)
         else:  # x is a scalar
             ind = torch.tensor([0], dtype=torch.int64)
-        out = torch.gather(x, dim, ind, sparse=False)
+        out = torch.gather(x, dim, ind, sparse_grad=False)
         grad = torch.rand_like(out)
         out.backward(grad)
         grad_dense = x.grad.clone()
