@@ -33,6 +33,7 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorAssignments.cpp
   ${extra_src}
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
@@ -110,6 +111,8 @@ INSTALL(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
+  generic/THTensorAssignments.h
+  generic/THTensorAssignments.cpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorLapack.cpp
