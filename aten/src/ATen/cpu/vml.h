@@ -125,15 +125,40 @@ IMPLEMENT_VML_BUG(trunc)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
-#define IMPLEMENT_VML_MKL(op, mklop)                                         \
-  template <>                                                                 \
-  inline void v##op(float* out, const float* in, int64_t size) {              \
-    vms##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
-  }                                                                           \
-  template <>                                                                 \
-  inline void v##op(double* out, const double* in, int64_t size) {            \
-    vmd##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
+#pragma message("MKL_INT=" MKL_INT)
+
+// NB: LP64 MKL is the most commonly used and thus we assume it here. That means
+// we need to expect MKL_INT to be of type int, which implies int32_t in most
+// cases.
+#define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
+  template <>                                                           \
+  inline void v##op(type * out, const type * in, int64_t size) {          \
+    int64_t max_mkl_ind = std::numeric_limits<MKL_INT>::max();          \
+    if (size <= static_cast<int64_t>(max_mkl_ind)) {                    \
+      vm##mkltype##mklop(                                               \
+          size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
+    } else {                                                            \
+      MKL_INT ind = 0;                                                  \
+      int64_t chunks = size / max_mkl_ind;                              \
+      int64_t rest = size % max_mkl_ind;                                \
+      for (; ind < chunks; ind++) {                                     \
+        vm##mkltype##mklop(                                             \
+            max_mkl_ind,                                                \
+            in + ind * max_mkl_ind,                                     \
+            out + ind * max_mkl_ind,                                    \
+            VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE);              \
+      }                                                                 \
+      vm##mkltype##mklop(                                               \
+          rest,                                                         \
+          in + ind * max_mkl_ind,                                       \
+          out + ind * max_mkl_ind,                                      \
+          VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE);                \
+    }                                                                   \
   }
+
+#define IMPLEMENT_VML_MKL(op, mklop)          \
+  IMPLEMENT_VML_MKL_STUB(op, mklop, float, s) \
+  IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple clang
 
