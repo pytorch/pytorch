@@ -35,6 +35,8 @@ class Optimizer(object):
         self._lr_multiplier = None
         self._local_lr_multiplier = None
         self._local_lr_multiplier_on_gpu = False
+        self.db_path = None
+        self.db_type = None
 
     '''
     Adds optimization operators to the net for given parameter and its gradient
@@ -198,6 +200,69 @@ class Optimizer(object):
         """
         return self._aux_params
 
+    def initialize_auxiliary_parameter(self, param_init_net, param, aux_param_name, db_path, db_type, rowWise, engine):
+        """Initialize a auxiliary parameter, either by loading existing parameter
+            from db_path, or initialize the auxiliaery parameter with all zeros.
+        """
+        if db_path is not None:
+            aux_param = param_init_net.NextScopedBlob(aux_param_name)
+            param_init_net.Load(
+                [],
+                [aux_param],
+                db=db_path,
+                db_type=db_type,
+                absolute_path=True,
+                source_blob_names=[aux_param_name],
+            )
+        else:
+            if rowWise:
+                logger.info("Using engine {} for rowWise Adagrad".format(engine))
+
+                shapes, types = workspace.InferShapesAndTypes([param_init_net])
+                if str(param) not in shapes:
+                    # Type/shape inference is not available for this param, fallback
+                    # on Shape/Slice logic
+                    shape = param_init_net.Shape(param, str(param) + "_shape")
+                    num_rows = param_init_net.Slice(
+                        [shape],
+                        str(shape) + "_numrows",
+                        starts=[0], ends=[1]
+                    )
+                    aux_param = param_init_net.ConstantFill(
+                        num_rows,
+                        aux_param_name,
+                        input_as_shape=1,
+                        value=0.0
+                    )
+                else:
+                    aux_param = param_init_net.ConstantFill(
+                        [],
+                        aux_param_name,
+                        shape=[shapes[str(param)][0]],
+                        value=0.0
+                    )
+            else:
+                logger.info("Using engine {} for regular Adagrad".format(engine))
+
+                if engine in FP16_ENGINES:
+                    shapes, types = workspace.InferShapesAndTypes([param_init_net])
+                    assert str(param) in shapes, shapes
+                    shape = shapes[str(param)]
+
+                    aux_param = param_init_net.Float16ConstantFill(
+                        [],
+                        aux_param_name,
+                        value=0.0,
+                        shape=shape,
+                    )
+                else:
+                    aux_param = param_init_net.ConstantFill(
+                        [param],
+                        aux_param_name,
+                        value=0.0
+                    )
+        return aux_param
+
     # TODO(xlwang): In transfer learning, parameter initialized from pretrained
     # model might require a different learning rate than otherwise initialized.
     # To this end, here we implement a python solution where
@@ -211,11 +276,9 @@ class Optimizer(object):
             "Optimizer Need to Implement `scale_learning_rate` method.")
 
     def create_lars_inputs(self, param_init_net, weight_decay, trust, lr_max):
-        wd = param_init_net.ConstantFill([], "weight_decay",
-            shape=[1], value=weight_decay)
+        wd = param_init_net.ConstantFill([], "weight_decay", shape=[1], value=weight_decay)
         trust = param_init_net.ConstantFill([], "trust", shape=[1], value=trust)
-        lr_max = param_init_net.ConstantFill([], "lr_max", shape=[1],
-            value=lr_max)
+        lr_max = param_init_net.ConstantFill([], "lr_max", shape=[1], value=lr_max)
         return wd, trust, lr_max
 
 
@@ -257,8 +320,7 @@ class SgdOptimizer(Optimizer):
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
-                is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                is_gpu_blob=(current_scope is not None and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -339,8 +401,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
-        param_fp32 = param_info.blob_copy[core.DataType.FLOAT] \
-                if param_info.blob_copy is not None else None
+        param_fp32 = param_info.blob_copy[core.DataType.FLOAT] if param_info.blob_copy is not None else None
 
         # If we have a straight fp32 parameter, run the base class
         if param_fp32 is None:
@@ -525,6 +586,10 @@ class AdagradOptimizer(Optimizer):
         self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
 
+        if "load_aux_param_db_path" in self.init_kwargs:
+            self.db_path = self.init_kwargs["load_aux_param_db_path"]
+            self.db_type = self.init_kwargs["load_aux_param_db_type"]
+
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
         grad = param_info.grad
@@ -548,8 +613,7 @@ class AdagradOptimizer(Optimizer):
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
-                is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                is_gpu_blob=(current_scope is not None and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         lr, _ = self.build_lr(
@@ -560,51 +624,10 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            logger.info("Using engine {} for rowWise Adagrad".format(self.engine))
-
-            shapes, types = workspace.InferShapesAndTypes([param_init_net])
-            if str(param) not in shapes:
-                # Type/shape inference is not available for this param, fallback
-                # on Shape/Slice logic
-                shape = param_init_net.Shape(param, str(param) + "_shape")
-                num_rows = param_init_net.Slice(
-                    [shape],
-                    str(shape) + "_numrows",
-                    starts=[0], ends=[1]
-                )
-                param_squared_sum = param_init_net.ConstantFill(
-                    num_rows,
-                    str(param) + "_avg_squared_sum",
-                    input_as_shape=1,
-                    value=0.0
-                )
-            else:
-                param_squared_sum = param_init_net.ConstantFill(
-                    [],
-                    str(param) + "_avg_squared_sum",
-                    shape=[shapes[str(param)][0]],
-                    value=0.0
-                )
+            param_squared_sum_name = str(param) + "_avg_squared_sum"
         else:
-            logger.info("Using engine {} for regular Adagrad".format(self.engine))
-
-            if self.engine in FP16_ENGINES:
-                shapes, types = workspace.InferShapesAndTypes([param_init_net])
-                assert str(param) in shapes, shapes
-                shape = shapes[str(param)]
-
-                param_squared_sum = param_init_net.Float16ConstantFill(
-                    [],
-                    str(param) + "_squared_sum",
-                    value=0.0,
-                    shape=shape,
-                )
-            else:
-                param_squared_sum = param_init_net.ConstantFill(
-                    [param],
-                    str(param) + "_squared_sum",
-                    value=0.0
-                )
+            param_squared_sum_name = str(param) + "_squared_sum"
+        param_squared_sum = self.initialize_auxiliary_parameter(param_init_net, param, param_squared_sum_name, self.db_path, self.db_type, self.rowWise, self.engine)
 
         self._aux_params.local.append(param_squared_sum)
 
@@ -687,8 +710,7 @@ class WngradOptimizer(Optimizer):
             current_scope = scope.CurrentDeviceScope()
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
-                is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                is_gpu_blob=(current_scope is not None and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         lr, _ = self.build_lr(
@@ -920,6 +942,10 @@ class AdamOptimizer(Optimizer):
         self.engine = engine
         self.init_kwargs = kwargs
 
+        if "load_aux_param_db_path" in self.init_kwargs:
+            self.db_path = self.init_kwargs["load_aux_param_db_path"]
+            self.db_type = self.init_kwargs["load_aux_param_db_type"]
+
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
         grad = param_info.grad
@@ -934,26 +960,15 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
-        m1 = param_init_net.ConstantFill(
-            [param],
-            param + "_first_moment",
-            value=0.0
-        )
+
+        m1_name = str(param) + "_first_moment"
+        m1 = self.initialize_auxiliary_parameter(param_init_net, param, m1_name, self.db_path, self.db_type, False, "")
 
         if self.rowWise:
-            shapes, types = workspace.InferShapesAndTypes([param_init_net])
-            m2 = param_init_net.ConstantFill(
-                [],
-                param + "_avg_second_moment",
-                shape=[shapes[param][0]],
-                value=0.0
-            )
+            m2_name = str(param) + "_avg_second_moment"
         else:
-            m2 = param_init_net.ConstantFill(
-                [param],
-                param + "_second_moment",
-                value=0.0
-            )
+            m2_name = str(param) + "_second_moment"
+        m2 = self.initialize_auxiliary_parameter(param_init_net, param, m2_name, self.db_path, self.db_type, self.rowWise, "")
 
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(m1)
