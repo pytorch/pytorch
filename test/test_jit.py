@@ -39,6 +39,7 @@ import copy
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from torch.testing import FileCheck
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional
@@ -949,6 +950,10 @@ class TestJit(JitTestCase):
 
         trace, _ = torch.jit.get_trace_graph(fn, (x, y))
         self.run_pass('cse', trace)
+        FileCheck().check_count("add", 1).check_count("mul", 2, True) \
+            .check_count("tanh", 1, True).check_count("add", 2, True).check_next("return")  \
+            .run(str(trace))
+
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
@@ -964,16 +969,7 @@ class TestJit(JitTestCase):
 
         graph = torch.jit.script(fn).graph
         self.run_pass('cse', graph)
-        self.assertExpectedGraph(graph)
-
-    def test_scalar(self):
-        # NB: must not require grad; if it requires grad, it's always a Tensor
-        x = torch.tensor(2.)
-        y = torch.tensor(3.)
-
-        def fn(x, y):
-            return x - y
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
+        FileCheck().check("block").check_not("aten::add").check_not("aten::gt").run(str(graph))
 
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
@@ -1031,7 +1027,9 @@ class TestJit(JitTestCase):
             return y
 
         trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.assertExpectedGraph(trace)
+        FileCheck().check_count("aten::clone", 1, exactly=True) \
+            .check_count("aten::add_", 2, exactly=True) \
+            .check_next("return").run(str(trace))
         self.assertExportImport(trace, (x,))
 
     def test_inplace_flags(self):
@@ -1178,7 +1176,9 @@ class TestJit(JitTestCase):
         x, y = torch.randn(2, 2), (torch.ones(2, 2), torch.randn(2, 2))
         traced_fn = torch.jit.trace(fn, (x, y))
         self.assertEqual(traced_fn(x, y), fn(x, y))
-        self.assertExpectedGraph(traced_fn.graph)
+        # should be a tuple nested within another tuple
+        FileCheck().check_count("prim::TupleConstruct", 2, exactly=True).check_next("return") \
+            .run(str(traced_fn.graph))
         self.assertExportImport(traced_fn.graph, (x, y))
 
     def test_trace_random(self):
@@ -2242,7 +2242,7 @@ class TestJit(JitTestCase):
                 warnings.warn("x is less than 2")
             return x
 
-        self.assertExpectedGraph(fn.graph)
+        self.assertTrue(str(fn.graph).count("aten::warn") == 1)
 
     def test_no_erroneous_warnings(self):
         import warnings
@@ -3622,11 +3622,25 @@ a")
             b = b - a
             return a, b, c, x, y
 
+        constants_expected = ["abc", "bcd", "abc", 1, 0, 3, 6]
         self.checkScript(func, torch.tensor([1]))
         graph = torch.jit.script(func).graph
         self.run_pass('constant_propagation', graph)
         self.run_pass('constant_pooling', graph)
-        self.assertExpectedGraph(graph)
+
+        # constants = graph.findAllNodes("prim::Constant")
+        # constants_found = list(map(lambda x: x.output().toIValue(), constants))
+        # tensor_type = type(torch.tensor([1]))
+        # for c_exp in constants_expected:
+        #     found = False
+        #     for c_found in constants_found:
+        #         if not found and type(c_exp) == type(c_found):
+        #             if isinstance(c_found, tensor_type):
+        #
+        #             else:
+        #                 found = c_exp == c_found
+        #     assert found
+        # # self.assertExpectedGraph(graph)
 
     def test_constant_pooling_none(self):
         @torch.jit.script
@@ -4606,38 +4620,6 @@ a")
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
-    def test_math_schema(self):
-        # This should use the add(Tensor, Tensor) schema.
-        # Also tests to see if alpha={1} is lifted correctly.
-        def fn(x, y):
-            return x + y
-
-        graph = torch.jit.script(fn).graph
-        self.assertExpectedGraph(graph)
-
-    def test_math_tensor_number(self):
-        # Test that 7 is casted to tensor, then casted to the
-        # correct type, and finally added to x.
-        def fn(x):
-            return x + 7
-
-        graph = torch.jit.script(fn).graph
-        self.assertExpectedGraph(graph)
-
-    def test_math_numbers(self):
-        # Test that the numbers are casted to tensor,
-        # added, and then casted back.
-        def fn1(x):
-            return 7 + 8
-
-        def fn2(x):
-            return 1.1 + 3.1
-
-        graph1 = torch.jit.script(fn1).graph
-        self.assertExpectedGraph(graph1, subname="int")
-        graph2 = torch.jit.script(fn2).graph
-        self.assertExpectedGraph(graph2, subname="float")
-
     def test_math_ops(self):
 
         def test_floor():
@@ -4828,7 +4810,17 @@ a")
 
         t = torch.randn(0)
         self.assertEqual(0, testNoThrows(torch.randn(0)))
-        self.assertExpectedGraph(testNoThrows.graph)
+        ifs = testNoThrows.graph.findAllNodes("prim::If", recurse=False)
+
+        # three ifs at the top level, and the second one has a nested if for
+        # the or (True or bool(t[1])) expression
+        self.assertTrue(len(ifs) == 3)
+        self.assertTrue(ifs[0].findNode("prim::If") is None)
+        self.assertTrue(ifs[1].findNode("prim::If").findNode("prim::If") is None)
+        self.assertTrue(ifs[2].findNode("prim::If") is None)
+        self.run_pass('constant_propagation', testNoThrows.graph)
+        self.assertTrue("prim::If" not in str(testNoThrows.graph))
+
         with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
             throwsOr(t)
         with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
@@ -5596,19 +5588,6 @@ a")
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
     def test_filecheck(self):
-        from torch.testing import FileCheck
-
-        # def test_accidental_not_used():
-        #     def unused():
-        #         a = FileCheck()
-        #
-        #     with self.capture_stdout() as captured:
-        #         a = FileCheck()
-        #         del a
-        #     self.assertTrue("You have not run this instance of FileCheck"
-        #                     in captured[0])
-        #
-        # test_accidental_not_used()
         def test_check():
             file = "232"
             FileCheck().check("2").check("3").check("2").run(file)
@@ -5627,6 +5606,9 @@ a")
             FileCheck().check_count("22", 2).run(file)
             FileCheck().check_count("222", 1).run(file)
 
+            with self.assertRaisesRegex(RuntimeError, 'CHECK-COUNT-EXACTLY'):
+                FileCheck().check_count("2", 4, exactly=True).run(file)
+
             with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
                 FileCheck().check_count("22", 3).run(file)
 
@@ -5637,7 +5619,7 @@ a")
 
         def test_check_same():
             file = "22\n33"
-            # FileCheck().check_same("22").run(file)
+            FileCheck().check_same("22").run(file)
 
             with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
                 FileCheck().check_same("33").run(file)
@@ -6040,23 +6022,6 @@ a")
                 return v
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
-
-    def test_script_module_list_sequential_error(self):
-        class M(torch.jit.ScriptModule):
-            def __init__(self, mod_list):
-                super(M, self).__init__(False)
-                self.mods = mod_list
-
-            @torch.jit.script_method
-            def forward(self, v):
-                for m in self.mods:
-                    v = m(v)
-                return v
-
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.Sequential(nn.ReLU()))
-        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
-            a = M(nn.ModuleList([nn.ReLU()]))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -7813,9 +7778,15 @@ a")
             return c
 
         graph = torch.jit.script(func).graph
+        self.assertTrue("int = prim::Constant" in str(graph))
+        self.assertTrue("aten::add_" in str(graph))
+
         self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
-        self.assertExpectedGraph(graph)
+        self.run_pass('dce', graph)
+
+        self.assertTrue("int = prim::Constant" not in str(graph))
+        self.assertTrue("aten::add_" not in str(graph))
 
     def test_mm_batching(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -7840,6 +7811,11 @@ a")
         self.assertEqual(slstm(*inputs), lstm(*inputs))
         self.assertEqual(torch.autograd.grad(slstm(*inputs).sum(), inputs),
                          torch.autograd.grad(lstm(*inputs).sum(), inputs))
+
+    def test_generic_list_equal(self):
+        @torch.jit.script
+        def test_gen_list(self):
+            return [[1, 2], [3]] == [[3, 4], [5]]
 
     def test_loop_unrolling(self):
         def fn(x):
@@ -9336,7 +9312,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
@@ -11058,7 +11034,6 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
-    'test_nn_batch_norm',
     'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
