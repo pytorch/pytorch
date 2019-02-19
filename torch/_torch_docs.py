@@ -3110,11 +3110,21 @@ If replacement is ``True``, samples are drawn with replacement.
 If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
 
+<<<<<<< HEAD
 .. note::
     When drawn without replacement, :attr:`num_samples` must be lower than
     blah blah
     number of non-zero elements in :attr:`input` (or the min number of non-zero
     elements in each row of :attr:`input` if it is a matrix).
+||||||| merged common ancestors
+This implies the constraint that :attr:`num_samples` must be lower than
+:attr:`input` length (or number of columns of :attr:`input` if it is a matrix).
+=======
+.. note::
+    When drawn without replacement, :attr:`num_samples` must be lower than
+    number of non-zero elements in :attr:`input` (or the min number of non-zero
+    elements in each row of :attr:`input` if it is a matrix).
+>>>>>>> origin/master
 
 Args:
     input (Tensor): the input tensor containing probabilities
