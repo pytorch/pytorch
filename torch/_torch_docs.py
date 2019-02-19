@@ -3110,8 +3110,10 @@ If replacement is ``True``, samples are drawn with replacement.
 If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
 
-This implies the constraint that :attr:`num_samples` must be lower than
-:attr:`input` length (or number of columns of :attr:`input` if it is a matrix).
+.. note::
+    When drawn without replacement, :attr:`num_samples` must be lower than
+    number of non-zero elements in :attr:`input` (or the min number of non-zero
+    elements in each row of :attr:`input` if it is a matrix).
 
 Args:
     input (Tensor): the input tensor containing probabilities
@@ -3122,8 +3124,11 @@ Args:
 Example::
 
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
-    >>> torch.multinomial(weights, 4)
-    tensor([ 1,  2,  0,  0])
+    >>> torch.multinomial(weights, 2)
+    tensor([1, 2])
+    >>> torch.multinomial(weights, 4) # ERROR!
+    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
+    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """)
