@@ -88,6 +88,7 @@ class RNNBase(Module):
                     setattr(self, name, param)
                 self._all_weights.append(param_names)
 
+        self._transposed_weights = []
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -122,6 +123,32 @@ class RNNBase(Module):
                     all_weights, (4 if self.bias else 2),
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
+
+    def transpose_paramters(self, is_transposed):
+        """Transpose parameters so that they can use faster code paths.
+
+        Right now, this works only if the module is on CPU and MKLDNN is endbled and inference mode.
+        Otherwise, it's a no-op
+        """
+        if not is_transposed:
+            return
+
+        def get_mkldnn_mode(mode):
+            if mode == 'RNN_RELU':
+                return 0
+            elif mode == 'RNN_TANH':
+                return 1
+            elif mode == 'LSTM':
+                return 2
+            elif mode == 'GRU':
+                return 3
+            else:
+                raise Exception("Unknown mode: {}".format(mode))
+
+        if not self._transposed_weights:
+            with torch.no_grad():
+                self._transposed_weights = torch.mkldnn_rnn_transpose_weight(
+                    self._flat_weights, (4 if self.bias else 2), get_mkldnn_mode(self.mode), self.num_layers, self.bidirectional)
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -200,10 +227,14 @@ class RNNBase(Module):
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
 
+        is_tranposed = self.use_transposed_weights and not self.training
+        self.transpose_paramters(is_tranposed)
+        _weights = self._transposed_weights if is_tranposed else self.get_flat_weights()
+
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _impl(input, hx, _weights, self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
             result = _impl(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
@@ -256,6 +287,10 @@ class RNNBase(Module):
     def all_weights(self):
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
+    @property
+    def use_transposed_weights(self):
+        any_param = next(self.parameters()).data
+        return not any_param.is_cuda and torch._C.has_mkldnn and torch._C._get_mkldnn_enabled()
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an

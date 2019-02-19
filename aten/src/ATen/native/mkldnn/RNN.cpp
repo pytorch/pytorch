@@ -11,6 +11,13 @@
 
 namespace at { namespace native {
 
+std::vector<Tensor> mkldnn_rnn_transpose_weight(
+    TensorList weight, int64_t weight_stride0,
+    int64_t fn_mode, int64_t fn_num_layers,
+    bool fn_bidirectional) {
+  AT_ERROR("mkldnn_rnn_transpose_weight: ATen not compiled with MKLDNN support");
+}
+
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn(
     const Tensor& input_r, TensorList weight, int64_t weight_stride0,
     const Tensor& hx, const Tensor& cx,
@@ -339,6 +346,23 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
   }
 }
 
+// MKLDNN expects weight in ldigo format while PyTorch stores weight in ldgoi format
+//   ldigo: {num_layers, num_directions, input_size, num_gates, hidden_size}
+//   ldgoi: {num_layers, num_directions, num_gates, hidden_size, input_size}
+//
+// MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
+//   (reset, input, new): MKLDNN
+//   (input, reset, new): PyTorch
+//
+Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
+  auto weight_t = weight.t();
+  if (static_cast<mkldnnRNNMode_t>(fn_mode) == MKLDNN_GRU) {
+    std::vector<Tensor> gates = weight_t.chunk(3, ldigo_shuffle_dim);
+    return at::cat({gates[1], gates[0], gates[2]}, ldigo_shuffle_dim);
+  }
+  return weight_t.contiguous();
+};
+
 std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
     const RNNParams& fn, const Tensor& input, TensorList weights,
     const Tensor& hx, const Tensor& cx, Tensor& hy, Tensor& cy, bool reverse) {
@@ -353,24 +377,10 @@ std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
   auto hidden_x = cx.defined() ? at::cat({hx, cx}, 0) : hx;
   auto hidden_y = at::empty_like(hidden_x);
 
-  // MKLDNN expects weight in ldigo format while PyTorch stores weight in ldgoi format
-  //   ldigo: {num_layers, num_directions, input_size, num_gates, hidden_size}
-  //   ldgoi: {num_layers, num_directions, num_gates, hidden_size, input_size}
-  //
-  // MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
-  //   (reset, input, new): MKLDNN
-  //   (input, reset, new): PyTorch
-  //
-  auto shuffle_weight = [&](const Tensor& weight) {
-    auto weight_t = weight.t();
-    if (fn.rnn.mode == MKLDNN_GRU) {
-      std::vector<Tensor> gates = weight_t.chunk(3, ldigo_shuffle_dim);
-      return at::cat({gates[1], gates[0], gates[2]}, ldigo_shuffle_dim);
-    }
-    return weight_t.contiguous();
-  };
-  auto weight_ih = shuffle_weight(weights[0]);
-  auto weight_hh = shuffle_weight(weights[1]);
+  auto train = fn.dropout.train;
+  auto mode = fn.rnn.mode;
+  auto weight_ih = train ? _shuffle_weight(weights[0], mode) : weights[0];
+  auto weight_hh = train ? _shuffle_weight(weights[1], mode) : weights[1];
 
   // MKLDNN GRU bias has 4 gates instead of 3
   // (let rt,zt,nt be reset,input,new)
@@ -566,6 +576,36 @@ Tensor mkldnn_rnn_layer_backward(
 }
 
 } // anonymous namespace
+
+std::vector<Tensor> mkldnn_rnn_transpose_weight(
+    TensorList weight, int64_t weight_stride0,
+    int64_t fn_mode, int64_t fn_num_layers,
+    bool fn_bidirectional) {
+
+  MatrixRef<Tensor> weights{weight, static_cast<size_t>(weight_stride0)};
+
+  std::vector<Tensor> transposed_weight_arr;
+  transposed_weight_arr.reserve(weights.numel());
+
+  auto has_bias = weight_stride0 == 4;
+  auto num_layers = fn_num_layers;
+  auto num_directions = fn_bidirectional ? 2 : 1;
+  for (int64_t layer = 0; layer < num_layers; layer++) {
+    for (int64_t direction = 0; direction < num_directions; direction++) {
+      auto index = layer * num_directions + direction;
+      auto layer_weights = weights[index];
+
+      transposed_weight_arr.emplace_back(_shuffle_weight(layer_weights[0], fn_mode));
+      transposed_weight_arr.emplace_back(_shuffle_weight(layer_weights[1], fn_mode));
+      if (has_bias) {
+        transposed_weight_arr.emplace_back(layer_weights[2]);
+        transposed_weight_arr.emplace_back(layer_weights[3]);
+      }
+    }
+  }
+
+  return transposed_weight_arr;
+}
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn(
     const Tensor& input_r, TensorList weight, int64_t weight_stride0,

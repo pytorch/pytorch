@@ -1471,6 +1471,9 @@
 - func: lstm_mkldnn_stub(Tensor self, Tensor[] hx, Tensor[] params, bool has_biases, int64_t num_layers, double dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
 
+- func: mkldnn_rnn_transpose_weight(Tensor[] weight, int64_t weight_stride0, int64_t fn_mode, int64_t fn_num_layers, bool fn_bidirectional) -> Tensor[]
+  matches_jit_signature: True
+
 - func: mkldnn_rnn(Tensor input, Tensor[] weight, int64_t weight_stride0, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, Int[] batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor[])
   matches_jit_signature: True
 
