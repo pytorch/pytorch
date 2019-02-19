@@ -1115,12 +1115,6 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <>
-int listRemove<Shared<GenericList>, IValue>(Stack& stack) {
-  AT_ERROR("list.remove is not supported yet for 'GenericList'");
-  return 0;
-}
-
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1416,16 +1410,15 @@ RegisterOperators reg2({
           " decl_type " el) -> ()",                                         \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
-          "aten::remove(" decl_type "[](a!) self,                           \
-          " decl_type " el) -> ()",                                         \
-          listRemove<Shared<c_type>, c_type::ElemType>),                    \
-      Operator(                                                             \
         "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
         -> " decl_type  "(*)",                                              \
         listPop<Shared<c_type>>)
 
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
+
+    Operator("aten::remove(Tensor[](a!) self, Tensor el) -> ()",
+        listRemove<Shared<TensorList>, at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
