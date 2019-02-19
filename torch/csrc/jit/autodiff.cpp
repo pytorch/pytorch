@@ -96,6 +96,7 @@ bool isDifferentiable(Node* n) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::remainder(Tensor self, Scalar other) -> Tensor",
       "aten::round(Tensor self) -> Tensor",
@@ -532,6 +533,9 @@ class GradientHelper {
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       return {grads.at(0).type_as(inputs.at(0)), nullptr};
+
+    } else if (node->matches("aten::rand_like(Tensor self) -> Tensor")) {
+      return {nullptr};
 
     } else if (node->matches(
                    "aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
