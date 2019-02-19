@@ -20,8 +20,6 @@ std::unordered_set<Symbol> skip_list = {
     prim::Constant,
     prim::Undefined,
     prim::unchecked_unwrap_optional, // TODO remove
-    prim::None, // it is already a constant and propagating it will lose
-                // important type information about which Optional type it is
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
 };
@@ -30,11 +28,7 @@ std::vector<IValue> runNode(Node* n) {
   auto op = getOperation(n);
   Stack stack;
   for (auto input : n->inputs()) {
-    if (input->node()->kind() == prim::None) {
-      stack.emplace_back(IValue());
-    } else {
-      stack.push_back(*(toIValue(input)));
-    }
+    stack.push_back(*(toIValue(input)));
   }
   op(stack);
   auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
@@ -66,6 +60,9 @@ void propagateNode(Node* n) {
   for (size_t i = 0; i < outputs.size(); ++i) {
     try {
       auto new_output = graph->insertConstant(outputs[i]);
+      if (outputs[i].isNone()) {
+        new_output->setType(n->outputs()[i]->type());
+      }
       n->outputs()[i]->replaceAllUsesWith(new_output);
     } catch (constant_not_supported_error& err) {
       // we cannot actually represent the IValue as a constant node,
@@ -170,8 +167,7 @@ void removeExtraLoopOutputs(Node* node) {
 void ConstantPropagation(Node* n, const AliasDb& aliasDb) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-        return v->node()->kind() == prim::Constant ||
-            v->node()->kind() == prim::None;
+        return v->node()->kind() == prim::Constant;
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&

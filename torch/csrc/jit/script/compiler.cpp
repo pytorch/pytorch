@@ -474,7 +474,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, r);
+  auto new_constant = graph.insertConstant(val, nullptr, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -1264,7 +1264,7 @@ struct to_ir {
       if (cond) {
         cond_val = emitCond(cond.value());
       } else {
-        cond_val = graph->insertConstant(true, range);
+        cond_val = graph->insertConstant(true, nullptr, range);
       }
     }
     n->addInput(max_trip_count_val);
@@ -1299,7 +1299,7 @@ struct to_ir {
         Value* body_cond_value = emitCond(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = graph->insertConstant(true, range);
+        Value* cond_value_dummy = graph->insertConstant(true, nullptr, range);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -1422,7 +1422,7 @@ struct to_ir {
   // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
+    auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
   }
 
@@ -2013,7 +2013,7 @@ struct to_ir {
       bool is_instance_val =
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, loc));
+          graph->insertConstant(is_instance_val, nullptr, loc));
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2135,7 +2135,7 @@ struct to_ir {
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], tree->range());
+    return graph->insertConstant(stack[0], nullptr, tree->range());
   }
 
   // This function extract a new graph from its original subgraph
@@ -2221,13 +2221,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, tree->range());
+        return graph->insertConstant(true, nullptr, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, tree->range());
+        return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), tree->range());
+        return graph->insertConstant(IValue(), nullptr, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2315,7 +2315,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), c.range());
+    return insertConstant(*graph, c.text(), nullptr, c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2329,7 +2329,7 @@ struct to_ir {
         *graph,
         aten::select,
         c10::nullopt,
-        {input, graph->insertConstant(dim, loc), index},
+        {input, graph->insertConstant(dim, nullptr, loc), index},
         {},
         true);
   }
@@ -2349,7 +2349,7 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
+      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2366,7 +2366,7 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
