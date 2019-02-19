@@ -207,10 +207,6 @@ auto PyFunction::is_traceable() -> bool {
   return traceable_py_bool == Py_True;
 }
 
-auto PyFunction::py_refcnt() const noexcept -> int {
-  return pyobj_ ? Py_REFCNT(pyobj_) : 0;
-}
-
 auto PyFunction::release_variables() -> void {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
@@ -1085,17 +1081,21 @@ struct Decref {
 // Similar to shared_from_this. There's a problem that the Python object
 // and its cdata depend on each other being alive, so we can't keep
 // shared_ptrs as members, but we'd like to be able to manage the lifetime of
-// the objects using shared_ptrs in the C++ graph. This returns a new
-// shared_ptr, which will decrement the Python reference count when it's
-// destructed. WARNING: it's generally not safe to create weak_ptrs from
-// these shared_ptrs since multiple shared_ptrs may control the same underlying
-// object.
+// the objects using shared_ptrs in the C++ graph. The first invocation creates
+// a new shared_ptr from the raw PyFunction pointer, which will decrement the
+// Python reference count when it's destructed. Subsequent invocations generates
+// shared_ptr using shared_from_this().
 std::shared_ptr<PyFunction> THPFunction_asFunction(THPFunction* self)
 {
   if (!self) {
     return std::shared_ptr<PyFunction>();
   }
 
-  Py_INCREF((PyObject*)self);
-  return std::shared_ptr<PyFunction>(&self->cdata, Decref());
+  AutoGIL gil;
+  try {
+    return std::dynamic_pointer_cast<PyFunction>(self->cdata.shared_from_this());
+  } catch (std::bad_weak_ptr&) {
+    Py_INCREF((PyObject*)self);
+    return std::shared_ptr<PyFunction>(&self->cdata, Decref());
+  }
 }

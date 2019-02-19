@@ -238,13 +238,6 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     pyobj_ = pyobj;
   }
 
-  /// PyFunction overrides this method to return Python reference count of
-  /// pyobj_. Keep this function virtual to avoid using python_headers.h in
-  /// C++ sources.
-  virtual int py_refcnt() const noexcept {
-    return pyobj_ != nullptr;
-  }
-
   /// Returns the anomaly metadata stored for this `Function`.
   /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;

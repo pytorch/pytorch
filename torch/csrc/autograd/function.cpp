@@ -46,16 +46,10 @@ static void gatherFunctions(
   func->release_variables();
 
   for (auto& edge : func->next_edges()) {
-    auto & fn = edge.function;
-    // When using DataParallel, modules will be replcated multiple times, with
-    // each replica creating its own of shared_ptr from the raw PyFunction
-    // pointer. Hence, the use_count() of the shared_ptr does not have a global
-    // view, and we have to check refcnt on Python side as well. See #16532 for
-    // more details.
-    if (fn.use_count() == 1 && fn->py_refcnt() <= 1) {
-      stack.emplace_back(std::move(fn));
+    if (edge.function.use_count() == 1) {
+      stack.emplace_back(std::move(edge.function));
     } else {
-      fn.reset();
+      edge.function.reset();
     }
   }
 }
