@@ -2140,6 +2140,27 @@ class TestNN(NNTestCase):
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
+    def _test_softmax_backward(self, device):
+        if device.type == 'cuda':
+            dtypes = [torch.float, torch.half]
+        else:
+            dtypes = [torch.float]
+        sizes = [(0, 10), (32, 20), (10, 0)]
+        for fn in [F.softmax, F.log_softmax]:
+            for dtype in dtypes:
+                for size in sizes:
+                    input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
+                    autograd.gradcheck(lambda x: fn(x, dtype=torch.float), [input])
+                    autograd.gradgradcheck(lambda x: fn(x, dtype=torch.float), [input])
+
+    def test_softmax_backward(self):
+        self._test_softmax_backward('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_softmax_backward_cuda(self):
+        self._test_softmax_backward('cuda')
+
     def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float)
         logits = logits.to(dtype)
