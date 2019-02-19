@@ -3127,6 +3127,8 @@ Example::
     >>> torch.multinomial(weights, 2)
     tensor([1, 2])
     >>> torch.multinomial(weights, 4) # ERROR!
+    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
+    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """)
