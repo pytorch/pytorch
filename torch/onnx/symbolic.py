@@ -1,7 +1,7 @@
 import numbers
 
 import torch
-from torch._C import DynamicType, ListType
+from torch._C import DynamicType, ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -230,7 +230,9 @@ _onnx_opset_version = 9
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("prim::None")
+    n = g.op("prim::Constant")
+    n.setType(OptionalType.ofTensor())
+    return n
 
 
 def _shape_as_tensor(g, input):
@@ -800,7 +802,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "prim::None" and bias.type().dim() == 1:
+    if not bias.node().mustBeNone() and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -821,7 +823,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "prim::None" and bias.type().dim() != 1:
+    if not bias.node().mustBeNone() and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -834,12 +836,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().kind() == "prim::None":
+    if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::None":
+    if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -866,12 +868,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().kind() == "prim::None":
+    if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::None":
+    if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -951,11 +953,11 @@ def pow(g, self, exponent):
 
 
 def clamp(g, self, min, max):
-    # min or max may be prim::None that we need to dispatch to
+    # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().kind() == "prim::None":
+    if min.node().mustBeNone():
         return clamp_max(g, self, max)
-    elif max.node().kind() == "prim::None":
+    elif max.node().mustBeNone():
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')

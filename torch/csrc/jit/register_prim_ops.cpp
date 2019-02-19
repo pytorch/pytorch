@@ -417,14 +417,6 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::None,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            stack.emplace_back(IValue());
-            return 0;
-          };
-        }),
-    Operator(
         prim::Print,
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();

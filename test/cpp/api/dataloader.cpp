@@ -831,6 +831,188 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
   }
 }
 
+TEST(DataTest, DistributedRandomSamplerSingleReplicaProduceCorrectSamples) {
+  size_t sample_count = 10;
+  samplers::DistributedRandomSampler drs(sample_count);
+
+  std::vector<size_t> res;
+  torch::optional<std::vector<size_t>> idx;
+  while ((idx = drs.next(3)).has_value()) {
+    res.insert(std::end(res), std::begin(*idx), std::end(*idx));
+  }
+
+  ASSERT_EQ(res.size(), sample_count);
+
+  std::sort(res.begin(), res.end());
+  for (size_t i = 0; i < res.size(); ++i) {
+    ASSERT_EQ(res[i], i);
+  }
+}
+
+TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
+  size_t sample_count = 10;
+  size_t num_replicas = 3;
+
+  auto test_function = [&](bool allow_duplicates,
+                           size_t local_sample_count,
+                           std::vector<size_t>& output,
+                           size_t batch_size) {
+    std::vector<std::unique_ptr<samplers::DistributedRandomSampler>> samplers;
+
+    for (size_t i = 0; i < num_replicas; ++i) {
+      samplers.emplace_back(
+          torch::make_unique<samplers::DistributedRandomSampler>(
+              sample_count, num_replicas, i, allow_duplicates));
+    }
+
+    std::vector<size_t> res;
+    for (size_t i = 0; i < num_replicas; ++i) {
+      (*samplers[i]).reset();
+      torch::optional<std::vector<size_t>> idx;
+      while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
+        res.insert(std::end(res), std::begin(*idx), std::end(*idx));
+      }
+      ASSERT_EQ(res.size(), local_sample_count * (i + 1));
+    }
+    std::sort(res.begin(), res.end());
+    ASSERT_EQ(res, output);
+  };
+
+  for (size_t batch_size = 1; batch_size <= 3; ++batch_size) {
+    size_t local_sample_count =
+        static_cast<size_t>(std::ceil(sample_count * 1.0 / num_replicas));
+    std::vector<size_t> output1{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    test_function(true, local_sample_count, output1, batch_size);
+
+    local_sample_count =
+        static_cast<size_t>(std::floor(sample_count * 1.0 / num_replicas));
+    std::vector<size_t> output2{0, 1, 2, 3, 4, 5, 6, 7, 8};
+    test_function(false, local_sample_count, output2, batch_size);
+  }
+}
+
+TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
+  {
+    samplers::DistributedRandomSampler a(10);
+    ASSERT_EQ(a.index(), 0);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedRandomSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 0);
+  }
+  {
+    samplers::DistributedRandomSampler a(10);
+    a.next(3);
+    a.next(4);
+    ASSERT_EQ(a.index(), 7);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedRandomSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 7);
+  }
+  {
+    samplers::DistributedRandomSampler a(10);
+    a.set_epoch(3); 
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedRandomSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.epoch(), 3);
+  }
+}
+
+TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
+  size_t sample_count = 10;
+  size_t batch_size = 3;
+  samplers::DistributedSequentialSampler dss(sample_count);
+
+  std::vector<size_t> res;
+  torch::optional<std::vector<size_t>> idx;
+  while ((idx = dss.next(batch_size)).has_value()) {
+    res.insert(std::end(res), std::begin(*idx), std::end(*idx));
+  }
+
+  ASSERT_EQ(res.size(), sample_count);
+
+  std::sort(res.begin(), res.end());
+  for (size_t i = 0; i < res.size(); ++i) {
+    ASSERT_EQ(res[i], i);
+  }
+}
+
+TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
+  size_t sample_count = 10;
+  size_t num_replicas = 3;
+
+  auto test_function = [&](bool allow_duplicates,
+                           size_t local_sample_count,
+                           std::vector<size_t>& output,
+                           size_t batch_size) {
+    std::vector<std::unique_ptr<samplers::DistributedSequentialSampler>>
+        samplers;
+
+    for (size_t i = 0; i < num_replicas; ++i) {
+      samplers.emplace_back(
+          torch::make_unique<samplers::DistributedSequentialSampler>(
+              sample_count, num_replicas, i, allow_duplicates));
+    }
+
+    std::vector<size_t> res;
+    for (size_t i = 0; i < num_replicas; ++i) {
+      (*samplers[i]).reset();
+      torch::optional<std::vector<size_t>> idx;
+      while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
+        res.insert(std::end(res), std::begin(*idx), std::end(*idx));
+      }
+      ASSERT_EQ(res.size(), local_sample_count * (i + 1));
+    }
+    std::sort(res.begin(), res.end());
+    ASSERT_EQ(res, output);
+  };
+
+  for (size_t batch_size = 1; batch_size <= 3; ++batch_size) {
+    size_t local_sample_count =
+        static_cast<size_t>(std::ceil(sample_count * 1.0 / num_replicas));
+    std::vector<size_t> output1{0, 0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    test_function(true, local_sample_count, output1, batch_size);
+
+    local_sample_count =
+        static_cast<size_t>(std::floor(sample_count * 1.0 / num_replicas));
+    std::vector<size_t> output2{0, 1, 2, 3, 4, 5, 6, 7, 8};
+    test_function(false, local_sample_count, output2, batch_size);
+  }
+}
+
+TEST(DataTest, CanSaveAndLoadDistributedSequentialSampler) {
+  {
+    samplers::DistributedSequentialSampler a(10);
+    ASSERT_EQ(a.index(), 0);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedSequentialSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 0);
+  }
+  {
+    samplers::DistributedSequentialSampler a(10);
+    a.next(3);
+    a.next(4);
+    ASSERT_EQ(a.index(), 7);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::DistributedSequentialSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 7);
+  }
+}
+
 TEST(DataLoaderTest, DataLoaderOptionsDefaultAsExpected) {
   DataLoaderOptions partial_options;
   FullDataLoaderOptions full_options(partial_options);

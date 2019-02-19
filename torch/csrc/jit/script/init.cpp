@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -444,26 +445,26 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), loc));
+      return toSimple(g.insertConstant(IValue(), nullptr, loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, loc));
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, loc));
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -955,6 +956,17 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+
+  py::class_<testing::FileCheck>(m, "FileCheck")
+      .def(py::init<>())
+      .def("check", &testing::FileCheck::check)
+      .def("check_not", &testing::FileCheck::check_not)
+      .def("check_same", &testing::FileCheck::check_same)
+      .def("check_next", &testing::FileCheck::check_next)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("check_dag", &testing::FileCheck::check_dag)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("run", &testing::FileCheck::run);
 }
 
 } // namespace script

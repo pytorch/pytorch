@@ -566,7 +566,6 @@ const std::vector<std::string> functions = {
                 # self is used in backward, no need to pass in its size explicitly
                 grad_self = ___adaptive_avg_pool2d_backward(grad_output, self, output_size)
                 return grad_self, None
-
             return torch.adaptive_avg_pool2d(self, output_size), backward
 
         def adaptive_avg_pool3d(self,
@@ -612,6 +611,12 @@ const std::vector<std::string> functions = {
                 return grad_weight, None, None, None, None
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
+
+        def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
+            result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
+            def backward(grad):
+                return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
+            return result, backward
 
         def softmax_0(self, dim: int):
             result = torch.softmax(self, dim)
@@ -713,7 +718,6 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
 
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
