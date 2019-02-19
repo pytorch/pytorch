@@ -1009,6 +1009,9 @@ inline Tensor & Tensor::pow_(const Tensor & exponent) {
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) {
     return type().lerp_(*this, end, weight);
 }
+inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
+    return type().lerp_(*this, end, weight);
+}
 inline Tensor & Tensor::sign_() {
     return type().sign_(*this);
 }
@@ -1214,6 +1217,9 @@ inline Tensor Tensor::atan2(const Tensor & other) const {
     return type().atan2(*this, other);
 }
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
+    return type().lerp(*this, end, weight);
+}
+inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
     return type().lerp(*this, end, weight);
 }
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {

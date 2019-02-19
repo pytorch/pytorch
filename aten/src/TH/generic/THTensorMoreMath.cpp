@@ -1469,13 +1469,6 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
   }
 }
 
-void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, scalar_t weight)
-{
-  THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
-  THTensor_(resizeAs)(r_, a);
-  TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, a, scalar_t, b, *r__data = TH_MATH_NAME(TH_lerp)(*a_data, *b_data, weight););
-}
-
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "invalid dimension %d",

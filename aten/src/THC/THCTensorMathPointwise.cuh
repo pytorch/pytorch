@@ -320,23 +320,6 @@ struct TensorClampOp {
 };
 
 template <typename T>
-struct TensorLerpOp {
-  TensorLerpOp(T w) : w(w) {}
-
-  __device__ __forceinline__ void operator()(T *out, T *a, T *b) {
-    *out = THCNumerics<T>::add(
-      *a,
-      THCNumerics<T>::mul(
-          w,
-          THCNumerics<T>::sub(*b, *a)
-        )
-    );
-  }
-
-  const T w;
-};
-
-template <typename T>
 struct TensorCrossOp {
   TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
