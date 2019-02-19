@@ -781,7 +781,7 @@
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
   matches_jit_signature: True
 
-- func: embedding(Tensor weight, IndexTensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
+- func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
 
 - func: embedding_backward(Tensor grad, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
 
@@ -790,7 +790,7 @@
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
 
-- func: embedding_renorm_(Tensor(a!) self, IndexTensor indices, float max_norm, float norm_type) -> Tensor(a!)
+- func: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_

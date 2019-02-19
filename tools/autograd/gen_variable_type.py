@@ -509,9 +509,6 @@ def emit_body(declaration):
     if func:
         for not_derivative in func['not_derivatives']:
             not_args_with_derivatives += not_derivative['var_names']
-#    args_with_derivatives = list(filter(lambda x: x not in func['not_derivatives'], args_with_derivatives))
-#    if name == "_s_where":
-#        import pdb; pdb.set_trace()
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if func is not None and func.get('output_differentiability') is not None:

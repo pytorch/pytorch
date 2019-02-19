@@ -149,14 +149,14 @@ def process_definition(defn, declarations_by_signature):
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            if formula == 'none':
-                derivative = create_derivative(declaration['arguments'], declaration['returns'], declaration['name'], formula, names)
+            if formula.lower().strip() == 'not_differentiable':
+                derivative = create_derivative(declaration['arguments'], declaration['returns'],
+                                               declaration['name'], formula, names)
                 not_derivatives.append(derivative)
                 not_args_with_gradients += derivative['var_names']
             else:
-                derivatives.append(create_derivative(declaration['arguments'], declaration['returns'], declaration['name'], formula, names))
-#        if defn_name == '_s_where':
-#            import pdb; pdb.set_trace()
+                derivatives.append(create_derivative(declaration['arguments'], declaration['returns'],
+                                                     declaration['name'], formula, names))
         args_with_gradients = list(filter(lambda x: x['name'] not in not_args_with_gradients, args_with_gradients))
 
         # Test to see if the use of 'grads' makes sense.
