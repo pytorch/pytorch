@@ -1,0 +1,193 @@
+  pytorch_short_perf_test_gpu:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      PYTHON_VERSION: "3.6"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    machine:
+      image: default
+    steps:
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: Perf Test
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+
+          docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
+          # This IAM user allows write access to S3 bucket for perf test numbers
+          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
+          docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
+
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+  pytorch_doc_push:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-doc-push
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+    resource_class: large
+    machine:
+      image: default
+    steps:
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        <<: *install_doc_push_script
+    - run:
+        name: Doc Build and Push
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+
+          docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
+
+          # master branch docs push
+          if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # stable release docs push. Due to some circleci limitations, we keep
+          # an eternal PR open (#16502) for merging v1.0.1 -> master for this job.
+          # XXX: The following code is only run on the v1.0.1 branch, which might
+          # not be exactly the same as what you see here.
+          elif [[ "${CIRCLE_BRANCH}" == "v1.0.1" ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.0.1") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          # For open PRs: Do a dry_run of the docs build, don't push build
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
+
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Save the docs build so we can debug any problems
+          export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
+          docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
+          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+
+  pytorch_macos_10_13_py3_build:
+    macos:
+      xcode: "9.0"
+    steps:
+      - checkout
+      - run:
+          <<: *macos_brew_update
+      - run:
+          name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+
+            export IN_CIRCLECI=1
+
+            # Install sccache
+            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+            # This IAM user allows write access to S3 bucket for sccache
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+
+            chmod a+x .jenkins/pytorch/macos-build.sh
+            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+
+            mkdir -p /Users/distiller/pytorch-ci-env/workspace
+
+            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
+            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
+      - persist_to_workspace:
+          root: /Users/distiller/pytorch-ci-env
+          paths:
+            - "*"
+
+  pytorch_macos_10_13_py3_test:
+    macos:
+      xcode: "9.0"
+    steps:
+      - run:
+          name: Prepare workspace
+          command: |
+            sudo mkdir -p /Users/distiller/pytorch-ci-env
+            sudo chmod -R 777 /Users/distiller/pytorch-ci-env
+      - attach_workspace:
+          at: /Users/distiller/pytorch-ci-env
+      - run:
+          <<: *macos_brew_update
+      - run:
+          name: Test
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CIRCLECI=1
+
+            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
+            cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+
+            chmod a+x .jenkins/pytorch/macos-test.sh
+            unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+
+  pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+    macos:
+      xcode: "9.0"
+    steps:
+      - checkout
+      - run:
+          <<: *macos_brew_update
+      - run:
+          name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+
+            export IN_CIRCLECI=1
+
+            # Install CUDA 9.2
+            sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
+            curl https://s3.amazonaws.com/ossci-macos/cuda_9.2.64_mac_installer.zip -o ~/cuda_9.2.64_mac_installer.zip
+            unzip ~/cuda_9.2.64_mac_installer.zip -d ~/
+            sudo ~/cuda_9.2.64_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-9.2/lib/libcuda.dylib
+            sudo rm -rf /usr/local/cuda || true
+
+            # Install cuDNN 7.1 for CUDA 9.2
+            curl https://s3.amazonaws.com/ossci-macos/cudnn-9.2-osx-x64-v7.1.tgz -o ~/cudnn-9.2-osx-x64-v7.1.tgz
+            rm -rf ~/cudnn-9.2-osx-x64-v7.1 && mkdir ~/cudnn-9.2-osx-x64-v7.1
+            tar -xzvf ~/cudnn-9.2-osx-x64-v7.1.tgz -C ~/cudnn-9.2-osx-x64-v7.1
+            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/include/
+            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
+            sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
+
+            # Install sccache
+            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+            # This IAM user allows write access to S3 bucket for sccache
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+
+            git submodule sync && git submodule update -q --init
+            chmod a+x .jenkins/pytorch/macos-build.sh
+            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+

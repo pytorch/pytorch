@@ -15,6 +15,11 @@ matrix:
       - name: "Ensure consistent CircleCI YAML"
         python: "3.6"
         dist: xenial
+        install:
+          - sudo add-apt-repository universe
+          - sudo apt update
+          - sudo apt install graphviz
+          - pip3 install pygraphviz
         script: cd .circleci && ./ensure-consistency.sh
       - name: "Python 2.7 Lint"
         python: "2.7"
