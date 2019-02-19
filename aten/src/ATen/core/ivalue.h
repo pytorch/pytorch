@@ -749,34 +749,37 @@ DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 
+template <typename T>
+struct _fake_type {};
+
 template <typename Elem>
-inline std::vector<Elem> to_list(std::vector<IValue>& list) {
-  return fmap(list, [](IValue ivalue) { return ivalue.to<Elem>(); });
+std::vector<Elem> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::vector<Elem>>) {
+  return fmap(ivalue->toGenericListRef(), [](IValue item_ivalue) { return item_ivalue.to<Elem>(); });
 }
 
-template <typename Elem>
-inline std::vector<Elem> to_list(const std::vector<IValue>& list) {
-  return fmap(list, [](IValue ivalue) { return ivalue.to<Elem>(); });
+template <typename K, typename V>
+std::unordered_map<K, V> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::unordered_map<K, V>>) {
+  std::unordered_map<K, V> specialized_dict;
+
+  for (auto item : ivalue->toGenericDictRef()) {
+    specialized_dict[item.first.to<K>()] = item.second.to<V>();
+  }
+
+  return specialized_dict;
 }
-
-template <typename Elem>
-struct is_vector : std::false_type {};
-
-template <typename Elem, typename Allocator>
-struct is_vector<std::vector<Elem, Allocator>> : std::true_type {};
 
 template <typename T>
 inline T IValue::to() && {
-  static_assert(
-      is_vector<T>(), "Generic IValue::to only supports GenericLists");
-  return to_list<typename T::value_type>(toGenericListRef());
+  return generic_to(this, _fake_type<T>{});
 }
 
 template <typename T>
 inline T IValue::to() const& {
-  static_assert(
-      is_vector<T>(), "Generic IValue::to only supports GenericLists");
-  return to_list<typename T::value_type>(toGenericListRef());
+  return generic_to(this, _fake_type<T>{});
 }
 
 // note: when adding a DEFINE_TO case here you should also add a

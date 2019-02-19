@@ -121,6 +121,13 @@ TORCH_API void addInputs(
     const std::vector<T>& value) {
   AT_ERROR("Tracing generic lists currently not supported!");
 }
+template<typename K, typename V>
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::unordered_map<K, V>& value) {
+  AT_ERROR("Tracing generic dicts currently not supported!");
+}
 
 template <size_t N>
 void addInputs(Node* n, const char* name, std::array<bool, N> value) {
