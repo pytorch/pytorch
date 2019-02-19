@@ -24,6 +24,9 @@
 #include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -31,6 +34,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+PYBIND11_MAKE_OPAQUE(torch::jit::script::ExtraFilesMap);
 
 namespace torch {
 namespace jit {
@@ -139,8 +144,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
     std::string cconv(inputs.size(), 'd');
-    Node* new_node =
-        getPythonOp(m.graph(), THPObjectPtr(func.release().ptr()), cconv);
+    Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
+        THPObjectPtr(func.release().ptr()), cconv, {}));
+
+    // Mark if function is ignored on export
+    if (py::cast<bool>(py::module::import("torch.jit")
+                           .attr("_try_get_ignored_op")(self))) {
+      auto python_op = static_cast<PythonOp*>(new_node);
+      python_op->ignore_on_export = true;
+    }
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for (auto& i : matched_schema->inputs)
       new_node->addInput(i);
@@ -156,6 +168,21 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Method& m,
+      const c10::optional<size_t>& size_hint = {}) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << kind() << " cannot be used as a tuple";
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+    throw ErrorReport(loc) << ss.str();
+  }
+
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name) {
     try {
@@ -163,14 +190,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     } catch (py::error_already_set& e) {
       throw ErrorReport(loc) << "object has no attribute " << name;
     }
-  }
-
-  virtual Node* getPythonOp(
-      const std::shared_ptr<Graph>& graph,
-      THPObjectPtr func_ptr,
-      std::string& cconv) const {
-    return graph->insertNode(
-        graph->createPythonOp(std::move(func_ptr), cconv, {}));
   }
 
   py::object self;
@@ -191,26 +210,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   }
 };
 
-// For ignored Python functions, set the PythonOp in the graph to
-// be ignored on export
-struct VISIBILITY_HIDDEN IgnoredPythonValue : public PythonValue {
-  IgnoredPythonValue(py::object self) : PythonValue(std::move(self)) {}
-
-  std::string kind() const override {
-    return "ignored python value";
-  }
-
-protected:
-  Node* getPythonOp(
-      const std::shared_ptr<Graph>& graph,
-      THPObjectPtr func_ptr,
-      std::string& cconv) const override {
-    Node* node = PythonValue::getPythonOp(graph, std::move(func_ptr), cconv);
-    auto python_op = static_cast<PythonOp*>(node);
-    python_op->ignore_on_export = true;
-    return node;
-  }
-};
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup)
@@ -518,12 +517,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
 
-  py::object ignored_python_op =
-      py::module::import("torch.jit").attr("_try_get_ignored_op")(obj);
-  if (py::cast<bool>(ignored_python_op)) {
-    return std::make_shared<IgnoredPythonValue>(obj);
-  }
-
   py::object overloads =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
   if (!overloads.is_none()) {
@@ -619,6 +612,10 @@ FunctionSchema getSchemaWithNameAndDefaults(
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  // STL containers are not mutable by default and hence we need to bind as
+  // follows.
+  py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -626,16 +623,22 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<>())
       .def(
           "save",
-          [](std::shared_ptr<Module> m, const std::string& filename) {
-            m->save(filename);
-          })
+          [](std::shared_ptr<Module> m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m->save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
       .def(
           "save_to_buffer",
-          [](std::shared_ptr<Module> m) {
+          [](std::shared_ptr<Module> m,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            m->save(buf);
+            m->save(buf, _extra_files);
             return py::bytes(buf.str());
-          })
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -846,7 +849,23 @@ void initJitScriptBindings(PyObject* module) {
             return ss.str();
           })
       .def("apply", &Module::apply)
-      .def("_copy_into", &Module::copy_into);
+      .def("_copy_into", &Module::copy_into)
+      .def(
+          "_copy_method",
+          [](std::shared_ptr<Module> m,
+            std::string name,
+            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
+            std::shared_ptr<Module> orig) {
+              std::vector<at::Tensor*> member_inputs;
+              for (auto& p : params) {
+                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+                AT_ASSERT(np != nullptr);
+                member_inputs.push_back(np->slot());
+              }
+
+              Method* orig_method = orig->find_method(name);
+              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+          });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def("graph", [&](Method& self) { return self.graph(); })
@@ -909,20 +928,22 @@ void initJitScriptBindings(PyObject* module) {
       "import_ir_module",
       [](ModuleLookup module_lookup,
          const std::string& filename,
-         py::object map_location) {
+         py::object map_location,
+         ExtraFilesMap& extra_files) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, filename, optional_device);
+        import_ir_module(module_lookup, filename, optional_device, extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
       [](ModuleLookup module_lookup,
          const std::string& buffer,
-         py::object map_location) {
+         py::object map_location,
+         ExtraFilesMap& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
@@ -930,7 +951,7 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        import_ir_module(module_lookup, in, optional_device);
+        import_ir_module(module_lookup, in, optional_device, extra_files);
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);

@@ -83,8 +83,4 @@ message ModelDef {
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
-
-  // Serialized metadata for input and outputs (e.g: expected types, shapes and
-  // semantic information).
-  optional RecordRef model_metadata = 6;
 }

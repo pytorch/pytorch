@@ -3351,6 +3351,43 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_model_device(self):
+        l = nn.Linear(2, 2)
+        error_msg = "module must have its parameters and buffers on device %d "
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1)))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (1),
+            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0]))
+
+        nn.DataParallel(l.cuda())
+        nn.DataParallel(l.cuda(1), device_ids=[1, 0])
+
+        s = nn.Sequential(l.cpu())
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+
+        s = nn.Sequential(deepcopy(l), l.cuda())
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+
+        s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (1),
+            lambda: nn.DataParallel(s, device_ids=[1, 0]))
+
+        s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
+        nn.DataParallel(s)
+
+        s = nn.Sequential(l.cuda(1), deepcopy(l).cuda(1))
+        nn.DataParallel(s, device_ids=[1, 0])
+
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
     @skipIfRocm
     def test_data_parallel_model_no_refcycles(self):
@@ -3858,6 +3895,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -6962,6 +7000,12 @@ class TestNN(NNTestCase):
 
         with self.assertRaises(ValueError):
             _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 25], div_value=2.)
+
+        with self.assertRaisesRegex(ValueError, "cutoffs should be a sequence of unique,"):
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 20], div_value=2.)
+
+        # not raise
+        _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 19], div_value=2.)
 
         # input shapes
         with self.assertRaisesRegex(RuntimeError, r"Input and target should have the same size"):

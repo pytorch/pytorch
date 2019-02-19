@@ -341,7 +341,7 @@ Tensor VariableType::detach(const Tensor & self) const {
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return result;
+  return std::move(result);
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {

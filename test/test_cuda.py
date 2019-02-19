@@ -807,6 +807,28 @@ class TestCuda(TestCase):
         for _ in self._test_memory_stats_generator(self):
             pass
 
+    def test_cuda_get_device_name(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_name = torch.cuda.get_device_name(current_device)
+        device_name_None = torch.cuda.get_device_name(None)
+        self.assertEqual(current_device_name, device_name_None)
+
+        # Testing the behaviour for No argument
+        device_name_no_argument = torch.cuda.get_device_name()
+        self.assertEqual(current_device_name, device_name_no_argument)
+
+    def test_cuda_get_device_capability(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_capability = torch.cuda.get_device_capability(current_device)
+        device_capability_None = torch.cuda.get_device_capability(None)
+        self.assertEqual(current_device_capability, device_capability_None)
+
+        # Testing the behaviour for No argument
+        device_capability_no_argument = torch.cuda.get_device_capability()
+        self.assertEqual(current_device_capability, device_capability_no_argument)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):
         # advance a generator with a end flag
@@ -1968,6 +1990,10 @@ class TestCuda(TestCase):
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
+
+    def test_reduction_gpu_memory_accessing(self):
+        x = torch.ones(512, 8, dtype=torch.float32, device='cuda')
+        torch.sum(x, 0)
 
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')

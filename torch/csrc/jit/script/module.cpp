@@ -102,12 +102,14 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out) {
-  ExportModule(*this, out);
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
+  ExportModule(*this, out, extra_files);
 }
 
-void Module::save(const std::string& filename) {
-  ExportModule(*this, filename);
+void Module::save(
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) {
+  ExportModule(*this, filename, extra_files);
 }
 
 void Module::to_impl(

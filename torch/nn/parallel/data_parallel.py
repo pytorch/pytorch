@@ -1,6 +1,7 @@
 import operator
 import torch
 import warnings
+from itertools import chain
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
@@ -105,7 +106,7 @@ class DataParallel(Module):
     Example::
 
         >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
-        >>> output = net(input_var)
+        >>> output = net(input_var)  # input_var can be on any device, including CPU
     """
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
@@ -122,6 +123,11 @@ class DataParallel(Module):
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
             output_device = device_ids[0]
+
+        if not all(t.is_cuda and t.device.index == device_ids[0]
+                   for t in chain(module.parameters(), module.buffers())):
+            raise RuntimeError("module must have its parameters and buffers "
+                               "on device %d (device_ids[0])" % device_ids[0])
 
         self.dim = dim
         self.module = module
