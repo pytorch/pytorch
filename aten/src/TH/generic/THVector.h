@@ -5,11 +5,10 @@
 // Opaque C++ struct
 struct THGenerator;
 
-#if defined(TH_REAL_IS_BOOL)
 TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
-#else
 
-TH_API void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n);
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
 TH_API void THVector_(cadd)(scalar_t *z, const scalar_t *x, const scalar_t *y, const scalar_t c, const ptrdiff_t n);
 TH_API void THVector_(adds)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
 TH_API void THVector_(cmul)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n);
@@ -63,8 +62,8 @@ TH_API void THVector_(trunc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(frac)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
-#endif /* non bool only part */
-
 #endif /* floating point only part */
+
+#endif /* non bool only part */
 
 #endif
