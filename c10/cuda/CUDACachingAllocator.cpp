@@ -16,8 +16,10 @@
 #include <vector>
 
 namespace c10 {
-namespace cuda {
 
+C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, CFreeCudaMemoryCallback);
+
+namespace cuda {
 namespace CUDACachingAllocator {
 
 //
@@ -44,6 +46,8 @@ namespace CUDACachingAllocator {
 // ensure that the block is not reused before each recorded stream completes
 // work.
 //
+
+
 
 namespace {
 
@@ -193,11 +197,25 @@ struct THCCachingAllocator
     Block* block = NULL;
     Block* remaining = NULL;
 
-    auto it = free_blocks.lower_bound(&search_key);
-    if (it != free_blocks.end() && (*it)->device == device && (*it)->stream == stream) {
-      block = *it;
-      free_blocks.erase(it);
-    } else {
+    bool repeat = true;
+    do {
+      repeat = false;
+      auto it = free_blocks.lower_bound(&search_key);
+      if (it != free_blocks.end() && (*it)->device == device &&
+          (*it)->stream == stream) {
+        block = *it;
+        free_blocks.erase(it);
+      }
+
+      if (block == NULL) {
+        for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
+          FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+          repeat = true;
+        }
+      }
+    } while (block == NULL && repeat);
+
+    if (block == NULL) {
       // TODO: We can check if some blocks become available by calling torch::CudaIPCCollect,
       // but right now such linking will require lots of code changes.
       void* ptr;

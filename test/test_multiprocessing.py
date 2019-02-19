@@ -386,6 +386,14 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(device, i % 2)
             self.assertEqual(tensor_size, 5)
 
+            # You might think this should be the case, but it's not!  After
+            # data from the CUDA caching allocator goes through IPC, the
+            # size of the storage is the size of the *cached cudaMalloc for
+            # the entire memory block* of the storage, not just the storage.
+            # See Note [CUDA IPC and the caching allocator] for more info
+            #
+            # self.assertEqual(storage_size, 5)
+
         # Collect current process (producer) files, make sure nothing holds
         # ref to the sent tensors
         del _tensor
@@ -394,14 +402,6 @@ class TestMultiprocessing(TestCase):
         # We need to collect, as CUDA MP implementation holds one shared
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
-
-        # You might think this should be the case, but it's not!  After
-        # data from the CUDA caching allocator goes through IPC, the
-        # size of the storage is the size of the *cached cudaMalloc for
-        # the entire memory block* of the storage, not just the storage.
-        # See Note [CUDA IPC and the caching allocator] for more info
-        #
-        # self.assertEqual(storage_size, 5)
 
     @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')

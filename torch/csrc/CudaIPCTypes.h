@@ -1,7 +1,7 @@
 #pragma once
 #ifdef USE_CUDA
 #include <c10/core/Allocator.h>
-
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
@@ -147,4 +147,15 @@ struct CudaIPCReceivedData final {
 };
 
 } // namespace torch
+
+namespace c10 {
+class CudaIPCCollectCallback : public CFreeCudaMemoryCallback {
+ public:
+  void Execute() {
+    torch::CudaIPCCollect();
+  }
+};
+
+} // namespace c10
+
 #endif
