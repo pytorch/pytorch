@@ -1064,7 +1064,7 @@ int listInsert(Stack& stack) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (normalized_idx < 0 || normalized_idx >= list_size) {
-    if (idx < 0) {
+    if (normalized_idx < 0) {
       elements.insert(elements.begin(), elem);
     } else {
       elements.push_back(elem);
@@ -1103,10 +1103,7 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   auto& elements = list->elements();
   auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
     const auto cmp_result = elem.eq(b);
-    if (!cmp_result.is_nonzero()) {
-      return false;
-    }
-    return true;
+    return cmp_result.is_nonzero();
   });
 
   if (pos != elements.end()) {
@@ -1120,21 +1117,7 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
 
 template <>
 int listRemove<Shared<GenericList>, IValue>(Stack& stack) {
-  Shared<GenericList> list;
-  IValue elem;
-  pop(stack, list, elem);
-
-  auto& elements = list->elements();
-  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const IValue& b) {
-    return b.isAliasOf(elem);
-  });
-
-  if (pos != elements.end()) {
-    elements.erase(pos);
-  } else {
-    AT_ERROR("list.remove(x): x not in list");
-  }
-
+  AT_ERROR("list.remove is not supported yet for 'GenericList'");
   return 0;
 }
 
