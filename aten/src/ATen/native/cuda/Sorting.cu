@@ -1,23 +1,23 @@
 #include <ATen/ATen.h>
+#include <ATen/native/SortingUtils.h>
+#include <assert.h>
+#include <c10/macros/Macros.h>
+#include <stdlib.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/native/SortingUtils.h>
-#include <c10/macros/Macros.h>
-#include <assert.h>
-#include <stdlib.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
-#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-#include <thrust/execution_policy.h>
 #include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
+#include <thrust/sort.h>
+#include <THC/THCThrustAllocator.cuh>
 
 namespace at {
 namespace native {
@@ -1960,6 +1960,13 @@ void mode_cuda_template(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  // FIXME: This seems bogus, I only do this because it was the old behaviour.
+  //        The reductions are fine, as long as the axis being reduced along
+  //        isn't of 0 elements (and the output has elements).
+  AT_CHECK(
+      self.numel() > 0,
+      "cannot perform reduction function mode",
+      " on tensor with no elements because the operation does not have an identity");
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
   if (self.dim() == 0 && self.numel() == 1) {
@@ -2203,6 +2210,13 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.size(dim);
+  // FIXME: This seems bogus, I only do this because it was the old behaviour.
+  //        The reductions are fine, as long as the axis being reduced along
+  //        isn't of 0 elements (and the output has elements).
+  AT_CHECK(
+      self.numel() > 0,
+      "cannot perform reduction function kthvalue",
+      " on tensor with no elements because the operation does not have an identity");
   AT_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
   _reduction_with_indices_allocate_or_resize_output(
@@ -2295,7 +2309,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
 Tensor median_cuda(const Tensor& self) {
   return AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "median", [&] {
     return median_cuda_template<scalar_t>(self);
-    });
+  });
 }
 
 std::tuple<Tensor&, Tensor&> topk_out_cuda(

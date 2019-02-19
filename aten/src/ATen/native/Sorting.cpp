@@ -319,6 +319,13 @@ std::tuple<Tensor&, Tensor&> mode_out_cpu(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
 
+  // FIXME: This seems bogus, I only do this because it was the old behaviour.
+  //        The reductions are fine, as long as the axis being reduced along
+  //        isn't of 0 elements (and the output has elements).
+  AT_CHECK(
+      self.numel() > 0,
+      "cannot perform reduction function mode",
+      " on tensor with no elements because the operation does not have an identity");
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim_, keepdim);
   if (self.dim() == 0 && self.numel() == 1) {
@@ -380,6 +387,13 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  // FIXME: This seems bogus, I only do this because it was the old behaviour.
+  //        The reductions are fine, as long as the axis being reduced along
+  //        isn't of 0 elements (and the output has elements).
+  AT_CHECK(
+      self.numel() > 0,
+      "cannot perform reduction function kthvalue",
+      " on tensor with no elements because the operation does not have an identity");
   AT_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
@@ -523,34 +537,29 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
   auto tmp_values = self.clone();
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
 
-  int64_t K =
-      largest ? self.size(dim) - k : k; // "pivotal" index for quickselect
+  // pivotal element for quick select, 0-based
+  int64_t K = largest ? self.size(dim) - k : k - 1;
 
-  AT_DISPATCH_ALL_TYPES(self.type(), "kthvalue", [&] {
-    dim_apply(
-        {tmp_values, tmp_indices, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data<scalar_t>();
-          int64_t* mode_index = tl[3].data<int64_t>();
-          for (int64_t j = 0; j < tmp_indices.size(0); j++) {
-            tmp_indices[j] = j;
-          }
-          quick_select_template(tmp_values, k - 1, [&](int64_t i, int64_t j) {
-            std::swap(tmp_values[i], tmp_values[j]);
-            std::swap(tmp_indices[i], tmp_indices[j]);
-          });
-          auto narrow_values = tl[0].narrow(0, largest ? K : 0, k);
-          auto narrow_indices = tl[1].narrow(0, largest ? K : 0, k);
-          if (sorted) {
-            quick_sort(
-                narrow_values.accessor<scalar_t, 1>(),
-                narrow_indices.accessor<int64_t, 1>(),
-                /*descending=*/largest);
-          }
-        });
+  AT_DISPATCH_ALL_TYPES(self.type(), "topk", [&] {
+    dim_apply({tmp_values, tmp_indices}, dim, [&](int64_t i, TensorList tl) {
+      auto tmp_values = tl[0].accessor<scalar_t, 1>();
+      auto tmp_indices = tl[1].accessor<int64_t, 1>();
+      for (int64_t j = 0; j < tmp_indices.size(0); j++) {
+        tmp_indices[j] = j;
+      }
+      quick_select_template(tmp_values, K, [&](int64_t i, int64_t j) {
+        std::swap(tmp_values[i], tmp_values[j]);
+        std::swap(tmp_indices[i], tmp_indices[j]);
+      });
+      auto narrow_values = tl[0].narrow(0, largest ? K : 0, k);
+      auto narrow_indices = tl[1].narrow(0, largest ? K : 0, k);
+      if (sorted) {
+        quick_sort(
+            narrow_values.accessor<scalar_t, 1>(),
+            narrow_indices.accessor<int64_t, 1>(),
+            /*descending=*/largest);
+      }
+    });
   });
   at::_copy_same_type_(values, tmp_values.narrow(dim, largest ? K : 0, k));
   at::_copy_same_type_(indices, tmp_indices.narrow(dim, largest ? K : 0, k));
