@@ -13,12 +13,12 @@
 
 #ifdef _OPENMP
 
-#ifdef _WIN32  
-// MSVC doesing support loop pragmas, but does support others. Create a new macro to account for those differences.  
-#define PRAGMA_LOOP(P)    // Noop  
+#ifdef _WIN32
+// MSVC doesing support loop pragmas, but does support others. Create a new macro to account for those differences.
+#define PRAGMA_LOOP(P)    // Noop
 #define PRAGMA(P)         __pragma(P)
 #else
-#define PRAGMA_LOOP(P)    _Pragma(#P)  
+#define PRAGMA_LOOP(P)    _Pragma(#P)
 #define PRAGMA(P)         _Pragma(#P)
 #endif
 
@@ -160,7 +160,7 @@ if (std::isnan(val)) break;
 static inline scalar_t THTensor_(powOne)(scalar_t x, scalar_t y) {
 #if defined(TH_REAL_IS_FLOAT)
   return powf(x, y);
-#elif defined(TH_REAL_IS_DOUBLE)
+#elif defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BOOL)
   return pow(x, y);
 #else
   THArgCheck(y >= 0, 1,

@@ -70,6 +70,18 @@ void THVector_(cmul_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, 
 {
   ptrdiff_t i = 0;
 
+#ifdef TH_REAL_IS_BOOL
+  for(; i <n-4; i+=4)
+  {
+    z[i] = x[i] && y[i];
+    z[i+1] = x[i+1] && y[i+1];
+    z[i+2] = x[i+2] && y[i+2];
+    z[i+3] = x[i+3] && y[i+3];
+  }
+
+  for(; i < n; i++)
+    z[i] = x[i] && y[i];
+#else
   for(; i <n-4; i+=4)
   {
     z[i] = x[i] * y[i];
@@ -80,12 +92,25 @@ void THVector_(cmul_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, 
 
   for(; i < n; i++)
     z[i] = x[i] * y[i];
+#endif
 }
 
 void THVector_(muls_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
+#ifdef TH_REAL_IS_BOOL
+  for(; i <n-4; i+=4)
+  {
+    y[i] = x[i] && c;
+    y[i+1] = x[i+1] && c;
+    y[i+2] = x[i+2] && c;
+    y[i+3] = x[i+3] && c;
+  }
+
+  for(; i < n; i++)
+    y[i] = x[i] && c;
+#else
   for(; i <n-4; i+=4)
   {
     y[i] = x[i] * c;
@@ -96,6 +121,7 @@ void THVector_(muls_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, c
 
   for(; i < n; i++)
     y[i] = x[i] * c;
+#endif
 }
 
 void THVector_(cdiv_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n)
