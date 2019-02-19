@@ -197,27 +197,24 @@ struct THCCachingAllocator
     Block* block = NULL;
     Block* remaining = NULL;
 
-    bool repeat = true;
-    do {
-      repeat = false;
-      auto it = free_blocks.lower_bound(&search_key);
-      if (it != free_blocks.end() && (*it)->device == device &&
-          (*it)->stream == stream) {
-        block = *it;
-        free_blocks.erase(it);
+    for (int i = 0; i < 2; ++i) {
+      if (block == NULL) {
+        auto it = free_blocks.lower_bound(&search_key);
+        if (it != free_blocks.end() && (*it)->device == device &&
+            (*it)->stream == stream) {
+          block = *it;
+          free_blocks.erase(it);
+        }
       }
 
       if (block == NULL) {
         for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
           FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
-          repeat = true;
         }
       }
-    } while (block == NULL && repeat);
+    }
 
     if (block == NULL) {
-      // TODO: We can check if some blocks become available by calling torch::CudaIPCCollect,
-      // but right now such linking will require lots of code changes.
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
       cudaError_t err = cuda_malloc_retry(device, &ptr, alloc_size);

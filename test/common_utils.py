@@ -299,11 +299,6 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         set_rng_seed(SEED)
 
-    def tearDown(self):
-        # This will keep tests isolated from each-other
-        if torch.cuda.is_available():
-            torch.cuda.ipc_collect()
-
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
         self.assertEqual(x.size(), y.size())
