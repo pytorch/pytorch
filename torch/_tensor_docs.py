@@ -1319,14 +1319,12 @@ add_docstr_all('lerp',
                r"""
 lerp(start, end, weight) -> Tensor
 
-See :func:`torch.lerp`
+Tensor usage is with `end` passed as a argument. See :func:`torch.lerp`
 """)
 
 add_docstr_all('lerp_',
                r"""
 lerp_(start, end, weight) -> Tensor
-
-Tensor usage is with `end` passed as a argument.
 
 In-place version of :meth:`~Tensor.lerp`
 """)
