@@ -692,7 +692,7 @@ class SGDR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
-        """Step could be called after every update, i.e. if one epoeh has 10 iterations(num_train / batch_size),
+        """Step could be called after every update, i.e. if one epoch has 10 iterations(num_train / batch_size),
         we could called SGDR.step(0.1), SGDR.step(0.2), etc.
         """
         if epoch is None:
