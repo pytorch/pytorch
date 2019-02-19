@@ -1700,7 +1700,7 @@
 
   smoke_macos_libtorch_2.7_cpu:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
+      BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *smoke_mac_test
 
 
