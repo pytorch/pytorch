@@ -5881,6 +5881,23 @@ a")
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_script_module_list_sequential_error(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -9148,7 +9165,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
@@ -10829,6 +10846,7 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_batch_norm',
     'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
