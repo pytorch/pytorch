@@ -1326,6 +1326,8 @@ add_docstr_all('lerp_',
                r"""
 lerp_(start, end, weight) -> Tensor
 
+Tensor usage is with `end` passed as a argument.
+
 In-place version of :meth:`~Tensor.lerp`
 """)
 
