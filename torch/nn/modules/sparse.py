@@ -138,7 +138,7 @@ class Embedding(Module):
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
-                First dimension is being passed to Embedding as ``'num_embeddings'``, second as ``'embedding_dim'``.
+                First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
             padding_idx (int, optional): See module initialization documentation.
