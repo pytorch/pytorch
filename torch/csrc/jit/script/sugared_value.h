@@ -39,6 +39,16 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
       const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
+
+  // assign an attribute on it, e.g. `this.field = newValue`
+  virtual void assign(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field,
+      Value* newValue) {
+    throw ErrorReport(loc) << "attribute assignment is not defined on "
+                           << kind();
+  }
   virtual NoneStatus isNone() {
     return NEVER;
   }
@@ -157,12 +167,50 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   c10::optional<int64_t> version;
 };
 
+// TODO right now this is doing double duty as a type and an instance of that
+// type, need to separate
+struct TORCH_API UserTypeValue : public SugaredValue {
+  UserTypeValue(UserTypePtr type) : type_(std::move(type)) {}
+
+  void assign(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field,
+      Value* newValue) override;
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override;
+
+  // This corresponds to a call to the UserType's constructor.
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  Value* asValue(const SourceRange& loc, Method& m) {
+    return value_;
+  }
+
+  std::string getName() const {
+    return type_->name();
+  }
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  UserTypePtr type_;
+  Value* value_;
+};
+
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(std::shared_ptr<Module> module, Method& method)
-      : module(std::move(module)) // insurance that method stays alive
-        ,
-        method(method) {}
+  MethodValue(std::shared_ptr<SugaredValue> self, Method& method)
+      : self_(std::move(self)), method(method) {}
   std::string kind() const override {
     return "method";
   }
@@ -172,12 +220,19 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
+    c10::optional<NamedValue> self;
+    if (auto userType = dynamic_cast<UserTypeValue*>(self_.get())) {
+      // If self_ is a user-defined type, then it will be expected as part of
+      // the schema.
+      // TODO is there a better way to factor this?
+      self = NamedValue(loc, "self", userType->asValue(loc, caller));
+    }
     return std::make_shared<SimpleValue>(
-        caller.emit_call_to(loc, method, inputs, attributes));
+        caller.emit_call_to(loc, method, self, inputs, attributes));
   }
 
  private:
-  std::shared_ptr<Module> module;
+  std::shared_ptr<SugaredValue> self_;
   Method& method;
 };
 

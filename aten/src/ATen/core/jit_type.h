@@ -14,6 +14,14 @@
 #include <iostream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Module;
+}
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
 #define C10_FORALL_TYPES(_) \
@@ -35,6 +43,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
+_(UserType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1068,4 +1077,79 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+/**
+ * User Defined Types
+ */
+
+struct UserType;
+using UserTypePtr = std::shared_ptr<UserType>;
+using ::torch::jit::script::Module;
+
+// This represents a user-defined type in TorchScript.
+struct CAFFE2_API UserType : public Type {
+  // Create a user type and register it globally.
+  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
+  // returns nullptr if there is no type with that name
+  static UserTypePtr get(const std::string& name);
+
+  DEFINE_IS_SUBCLASS(UserType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<UserType>()) {
+      return typename_ == user_rhs->typename_;
+    }
+    return false;
+  }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    // XXX: We do not have inheritance implemented, only types that are the
+    // same can subtype from each other.
+    return *this == *rhs;
+  }
+  std::string str() const override {
+    return std::string("UserType<") + typename_ + ">";
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    if (namespace_.count(name)) {
+      return namespace_.at(name);
+    }
+    return nullptr;
+  }
+
+  std::string name() const {
+    return typename_;
+  }
+
+  std::shared_ptr<Module> module() const {
+    return module_;
+  }
+
+  bool hasAttribute(const std::string& name) const {
+    return namespace_.count(name);
+  }
+
+  void addAttribute(const std::string& name, TypePtr type) {
+    namespace_.emplace(name, type);
+  }
+
+  static const TypeKind Kind = TypeKind::UserType;
+
+ private:
+  UserType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::UserType),
+        typename_(std::move(name)),
+        module_(std::move(module)) {}
+
+  // Name of type (note that this has to be globally unique).
+  std::string typename_;
+
+  // Mapping of attribute names -> their type.
+  // NOTE: this does not contain methods, which are stored in the module
+  // TODO: once modules support arbitrary ivalue attributes, we don't need this
+  // anymore.
+  std::unordered_map<std::string, TypePtr> namespace_;
+  // Holds method attributes
+  std::shared_ptr<Module> module_;
+
+};
 } // namespace c10

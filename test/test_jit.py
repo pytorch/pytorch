@@ -4346,21 +4346,21 @@ a")
             assert 1 == 1, "hello"
             return x
 
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(not PY2, "Requires python 2")
     def test_python_frontend_py2(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):
@@ -13395,6 +13395,114 @@ class TestDataParallel(JitTestCase):
         r1_forward = replica[1].forward(x1)
         self.assertEqual(first_forward, r1_forward)
 
+
+class TestUserType(JitTestCase):
+    def test_get_with_method(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            @torch.jit.script
+            class Foo:
+                def __init__(self, x):
+                    self.foo = x
+
+                def getFoo(self):
+                    return self.foo
+
+            @torch.jit.script
+            def fn(x):
+                foo = Foo(x)
+                return foo.getFoo()
+
+            input = torch.ones(2, 3)
+            self.assertEqual(fn(input), input)
+
+    def test_get_attr(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            @torch.jit.script
+            class Foo:
+                def __init__(self, x):
+                    self.foo = x
+
+            @torch.jit.script
+            def fn(x):
+                foo = Foo(x)
+                return foo.foo
+
+            input = torch.ones(2, 3)
+            self.assertEqual(fn(input), input)
+
+    def test_set_attr_in_method(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            @torch.jit.script
+            class Foo:
+                def __init__(self, x):
+                    # type: (int)
+                    self.foo = x
+
+                def incFoo(self, y):
+                    # type: (int)
+                    self.foo = self.foo + y
+
+            @torch.jit.script
+            def fn(x):
+                # type: (int)
+                foo = Foo(x)
+                foo.incFoo(2)
+                return foo.foo
+
+            self.assertEqual(fn(1), 3)
+
+    def test_set_attr_type_mismatch(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
+                @torch.jit.script
+                class Foo:
+                    def __init__(self, x):
+                        self.foo = x
+                        self.foo = 10  # should error since int != Tensor
+
+    def test_get_attr_not_initialized(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
+                @torch.jit.script
+                class Foo:
+                    def __init__(self, x):
+                        self.foo = x
+
+                    def get_non_initialized(self):
+                        return self.asdf  # asdf isn't an attr
+
+    def test_set_attr_non_initialized(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            with self.assertRaisesRegex(RuntimeError, "Tried to assign to nonexistent attribute"):
+                @torch.jit.script
+                class Foo:
+                    def __init__(self, x):
+                        self.foo = x
+
+                    def set_non_initialized(self, y):
+                        self.bar = y  # can't assign to non-initialized attr
+
+    def test_type_annotations(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
+                @torch.jit.script
+                class Foo:
+                    def __init__(self, x):
+                        # type: (bool)
+                        self.foo = x
+
+                @torch.jit.script
+                def fn(x):
+                    Foo(x)
+
+                fn(2)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

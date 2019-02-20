@@ -103,7 +103,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
     }
     auto names = tuple_type->names();
-    for (int i = 0; i < names.size(); i++) {
+    for (size_t i = 0; i < names.size(); i++) {
       if (names[i] == field) {
         auto r = m.graph()
                      ->insertNode(m.graph()->createTupleIndex(getValue(), i))
@@ -140,6 +140,81 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   }
   throw ErrorReport(loc) << value->type()->str()
                          << " cannot be used as a tuple";
+}
+
+void UserTypeValue::assign(
+    const SourceRange& loc,
+    Method& m,
+    const std::string& field,
+    Value* newValue) {
+  auto expectedType = type_->getAttribute(field);
+  if (!expectedType) {
+    // We don't have an attribute with this name, either add it to the type
+    // definition or throw an error
+    if (m.name() == "__init__") {
+      type_->addAttribute(field, newValue->type());
+      expectedType = newValue->type();
+    } else {
+      throw ErrorReport(loc)
+          << "Tried to assign to nonexistent attribute " << field
+          << ". Did you forget to initialize it in __init__()?";
+    }
+  }
+
+  // Check type correctness
+  const auto newType = newValue->type();
+  if (!newType->isSubtypeOf(expectedType)) {
+    throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
+                           << expectedType->str() << " but got "
+                           << newType->str();
+  }
+
+  auto& g = *m.graph();
+  g.insertNode(g.createSetAttr(value_, field, newValue));
+}
+
+std::shared_ptr<SugaredValue> UserTypeValue::attr(
+    const SourceRange& loc,
+    Method& m,
+    const std::string& field) {
+  AT_ASSERT(value_);
+  if (auto method = type_->module()->find_method(field)) {
+    return std::make_shared<MethodValue>(shared_from_this(), *method);
+  }
+
+  if (!type_->hasAttribute(field)) {
+    throw ErrorReport(loc)
+        << "Tried to access to nonexistent attribute " << field
+        << ". Did you forget to initialize it in __init__()?";
+  }
+  auto& g = *m.graph();
+  auto n = g.insertNode(g.createGetAttr(value_, field));
+  return std::make_shared<SimpleValue>(n->output());
+}
+
+std::shared_ptr<SugaredValue> UserTypeValue::call(
+    const SourceRange& loc,
+    Method& m,
+    // note: names for args will be 'argument 0', 'argument 1', etc..
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  AT_ASSERT(n_binders <= 1);
+
+  // Generate a new object of the right type, then call `__init__` on it
+  auto& g = *m.graph();
+  auto createNode = g.insertNode(g.createUserObject(type_));
+  value_ = createNode->output();
+
+  auto initMethod = type_->module()->find_method("__init__");
+  AT_ASSERT(initMethod);
+
+  // Call the init function
+  MethodValue(shared_from_this(), *initMethod)
+      .call(loc, m, inputs, attributes, n_binders);
+
+  // Return `self`
+  return shared_from_this();
 }
 } // namespace script
 } // namespace jit
