@@ -483,7 +483,7 @@ library_dirs = []
 if IS_WINDOWS:
     # /NODEFAULTLIB makes sure we only link to DLL runtime
     # and matches the flags set for protobuf and ONNX
-    extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
+    extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB', '/DEBUG:FULL']
     # /MD links against DLL runtime
     # and matches the flags set for protobuf and ONNX
     # /Z7 turns on symbolic debugging information in .obj files

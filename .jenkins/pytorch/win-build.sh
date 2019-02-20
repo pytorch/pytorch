@@ -122,7 +122,8 @@ sccache --zero-stats
 set CC=sccache cl
 set CXX=sccache cl
 
-set REL_WITH_DEB_INFO=1
+set CFLAGS= /Z7
+set LDFLAGS= /DEBUG:FULL
 
 set CMAKE_GENERATOR=Ninja
 
