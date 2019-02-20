@@ -4567,6 +4567,37 @@ class TestNN(NNTestCase):
         # test error message
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
+    
+    def test_reverse_padded_sequence(self):
+        inputs = torch.FloatTensor(
+            [[1.0, 2.0, 3.0],
+             [1.1, 2.1, 0.0],
+             [1.2, 2.2, 0.0],
+             [0.0, 2.3, 0.0]]).unsqueeze(2).repeat(1, 1, 5)
+        lengths = [3, 4, 1]
+        expected_outputs = torch.FloatTensor(
+            [[1.2, 2.3, 3.0],
+             [1.1, 2.2, 0.0],
+             [1.0, 2.1, 0.0],
+             [0.0, 2.0, 0.0]]).unsqueeze(2).repeat(1, 1, 5)
+        expected_sum_grad = torch.FloatTensor(
+            [[1.0, 1.0, 1.0],
+             [1.0, 1.0, 1.0],
+             [1.0, 1.0, 1.0],
+             [1.0, 1.0, 1.0]]).unsqueeze(2).repeat(1, 1, 5)
+        for include_third_dimension in (False, True):
+            for batch_first in (False, True):
+                triplet_ = (inputs.clone(), expected_outputs.clone(), expected_sum_grad.clone())
+                if not include_third_dimension:
+                    triplet_ = (x[:, :, 0] for x in triplet_)
+                if batch_first:
+                    triplet_ = (x.transpose(0, 1) for x in triplet_)
+                inputs_, expected_outputs_, expected_sum_grad_ = triplet_
+                inputs_.requires_grad_()
+                outputs = rnn_utils.reverse_padded_sequence(inputs_, lengths, batch_first=batch_first)
+                outputs.sum().backward()
+                self.assertEqual(outputs.data, expected_outputs_)
+                self.assertEqual(inputs_.grad.data, expected_sum_grad_)
 
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
