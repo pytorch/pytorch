@@ -168,9 +168,13 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
+  std::function<bool(Node*)> callback_ = nullptr;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
+
+  GraphFuser(Block* block, std::shared_ptr<Graph> graph, std::function<bool(Node*)> callback)
+      : block_(block), graph_(std::move(graph)), callback_(callback) {}
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -186,7 +190,16 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return isFusableMap(node) || isFusableBatchNorm(node);
+    return isFusableMap(node) || isFusableBatchNorm(node) || isFusableCallback(node);
+  }
+
+  bool isFusableCallback(Node* node) {
+    // Ever denoting a prim::Param as fusable is broken,
+    // this simply saves the user defined callback_ the effort.
+    if (node->kind() == prim::Param) {
+      return false;
+    }
+    return (!(callback_ == nullptr)) && callback_(node);
   }
 
   bool isFusableMap(Node* node) {
@@ -1336,6 +1349,12 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
     EliminateDeadCode(graph);
     // Improve the quality of shape propagation code that was left
     PeepholeOptimizeShapeExpressions(graph->block());
+  }
+}
+
+void CustomFuseGraph(std::shared_ptr<Graph>& graph, std::function<bool(Node*)> fn) {
+  if (canFuseOnCPU() || canFuseOnGPU()) {
+    GraphFuser(graph->block(), graph, fn).run();
   }
 }
 

@@ -975,6 +975,36 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   ASSERT_EQ(second_key, expected_key);
 }
 
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(graph, [](Node* n) { return true; });
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == prim::FusionGroup;
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+}
+
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
   auto graph = build_lstm();
   CreateAutodiffSubgraphs(graph, /*threshold=*/2);
