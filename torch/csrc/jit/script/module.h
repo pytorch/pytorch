@@ -133,11 +133,9 @@ struct Method {
     return graph()->addInput();
   }
 
-  TORCH_API Value* add_attribute(IValue* slot) {
+  TORCH_API Value* add_attribute(TypePtr type, IValue* slot) {
     attributes.push_back(slot);
-    auto in = graph()->addInput();
-    in->setType(DictType::create(StringType::get(), TensorType::get()));
-    return in;
+    return graph()->addInput()->setType(type);
   }
 
   std::shared_ptr<Graph> propagate_shapes(
@@ -362,7 +360,21 @@ struct NamedModule {
   std::shared_ptr<Module> module;
 };
 
-struct NamedParameter {
+struct NamedAttribute {
+  NamedAttribute(std::string name, TypePtr type, IValue ivalue)
+      : name_(name),
+        type_(type),
+        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
+
+  IValue* slot() const {
+    return ivalue_.get();
+  }
+  const std::string name_;
+  const TypePtr type_;
+  std::unique_ptr<IValue> ivalue_;
+};
+
+ struct NamedParameter {
   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
       : name(std::move(name)),
         is_buffer(is_buffer),
@@ -418,13 +430,9 @@ struct Module {
   }
   void register_attribute(
       const std::string& name,
-      IValue value) {
-    // if (auto p = parameters.find(name)) {
-    //   *p->slot() = v;
-    //   p->is_buffer = is_buffer;
-    //   return;
-    // }
-    attributes.insert(name, value);
+      const TypePtr type,
+      IValue ivalue) {
+    attributes.insert(name, NamedAttribute(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
@@ -492,7 +500,7 @@ struct Module {
       const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, IValue>& get_attributes()
+  const torch::OrderedDict<std::string, NamedAttribute>& get_attributes()
       const {
     return attributes;
   }
@@ -504,7 +512,7 @@ struct Module {
   NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  IValue* find_attribute(const std::string& name) {
+  NamedAttribute* find_attribute(const std::string& name) {
     return attributes.find(name);
   }
   NamedModule* find_module(const std::string& name) {
@@ -637,7 +645,7 @@ struct Module {
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
   torch::OrderedDict<std::string, NamedParameter> parameters;
-  torch::OrderedDict<std::string, IValue> attributes;
+  torch::OrderedDict<std::string, NamedAttribute> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };

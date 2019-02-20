@@ -286,7 +286,7 @@ struct ModuleValue : public SugaredValue {
 
     if (auto value = module->find_attribute(field)) {
       std::cout << "Found attribute for " << field << "\n";
-      return std::make_shared<SimpleValue>(m.add_attribute(value));
+      return std::make_shared<SimpleValue>(m.add_attribute(value->type_, value->slot()));
       // return std::make_shared<NoneValue>();
     } else {
       std::cout << "No attri for " << field << "\n";
@@ -694,10 +694,11 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
-      // .def("_register_attribute", &Module::register_attribute)
-      .def("_register_attribute", [](Module& self, std::string name, TypePtr type, py::object value) {
-        self.register_attribute(name, toIValue(value, type));
-      })
+      .def(
+          "_register_attribute",
+          [](Module& self, std::string name, TypePtr type, py::object value) {
+            self.register_attribute(name, type, toIValue(value, type));
+          })
       .def("_register_module", &Module::register_module)
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
@@ -866,18 +867,21 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_copy_method",
           [](std::shared_ptr<Module> m,
-            std::string name,
-            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
-            std::shared_ptr<Module> orig) {
-              std::vector<at::Tensor*> member_inputs;
-              for (auto& p : params) {
-                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
-                AT_ASSERT(np != nullptr);
-                member_inputs.push_back(np->slot());
-              }
+             std::string name,
+             std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
+                 params,
+             std::shared_ptr<Module> orig) {
+            std::vector<at::Tensor*> member_inputs;
+            for (auto& p : params) {
+              NamedParameter* np =
+                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              AT_ASSERT(np != nullptr);
+              member_inputs.push_back(np->slot());
+            }
 
-              Method* orig_method = orig->find_method(name);
-              m->create_method(name, orig_method->graph()->copy(), member_inputs, {});
+            Method* orig_method = orig->find_method(name);
+            m->create_method(
+                name, orig_method->graph()->copy(), member_inputs, {});
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
