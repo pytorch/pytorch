@@ -1069,7 +1069,7 @@ int listSelect<Shared<BoolList>>(Stack& stack) {
   pop(stack, list, idx);
 
   auto element = getBoolItem(list->elements(), idx);
-  push(stack, std::move(element));
+  push(stack, element);
   return 0;
 }
 

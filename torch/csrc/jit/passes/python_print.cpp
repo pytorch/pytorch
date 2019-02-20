@@ -367,7 +367,7 @@ struct PythonPrintPass {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id[name]++);
+      name += std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -749,8 +749,7 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
-      case prim::Constant:
-      case prim::Undefined: {
+      case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
