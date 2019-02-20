@@ -418,15 +418,15 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 namespace {
 class UserTypeRegistry {
  public:
-  void registerType(Symbol name, UserTypePtr type) {
+  void registerType(std::string name, UserTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
-      AT_ERROR("Type name: ", name.toQualString(), " already exists.");
+      AT_ERROR("Type name: ", name, " already exists.");
     }
-    reg_.emplace(name, type);
+    reg_.emplace(std::move(name), type);
   }
 
-  UserTypePtr getType(Symbol name) {
+  UserTypePtr getType(const std::string& name) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
       return reg_.at(name);
@@ -436,7 +436,7 @@ class UserTypeRegistry {
 
  private:
   std::mutex mutex_;
-  std::unordered_map<Symbol, UserTypePtr> reg_;
+  std::unordered_map<std::string, UserTypePtr> reg_;
 };
 
 UserTypeRegistry& getRegistry() {
@@ -448,17 +448,12 @@ UserTypeRegistry& getRegistry() {
 UserTypePtr UserType::create(
     const std::string& name,
     std::shared_ptr<Module> module) {
-  // TODO write a way to create a namespace directly instead of doing this.
-  const auto internedTypename =
-      Symbol::fromQualString(name + "::__name__").ns();
-  auto ptr = UserTypePtr(new UserType(internedTypename, std::move(module)));
-  getRegistry().registerType(internedTypename, ptr);
+  auto ptr = UserTypePtr(new UserType(name, std::move(module)));
+  getRegistry().registerType(name, ptr);
   return ptr;
 }
 
 UserTypePtr UserType::get(const std::string& name) {
-  const auto internedTypename =
-      Symbol::fromQualString(name + "::__name__").ns();
-  return getRegistry().getType(internedTypename);
+  return getRegistry().getType(name);
 }
 } // namespace c10

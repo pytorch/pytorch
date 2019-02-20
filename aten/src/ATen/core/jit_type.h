@@ -1085,7 +1085,7 @@ struct UserType;
 using UserTypePtr = std::shared_ptr<UserType>;
 using ::torch::jit::script::Module;
 
-// This node represents a user-defined type in TorchScript
+// This represents a user-defined type in TorchScript
 struct CAFFE2_API UserType : public Type {
   static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
   // returns nullptr if there is no type with that name
@@ -1106,21 +1106,18 @@ struct CAFFE2_API UserType : public Type {
     return *this == *rhs;
   }
   std::string str() const override {
-    return std::string("UserType<") + typename_.toUnqualString() + ">";
+    return std::string("UserType<") + typename_ + ">";
   }
 
   TypePtr getAttribute(const std::string& name) const {
-    const std::string ns = typename_.ns().toUnqualString();
-    const Symbol internedName = Symbol::fromQualString(ns + "::" + name);
-    if (namespace_.count(internedName)) {
-      return namespace_.at(internedName);
+    if (namespace_.count(name)) {
+      return namespace_.at(name);
     }
     return nullptr;
   }
 
-  // TODO all this stuff should be interned
   std::string name() const {
-    return typename_.toUnqualString();
+    return typename_;
   }
 
   std::shared_ptr<Module> module() const {
@@ -1128,23 +1125,17 @@ struct CAFFE2_API UserType : public Type {
   }
 
   bool hasAttribute(const std::string& name) const {
-    const std::string ns = typename_.ns().toUnqualString();
-    const Symbol internedName =
-        Symbol::fromQualString(ns + "::" + name);
-    return namespace_.count(internedName);
+    return namespace_.count(name);
   }
 
   void addAttribute(const std::string& name, TypePtr type) {
-    const std::string ns = typename_.ns().toUnqualString();
-    const Symbol internedName =
-        Symbol::fromQualString(ns + "::" + name);
-    namespace_.emplace(internedName, type);
+    namespace_.emplace(name, type);
   }
 
   static const TypeKind Kind = TypeKind::UserType;
 
  private:
-  UserType(Symbol name, std::shared_ptr<Module> module)
+  UserType(std::string name, std::shared_ptr<Module> module)
       : Type(TypeKind::UserType),
         module_(std::move(module)),
         typename_(std::move(name)) {}
@@ -1153,10 +1144,10 @@ struct CAFFE2_API UserType : public Type {
   std::shared_ptr<Module> module_;
 
   // Name of type (note that this has to be globally unique).
-  Symbol typename_;
+  std::string typename_;
 
   // Mapping of attribute names -> their type.
   // XXX: methods are not yet implemented
-  std::unordered_map<Symbol, TypePtr> namespace_;
+  std::unordered_map<std::string, TypePtr> namespace_;
 };
 } // namespace c10

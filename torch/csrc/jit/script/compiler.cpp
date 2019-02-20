@@ -31,8 +31,6 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
 
-struct ModuleValue;
-
 // Holds mappings from a variable name to a refined type for that variable
 // E.g if x is not None is true than we can refine x from type t? to t.
 struct Refinements {
@@ -568,6 +566,7 @@ struct to_ir {
       const SugaredValuePtr& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
+    // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
     }
@@ -579,26 +578,6 @@ struct to_ir {
     emitStatements(stmts_list.begin(), stmts_list.end());
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), std::move(arguments), std::move(returns)};
-  }
-
-  FunctionSchema emitInitDef(
-      const Def& def,
-      const SugaredValuePtr& self,
-      Block* block) {
-    auto schema = extractSchemaFromDef(def, self);
-    if (schema.returns().size() != 0) {
-      // TODO ErrorReport on return stmt location
-      throw std::runtime_error("__init__() should return None, not XYZ");
-    }
-    const auto arguments = emitFormalArguments(def, self, schema, block);
-    auto stmts_list = moveAllReturnsToEnd(def.statements());
-    emitStatements(stmts_list.begin(), stmts_list.end());
-
-    auto none = graph->insertConstant(IValue());
-    graph->registerOutput(none);
-    return {def.name().name(),
-            std::move(arguments),
-            {Argument("", NoneType::get())}};
   }
 
   std::vector<IValue> evaluateDefaults(
@@ -735,6 +714,7 @@ struct to_ir {
       expected_annotation_size--;
     }
     if (schema.arguments().size() != expected_annotation_size) {
+      AT_ASSERT(false);
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
           << " function parameters (" << schema.arguments().size() << ")"
