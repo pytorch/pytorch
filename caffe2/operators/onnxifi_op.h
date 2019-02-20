@@ -171,19 +171,28 @@ class OnnxifiOp final : public Operator<Context> {
         }
         lib_->onnxReleaseBackendID(backend_ids[i]);
       }
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxInitGraph(
-              backend_,
-              nullptr,
-              onnx_model_str.size(),
-              (const void*)(onnx_model_str.c_str()),
-              weight_descs.size(),
-              weight_descs.data(),
-              &graph_),
-          ONNXIFI_STATUS_SUCCESS);
-      backend_graph_shared_ptr_ = backend_graph_map_ptr_->insert(
-          op_id_string_,
-          onnx::BackendGraphInfo(backend_id_, backend_, graph_, lib_));
+
+      // Lookup the backend first, if it's not there, create our own and try
+      // submitting it to the backend_graph_map
+      backend_graph_shared_ptr_ = backend_graph_map_ptr_->lookup(op_id_string_);
+      if (!backend_graph_shared_ptr_) {
+        LOG(INFO) << "Creating backend for " << op_id_string_;
+        CAFFE_ENFORCE_EQ(
+            lib_->onnxInitGraph(
+                backend_,
+                nullptr,
+                onnx_model_str.size(),
+                (const void*)(onnx_model_str.c_str()),
+                weight_descs.size(),
+                weight_descs.data(),
+                &graph_),
+            ONNXIFI_STATUS_SUCCESS);
+        backend_graph_shared_ptr_ = backend_graph_map_ptr_->insert(
+            op_id_string_,
+            onnx::BackendGraphInfo(backend_id_, backend_, graph_, lib_));
+      } else {
+        LOG(INFO) << "Got cached backend for " << op_id_string_;
+      }
       // This checks if our insertion was successful or some other thread did
       // the insert in the meantime.
       if (backend_graph_shared_ptr_->backend_id != backend_id_ ||
