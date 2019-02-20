@@ -56,6 +56,7 @@ _enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
+_jit_script_class_compile = torch._C._jit_script_class_compile
 BatchTensor = torch._C._jit.BatchTensor
 
 Future = torch._C.Future
@@ -746,6 +747,23 @@ def script_method(fn, _rcb=None):
         _rcb = _jit_internal.createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
     return ScriptMethodStub(_rcb, ast, fn)
+
+
+def script_class(cls):
+    if not _enabled:
+        return cls
+    class_def = get_jit_ast(cls, is_method=False, is_class=True)
+    _rcb = _jit_internal.createResolutionCallback(1)
+    mod = ScriptModule()
+    _jit_script_class_compile(mod, class_def, _rcb)
+    # Forward docstrings
+    mod.__doc__ = cls.__doc__
+
+    # TODO need a better way to pass information to init.cpp that this is a
+    # script class
+    mod.__is_user_type__ = True
+    mod.__user_type_name__ = cls.__name__
+    return mod
 
 
 def _try_get_weak_module(mod):

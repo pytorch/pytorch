@@ -81,6 +81,9 @@ namespace c10 {
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(prim, Function)                \
+  _(prim, CreateUserObject)        \
+  _(prim, SetAttr)                 \
+  _(prim, GetAttr)                 \
   _(aten, append)                  \
   _(aten, format)                  \
   _(aten, __not__)                 \

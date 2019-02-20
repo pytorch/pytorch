@@ -884,7 +884,38 @@ RegisterOperators reg({
             return 0;
           };
         }),
-});
+     Operator(
+         prim::CreateUserObject,
+         [](const Node* node) {
+           auto type = node->output()->type()->cast<UserType>();
+           AT_ASSERT(type);
+           return [=](Stack& stack) {
+             auto userObj = c10::ivalue::UserObject::create(type->name());
+             push(stack, userObj);
+             return 0;
+           };
+         }),
+     // TODO schematize?
+     Operator(
+         prim::GetAttr,
+         [](const Node* node) {
+           return [](Stack& stack) {
+             auto fieldname = pop(stack).toString();
+             auto userObj = pop(stack).toUserObject();
+             auto value = userObj->getAttr(*fieldname);
+             push(stack, value);
+             return 0;
+           };
+         }), // TODO schematize?
+     Operator(prim::SetAttr, [](const Node* node) {
+       return [](Stack& stack) {
+         auto v = pop(stack);
+         auto fieldname = pop(stack).toString();
+         auto userObj = pop(stack).toUserObject();
+         userObj->setAttr(*fieldname, v);
+         return 0;
+       };
+     })});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \

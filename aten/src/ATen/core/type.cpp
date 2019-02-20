@@ -421,17 +421,17 @@ class UserTypeRegistry {
   void registerType(Symbol name, UserTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
-      AT_ERROR("Type name: ", name, " already exists.");
+      AT_ERROR("Type name: ", name.toQualString(), " already exists.");
     }
     reg_.emplace(name, type);
   }
 
   UserTypePtr getType(Symbol name) {
     std::lock_guard<std::mutex> g(mutex_);
-    if (!reg_.count(name)) {
-      AT_ERROR("Type: ", name, " does not exist.");
+    if (reg_.count(name)) {
+      return reg_.at(name);
     }
-    return reg_.at(name);
+    return nullptr;
   }
 
  private:
@@ -445,30 +445,18 @@ UserTypeRegistry& getRegistry() {
 }
 } // namespace
 
-UserTypePtr UserType::create(
-    const std::string& name,
-    std::unordered_map<std::string, TypePtr> ns) {
+UserTypePtr UserType::create(const std::string& name) {
   // TODO write a way to create a namespace directly instead of doing this.
   const auto internedTypename =
       Symbol::fromQualString(name + "::__name__").ns();
-
-  std::unordered_map<Symbol, TypePtr> internedNamespace;
-
-  for (const auto& pr : ns) {
-    const auto& attrName = pr.first;
-    const auto& type = pr.second;
-    const Symbol internedName =
-        Symbol::fromQualString(name + "::" + attrName);
-    internedNamespace.emplace(internedName, type);
-  }
-
-  auto ptr =
-      UserTypePtr(new UserType(internedTypename, std::move(internedNamespace)));
+  auto ptr = UserTypePtr(new UserType(internedTypename));
   getRegistry().registerType(internedTypename, ptr);
   return ptr;
 }
 
-UserTypePtr getUserType(Symbol name) {
-  return getRegistry().getType(name);
+UserTypePtr UserType::get(const std::string& name) {
+  const auto internedTypename =
+      Symbol::fromQualString(name + "::__name__").ns();
+  return getRegistry().getType(internedTypename);
 }
 } // namespace c10

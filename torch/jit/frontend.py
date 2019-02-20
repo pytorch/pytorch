@@ -137,14 +137,24 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_ast(fn, is_method):
-    source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
-    type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
-    return build_def(ctx, py_ast.body[0], type_line, is_method)
+def get_jit_ast(fn, is_method, is_class=False, class_name=None):
+    if is_class:
+        methods = inspect.getmembers(fn, predicate=inspect.isfunction)
+        method_asts = [get_jit_ast(method[1], is_method=True, is_class=False, class_name=fn.__name__) for method in methods]
+
+        source = dedent(inspect.getsource(fn))
+        py_ast = ast.parse(source)
+        # TODO use true division?
+        ctx = SourceContext(source, False)
+        return build_class_def(ctx, py_ast.body[0], method_asts)
+    else:
+        source = dedent(inspect.getsource(fn))
+        py_ast = ast.parse(source)
+        if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
+            raise RuntimeError("expected a single top-level function")
+        type_line = torch.jit.annotations.get_type_line(source)
+        ctx = SourceContext(source, _uses_true_division(fn))
+        return build_def(ctx, py_ast.body[0], type_line, class_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
@@ -163,13 +173,17 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def, type_line, is_method):
-    returns = []
-    ret_body = []
+def build_class_def(ctx, py_def, methods):
+    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+                       py_def.col_offset + len("class"))
+    return ClassDef(Ident(r, py_def.name), methods)
+
+
+def build_def(ctx, py_def, type_line, class_name=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
-    param_list = build_param_list(ctx, py_def.args)
+    param_list = build_param_list(ctx, py_def.args, class_name)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
@@ -186,21 +200,23 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or keyword-only arguments")
 
 
-def build_param_list(ctx, py_args):
+def build_param_list(ctx, py_args, class_name):
     if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
     if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
         raise ValueError(_vararg_kwarg_err)
-    return [build_param(ctx, arg) for arg in py_args.args]
+    return [build_param(ctx, arg, class_name) for arg in py_args.args]
 
 
-def build_param(ctx, py_arg):
+def build_param(ctx, py_arg, class_name):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
     name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
+    elif class_name is not None and py_arg.arg == 'self':
+        annotation_expr = Var(Ident(r, class_name))
     else:
         annotation_expr = Var(Ident(r, 'Tensor'))
     return Param(annotation_expr, Ident(r, name))

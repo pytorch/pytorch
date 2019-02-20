@@ -31,6 +31,8 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
 
+struct ModuleValue;
+
 // Holds mappings from a variable name to a refined type for that variable
 // E.g if x is not None is true than we can refine x from type t? to t.
 struct Refinements {
@@ -531,12 +533,18 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
+    if (def.name().name() == "__init__") {
+      isInitDef_ = true;
+      method.setSchema(emitInitDef(def, self, graph->block()));
+    } else {
+      method.setSchema(emitDef(def, self, graph->block()));
+    }
 
-    method.setSchema(emitDef(def, self, graph->block()));
     runCleanupPasses(graph);
   }
 
  private:
+  bool isInitDef_ = false;
   Method& method;
   std::shared_ptr<Graph> graph;
   Resolver resolver;
@@ -588,6 +596,26 @@ struct to_ir {
     return {def.name().name(), std::move(arguments), std::move(returns)};
   }
 
+  FunctionSchema emitInitDef(
+      const Def& def,
+      const SugaredValuePtr& self,
+      Block* block) {
+    auto schema = extractSchemaFromDef(def, self);
+    if (schema.returns().size() != 0) {
+      // TODO ErrorReport on return stmt location
+      throw std::runtime_error("__init__() should return None, not XYZ");
+    }
+    const auto arguments = emitFormalArguments(def, self, schema, block);
+    auto stmts_list = moveAllReturnsToEnd(def.statements());
+    emitStatements(stmts_list.begin(), stmts_list.end());
+
+    auto none = graph->insertConstant(IValue());
+    graph->registerOutput(none);
+    return {def.name().name(),
+            std::move(arguments),
+            {Argument("", NoneType::get())}};
+  }
+
   std::vector<IValue> evaluateDefaults(
       const SourceRange& r,
       const std::vector<Expr>& default_types,
@@ -629,8 +657,9 @@ struct to_ir {
       const SugaredValuePtr& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
-    if (self)
+    if (self && !dynamic_cast<UserTypeValue*>(self.get())) {
       ++params_begin;
+    }
     std::vector<Argument> retval;
 
     std::vector<Expr> default_types;
@@ -716,7 +745,9 @@ struct to_ir {
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
     auto expected_annotation_size =
-        self ? def.decl().params().size() - 1 : def.decl().params().size();
+        // (self && !dynamic_cast<UserTypeValue*>(self.get()))
+        // ? def.decl().params().size() - 1
+        : def.decl().params().size();
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
@@ -724,12 +755,30 @@ struct to_ir {
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!";
     }
+    // TODO figure out what to do here. We want to do:
+    // 1. If `self` is "first class", e.g. it's a user-defined type, treat it
+    // like normal arguments
+    // 2. Otherwise, it's a
+    size_t arg_annotation_idx = 0;
     if (self) {
       AT_ASSERT(it != end);
-      environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
+      const auto& name = (*it).ident().name();
+      environment_stack->setSugaredVar(def.range(), name, self);
+      // TODO If this is a first-class type, we also need to bind "self" to a
+      // block input
+      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
+        Value* new_input = block->addInput();
+        if (meaningfulName(name)) {
+          new_input->setUniqueName(name);
+          new_input->setType(userType->p_);
+        }
+
+        userType->v_ = new_input;
+        arguments.push_back(schema.arguments().at(arg_annotation_idx));
+      }
       ++it;
+      ++arg_annotation_idx;
     }
-    size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
@@ -1805,6 +1854,9 @@ struct to_ir {
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
         break;
+      case '.':
+        emitSelectAssign(stmt);
+        break;
       case TK_SUBSCRIPT:
         emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
         break;
@@ -1812,6 +1864,18 @@ struct to_ir {
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on left-hand side of assignment.";
     }
+  }
+
+  void emitSelectAssign(const Assign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto basename = Var(lhs.value()).name();
+    const auto rhsValue =
+        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    bool shouldDefine = basename.name() == "self" && isInitDef_;
+
+    auto userObject = environment_stack->getSugaredVar(basename);
+    userObject->assign(
+        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2669,6 +2733,21 @@ void defineMethodsInModule(
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
+}
+
+void defineUserType(
+    const ClassDef& classDef,
+    const Resolver& resolver,
+    const std::shared_ptr<UserTypeValue>& self) {
+  const auto defs = classDef.defs();
+  for (auto it = defs.begin(); it != defs.end(); ++it) {
+    auto def = *it;
+    auto creator = [&](Method& method) {
+      to_ir(def, resolver, self, method);
+    };
+    Method& m = self->module_->create_method(def.name().name(), creator);
+    m.ensure_defined();
+  }
 }
 
 void lambdaLiftFork(Node* fork_node) {

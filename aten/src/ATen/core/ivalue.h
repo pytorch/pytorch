@@ -3,10 +3,11 @@
 #include <condition_variable>
 #include <type_traits>
 
+#include <ATen/core/blob.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <ATen/core/Tensor.h>
@@ -91,6 +92,30 @@ using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
 
+// User-defined object.
+// TODO this is templated to avoid circularity with IValue. Should be a better
+// way to do this
+template <typename Elem>
+struct CAFFE2_API UserObjectGeneric final : c10::intrusive_ptr_target {
+ public:
+  UserObjectGeneric(std::string name) : typename_(std::move(name)) {}
+  static c10::intrusive_ptr<UserObjectGeneric> create(std::string name) {
+    return c10::make_intrusive<UserObjectGeneric>(std::move(name));
+  }
+  void setAttr(const std::string& name, Elem v) {
+    namespace_[name] = v;
+  }
+
+  Elem getAttr(const std::string& name) const {
+    return namespace_.at(name);
+  }
+
+ private:
+  const std::string typename_;
+  std::unordered_map<std::string, Elem> namespace_;
+};
+
+using UserObject = UserObjectGeneric<IValue>;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -116,7 +141,8 @@ using GenericList = List<IValue>;
   _(GenericList) \
   _(GenericDict) \
   _(Future) \
-  _(Device)
+  _(Device) \
+  _(UserObject)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -390,6 +416,18 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const & {
     AT_ASSERT(isGenericDict());
     return toIntrusivePtr<ivalue::GenericDict>();
+  }
+
+  // UserType
+  IValue(c10::intrusive_ptr<ivalue::UserObject> v);
+  bool isUserObject() const { return tag == Tag::UserObject; }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() && {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
+  }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() const & {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
   }
 
   // None
@@ -736,6 +774,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
+DEFINE_TO(c10::intrusive_ptr<ivalue::UserObject>, toUserObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
@@ -807,6 +846,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 inline IValue::IValue(ivalue::UnorderedMap v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::UserObject> v)
+: tag(Tag::UserObject), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();

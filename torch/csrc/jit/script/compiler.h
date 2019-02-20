@@ -43,6 +43,11 @@ TORCH_API void defineMethodsInModule(
     const Resolver& resolver,
     const std::shared_ptr<SugaredValue>& self);
 
+TORCH_API void defineUserType(
+    const ClassDef& classDef,
+    const Resolver& resolver,
+    const std::shared_ptr<UserTypeValue>& self);
+
 TORCH_API void lambdaLiftFork(Node* fork_node);
 
 } // namespace script

@@ -1075,10 +1075,12 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct UserType;
 using UserTypePtr = std::shared_ptr<UserType>;
 
-UserTypePtr getUserType(Symbol name);
-
 // This node represents a user-defined type in TorchScript
 struct CAFFE2_API UserType : public Type {
+  static UserTypePtr create(const std::string& name);
+  // returns nullptr if there is no type with that name
+  static UserTypePtr get(const std::string& name);
+
   // Create a user type and register it.
   DEFINE_IS_SUBCLASS(UserType);
   bool operator==(const Type& rhs) const override {
@@ -1097,21 +1099,39 @@ struct CAFFE2_API UserType : public Type {
     return std::string("UserType<") + typename_.toUnqualString() + ">";
   }
 
-  TypePtr getAttribute(Symbol attr) {
-    return namespace_.at(attr);
+  TypePtr getAttribute(const std::string& name) const {
+    const std::string ns = typename_.ns().toUnqualString();
+    const Symbol internedName = Symbol::fromQualString(ns + "::" + name);
+    if (namespace_.count(internedName)) {
+      return namespace_.at(internedName);
+    }
+    return nullptr;
   }
+
+  // TODO all this stuff should be interned
+  std::string name() const {
+    return typename_.toUnqualString();
+  }
+
+  bool hasAttribute(const std::string& name) const {
+    const std::string ns = typename_.ns().toUnqualString();
+    const Symbol internedName =
+        Symbol::fromQualString(ns + "::" + name);
+    return namespace_.count(internedName);
+  }
+
+  void addAttribute(const std::string& name, TypePtr type) {
+    const std::string ns = typename_.ns().toUnqualString();
+    const Symbol internedName =
+        Symbol::fromQualString(ns + "::" + name);
+    namespace_.emplace(internedName, type);
+  }
+
   static const TypeKind Kind = TypeKind::UserType;
 
  private:
-  friend class UserTypeBuilder;
-  static UserTypePtr create(
-      const std::string& name,
-      std::unordered_map<std::string, TypePtr> ns);
-
-  UserType(Symbol name, std::unordered_map<Symbol, TypePtr> ns)
-      : Type(TypeKind::UserType),
-        typename_(std::move(name)),
-        namespace_(std::move(ns)) {}
+  UserType(Symbol name)
+      : Type(TypeKind::UserType), typename_(std::move(name)) {}
 
   // Name of type (note that this has to be globally unique).
   Symbol typename_;
@@ -1120,31 +1140,4 @@ struct CAFFE2_API UserType : public Type {
   // XXX: methods are not yet implemented
   std::unordered_map<Symbol, TypePtr> namespace_;
 };
-
-// Helper to construct user types incrementally. Calling `build()` will
-// register the type and intern all relevant strings, after which modifications
-// are not allowed.
-class UserTypeBuilder {
-  public:
-   UserTypeBuilder(std::string name) : typename_(std::move(name)) {}
-   void addAttribute(std::string name, TypePtr type) {
-     AT_ASSERT(!built_);
-     namespace_.emplace(std::move(name), std::move(type));
-   }
-
-   // Build the actual user type. This "freezes" the type and render the
-   // builder unusable.
-   UserTypePtr build() {
-     AT_ASSERT(!built_);
-     built_ = true;
-     return UserType::create(typename_, std::move(namespace_));
-   }
-
-  private:
-   std::string typename_;
-   std::unordered_map<std::string, TypePtr> namespace_;
-   bool built_ = false;
-};
-
-
 } // namespace c10
