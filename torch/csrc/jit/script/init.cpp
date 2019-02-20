@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -166,6 +167,21 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     std::stringstream ss;
     ss << "python value of type '" << typeString(self) << "'";
     return ss.str();
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Method& m,
+      const c10::optional<size_t>& size_hint = {}) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << kind() << " cannot be used as a tuple";
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+    throw ErrorReport(loc) << ss.str();
   }
 
  protected:
@@ -429,26 +445,26 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), loc));
+      return toSimple(g.insertConstant(IValue(), nullptr, loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, loc));
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, loc));
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -834,7 +850,23 @@ void initJitScriptBindings(PyObject* module) {
             return ss.str();
           })
       .def("apply", &Module::apply)
-      .def("_copy_into", &Module::copy_into);
+      .def("_copy_into", &Module::copy_into)
+      .def(
+          "_copy_method",
+          [](std::shared_ptr<Module> m,
+            std::string name,
+            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
+            std::shared_ptr<Module> orig) {
+              std::vector<at::Tensor*> member_inputs;
+              for (auto& p : params) {
+                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+                AT_ASSERT(np != nullptr);
+                member_inputs.push_back(np->slot());
+              }
+
+              Method* orig_method = orig->find_method(name);
+              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+          });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def("graph", [&](Method& self) { return self.graph(); })
@@ -924,6 +956,17 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+
+  py::class_<testing::FileCheck>(m, "FileCheck")
+      .def(py::init<>())
+      .def("check", &testing::FileCheck::check)
+      .def("check_not", &testing::FileCheck::check_not)
+      .def("check_same", &testing::FileCheck::check_same)
+      .def("check_next", &testing::FileCheck::check_next)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("check_dag", &testing::FileCheck::check_dag)
+      .def("check_count", &testing::FileCheck::check_count)
+      .def("run", &testing::FileCheck::run);
 }
 
 } // namespace script
