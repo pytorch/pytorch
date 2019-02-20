@@ -1152,6 +1152,15 @@ if _enabled:
                 return self.__getattr__('forward').graph
             return Module.__getattr__(self, attr)
 
+        def _is_attribute(self, attr, value):
+            containers = ['_parameters', '_modules', '_buffers']
+            if attr in containers:
+                return False
+            for container in containers:
+                if attr in getattr(self, container):
+                    return False
+            return True
+
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
@@ -1164,7 +1173,7 @@ if _enabled:
                         return
                 ret = super(ScriptModule, self).__setattr__(attr, value)
                 value_type = _get_type(value)
-                if value_type:
+                if value_type and self._is_attribute(attr, value):
                     self._register_attribute(attr, value_type, value)
                 return ret
 
