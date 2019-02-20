@@ -40,8 +40,6 @@ def _batch_mahalanobis(bL, bx):
     shape, but `bL` one should be able to broadcasted to `bx` one.
     """
     n = bx.size(-1)
-    # Broadcast singleton dimensions of bx into the corresponding dimensions of bL
-    bx, _ = torch.broadcast_tensors(bx, bL[..., 0])
 
     bx_batch_shape = bx.shape[:-1]
     # Assume that bL.shape = (i, 1, n, n), bx.shape = (..., i, j, n),
