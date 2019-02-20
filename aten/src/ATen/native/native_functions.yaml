@@ -240,19 +240,11 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
   matches_jit_signature: True
 
-- func: argmax(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: argmax(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: argmin(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: argmin(Tensor self) -> Tensor
+- func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
