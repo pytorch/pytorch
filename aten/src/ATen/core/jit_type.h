@@ -14,6 +14,14 @@
 #include <iostream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Module;
+}
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
 #define C10_FORALL_TYPES(_) \
@@ -1072,12 +1080,14 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 /**
  * User Defined Types
  */
+
 struct UserType;
 using UserTypePtr = std::shared_ptr<UserType>;
+using ::torch::jit::script::Module;
 
 // This node represents a user-defined type in TorchScript
 struct CAFFE2_API UserType : public Type {
-  static UserTypePtr create(const std::string& name);
+  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
   // returns nullptr if there is no type with that name
   static UserTypePtr get(const std::string& name);
 
@@ -1113,6 +1123,10 @@ struct CAFFE2_API UserType : public Type {
     return typename_.toUnqualString();
   }
 
+  std::shared_ptr<Module> module() const {
+    return module_;
+  }
+
   bool hasAttribute(const std::string& name) const {
     const std::string ns = typename_.ns().toUnqualString();
     const Symbol internedName =
@@ -1130,8 +1144,13 @@ struct CAFFE2_API UserType : public Type {
   static const TypeKind Kind = TypeKind::UserType;
 
  private:
-  UserType(Symbol name)
-      : Type(TypeKind::UserType), typename_(std::move(name)) {}
+  UserType(Symbol name, std::shared_ptr<Module> module)
+      : Type(TypeKind::UserType),
+        module_(std::move(module)),
+        typename_(std::move(name)) {}
+
+  // Holds static info about the type (i.e. methods)
+  std::shared_ptr<Module> module_;
 
   // Name of type (note that this has to be globally unique).
   Symbol typename_;

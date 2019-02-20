@@ -45,8 +45,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
       const SourceRange& loc,
       Method& m,
       const std::string& field,
-      Value* newValue,
-      bool shouldDefine) {
+      Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
                            << kind();
   }
@@ -235,19 +234,18 @@ struct TORCH_API CastValue : public BuiltinFunction {
 };
 
 struct TORCH_API UserTypeValue : public SugaredValue {
-  UserTypeValue(std::shared_ptr<Module> module, UserTypePtr p)
-      : module_(std::move(module)), p_(p) {}
+  UserTypeValue(UserTypePtr p) : type_(p) {}
 
   void assign(
       const SourceRange& loc,
       Method& m,
       const std::string& field,
-      Value* newValue,
-      bool shouldDefine) override {
-    const auto expectedType = p_->getAttribute(field);
+      Value* newValue) override {
+    auto expectedType = type_->getAttribute(field);
     if (!expectedType) {
-      if (shouldDefine) {
-        return p_->addAttribute(field, newValue->type());
+      if (assignmentsShouldDefine_) {
+        type_->addAttribute(field, newValue->type());
+        expectedType = newValue->type();
       } else {
         throw ErrorReport(loc)
             << "Tried to assign to nonexistent field " << field
@@ -266,21 +264,21 @@ struct TORCH_API UserTypeValue : public SugaredValue {
 
     // Emit
     auto& g = *m.graph();
-    g.insertNode(g.createSetAttr(v_, field, newValue));
+    g.insertNode(g.createSetAttr(value_, field, newValue));
   }
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Method& m,
       const std::string& field) {
-    AT_ASSERT(v_);
-    if (auto method = module_->find_method(field)) {
+    AT_ASSERT(value_);
+    if (auto method = type_->module()->find_method(field)) {
       return std::make_shared<MethodValue>(
-          module_, *method, NamedValue(loc, "self", v_));
+          type_->module(), *method, NamedValue(loc, "self", value_));
     }
 
     auto& g = *m.graph();
-    auto n = g.insertNode(g.createGetAttr(v_, field));
+    auto n = g.insertNode(g.createGetAttr(value_, field));
     return std::make_shared<SimpleValue>(n->output());
   }
 
@@ -292,61 +290,47 @@ struct TORCH_API UserTypeValue : public SugaredValue {
       // note: names for args will be 'argument 0', 'argument 1', etc..
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override{
+      size_t n_binders) override {
     AT_ASSERT(n_binders == 1);
 
     auto& g = *m.graph();
-    auto createNode = g.insertNode(g.createUserObject(p_));
-    v_ = createNode->output();
+    auto createNode = g.insertNode(g.createUserObject(type_));
+    value_ = createNode->output();
 
-    auto initMethod = module_->find_method("__init__");
+    auto initMethod = type_->module()->find_method("__init__");
     AT_ASSERT(initMethod);
-
 
     // Add the user type as `self`
     std::vector<NamedValue> inputsWithSelf;
-    inputsWithSelf.emplace_back(loc, "self", v_);
+    inputsWithSelf.emplace_back(loc, "self", value_);
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
 
     // Call the init function
-    std::make_shared<MethodValue>(module_, *initMethod)
+    std::make_shared<MethodValue>(type_->module(), *initMethod)
         ->call(loc, m, inputsWithSelf, attributes, n_binders);
 
     // Return `self`
-    auto newObj = std::make_shared<UserTypeValue>(module_, p_);
-    newObj->v_ = v_;
+    auto newObj = std::make_shared<UserTypeValue>(type_);
+    newObj->value_ = value_;
     return newObj;
-
-    // n_binders is always set to the number of variables an expression is
-    // syntactically bound to:
-    //     a = foo() # 1 binder (note in this case the single binder might be a
-    //     tuple) a, * b = foo() # 1 binder a, b = foo() # 2 binders foo() # 0
-    //     binders
-    //
-    // In subexpressions, like bar() in foo(bar()), n_binders is always set to
-    // 1. n_binders is used as a hint to subexpressions to determine how many
-    // values they should return when that number is ambiguous statically. In
-    // particular it is currently used to decide how many tensors a call to a
-    // python function will return. It is only a hint, functions do not have to
-    // check that n_binders match the number of things they are returning, the
-    // assignment logic will do that anyway.
   }
 
   Value* asValue(const SourceRange& loc, Method& m) {
-    return v_;
+    return value_;
   }
 
   std::string getName() const {
-    return p_->name();
+    return type_->name();
   }
 
   std::string kind() const override {
-    return p_->str();
+    return type_->str();
   }
 
-  std::shared_ptr<Module> module_;
-  UserTypePtr p_;
-  Value* v_;
+  UserTypePtr type_;
+  Value* value_;
+  bool assignmentsShouldDefine_ = false;
+  ;
 };
 
 // These SugaredValues have special handling in the compiler because they

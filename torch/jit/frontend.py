@@ -140,7 +140,10 @@ def _uses_true_division(fn):
 def get_jit_ast(fn, is_method, is_class=False, class_name=None):
     if is_class:
         methods = inspect.getmembers(fn, predicate=inspect.isfunction)
-        method_asts = [get_jit_ast(method[1], is_method=True, is_class=False, class_name=fn.__name__) for method in methods]
+        method_asts = [get_jit_ast(method[1],
+                       is_method=True,
+                       is_class=False,
+                       class_name=fn.__name__) for method in methods]
 
         source = dedent(inspect.getsource(fn))
         py_ast = ast.parse(source)
@@ -154,7 +157,7 @@ def get_jit_ast(fn, is_method, is_class=False, class_name=None):
             raise RuntimeError("expected a single top-level function")
         type_line = torch.jit.annotations.get_type_line(source)
         ctx = SourceContext(source, _uses_true_division(fn))
-        return build_def(ctx, py_ast.body[0], type_line, class_name)
+        return build_def(ctx, py_ast.body[0], type_line, is_method, class_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
@@ -179,7 +182,7 @@ def build_class_def(ctx, py_def, methods):
     return ClassDef(Ident(r, py_def.name), methods)
 
 
-def build_def(ctx, py_def, type_line, class_name=None):
+def build_def(ctx, py_def, type_line, is_method, class_name=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))

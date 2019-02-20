@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -6,6 +5,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -313,10 +313,10 @@ struct Environment {
   }
 
   void setVar(const SourceRange& loc, const std::string& name, Value* value) {
-    setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
+    setVar(loc, name, std::make_shared<SimpleValue>(value));
   }
 
-  void setSugaredVar(
+  void setVar(
       const SourceRange& loc,
       const std::string& name,
       SugaredValuePtr value) {
@@ -490,16 +490,6 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
   return v;
 }
 
-std::shared_ptr<SugaredValue> BuiltinFunction::call(
-    const SourceRange& loc,
-    Method& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
@@ -533,18 +523,13 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-    if (def.name().name() == "__init__") {
-      isInitDef_ = true;
-      method.setSchema(emitInitDef(def, self, graph->block()));
-    } else {
-      method.setSchema(emitDef(def, self, graph->block()));
-    }
+
+    method.setSchema(emitDef(def, self, graph->block()));
 
     runCleanupPasses(graph);
   }
 
  private:
-  bool isInitDef_ = false;
   Method& method;
   std::shared_ptr<Graph> graph;
   Resolver resolver;
@@ -728,7 +713,7 @@ struct to_ir {
   FunctionSchema extractSchemaFromDef(
       const Def& def,
       const SugaredValuePtr& self) {
-    auto name = def.name().name();
+    const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
     return FunctionSchema(
@@ -744,10 +729,11 @@ struct to_ir {
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
-    auto expected_annotation_size =
-        // (self && !dynamic_cast<UserTypeValue*>(self.get()))
-        // ? def.decl().params().size() - 1
-        : def.decl().params().size();
+    auto userType = dynamic_cast<UserTypeValue*>(self.get());
+    auto expected_annotation_size = def.decl().params().size();
+    if (self && !userType) {
+      expected_annotation_size--;
+    }
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
@@ -763,21 +749,20 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      environment_stack->setSugaredVar(def.range(), name, self);
+      environment_stack->setVar(def.range(), name, self);
       // TODO If this is a first-class type, we also need to bind "self" to a
       // block input
-      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
+      if (userType) {
         Value* new_input = block->addInput();
         if (meaningfulName(name)) {
           new_input->setUniqueName(name);
-          new_input->setType(userType->p_);
         }
 
-        userType->v_ = new_input;
-        arguments.push_back(schema.arguments().at(arg_annotation_idx));
+        userType->value_ = new_input;
+        arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+        new_input->setType(arguments.back().type());
       }
       ++it;
-      ++arg_annotation_idx;
     }
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
@@ -1439,7 +1424,7 @@ struct to_ir {
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
-      environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
+      environment_stack->setVar(itrs[0].range(), target_name, inst);
       emitStatements(body);
     }
 
@@ -1816,7 +1801,7 @@ struct to_ir {
           i++;
           break;
         case TK_VAR:
-          environment_stack->setSugaredVar(
+          environment_stack->setVar(
               assignee.range(), Var(assignee).name().name(), outputs.at(i));
           i++;
           break;
@@ -1848,7 +1833,7 @@ struct to_ir {
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
-        environment_stack->setSugaredVar(
+        environment_stack->setVar(
             v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
       } break;
       case TK_TUPLE_LITERAL:
@@ -1871,11 +1856,8 @@ struct to_ir {
     const auto basename = Var(lhs.value()).name();
     const auto rhsValue =
         emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
-    bool shouldDefine = basename.name() == "self" && isInitDef_;
-
     auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->assign(
-        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
+    userObject->assign(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2742,11 +2724,15 @@ void defineUserType(
   const auto defs = classDef.defs();
   for (auto it = defs.begin(); it != defs.end(); ++it) {
     auto def = *it;
-    auto creator = [&](Method& method) {
-      to_ir(def, resolver, self, method);
-    };
-    Method& m = self->module_->create_method(def.name().name(), creator);
+    if (def.name().name() == "__init__") {
+      // TODO explain
+      self->assignmentsShouldDefine_ = true;
+    }
+    auto creator = [&](Method& method) { to_ir(def, resolver, self, method); };
+    Method& m =
+        self->type_->module()->create_method(def.name().name(), creator);
     m.ensure_defined();
+    self->assignmentsShouldDefine_ = false;
   }
 }
 

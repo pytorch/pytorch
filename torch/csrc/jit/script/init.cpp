@@ -484,15 +484,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
     }
-    const bool is_user_type =
-        py::cast<bool>(py::getattr(obj, "__is_user_type__"));
+    const bool is_user_type = py::hasattr(obj, "__is_user_type__");
     if (is_user_type) {
       const auto classname =
           py::cast<std::string>(py::getattr(obj, "__user_type_name__"));
-      std::cout << "name: " << classname << "\n";
       auto userType = UserType::get(classname);
       AT_ASSERT(userType);
-      return std::make_shared<UserTypeValue>(mod, userType);
+      return std::make_shared<UserTypeValue>(userType);
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
@@ -568,18 +566,18 @@ namespace {
 Resolver pythonResolver(const ResolutionCallback& rcb) {
   return [rcb](const std::string& name, Method& m, const SourceRange& loc)
              -> std::shared_ptr<SugaredValue> {
-       // TODO how do we handle redefinitions/precedence?
-       // e.g. if there's something like
-       // @script
-       // class Foo:
-       //   ...
-       //
-       // Foo = 1  # in python
-       //
-       // @script
-       // def bar():
-       //   foo = Foo()  # <-- is this the UDT or the python value?
-       //
+    // TODO how do we handle redefinitions/precedence?
+    // e.g. if there's something like
+    // @script
+    // class Foo:
+    //   ...
+    //
+    // Foo = 1  # in python
+    //
+    // @script
+    // def bar():
+    //   foo = Foo()  # <-- is this the UDT or the python value?
+    //
     AutoGIL ag;
     py::object obj = rcb(name);
     if (obj.is(py::none())) {
@@ -944,11 +942,11 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<Module> module,
          const ClassDef& def,
          ResolutionCallback rcb) {
-        auto userType = UserType::create(def.name().name());
+        auto userType = UserType::create(def.name().name(), module);
         defineUserType(
             def,
             pythonResolver(rcb),
-            std::make_shared<UserTypeValue>(module, userType));
+            std::make_shared<UserTypeValue>(userType));
         return module;
       });
 

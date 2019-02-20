@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/tree_views.h>
 #include <torch/csrc/jit/script/type_parser.h>
@@ -54,6 +55,16 @@ builtin_cast_methods() {
       {"short", "_cast_Short"},
       {"half", "_cast_Half"}};
   return builtin_cast_methods;
+}
+
+std::shared_ptr<SugaredValue> BuiltinFunction::call(
+    const SourceRange& loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  return std::make_shared<SimpleValue>(
+      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a

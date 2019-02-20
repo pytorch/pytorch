@@ -445,11 +445,13 @@ UserTypeRegistry& getRegistry() {
 }
 } // namespace
 
-UserTypePtr UserType::create(const std::string& name) {
+UserTypePtr UserType::create(
+    const std::string& name,
+    std::shared_ptr<Module> module) {
   // TODO write a way to create a namespace directly instead of doing this.
   const auto internedTypename =
       Symbol::fromQualString(name + "::__name__").ns();
-  auto ptr = UserTypePtr(new UserType(internedTypename));
+  auto ptr = UserTypePtr(new UserType(internedTypename, std::move(module)));
   getRegistry().registerType(internedTypename, ptr);
   return ptr;
 }
