@@ -719,7 +719,7 @@ class MultiLabelMarginLoss(_Loss):
         >>> # for target y, only consider labels 3 and 0, not after label -1
         >>> y = torch.LongTensor([[3, 0, -1, 1]])
         >>> loss(x, y)
-        >>> # 0.25 * ((1-(0.1-0.2))+ (1-(0.1-0.4)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
+        >>> # 0.25 * ((1-(0.1-0.2)) + (1-(0.1-0.4)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
         tensor(0.8500)
 
     """
@@ -1144,7 +1144,7 @@ class TripletMarginLoss(_Loss):
     tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater than :math:`0`.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n`: `anchor`, `positive examples` and `negative
-    example` respectively. The shapes of all input tensors should be
+    examples` respectively. The shapes of all input tensors should be
     :math:`(N, D)`.
 
     The distance swap is described in detail in the paper `Learning shallow
@@ -1164,7 +1164,7 @@ class TripletMarginLoss(_Loss):
 
     Args:
         margin (float, optional): Default: :math:`1`.
-        p (int, optional): The norm degree for pairwise distance. Default: `2`.
+        p (int, optional): The norm degree for pairwise distance. Default: :math:`2`.
         swap (float, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
