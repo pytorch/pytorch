@@ -96,6 +96,10 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const ArrayRef<double>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
