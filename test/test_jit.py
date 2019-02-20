@@ -6101,8 +6101,6 @@ a")
 
         m = M()
         graph = str(m.graph)
-        print(graph)
-        return
         self.assertTrue(graph.count("aten::add") == 4)
         self.assertTrue("python" not in graph)
 
