@@ -21,6 +21,8 @@ setup_linux_system_environment: &setup_linux_system_environment
   no_output_timeout: "1h"
   command: |
     set -e
+    lsb_release -a
+    exit 1
 
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
