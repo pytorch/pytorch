@@ -350,14 +350,14 @@ class KLDivLoss(_Loss):
             ``'mean'``: the output will be divided by the number of elements in the output.
             Default: ``'mean'``
 
-        .. note::
-            :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
-            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+    .. note::
+        :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+        and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-        .. note::
-            :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
-            :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
-            In the next major release, ``'mean'`` will be changed to be the same as ``'batchmean'``.
+    .. note::
+        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        In the next major release, ``'mean'`` will be changed to be the same as ``'batchmean'``.
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means, any number of additional
