@@ -33,8 +33,8 @@ install_official_git_client: &install_official_git_client
   command: |
     set -e
 
-    sudo apt-get -qq update
-    sudo apt-get -qq install openssh-client git
+    sudo apt-get update
+    sudo apt-get install openssh-client git
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -156,9 +156,9 @@ setup_ci_environment: &setup_ci_environment
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 
-    sudo apt-get -qq update
-    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
-    sudo apt-get -qq install \
+    sudo apt-get update
+    sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get install \
       linux-headers-$(uname -r) \
       linux-image-generic \
       moreutils \
