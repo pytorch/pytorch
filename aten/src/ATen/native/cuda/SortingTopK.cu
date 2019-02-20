@@ -18,10 +18,10 @@
 #include <thrust/extrema.h>
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/native/cuda/SortingSort.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/cuda/SortingSort.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
 namespace at {
 namespace native {
@@ -29,6 +29,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename index_t, int Dim, bool Order>
+C10_LAUNCH_BOUNDS(1024)
 __global__ void gatherTopK(
     cuda::detail::TensorInfo<scalar_t, index_t> input,
     index_t inputSliceSize,
@@ -272,7 +273,7 @@ void topk_cuda_template(
   } else {
     indices = at::empty(result_sizes, self_.options().dtype(kLong));
   }
-  if (k == 0) { // we're done already
+  if (values.numel() == 0) { // we're done already
     return;
   }
   if (self_.dim() == 0 && self_.numel() == 1) {
@@ -302,10 +303,17 @@ void topk_cuda_template(
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
   if (sorted) {
-    // FIXME: the k/v inplace sort along slice only works for size <=
-    // 2048 at the moment
-    // FIXME: 1024 seems to be the limit with newer cuda and 64 bit types
-    if (k <= 2048) {
+    // Workaround:
+    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+    // and so for the double word types,
+    // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+    int max_slice_size =
+        (self.dtype() == kDouble || self.dtype() == kLong) ? 1024 : 2048;
+#else
+    int max_slice_size = 2048;
+#endif
+    if (k <= max_slice_size) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       sortKeyValueInplace<scalar_t>(values, indices, dim, largest);
@@ -327,7 +335,6 @@ void topk_cuda_template(
 
   AT_CUDA_CHECK(cudaGetLastError());
 }
-
 
 } // namespace
 

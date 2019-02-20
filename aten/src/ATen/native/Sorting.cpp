@@ -526,7 +526,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
   } else {
     indices = at::empty(result_sizes, self.options().dtype(kLong));
   }
-  if (k == 0) { // we're done already
+  if (values.numel() == 0) { // we're done already
     return std::forward_as_tuple(values, indices);
   }
   if (self.dim() == 0 && self.numel() == 1) {
