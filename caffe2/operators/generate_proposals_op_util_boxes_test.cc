@@ -31,8 +31,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
       bbox.array(),
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
-      BBOX_XFORM_CLIP,
-      true);
+      BBOX_XFORM_CLIP);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 
@@ -65,7 +64,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
-      true, /* correct_transform_coords */
       false /* angle_bound_on */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
@@ -98,7 +96,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
-      true, /* correct_transform_coords */
       true, /* angle_bound_on */
       -90, /* angle_bound_lo */
       90 /* angle_bound_hi */);
