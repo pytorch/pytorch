@@ -260,6 +260,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_indices(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
+
     def test_at_op(self):
         x = torch.randn(3, 4)
 

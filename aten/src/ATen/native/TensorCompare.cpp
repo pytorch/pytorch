@@ -34,6 +34,14 @@ namespace at { namespace native {
 DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
+Tensor index_select_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  Tensor res = at::zeros(sizes, grad.options());
+  if (!keepdim && sizes.size() > 0) {
+    return res.scatter_(dim, indices.unsqueeze(dim), grad.unsqueeze(dim));
+  }
+  return res.scatter_(dim, indices, grad);
+}
+
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
 }
