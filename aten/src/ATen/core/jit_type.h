@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
-#include <ATen/core/interned_strings.h>
-#include <ATen/core/functional.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/TensorMethods.h>
+#include <ATen/core/Type.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
@@ -35,6 +35,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
+_(UserType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1067,5 +1068,83 @@ CAFFE2_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
+
+/**
+ * User Defined Types
+ */
+struct UserType;
+using UserTypePtr = std::shared_ptr<UserType>;
+
+UserTypePtr getUserType(Symbol name);
+
+// This node represents a user-defined type in TorchScript
+struct CAFFE2_API UserType : public Type {
+  // Create a user type and register it.
+  DEFINE_IS_SUBCLASS(UserType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<UserType>()) {
+      return typename_ == user_rhs->typename_;
+    }
+    return false;
+  }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    // XXX: We do not have inheritance implemented, only types that are the
+    // same can subtype from each other.
+    return *this == *rhs;
+  }
+  std::string str() const override {
+    return std::string("UserType<") + typename_.toUnqualString() + ">";
+  }
+
+  TypePtr getAttribute(Symbol attr) {
+    return namespace_.at(attr);
+  }
+  static const TypeKind Kind = TypeKind::UserType;
+
+ private:
+  friend class UserTypeBuilder;
+  static UserTypePtr create(
+      const std::string& name,
+      std::unordered_map<std::string, TypePtr> ns);
+
+  UserType(Symbol name, std::unordered_map<Symbol, TypePtr> ns)
+      : Type(TypeKind::UserType),
+        typename_(std::move(name)),
+        namespace_(std::move(ns)) {}
+
+  // Name of type (note that this has to be globally unique).
+  Symbol typename_;
+
+  // Mapping of attribute names -> their type.
+  // XXX: methods are not yet implemented
+  std::unordered_map<Symbol, TypePtr> namespace_;
+};
+
+// Helper to construct user types incrementally. Calling `build()` will
+// register the type and intern all relevant strings, after which modifications
+// are not allowed.
+class UserTypeBuilder {
+  public:
+   UserTypeBuilder(std::string name) : typename_(std::move(name)) {}
+   void addAttribute(std::string name, TypePtr type) {
+     AT_ASSERT(!built_);
+     namespace_.emplace(std::move(name), std::move(type));
+   }
+
+   // Build the actual user type. This "freezes" the type and render the
+   // builder unusable.
+   UserTypePtr build() {
+     AT_ASSERT(!built_);
+     built_ = true;
+     return UserType::create(typename_, std::move(namespace_));
+   }
+
+  private:
+   std::string typename_;
+   std::unordered_map<std::string, TypePtr> namespace_;
+   bool built_ = false;
+};
+
 
 } // namespace c10
