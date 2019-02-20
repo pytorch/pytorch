@@ -138,7 +138,7 @@ class Embedding(Module):
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
-                First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
+                First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
             padding_idx (int, optional): See module initialization documentation.
@@ -180,9 +180,9 @@ class EmbeddingBag(Module):
 
     For bags of constant length, this class
 
-        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
-        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
-        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=1)``.
+        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=0)``,
+        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=0)``,
+        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=0)``.
 
     However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.
@@ -203,27 +203,27 @@ class EmbeddingBag(Module):
                                  supported when ``mode="max"``.
 
     Attributes:
-        weight (Tensor): the learnable weights of the module of shape ``(num_embeddings x embedding_dim)``
+        weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
     Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-        - If :attr:`input` is 2D of shape ``B x N``,
+        - If :attr:`input` is 2D of shape `(B, N)`,
 
           it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
           this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
           :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-        - If :attr:`input` is 1D of shape ``N``,
+        - If :attr:`input` is 1D of shape `(N)`,
 
           it will be treated as a concatenation of multiple bags (sequences).
           :attr:`offsets` is required to be a 1D tensor containing the
           starting index positions of each bag in :attr:`input`. Therefore,
-          for :attr:`offsets` of shape ``B``, :attr:`input` will be viewed as
+          for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
           having ``B`` bags. Empty bags (i.e., having 0-length) will have
           returned vectors filled by zeros.
 
-    Output shape: ``B x embedding_dim``
+    Output shape: `(B, embedding_dim)`
 
     Examples::
 

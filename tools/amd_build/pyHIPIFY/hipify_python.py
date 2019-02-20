@@ -964,117 +964,6 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-# Note [PyTorch and Caffe2 kernel name clobber]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# For some reason, the static_cast logic in pyHIPIFY assumes all kernels
-# have unique names.  This may be true internally within PyTorch and
-# Caffe2, but it is not true across PyTorch and Caffe2.  The metadata
-# in these cases clobbers each other.
-#
-# To prevent this happening, KernelTemplateParams is distinguished
-# by a boolean saying if it is a PyTorch kernel or a Caffe2 kernel.
-# We can't do a more fine-grained distinction, e.g., the filename,
-# because we need to work on the kernel from files distinct from
-# the one they were originally defined in (that's why this is done
-# in two passes).
-#
-# We can soon kill static_cast handling entirely, as hcc will support
-# this properly.  So don't bother refactoring this code; it will
-# get deleted soon.
-
-
-RE_KERNEL_TEMPLATE = re.compile(r"(template[ ]*<(.*)>\n.*\n?)?__global__ void[\n| ](\w+(\(.*\))?)\(")
-RE_GENERATE_KERNEL = re.compile(r"GENERATE_KERNEL([1-9])\((.*)\)")
-
-
-def get_kernel_template_params(output_directory, the_file, KernelTemplateParams, template_param_to_value):
-    """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
-    # Read the kernel file.
-    with openf(os.path.join(output_directory, the_file), "r") as f:
-        # Extract all kernels with their templates inside of the file
-        string = f.read()
-
-        get_kernel_definitions = [k for k in RE_KERNEL_TEMPLATE.finditer(string)]
-
-        # Create new launch syntax
-        for kernel in get_kernel_definitions:
-            template_arguments = kernel.group(2).split(",") if kernel.group(2) else ""
-            template_arguments = [x.replace("template", "").replace("typename", "").strip() for x in template_arguments]
-            kernel_name = kernel.group(3)
-
-            # Kernel starting / ending positions
-            arguments_start = kernel.end()
-            argument_start_pos = arguments_start
-            current_position = arguments_start + 1
-
-            # Search for final parenthesis
-            arguments = []
-            closures = {"(": 1, "<": 0}
-            while current_position < len(string):
-                if string[current_position] == "(":
-                    closures["("] += 1
-                elif string[current_position] == ")":
-                    closures["("] -= 1
-                elif string[current_position] == "<":
-                    closures["<"] += 1
-                elif string[current_position] == ">":
-                    closures["<"] -= 1
-
-                # Finished all arguments
-                if closures["("] == 0 and closures["<"] == 0:
-                    # Add final argument
-                    arguments.append({"start": argument_start_pos, "end": current_position})
-                    break
-
-                # Finished current argument
-                if closures["("] == 1 and closures["<"] == 0 and string[current_position] == ",":
-                    arguments.append({"start": argument_start_pos, "end": current_position})
-                    argument_start_pos = current_position + 1
-
-                current_position += 1
-
-            # Grab range of arguments
-            arguments_string = [string[arg["start"]: arg["end"]] for arg in arguments]
-
-            argument_types = [None] * len(arguments_string)
-            for arg_idx, arg in enumerate(arguments_string):
-                for i in range(len(arg) - 1, -1, -1):
-                    if arg[i] == "*" or arg[i] == " ":
-                        argument_types[arg_idx] = re.sub(' +', ' ', arg[0:i + 1].replace("\n", "").strip())
-                        break
-
-            # Here we'll use the template_param_to_value dictionary to replace the PyTorch / Caffe2.
-            if len(template_arguments) == 1 and template_arguments[0].strip() in template_param_to_value.keys():
-                # Updates kernel
-                kernel_with_template = "{0}<{1}>".format(
-                    kernel_name, template_param_to_value[template_arguments[0].strip()])
-            else:
-                kernel_with_template = kernel_name
-            formatted_args = {}
-            for idx, arg_type in enumerate(argument_types):
-                formatted_args[idx] = arg_type
-
-            # See Note [PyTorch and Caffe2 kernel name clobber]
-            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
-
-        # Extract generated kernels
-        # curandStateMtgp32 *state, int size, T *result, ARG1
-        for kernel in RE_GENERATE_KERNEL.finditer(string):
-            kernel_gen_type = int(kernel.group(1))
-            kernel_name = kernel.group(2).split(",")[0]
-            kernel_params = kernel.group(2).split(",")[1:]
-
-            if kernel_gen_type == 1:
-                kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1]}
-
-            if kernel_gen_type == 2:
-                kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1], 4: kernel_params[2]}
-
-            # Argument at position 1 should be int
-            # See Note [PyTorch and Caffe2 kernel name clobber]
-            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
-
-
 def disable_unsupported_function_call(function, input_string, replacement):
     """Disables calls to an unsupported HIP function"""
     # Prepare output string
@@ -1175,95 +1064,6 @@ def extract_arguments(start, string):
     return arguments
 
 
-RE_HIP_LAUNCH_KERNEL_GGL = re.compile(r"hipLaunchKernelGGL\(")
-
-
-# Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-def add_static_casts(orig_filepath, filepath, KernelTemplateParams):
-    """Add static casts to kernel launches in order to keep launch argument types and kernel definition types matching.
-
-       Example:
-           old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-              (const scalar_t**)d_result, THCTensor_(data)(state, ra__),
-              ra__->stride[0], num_batches'
-
-           new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-              (const scalar_t**)d_result, THCTensor_(data)(state, ra__),
-              static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
-    """
-
-    # These are the types that generally have issues with hipKernelLaunch.
-    static_cast_types = ["int", "const int", "int64_t", "THCIndex_t *",
-                         "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]
-
-    with openf(filepath, "r+") as fileobj:
-        input_source = fileobj.read()
-        new_output_source = input_source
-        for kernel in RE_HIP_LAUNCH_KERNEL_GGL.finditer(input_source):
-            arguments = extract_arguments(kernel.end() - 1, input_source)
-
-            # Check if we have templating + static_cast information
-            argument_strings = [input_source[arg["start"]:arg["end"]] for arg in arguments]
-            original_kernel_name_with_template = argument_strings[0].strip()
-            kernel_name = original_kernel_name_with_template.split("<")[0].strip()
-            ignore = ["upscale"]
-            if (is_pytorch_file(orig_filepath), kernel_name) in KernelTemplateParams and kernel_name not in ignore:
-                # Add template to the kernel
-                # Add static_casts to relevant arguments
-                # See Note [PyTorch and Caffe2 kernel name clobber]
-                params = KernelTemplateParams[(is_pytorch_file(orig_filepath), kernel_name)]
-                kernel_name_with_template = params["kernel_with_template"]
-                argument_types = params["arg_types"]
-
-                # The first 5 arguments are simply (function, number blocks, dimension blocks, shared memory, stream)
-                # old_kernel_launch_parameters - will contain the actual arguments to the function itself.
-                old_kernel_launch_parameters = input_source[arguments[5]["start"]:arguments[-1]["end"]]
-                new_kernel_launch_parameters = old_kernel_launch_parameters
-
-                # full_old_kernel_launch - will contain the entire kernel launch closure.
-                full_old_kernel_launch = input_source[arguments[0]["start"]:arguments[-1]["end"]]
-                full_new_kernel_launch = full_old_kernel_launch
-
-                kernel_params = argument_strings[5:]
-                for arg_idx, arg in enumerate(kernel_params):
-                    if arg_idx in argument_types:
-                        the_type = argument_types[arg_idx]
-                        the_arg = arg.replace("\n", "").replace("\\", "").strip()
-                        # Not all types have issues with the hipLaunchKernelGGL.
-                        if the_type in static_cast_types:
-                            static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
-
-                            def replace_arg(match):
-                                return match.group(1) + static_argument + match.group(3)
-                            # Update to static_cast, account for cases where argument is at start/end of string
-                            new_kernel_launch_parameters = re.sub(r'(^|\W)({0})(\W|$)'.format(
-                                re.escape(the_arg)), replace_arg, new_kernel_launch_parameters)
-
-                # replace kernel arguments in full kernel launch arguments w/ static_cast ones
-                full_new_kernel_launch = full_new_kernel_launch.replace(
-                    old_kernel_launch_parameters, new_kernel_launch_parameters)
-
-                # PyTorch Specific: Add template type
-                # Here the template value will be resolved from <scalar_t> to <Dtype>.
-                if "THHUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
-                    kernel_name_with_template = kernel_name_with_template.replace("<scalar_t>", "<Dtype>")
-
-                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
-                                                lambda x: kernel_name_with_template, full_new_kernel_launch)
-
-                # Replace Launch
-                new_output_source = new_output_source.replace(full_old_kernel_launch, full_new_kernel_launch)
-
-        # Overwrite file contents
-        fileobj.seek(0)
-        fileobj.write(new_output_source)
-        fileobj.truncate()
-        fileobj.flush()
-
-        # Flush to disk
-        os.fsync(fileobj)
-
-
 def str2bool(v):
     """ArgumentParser doesn't support type=bool. Thus, this helper method will convert
     from possible string types to True / False."""
@@ -1282,7 +1082,6 @@ def hipify(
     output_directory="",
     includes=(),
     json_settings="",
-    add_static_casts_option=False,
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
@@ -1402,22 +1201,3 @@ def hipify(
         all_files,
         show_detailed=show_detailed,
         show_progress=show_progress)
-
-    # Extract all of the kernel parameter and template type information.
-    if add_static_casts_option:
-        KernelTemplateParams = {}
-        for filepath in all_files:
-            get_kernel_template_params(
-                output_directory,
-                filepath,
-                KernelTemplateParams,
-                CAFFE2_TEMPLATE_MAP if not is_pytorch_file(filepath) else PYTORCH_TEMPLATE_MAP)
-
-        # Execute the Clang Tool to Automatically add static casts
-        for filepath in all_files:
-            add_static_casts(
-                filepath,
-                os.path.join(
-                    output_directory,
-                    get_hip_file_path(filepath)),
-                KernelTemplateParams)

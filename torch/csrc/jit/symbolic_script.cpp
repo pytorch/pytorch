@@ -294,6 +294,26 @@ const std::vector<std::string> functions = {
 
             return torch.var(self, dim, unbiased, keepdim), backward
 
+        def std_0(self,
+                  unbiased: bool=True):
+            std_out = torch.std(self, unbiased)
+            def backward(grad_output):
+                grad_self = torch.var_backward(grad_output / (std_out * 2), self, unbiased)
+                return grad_self, None
+
+            return std_out, backward
+
+        def std_1(self,
+                  dim: List[int],
+                  unbiased: bool,
+                  keepdim: bool):
+            std_out = torch.std(self, dim, unbiased, keepdim)
+            def backward(grad_output):
+                grad_self = torch.var_backward(grad_output / (std_out * 2), self, dim, unbiased, keepdim)
+                return grad_self, None, None, None
+
+            return std_out, backward
+
         def view(self,
                  size: List[int]):
             self_size = self.size()
@@ -305,11 +325,38 @@ const std::vector<std::string> functions = {
 
         def adaptive_avg_pool2d(self,
                                 output_size: List[int]):
+            self_size = self.size()
             def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool2d_backward(grad_output, self)
+                if output_size[0] == 1 and output_size[1] == 1:
+                    grad_self = grad_output.expand(self_size) / (self_size[-1] * self_size[-2])
+                else:
+                    grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
-
             return torch.adaptive_avg_pool2d(self, output_size), backward
+
+        def batch_norm(input : Tensor,
+                       weight : Optional[Tensor],
+                       bias : Optional[Tensor],
+                       running_mean : Optional[Tensor],
+                       running_var : Optional[Tensor],
+                       training : bool,
+                       momentum : float,
+                       eps : float,
+                       cudnn_enabled : bool):
+
+            output, save1, save2, impl_idx = torch._batch_norm_impl_index(
+                input, weight, bias, running_mean, running_var, training,
+                momentum, eps, cudnn_enabled)
+            has_weight = weight is not None
+            has_bias = bias is not None
+
+            def backward(grad_output):
+                dinput, dweight, dbias = torch._batch_norm_impl_index_backward(
+                    impl_idx, input, grad_output, weight, running_mean, running_var,
+                    save1, save2, training, eps, [True, has_weight, has_bias])
+                return dinput, dweight, dbias, None, None, None, None, None, None
+
+            return output, backward
 
         def embedding(weight,
                       indices,
@@ -323,6 +370,11 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
+        def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
+            result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
+            def backward(grad):
+                return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
+            return result, backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 

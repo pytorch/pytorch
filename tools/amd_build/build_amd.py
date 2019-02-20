@@ -14,10 +14,6 @@ parser.add_argument(
     '--out-of-place-only',
     action='store_true',
     help="Whether to only run hipify out-of-place on source files")
-parser.add_argument(
-    '--add-static-casts',
-    action='store_true',
-    help="Whether to automatically add static_casts to kernel arguments.")
 
 parser.add_argument(
     '--project-directory',
@@ -129,5 +125,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings,
-    add_static_casts_option=args.add_static_casts)
+    json_settings=json_settings)

@@ -3351,6 +3351,43 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_model_device(self):
+        l = nn.Linear(2, 2)
+        error_msg = "module must have its parameters and buffers on device %d "
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1)))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (1),
+            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0]))
+
+        nn.DataParallel(l.cuda())
+        nn.DataParallel(l.cuda(1), device_ids=[1, 0])
+
+        s = nn.Sequential(l.cpu())
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+
+        s = nn.Sequential(deepcopy(l), l.cuda())
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+
+        s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+        self.assertRaisesRegex(
+            RuntimeError, error_msg % (1),
+            lambda: nn.DataParallel(s, device_ids=[1, 0]))
+
+        s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
+        nn.DataParallel(s)
+
+        s = nn.Sequential(l.cuda(1), deepcopy(l).cuda(1))
+        nn.DataParallel(s, device_ids=[1, 0])
+
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
     @skipIfRocm
     def test_data_parallel_model_no_refcycles(self):
@@ -4558,9 +4595,10 @@ class TestNN(NNTestCase):
             unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed_out)
 
             # Check forward
-            self.assertEqual(packed_hidden, seq_hidden)
-            self.assertEqual(unpacked, seq_out)
-            self.assertEqual(unpacked_len, lengths)
+            prec = dtype2prec[dtype]
+            self.assertEqual(packed_hidden, seq_hidden, prec)
+            self.assertEqual(unpacked, seq_out, prec)
+            self.assertEqual(unpacked_len, lengths, prec)
 
             # Check backward
             seq_out.sum().backward()
@@ -6367,7 +6405,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
@@ -6382,7 +6420,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, requires_grad=True)
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -6400,10 +6438,10 @@ class TestNN(NNTestCase):
 
         input = torch.randn(1, 1, 2, 2, requires_grad=True)
         self.assertEqual(
-            F.upsample(input, 4, mode='nearest'),
-            F.upsample(input, scale_factor=2, mode='nearest'))
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
-        gradgradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+            F.interpolate(input, 4, mode='nearest'),
+            F.interpolate(input, scale_factor=2, mode='nearest'))
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+        gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
@@ -6418,7 +6456,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
         # test output against known input
@@ -6460,7 +6498,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
@@ -6476,10 +6514,10 @@ class TestNN(NNTestCase):
 
                 input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
                 self.assertEqual(
-                    F.upsample(input, (out_size, out_size, out_size), **kwargs),
-                    F.upsample(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
@@ -6963,6 +7001,12 @@ class TestNN(NNTestCase):
 
         with self.assertRaises(ValueError):
             _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 25], div_value=2.)
+
+        with self.assertRaisesRegex(ValueError, "cutoffs should be a sequence of unique,"):
+            _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 20], div_value=2.)
+
+        # not raise
+        _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 19], div_value=2.)
 
         # input shapes
         with self.assertRaisesRegex(RuntimeError, r"Input and target should have the same size"):
