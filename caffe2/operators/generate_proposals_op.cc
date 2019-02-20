@@ -228,7 +228,6 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
-      correct_transform_coords_,
       angle_bound_on_,
       angle_bound_lo_,
       angle_bound_hi_);
@@ -364,12 +363,6 @@ non-maximum suppression is applied to generate the final bounding boxes.
     .Arg("nms_thresh", "(float) RPN_NMS_THRESH")
     .Arg("min_size", "(float) RPN_MIN_SIZE")
     .Arg(
-        "correct_transform_coords",
-        "bool (default false), Correct bounding box transform coordates,"
-        " see bbox_transform() in boxes.py "
-        "Set to true to match the detectron code, set to false for backward"
-        " compatibility")
-    .Arg(
         "angle_bound_on",
         "bool (default true). If set, for rotated boxes, angle is "
         "normalized to be within [angle_bound_lo, angle_bound_hi].")
@@ -425,7 +418,6 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
         c10::Argument("post_nms_topN", IntType::get()),
         c10::Argument("nms_thresh", FloatType::get()),
         c10::Argument("min_size", FloatType::get()),
-        c10::Argument("correct_transform_coords", BoolType::get()),
         c10::Argument("angle_bound_on", BoolType::get()),
         c10::Argument("angle_bound_lo", IntType::get()),
         c10::Argument("angle_bound_hi", IntType::get()),
@@ -435,5 +427,4 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
         c10::Argument("output_0"),
         c10::Argument("output_1"),
     }),
-    caffe2::GenerateProposalsOp<caffe2::CPUContext>
-);
+    caffe2::GenerateProposalsOp<caffe2::CPUContext>);
