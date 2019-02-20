@@ -212,6 +212,7 @@ def add_torch_libs():
         link_whole=True,
         propagated_pp_flags=[
             "-DUSE_CUDA",
+            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",

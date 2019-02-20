@@ -51,6 +51,11 @@ void checkCUDAVersion(const cudaDeviceProp& prop) {
   }
 }
 
+#ifdef USE_DIRECT_NVRTC
+std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
+  return std::make_pair(nullptr, torch_load_nvrtc());
+}
+#else
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
   std::string path = cpu::DynamicLibrary::directoryOf((void*)checkCUDAVersion);
 #ifdef __APPLE__
@@ -63,6 +68,7 @@ std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
   auto fn = (THNVRTC * (*)()) libnvrtc_stub->sym("torch_load_nvrtc");
   return std::make_pair(std::move(libnvrtc_stub), fn());
 }
+#endif
 
 const THNVRTC& nvrtc() {
   // must hold onto DynamicLibrary otherwise it will unload
