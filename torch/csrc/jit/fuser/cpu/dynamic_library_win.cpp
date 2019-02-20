@@ -16,7 +16,7 @@ void* DynamicLibrary::sym(const char* name) {
   AT_ERROR("NYI: DynamicLibrary on Windows");
 }
 
-std::string DynamicLibrary::pathOf(void* addr) {
+std::string DynamicLibrary::directoryOf(void* addr) {
   AT_ERROR("NYI: DynamicLibrary on Windows");
 }
 
