@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <type_traits>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>
@@ -125,11 +126,12 @@ IMPLEMENT_VML_BUG(trunc)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
-#pragma message("MKL_INT=" MKL_INT)
-
 // NB: LP64 MKL is the most commonly used and thus we assume it here. That means
 // we need to expect MKL_INT to be of type int, which implies int32_t in most
 // cases.
+static_assert(
+    std::is_same<MKL_INT, int32_t>::value,
+    "MKL_INT is assumed to be int32_t");
 #define IMPLEMENT_VML_MKL_STUB(op, mklop, type, mkltype)                    \
   template <>                                                           \
   inline void v##op(type * out, const type * in, int64_t size) {          \
