@@ -2243,6 +2243,13 @@ struct to_ir {
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
         }
+
+        // If we inferred the elem_type to be a specialized tensor type, relax
+        // elem_type to be a dynamic Tensor type. This is to allow lists that
+        // look like: [CompleteTensorType, TensorType, ...]
+        if (elem_type->isSubtypeOf(TensorType::get())) {
+          elem_type = TensorType::get();
+        }
         for (auto v : values) {
           if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
