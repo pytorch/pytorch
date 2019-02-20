@@ -154,7 +154,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
 } // namespace torch
 
 namespace c10 {
-REGISTER_FREE_CUDA_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
+REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 
 #endif

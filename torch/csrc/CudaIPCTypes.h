@@ -149,7 +149,7 @@ struct CudaIPCReceivedData final {
 } // namespace torch
 
 namespace c10 {
-class CudaIPCCollectCallback : public CFreeCudaMemoryCallback {
+class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
   void Execute() {
     torch::CudaIPCCollect();

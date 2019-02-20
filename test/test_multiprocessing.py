@@ -208,7 +208,6 @@ class TestMultiprocessing(TestCase):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
 
-
     def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
         def test_fill():
             x = torch.zeros(5, 5).type(type)

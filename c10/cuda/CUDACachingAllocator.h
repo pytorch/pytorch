@@ -12,14 +12,14 @@ namespace c10 {
 
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
-class C10_CUDA_API CFreeCudaMemoryCallback {
+class C10_CUDA_API FreeMemoryCallback {
  public:
-  CFreeCudaMemoryCallback() = default;
+  FreeMemoryCallback() = default;
   virtual void Execute() = 0;
 };
 
-C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, CFreeCudaMemoryCallback);
-#define REGISTER_FREE_CUDA_MEMORY_CALLBACK(name, ...) \
+C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+#define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__);
 
 namespace cuda {
