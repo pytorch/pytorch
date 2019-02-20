@@ -779,7 +779,8 @@
 - func: dot(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: einsum(std::string equation, Tensor[] tensors) -> Tensor
+- func: einsum(str equation, Tensor[] tensors) -> Tensor
+  matches_jit_signature: True
 
 - func: embedding(Tensor weight, IndexTensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
 
