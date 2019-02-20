@@ -5,7 +5,7 @@ namespace native {
 
 // ensure we get good values and indices for kthvalue, mode, median
 // this will always be with the reducing dim as 1-d
-void _reduction_with_indices_allocate_or_resize_output(
+static void _reduction_with_indices_allocate_or_resize_output(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
