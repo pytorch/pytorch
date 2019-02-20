@@ -467,10 +467,16 @@ _(aten, miopen_depthwise_convolution) \
 _(aten, miopen_depthwise_convolution_backward) \
 _(aten, miopen_depthwise_convolution_backward_input) \
 _(aten, miopen_depthwise_convolution_backward_weight) \
+_(aten, mkldnn_is_acceptable)\
 _(aten, mkldnn_convolution) \
 _(aten, mkldnn_convolution_backward) \
 _(aten, mkldnn_convolution_backward_input) \
 _(aten, mkldnn_convolution_backward_weights) \
+_(aten, rnn_tanh_mkldnn_stub)\
+_(aten, rnn_relu_mkldnn_stub)\
+_(aten, gru_mkldnn_stub)\
+_(aten, lstm_mkldnn_stub)\
+_(aten, mkldnn_rnn_transpose_weight)\
 _(aten, mkldnn_rnn) \
 _(aten, mkldnn_rnn_backward) \
 _(aten, mm) \
