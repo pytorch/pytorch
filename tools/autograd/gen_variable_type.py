@@ -505,9 +505,7 @@ def emit_body(declaration):
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    args_with_no_gradients = []
-    if func:
-        args_with_no_gradients += func['args_with_no_gradients']
+    args_with_no_gradients = func['args_with_no_gradients'] if func else []
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if func is not None and func.get('output_differentiability') is not None:
