@@ -29,7 +29,7 @@ def load_derivatives(path, declarations):
 
 
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_gradients, not_derivatives,
+def create_autograd_function(name, derivatives, args_with_gradients, args_with_no_gradients,
                              signature, declaration, output_differentiability):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
@@ -38,9 +38,9 @@ def create_autograd_function(name, derivatives, args_with_gradients, not_derivat
         'op': op,
         'declaration': declaration,
         'args_with_gradients': args_with_gradients,
+        'args_with_no_gradients': args_with_no_gradients,
         'signature': signature,
         'derivatives': derivatives,
-        'not_derivatives': not_derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
         'output_differentiability': output_differentiability,
@@ -144,25 +144,26 @@ def process_definition(defn, declarations_by_signature):
 
         # Set up the derivative information
         derivatives = []
-        not_derivatives = []
-        not_args_with_gradients = []
+        args_with_no_gradients = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
             if formula.lower().strip() == 'not_differentiable':
                 derivative = create_derivative(declaration['arguments'], declaration['returns'],
                                                declaration['name'], formula, names)
-                not_derivatives.append(derivative)
-                not_args_with_gradients += derivative['var_names']
+                assert not sum([type(var_name) == list
+                                for var_name in derivative['var_names']]), \
+                    "Variable names associated to a formula should be a flat list"
+                args_with_no_gradients += derivative['var_names']
             else:
                 derivatives.append(create_derivative(declaration['arguments'], declaration['returns'],
                                                      declaration['name'], formula, names))
-        args_with_gradients = list(filter(lambda x: x['name'] not in not_args_with_gradients, args_with_gradients))
+        args_with_gradients = list(filter(lambda x: x['name'] not in args_with_no_gradients, args_with_gradients))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_gradients, not_derivatives
+        return derivatives, args_with_gradients, args_with_no_gradients
 
     def unzip(xs):
         return zip(*xs)
@@ -205,8 +206,8 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, args_with_gradients, not_derivatives = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_gradients, not_derivatives,
+    derivatives, args_with_gradients, args_with_no_gradients = set_up_derivatives(defn_name, defn, canonical)
+    return create_autograd_function(defn_name, derivatives, args_with_gradients, args_with_no_gradients,
                                     signature, canonical, output_differentiability)
 
 
