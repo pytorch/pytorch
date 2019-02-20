@@ -73,11 +73,23 @@ struct Method {
   }
 
   void run(Stack& stack) {
-    for (at::Tensor* tp : member_inputs) {
-      stack.emplace_back(*tp);
-    }
-    for (auto attribute : attributes) {
-      stack.emplace_back(*attribute);
+    auto params_it = member_inputs.begin();
+    auto attr_it = attributes.begin();
+    for (size_t i = stack.size();
+         params_it != member_inputs.end() || attr_it != attributes.end();
+         ++i) {
+      if (attr_it != attributes.end() &&
+          i == attributes_index.find(*attr_it)->second) {
+        stack.emplace_back(*(*attr_it));
+        ++attr_it;
+      } else if (
+          params_it != member_inputs.end() &&
+          i == member_input_index.find(*params_it)->second) {
+        stack.emplace_back(*(*params_it));
+        ++params_it;
+      } else {
+        AT_ERROR("Unknown parameter or attribute");
+      }
     }
     get_executor().run(stack);
   }
@@ -134,7 +146,12 @@ struct Method {
   }
 
   TORCH_API Value* add_attribute(TypePtr type, IValue* slot) {
+    auto it = attributes_index.find(slot);
+    if (it != attributes_index.end()) {
+      return graph()->inputs().at(it->second);
+    }
     attributes.push_back(slot);
+    attributes_index[slot] = graph()->inputs().size();
     return graph()->addInput()->setType(type);
   }
 
@@ -331,6 +348,7 @@ struct Method {
   // map from a at::Tensor* in member_inputs to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
   std::unordered_map<at::Tensor*, size_t> member_input_index;
+  std::unordered_map<IValue*, size_t> attributes_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.

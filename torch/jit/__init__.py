@@ -1163,7 +1163,6 @@ if _enabled:
                         self._get_parameter('training').fill_(int(value))
                         return
                 ret = super(ScriptModule, self).__setattr__(attr, value)
-
                 value_type = _get_type(value)
                 if value_type:
                     self._register_attribute(attr, value_type, value)
