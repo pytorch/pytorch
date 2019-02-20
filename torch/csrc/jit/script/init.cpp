@@ -283,6 +283,14 @@ struct ModuleValue : public SugaredValue {
     } else if (NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
+
+    if (auto value = module->find_attribute(field)) {
+      std::cout << "Found attribute for " << field << "\n";
+      return std::make_shared<SimpleValue>(m.add_attribute(value));
+      // return std::make_shared<NoneValue>();
+    } else {
+      std::cout << "No attri for " << field << "\n";
+    }
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
@@ -686,6 +694,10 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
+      // .def("_register_attribute", &Module::register_attribute)
+      .def("_register_attribute", [](Module& self, std::string name, TypePtr type, py::object value) {
+        self.register_attribute(name, toIValue(value, type));
+      })
       .def("_register_module", &Module::register_module)
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
@@ -754,7 +766,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self,
              const std::string& name,
              std::shared_ptr<Graph> graph) {
-            self.create_method(name, std::move(graph), {});
+            self.create_method(name, std::move(graph), {}, {});
           })
       .def(
           "_create_method_from_trace",
@@ -778,7 +790,7 @@ void initJitScriptBindings(PyObject* module) {
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());
-            self->create_method(name, std::move(graph), std::move(parameters));
+            self->create_method(name, std::move(graph), std::move(parameters), {});
             didFinishEmitModule(self);
           })
       .def(
@@ -865,7 +877,7 @@ void initJitScriptBindings(PyObject* module) {
               }
 
               Method* orig_method = orig->find_method(name);
-              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+              m->create_method(name, orig_method->graph()->copy(), member_inputs, {});
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

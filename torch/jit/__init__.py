@@ -1140,6 +1140,21 @@ if _enabled:
                 return self.__getattr__('forward').graph
             return Module.__getattr__(self, attr)
 
+        def _is_attribute(self, attr):
+            containers = ['_parameters', '_buffers', '_modules']
+            for name in containers:
+                if not hasattr(self, name):
+                    return False
+            if attr in containers:
+                return False
+            if attr == "training":
+                return False
+            is_attribute = True
+            for name in containers:
+                if attr in getattr(self, name):
+                    is_attribute = False
+            return is_attribute
+
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
@@ -1150,7 +1165,15 @@ if _enabled:
                         self.__dict__['training'] = value
                         self._get_parameter('training').fill_(int(value))
                         return
-                return super(ScriptModule, self).__setattr__(attr, value)
+                ret = super(ScriptModule, self).__setattr__(attr, value)
+
+                if self._is_attribute(attr):
+                    print("Setting an attribute ", attr, value)
+                    t = torch._C.DictType(torch._C.StringType.get(), torch._C.DynamicType.get())
+                    self._register_attribute(attr, t, value)
+                    pass
+
+                return ret
 
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))

@@ -56,12 +56,14 @@ struct Method {
       bool optimize,
       std::shared_ptr<Graph> graph,
       std::vector<at::Tensor*> initial_members,
+      std::vector<IValue*> attributes,
       std::function<void(Method&)> method_creator)
       : owner_(owner),
         name_(std::move(name)),
         graph_(std::move(graph)),
         optimize(optimize),
         member_inputs(std::move(initial_members)),
+        attributes(std::move(attributes)),
         method_creator(std::move(method_creator)) {
     AT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
@@ -73,6 +75,9 @@ struct Method {
   void run(Stack& stack) {
     for (at::Tensor* tp : member_inputs) {
       stack.emplace_back(*tp);
+    }
+    for (auto attribute : attributes) {
+      stack.emplace_back(*attribute);
     }
     get_executor().run(stack);
   }
@@ -126,6 +131,13 @@ struct Method {
     member_inputs.push_back(slot);
     member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
+  }
+
+  TORCH_API Value* add_attribute(IValue* slot) {
+    attributes.push_back(slot);
+    auto in = graph()->addInput();
+    in->setType(DictType::create(StringType::get(), TensorType::get()));
+    return in;
   }
 
   std::shared_ptr<Graph> propagate_shapes(
@@ -316,6 +328,7 @@ struct Method {
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
   std::vector<at::Tensor*> member_inputs;
+  std::vector<IValue*> attributes;
 
   // map from a at::Tensor* in member_inputs to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
@@ -374,6 +387,7 @@ struct Module {
   Module()
       : modules("Module"),
         parameters("Parameter"),
+        attributes("Attributes"),
         methods("Method"),
         optimize(true) {}
 
@@ -402,6 +416,16 @@ struct Module {
     }
     parameters.insert(name, NamedParameter(name, std::move(v), is_buffer));
   }
+  void register_attribute(
+      const std::string& name,
+      IValue value) {
+    // if (auto p = parameters.find(name)) {
+    //   *p->slot() = v;
+    //   p->is_buffer = is_buffer;
+    //   return;
+    // }
+    attributes.insert(name, value);
+  }
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
@@ -411,7 +435,8 @@ struct Module {
   Method& create_method(
       const std::string& name,
       std::shared_ptr<Graph> graph,
-      std::vector<at::Tensor*> member_inputs) {
+      std::vector<at::Tensor*> member_inputs,
+      std::vector<IValue*> attributes) {
     AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
@@ -419,6 +444,7 @@ struct Module {
         optimize,
         std::move(graph),
         std::move(member_inputs),
+        std::move(attributes),
         nullptr));
     return *methods.insert(name, std::move(method));
   }
@@ -431,6 +457,7 @@ struct Module {
         name,
         optimize,
         std::make_shared<Graph>(),
+        {},
         {},
         std::move(creator)));
     return *methods.insert(name, std::move(method));
@@ -465,6 +492,10 @@ struct Module {
       const {
     return parameters;
   }
+  const torch::OrderedDict<std::string, IValue>& get_attributes()
+      const {
+    return attributes;
+  }
   const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
       const {
     return methods;
@@ -472,6 +503,9 @@ struct Module {
 
   NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
+  }
+  IValue* find_attribute(const std::string& name) {
+    return attributes.find(name);
   }
   NamedModule* find_module(const std::string& name) {
     return modules.find(name);
@@ -587,7 +621,7 @@ struct Module {
       for (auto& p : kv.value()->params()) {
         params.push_back(parameter_remap.at(p));
       }
-      curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
+      curr->create_method(kv.key(), kv.value()->graph()->copy(), params, {});
     }
   }
 
@@ -603,6 +637,7 @@ struct Module {
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
   torch::OrderedDict<std::string, NamedParameter> parameters;
+  torch::OrderedDict<std::string, IValue> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
