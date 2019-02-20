@@ -23,7 +23,6 @@ namespace c10 {
   _(prim, BroadcastSizes)          \
   _(prim, Constant)                \
   _(prim, ChunkSizes)              \
-  _(prim, None)                    \
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
@@ -45,7 +44,6 @@ namespace c10 {
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
-  _(prim, Undefined)               \
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
