@@ -148,7 +148,8 @@ class RNNBase(Module):
         if not self._transposed_weights:
             with torch.no_grad():
                 self._transposed_weights = torch.mkldnn_rnn_transpose_weight(
-                    self._flat_weights, (4 if self.bias else 2), get_mkldnn_mode(self.mode), self.num_layers, self.bidirectional)
+                    self._flat_weights, (4 if self.bias else 2), get_mkldnn_mode(self.mode),
+                    self.num_layers, self.bidirectional)
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -291,6 +292,7 @@ class RNNBase(Module):
     def use_transposed_weights(self):
         any_param = next(self.parameters()).data
         return not any_param.is_cuda and torch._C.has_mkldnn and torch._C._get_mkldnn_enabled()
+
 
 class RNN(RNNBase):
     r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an
