@@ -31,6 +31,7 @@
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/tvm.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/utils/memory.h"
 
@@ -346,6 +347,86 @@ void testATenNativeBatchNorm() {
   // Compare results
   assertAllClose(tensors_out, expected_tensors_out);
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
+
+void testRelayFusion() {
+  auto graph = std::make_shared<Graph>();
+
+  auto run = [&](std::vector<IValue> stack) {
+    Code code(graph);
+    InterpreterState interp(code);
+    interp.run(stack);
+    return stack;
+  };
+
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = SymbolicVariable::asNewInput(*graph, type);
+  auto d = a * b;
+  auto e = c * d;
+  graph->registerOutput(e.value());
+  AT_ASSERT(a.value()->isTensor());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(graph, torch::jit::relay::isSupported, prim::TVMGroup);
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == prim::TVMGroup;
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+  at::Tensor A = at::rand({2,3,4});
+  at::Tensor B = at::rand({2,3,4});
+  at::Tensor C = at::rand({2,3,4});
+  std::vector<IValue> stack = { IValue(A), IValue(B), IValue(C) };
+  AT_ASSERT(stack[0].isTensor());
+
+  auto out = run(stack);
+  AT_ASSERT(out.size() == 1);
+  auto out_tensor = out[0].toTensor();
+  torch::jit::overrideCanFuseOnCPU(false);
+  auto D = (A * B) * C;
+  ASSERT_TRUE(out_tensor.allclose(D));
+}
+
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(graph, [](Node* n) { return true; }, Symbol::fromQualString("prim::FusionGroup"));
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == Symbol::fromQualString("prim::FusionGroup");
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
 }
 
 static const auto cf_examples = R"JIT(

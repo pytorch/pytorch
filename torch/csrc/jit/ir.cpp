@@ -1211,8 +1211,8 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
-Node* Graph::createFusionGroup() {
-  auto n = create(prim::FusionGroup, 0);
+Node* Graph::createFusionGroup(Symbol kind) {
+  auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
   return n;
 }

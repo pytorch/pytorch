@@ -187,6 +187,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/tvm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
@@ -407,6 +408,31 @@ target_include_directories(torch PUBLIC
 
 target_include_directories(torch PUBLIC
   ${TORCH_ROOT}/third_party/miniz-2.0.8)
+
+
+if (USE_TVM)
+  set(DMLC_USE_GLOG ON)
+  set(USE_BLAS none)
+  set(USE_LLVM $ENV{USE_LLVM})
+  add_subdirectory(${TORCH_ROOT}/third_party/tvm ${CMAKE_BINARY_DIR}/tvm)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/3rdparty/dlpack/include)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/3rdparty/HalideIR/src)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/3rdparty/dmlc-core/include)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/include)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/nnvm/include)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/topi/include)
+  target_include_directories(torch PUBLIC
+    ${TORCH_ROOT}/third_party/tvm/src)
+
+  target_link_libraries(torch tvm tvm_topi)
+  set(USE_BLAS ON)
+endif()
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 

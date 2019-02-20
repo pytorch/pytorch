@@ -109,6 +109,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
+    "torch/csrc/jit/tvm.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
     "torch/csrc/jit/fuser/kernel_cache.cpp",

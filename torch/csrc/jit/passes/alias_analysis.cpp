@@ -359,6 +359,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+    case prim::TVMGroup:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:
@@ -1133,6 +1134,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::If,
       prim::Loop,
       prim::FusionGroup,
+      prim::TVMGroup,
       prim::DifferentiableGraph,
       prim::Constant,
       prim::DictConstruct,

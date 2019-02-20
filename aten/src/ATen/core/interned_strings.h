@@ -28,6 +28,7 @@ namespace c10 {
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
   _(prim, FusionGroup)             \
+  _(prim, TVMGroup)             \
   _(prim, DifferentiableGraph)     \
   _(prim, If)                      \
   _(prim, Jump) /* debug */        \
