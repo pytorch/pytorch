@@ -87,6 +87,7 @@ struct CudaIPCSentDataLimbo final {
   // TODO: Can be changed to FIFO in order to avoid full traverse on every
   // collect()
   std::vector<std::unique_ptr<CudaIPCSentData>> shared_blocks_;
+  std::mutex limbo_mutex_;
 };
 
 struct CudaIPCRefCountersFile final {

@@ -146,7 +146,7 @@ struct THCCachingAllocator
   std::vector<DeviceStats> device_stats;
 
   // lock around all operations
-  std::mutex mutex;
+  std::recursive_mutex mutex;
 
   // lock around calls to cudaFree (to prevent deadlocks with NCCL)
   std::mutex cuda_free_mutex;
@@ -178,7 +178,7 @@ struct THCCachingAllocator
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
 
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
@@ -204,6 +204,7 @@ struct THCCachingAllocator
             (*it)->stream == stream) {
           block = *it;
           free_blocks.erase(it);
+          break;
         }
       }
 
@@ -285,7 +286,7 @@ struct THCCachingAllocator
 
   void free(void* ptr)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!ptr) {
       return;
     }
@@ -310,14 +311,14 @@ struct THCCachingAllocator
   /** returns cached blocks to the system allocator */
   void emptyCache()
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
     free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       AT_ERROR("invalid device pointer: %p", ptr);
@@ -353,14 +354,14 @@ struct THCCachingAllocator
 
   void cacheInfo(int dev_id, size_t* total, size_t* largest)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     cacheInfoAux(large_blocks, dev_id, total, largest);
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
   void recordStream(void* ptr, cuda::CUDAStream stream)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       AT_ERROR("invalid device pointer: %p", ptr);
