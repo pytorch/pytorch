@@ -22,6 +22,9 @@ setup_linux_system_environment: &setup_linux_system_environment
   command: |
     set -e
 
+    # Workaround: Hash Sum mismatch error for Docker
+    sudo apt-get clean
+
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
