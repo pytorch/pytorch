@@ -1,0 +1,197 @@
+      - binary_linux_manywheel_2.7m_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7m_cpu_test
+      - binary_linux_manywheel_2.7mu_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7mu_cpu_test
+      - binary_linux_manywheel_3.5m_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.5m_cpu_test
+      - binary_linux_manywheel_3.6m_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.6m_cpu_test
+      - binary_linux_manywheel_3.7m_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.7m_cpu_test
+      - binary_linux_manywheel_2.7m_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7m_cu80_test
+      - binary_linux_manywheel_2.7mu_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7mu_cu80_test
+      - binary_linux_manywheel_3.5m_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.5m_cu80_test
+      - binary_linux_manywheel_3.6m_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.6m_cu80_test
+      - binary_linux_manywheel_3.7m_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.7m_cu80_test
+      - binary_linux_manywheel_2.7m_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7m_cu90_test
+      - binary_linux_manywheel_2.7mu_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7mu_cu90_test
+      - binary_linux_manywheel_3.5m_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.5m_cu90_test
+      - binary_linux_manywheel_3.6m_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.6m_cu90_test
+      - binary_linux_manywheel_3.7m_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.7m_cu90_test
+      - binary_linux_manywheel_2.7m_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7m_cu100_test
+      - binary_linux_manywheel_2.7mu_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_2.7mu_cu100_test
+      - binary_linux_manywheel_3.5m_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.5m_cu100_test
+      - binary_linux_manywheel_3.6m_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.6m_cu100_test
+      - binary_linux_manywheel_3.7m_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3.7m_cu100_test
+      - binary_linux_conda_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_2.7_cpu_test
+      - binary_linux_conda_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.5_cpu_test
+      - binary_linux_conda_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.6_cpu_test
+      - binary_linux_conda_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.7_cpu_test
+      - binary_linux_conda_2.7_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_2.7_cu80_test
+      - binary_linux_conda_3.5_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.5_cu80_test
+      - binary_linux_conda_3.6_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.6_cu80_test
+      - binary_linux_conda_3.7_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.7_cu80_test
+      - binary_linux_conda_2.7_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_2.7_cu90_test
+      - binary_linux_conda_3.5_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.5_cu90_test
+      - binary_linux_conda_3.6_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.6_cu90_test
+      - binary_linux_conda_3.7_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.7_cu90_test
+      - binary_linux_conda_2.7_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_2.7_cu100_test
+      - binary_linux_conda_3.5_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.5_cu100_test
+      - binary_linux_conda_3.6_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.6_cu100_test
+      - binary_linux_conda_3.7_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_conda_3.7_cu100_test
+      - binary_linux_libtorch_2.7m_cpu_upload:
+          context: org-member
+          requires:
+            - binary_linux_libtorch_2.7m_cpu_build
+      - binary_linux_libtorch_2.7m_cu80_upload:
+          context: org-member
+          requires:
+            - binary_linux_libtorch_2.7m_cu80_build
+      - binary_linux_libtorch_2.7m_cu90_upload:
+          context: org-member
+          requires:
+            - binary_linux_libtorch_2.7m_cu90_build
+      - binary_linux_libtorch_2.7m_cu100_upload:
+          context: org-member
+          requires:
+            - binary_linux_libtorch_2.7m_cu100_build
+      - binary_macos_wheel_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_2.7_cpu_build
+      - binary_macos_wheel_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.5_cpu_build
+      - binary_macos_wheel_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.6_cpu_build
+      - binary_macos_wheel_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_wheel_3.7_cpu_build
+      - binary_macos_conda_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_2.7_cpu_build
+      - binary_macos_conda_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.5_cpu_build
+      - binary_macos_conda_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.6_cpu_build
+      - binary_macos_conda_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_conda_3.7_cpu_build
+      - binary_macos_libtorch_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - binary_macos_libtorch_2.7_cpu_build
+

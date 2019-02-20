@@ -1,7 +1,7 @@
 import numbers
 
 import torch
-from torch._C import DynamicType, ListType
+from torch._C import DynamicType, ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -230,7 +230,9 @@ _onnx_opset_version = 9
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("prim::None")
+    n = g.op("prim::Constant")
+    n.setType(OptionalType.ofTensor())
+    return n
 
 
 def _shape_as_tensor(g, input):
@@ -239,6 +241,15 @@ def _shape_as_tensor(g, input):
 
 def _reshape_from_tensor(g, input, shape):
     return g.op('Reshape', input, shape)
+
+
+def reshape(g, self, shape):
+    return view(g, self, shape)
+
+
+def reshape_as(g, self, other):
+    shape = g.op('Shape', other)
+    return reshape(g, self, shape)
 
 
 def add(g, self, other, alpha=None):
@@ -580,11 +591,30 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_single(kernel_size),
-             pads_i=_single(padding) * 2,
-             strides_i=_single(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_single(kernel_size),
+                      pads_i=_single(padding) * 2,
+                      strides_i=_single(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened.
+    # In ONNX the indices are computed as a flatten 1-D tensor,
+    # so the values in indices are in [0, N x C x D1 x ... x Dn).
+    # To convert the indices to the same format used by Pytorch,
+    # we first execute a maxpool with a kernel and stride of 1 on the same input.
+    # This will result in a tensor of indices in which each index will have it's own value.
+    # Using this tensor as a reference, we extract the first index of each axis and substract
+    # it from each index of this axis in the indices to convert.
+    # This step will result in a tensor were each dimension has values of indices within
+    # the dimension it is in.
+    # For more information :
+    # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1],
+                                strides_i=[1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -595,11 +625,20 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding) * 2,
-             strides_i=_pair(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_pair(kernel_size),
+                      pads_i=_pair(padding) * 2,
+                      strides_i=_pair(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened
+    # See comment in max_pool1d_with_indices for details.
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1, 1],
+                                strides_i=[1, 1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -610,11 +649,20 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_triple(kernel_size),
-             pads_i=_triple(padding) * 2,
-             strides_i=_triple(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_triple(kernel_size),
+                      pads_i=_triple(padding) * 2,
+                      strides_i=_triple(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened
+    # See comment in max_pool1d_with_indices for details.
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1, 1, 1],
+                                strides_i=[1, 1, 1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 def _avg_pool(name, tuple_fn):
@@ -791,7 +839,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "prim::None" and bias.type().dim() == 1:
+    if not bias.node().mustBeNone() and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -812,7 +860,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "prim::None" and bias.type().dim() != 1:
+    if not bias.node().mustBeNone() and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -825,12 +873,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().kind() == "prim::None":
+    if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::None":
+    if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -857,12 +905,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().kind() == "prim::None":
+    if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().kind() == "prim::None":
+    if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -942,11 +990,11 @@ def pow(g, self, exponent):
 
 
 def clamp(g, self, min, max):
-    # min or max may be prim::None that we need to dispatch to
+    # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().kind() == "prim::None":
+    if min.node().mustBeNone():
         return clamp_max(g, self, max)
-    elif max.node().kind() == "prim::None":
+    elif max.node().mustBeNone():
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')

@@ -1317,14 +1317,14 @@ In-place version of :meth:`~Tensor.le`
 
 add_docstr_all('lerp',
                r"""
-lerp(start, end, weight) -> Tensor
+lerp(end, weight) -> Tensor
 
 See :func:`torch.lerp`
 """)
 
 add_docstr_all('lerp_',
                r"""
-lerp_(start, end, weight) -> Tensor
+lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
 """)
@@ -2968,6 +2968,55 @@ add_docstr_all('pinverse',
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
+""")
+
+add_docstr_all('index_add',
+               r"""
+index_add(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_add_`
+""")
+
+add_docstr_all('index_copy',
+               r"""
+index_copy(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_copy_`
+""")
+
+add_docstr_all('index_fill',
+               r"""
+index_fill(dim, index, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_fill_`
+""")
+
+add_docstr_all('scatter',
+               r"""
+scatter(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_`
+""")
+
+add_docstr_all('scatter_add',
+               r"""
+scatter_add(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
+
+add_docstr_all('masked_scatter',
+               r"""
+masked_scatter(mask, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+""")
+
+add_docstr_all('masked_fill',
+               r"""
+masked_fill(mask, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
 add_docstr_all('grad',

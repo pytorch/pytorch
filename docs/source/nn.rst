@@ -794,11 +794,6 @@ Utilities
 
 .. autofunction:: torch.nn.utils.remove_spectral_norm
 
-:hidden:`one_hot`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: torch.nn.utils.one_hot
-
 
 .. currentmodule:: torch.nn.utils.rnn
 
@@ -1170,6 +1165,11 @@ Sparse functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: embedding_bag
+
+:hidden:`one_hot`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: one_hot
 
 Distance functions
 ----------------------------------

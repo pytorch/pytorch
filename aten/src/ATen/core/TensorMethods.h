@@ -310,11 +310,14 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
-    return type().index_put(*this, indices, values, accumulate);
+inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_copy(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
     return type().index_put_(*this, indices, values, accumulate);
+}
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -811,11 +814,20 @@ inline bool Tensor::is_set_to(const Tensor & tensor) const {
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
     return type().masked_fill_(*this, mask, value);
 }
+inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
+    return type().masked_fill(*this, mask, value);
+}
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
     return type().masked_fill_(*this, mask, value);
 }
+inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) const {
+    return type().masked_fill(*this, mask, value);
+}
 inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
     return type().masked_scatter_(*this, mask, source);
+}
+inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
+    return type().masked_scatter(*this, mask, source);
 }
 inline Tensor Tensor::view(IntArrayRef size) const {
     return type().view(*this, size);
@@ -826,20 +838,38 @@ inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool a
 inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_add_(*this, dim, index, source);
 }
+inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_add(*this, dim, index, source);
+}
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
     return type().index_fill_(*this, dim, index, value);
+}
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value) const {
+    return type().index_fill(*this, dim, index, value);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
     return type().index_fill_(*this, dim, index, value);
 }
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor & value) const {
+    return type().index_fill(*this, dim, index, value);
+}
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
     return type().scatter_(*this, dim, index, src);
+}
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & src) const {
+    return type().scatter(*this, dim, index, src);
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
     return type().scatter_(*this, dim, index, value);
 }
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) const {
+    return type().scatter(*this, dim, index, value);
+}
 inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
     return type().scatter_add_(*this, dim, index, src);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const {
+    return type().scatter_add(*this, dim, index, src);
 }
 inline Tensor & Tensor::lt_(Scalar other) {
     return type().lt_(*this, other);
