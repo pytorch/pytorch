@@ -211,6 +211,17 @@ else ()
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
     )
+    add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
+    cuda_find_library_local_first(CUDA_NVRTC nvrtc "\"nvrtc\" library")
+    if(APPLE)
+      # on macOS this is where the CUDA stub is installed according to the manual
+      set(CUDA_CUDA_STUB /usr/local/cuda/lib/libcuda.dylib)
+    else()
+      cuda_find_library_local_first_with_path_ext(CUDA_CUDA_STUB cuda "\"cuda\" library" "stubs/")
+    endif()
+    target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_STUB})
+    target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif ()
 
