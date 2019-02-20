@@ -7,9 +7,8 @@ from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_negative_env_
     gather_paths
 
 from .cuda import USE_CUDA, CUDA_HOME
-from .dist_check import USE_DISTRIBUTED
 
-USE_NCCL = USE_CUDA and USE_DISTRIBUTED and not IS_DARWIN and not IS_WINDOWS
+USE_NCCL = USE_CUDA and not check_negative_env_flag('USE_NCCL') and not IS_DARWIN and not IS_WINDOWS
 USE_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None
