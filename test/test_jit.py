@@ -10271,6 +10271,21 @@ a")
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_module_attrs(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, table):
+                super(M, self).__init__()
+                self.table = table
+                self.x = torch.nn.Parameter(torch.tensor([100.0]))
+
+            @torch.jit.script_method
+            def forward(self, key):
+                # type: (str) -> Tensor
+                return self.table[key] + self.x
+
+        m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
+        self.assertEqual(m("c"), torch.tensor([103]))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
