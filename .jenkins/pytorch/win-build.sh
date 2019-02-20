@@ -122,12 +122,8 @@ sccache --zero-stats
 set CC=sccache cl
 set CXX=sccache cl
 
-<<<<<<< HEAD
-=======
-set DISTUTILS_USE_SDK=1
 set REL_WITH_DEB_INFO=1
 
->>>>>>> 94c8133c2... add /Z7 into CXX flags
 set CMAKE_GENERATOR=Ninja
 
 if not "%USE_CUDA%"=="1" (
