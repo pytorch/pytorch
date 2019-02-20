@@ -209,7 +209,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
-                assert argument['name'] == func_return[arg_idx]['name']
+                assert argument['name'] == func_return[arg_idx]['name'] or \
+                    argument['name'] == func_return[arg_idx]['name'] + "_return"
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
@@ -226,7 +227,12 @@ def parse_return_arguments(return_decl, inplace, func_decl):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         t, name, default, nullable, size, annotation = type_argument_translations(arg)
-        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
+        # name of arguments and name of return sometimes have collision
+        # in this case, we rename the return name to <name>_return.
+        return_name = name
+        if name in func_decl['func'].split('->')[0]:
+            return_name = name + "_return"
+        argument_dict = {'type': t, 'name': return_name, 'annotation': annotation}
         if name:
             # See Note [field_name versus name]
             argument_dict['field_name'] = name

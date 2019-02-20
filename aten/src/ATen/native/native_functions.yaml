@@ -3598,15 +3598,15 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) ->(Tensor(a!), Tensor(b!))
+- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) ->(Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
 
-- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor, Tensor)
+- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   matches_jit_signature: True
   variants: method, function
 
-- func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) ->(Tensor(a!), Tensor(b!))
+- func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) ->(Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
 
-- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor, Tensor)
+- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   matches_jit_signature: True
   variants: method, function
 
@@ -3650,21 +3650,21 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) piv) ->(Tensor(a!), Tensor(b!))
+- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) ->(Tensor(a!) u, Tensor(b!) pivot)
 
-- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor, Tensor)
+- func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   matches_jit_signature: True
   variants: method, function
 
-- func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) ->(Tensor(a!), Tensor(b!))
+- func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) ->(Tensor(a!) Q, Tensor(b!) R)
 
-- func: qr(Tensor self) -> (Tensor, Tensor)
+- func: qr(Tensor self) -> (Tensor Q, Tensor R)
   matches_jit_signature: True
   variants: method, function
 
-- func: geqrf(Tensor self, *, Tensor(a!) out0, Tensor(b!) out1) ->(Tensor(a!), Tensor(b!))
+- func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) ->(Tensor(a!) a, Tensor(b!) tau)
 
-- func: geqrf(Tensor self) -> (Tensor, Tensor)
+- func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   matches_jit_signature: True
   variants: method, function
 
