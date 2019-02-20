@@ -944,6 +944,18 @@ def _get_valid_constant(attr, v):
         """.format(type(v).__name__, attr, constants)))
 
 
+def _get_type(value):
+    if isinstance(value, dict):
+        for key in value:
+            key_type = _get_type(key)
+            value_type = _get_type(value[key])
+            return torch._C.DictType(key_type, value_type)
+    elif isinstance(value, torch.Tensor):
+        return torch._C.DynamicType.get()
+    elif isinstance(value, str):
+        return torch._C.StringType.get()
+
+
 def _create_methods_from_stubs(self, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
@@ -1140,21 +1152,6 @@ if _enabled:
                 return self.__getattr__('forward').graph
             return Module.__getattr__(self, attr)
 
-        def _is_attribute(self, attr):
-            containers = ['_parameters', '_buffers', '_modules']
-            for name in containers:
-                if not hasattr(self, name):
-                    return False
-            if attr in containers:
-                return False
-            if attr == "training":
-                return False
-            is_attribute = True
-            for name in containers:
-                if attr in getattr(self, name):
-                    is_attribute = False
-            return is_attribute
-
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
@@ -1167,12 +1164,9 @@ if _enabled:
                         return
                 ret = super(ScriptModule, self).__setattr__(attr, value)
 
-                if self._is_attribute(attr):
-                    print("Setting an attribute ", attr, value)
-                    t = torch._C.DictType(torch._C.StringType.get(), torch._C.DynamicType.get())
-                    self._register_attribute(attr, t, value)
-                    pass
-
+                value_type = _get_type(value)
+                if value_type:
+                    self._register_attribute(attr, value_type, value)
                 return ret
 
             if hasattr(self, attr):

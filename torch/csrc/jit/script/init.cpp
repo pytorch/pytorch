@@ -283,14 +283,10 @@ struct ModuleValue : public SugaredValue {
     } else if (NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
-
     if (auto value = module->find_attribute(field)) {
-      std::cout << "Found attribute for " << field << "\n";
       return std::make_shared<SimpleValue>(m.add_attribute(value->type_, value->slot()));
-      // return std::make_shared<NoneValue>();
-    } else {
-      std::cout << "No attri for " << field << "\n";
     }
+
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
