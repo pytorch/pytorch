@@ -12,7 +12,7 @@ from subprocess import check_call, call, check_output
 from distutils.version import LooseVersion
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
-from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB, USE_NCCL
 from .setup_helpers.rocm import ROCM_HOME, ROCM_VERSION, USE_ROCM
 from .setup_helpers.nnpack import USE_NNPACK
 from .setup_helpers.qnnpack import USE_QNNPACK
@@ -183,7 +183,8 @@ def run_cmake(version,
         USE_FFMPEG=check_env_flag('USE_FFMPEG'),
         USE_SYSTEM_EIGEN_INSTALL="OFF",
         USE_MKLDNN=USE_MKLDNN,
-        NCCL_EXTERNAL=USE_CUDA,
+        USE_NCCL=USE_NCCL,
+        NCCL_EXTERNAL=USE_NCCL,
         CMAKE_INSTALL_PREFIX=install_dir,
         CMAKE_C_FLAGS=cflags,
         CMAKE_CXX_FLAGS=cflags,
