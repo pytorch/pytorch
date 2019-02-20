@@ -148,16 +148,15 @@ def process_definition(defn, declarations_by_signature):
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
+            derivative = create_derivative(declaration['arguments'], declaration['returns'],
+                                           declaration['name'], formula, names)
             if formula.lower().strip() == 'not_differentiable':
-                derivative = create_derivative(declaration['arguments'], declaration['returns'],
-                                               declaration['name'], formula, names)
                 assert not sum([type(var_name) == list
                                 for var_name in derivative['var_names']]), \
                     "Variable names associated to a formula should be a flat list"
                 args_with_no_gradients += derivative['var_names']
             else:
-                derivatives.append(create_derivative(declaration['arguments'], declaration['returns'],
-                                                     declaration['name'], formula, names))
+                derivatives.append(derivative)
         args_with_gradients = list(filter(lambda x: x['name'] not in args_with_no_gradients, args_with_gradients))
 
         # Test to see if the use of 'grads' makes sense.
