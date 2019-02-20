@@ -27,6 +27,18 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// [USE OF NVRTC AND DRIVER API]
+// libtorch does not directly link to either libnvrtc or libcuda because
+// they require libcuda to be installed. Normal CUDA code in torch uses the cuda
+// runtime libraries which can be installed even if the driver is not installed,
+// but here we specifically need to use the driver API to load JIT compiled
+// code. To accomplish this, we lazily link libthnvrtc which provides a struct
+// THNVRTC that contains function pointers to all of the apis we need.
+//
+// IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
+// INSTEAD USE, e.g. nvrtc().cuLoadModule(...)
+// If a function is missing add it to the list in thnvrtc.
+
 void checkCUDAVersion(const cudaDeviceProp& prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
       (prop.major >= 7 && CUDA_VERSION < 9000)) {
