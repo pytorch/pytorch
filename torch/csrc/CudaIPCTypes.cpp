@@ -23,16 +23,16 @@ struct CudaIPCGlobalEntities {
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
-    if (next_available_ref_counters_file_ != nullptr) {
+    if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
     }
   };
   void safe_clean_current_file() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (next_available_ref_counters_file_ != nullptr &&
+    if (next_available_ref_counters_file_ &&
         next_available_ref_counters_file_->offsets_in_use() == 0) {
       ref_counters_files_.erase(next_available_ref_counters_file_->handle());
-      next_available_ref_counters_file_ = nullptr;
+      next_available_ref_counters_file_.reset();
     }
   }
 };
@@ -118,7 +118,7 @@ void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
 
 bool CudaIPCHaveRefCounter() {
   std::lock_guard<std::mutex> lock(cuda_ipc_global_entities.mutex_);
-  return cuda_ipc_global_entities.next_available_ref_counters_file_ != nullptr;
+  return (bool)cuda_ipc_global_entities.next_available_ref_counters_file_;
 }
 
 void CudaIPCCreateRefCounter(
@@ -146,7 +146,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   cuda_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
   if (!cuda_ipc_global_entities.next_available_ref_counters_file_
            ->have_offsets()) {
-    cuda_ipc_global_entities.next_available_ref_counters_file_ = nullptr;
+    cuda_ipc_global_entities.next_available_ref_counters_file_.reset();
   }
   return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
