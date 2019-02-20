@@ -286,7 +286,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
-    case prim::None:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
     case prim::Function:
