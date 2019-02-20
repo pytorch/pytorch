@@ -4221,21 +4221,21 @@ a")
             assert 1 == 1, "hello"
             return x
 
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(not PY2, "Requires python 2")
     def test_python_frontend_py2(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):

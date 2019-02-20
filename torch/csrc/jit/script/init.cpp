@@ -484,7 +484,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
     }
-    const bool is_user_type = py::hasattr(obj, "__is_user_type__");
+    const bool is_user_type = py::hasattr(obj, "__user_type_name__");
     if (is_user_type) {
       const auto classname =
           py::cast<std::string>(py::getattr(obj, "__user_type_name__"));
@@ -872,18 +872,20 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_copy_method",
           [](std::shared_ptr<Module> m,
-            std::string name,
-            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
-            std::shared_ptr<Module> orig) {
-              std::vector<at::Tensor*> member_inputs;
-              for (auto& p : params) {
-                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
-                AT_ASSERT(np != nullptr);
-                member_inputs.push_back(np->slot());
-              }
+             std::string name,
+             std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
+                 params,
+             std::shared_ptr<Module> orig) {
+            std::vector<at::Tensor*> member_inputs;
+            for (auto& p : params) {
+              NamedParameter* np =
+                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              AT_ASSERT(np != nullptr);
+              member_inputs.push_back(np->slot());
+            }
 
-              Method* orig_method = orig->find_method(name);
-              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+            Method* orig_method = orig->find_method(name);
+            m->create_method(name, orig_method->graph()->copy(), member_inputs);
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

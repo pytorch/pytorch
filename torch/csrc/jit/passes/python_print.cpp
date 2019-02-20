@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -600,10 +600,10 @@ struct PythonPrintPass {
     if (node->kind() == prim::PythonOp) {
       auto value = static_cast<const PythonOp*>(node);
       if (enforce_importable_ && value->ignore_on_export) {
-          // Op has been marked as ignored, so insert an error in its place
-          indent();
-          out << "ops.prim.IgnoredPythonOp()\n";
-          return;
+        // Op has been marked as ignored, so insert an error in its place
+        indent();
+        out << "ops.prim.IgnoredPythonOp()\n";
+        return;
       }
     }
     switch (node->kind()) {
@@ -804,7 +804,8 @@ struct PythonPrintPass {
         if (node->inputs().size() == 0 &&
             !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
             !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", {})";
         } else {
           printDict(stmt, node->inputs());
         }
@@ -837,6 +838,10 @@ struct PythonPrintPass {
             [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
+      case prim::CreateUserObject:
+      case prim::SetAttr:
+      case prim::GetAttr:
+        throw std::runtime_error("NYI");
       default: {
         Symbol kind = node->kind();
         if (kind.is_aten()) {
@@ -1081,6 +1086,9 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
+      prim::CreateUserObject,
+      prim::GetAttr,
+      prim::SetAttr,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your

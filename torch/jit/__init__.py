@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast, get_default_args
+from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
@@ -713,17 +713,23 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
-def script(fn, optimize=True, _frames_up=0, _rcb=None):
+def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
-        return fn
+        return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn, is_method=False)
     mod = ScriptModule()
-    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
+    if inspect.isclass(obj):
+        ast = get_jit_class_def(obj)
+        _jit_script_class_compile(mod, ast, _rcb)
+        mod.__user_type_name__ = obj.__name__
+    else:
+        ast = get_jit_def(obj)
+        _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
     # Forward docstrings
-    mod.__doc__ = fn.__doc__
+    mod.__doc__ = obj.__doc__
     return mod
+
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -745,25 +751,8 @@ def script_method(fn, _rcb=None):
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(frames_up=2)
-    ast = get_jit_ast(fn, is_method=True)
+    ast = get_jit_def(fn, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
-
-
-def script_class(cls):
-    if not _enabled:
-        return cls
-    class_def = get_jit_ast(cls, is_method=False, is_class=True)
-    _rcb = _jit_internal.createResolutionCallback(1)
-    mod = ScriptModule()
-    _jit_script_class_compile(mod, class_def, _rcb)
-    # Forward docstrings
-    mod.__doc__ = cls.__doc__
-
-    # TODO need a better way to pass information to init.cpp that this is a
-    # script class
-    mod.__is_user_type__ = True
-    mod.__user_type_name__ = cls.__name__
-    return mod
 
 
 def _try_get_weak_module(mod):
