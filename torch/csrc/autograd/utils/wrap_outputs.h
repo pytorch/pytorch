@@ -133,6 +133,15 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
   return r.release();
 }
 
+inline PyObject* wrap(at::TensorList tl) {
+  auto r = THPObjectPtr{PyTuple_New(tl.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < tl.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
+  }
+  return r.release();
+}
+
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::TensorList> tensors) {
   auto r = THPObjectPtr{PyTuple_New(4)};
   if (!r) throw python_error();
@@ -140,15 +149,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::TensorL
   PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
   PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
   PyTuple_SET_ITEM(r.get(), 3, wrap(std::get<3>(tensors)));
-  return r.release();
-}
-
-inline PyObject* wrap(at::TensorList tl) {
-  auto r = THPObjectPtr{PyTuple_New(tl.size())};
-  if (!r) throw python_error();
-  for (size_t i = 0; i < tl.size(); ++i) {
-    PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
-  }
   return r.release();
 }
 

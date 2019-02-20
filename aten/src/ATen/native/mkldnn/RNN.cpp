@@ -11,6 +11,23 @@
 
 namespace at { namespace native {
 
+#define ONE_HIDDEN_RNN(NAME, MODE)                                             \
+std::tuple<Tensor, Tensor> NAME##_mkldnn_stub(                                 \
+    const Tensor& input, const Tensor& hx, TensorList params, bool has_biases, \
+    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+  AT_ERROR("NAME##_mkldnn_stub: ATen not compiled with MKLDNN support");     \
+}
+
+ONE_HIDDEN_RNN(gru, MKLDNN_GRU)
+ONE_HIDDEN_RNN(rnn_tanh, MKLDNN_RNN_TANH)
+ONE_HIDDEN_RNN(rnn_relu, MKLDNN_RNN_RELU)
+
+std::tuple<Tensor, Tensor, Tensor> lstm_mkldnn_stub(
+    const Tensor& input, TensorList hx, TensorList params, bool has_biases,
+    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+  AT_ERROR("lstm_mkldnn_stub: ATen not compiled with MKLDNN support");
+}
+
 std::vector<Tensor> mkldnn_rnn_transpose_weight(
     TensorList weight, int64_t weight_stride0,
     int64_t fn_mode, int64_t fn_num_layers,
@@ -23,7 +40,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn(
     const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state) {
   AT_ERROR("mkldnn_rnn: ATen not compiled with MKLDNN support");
 }
@@ -34,7 +51,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& grad_output_r, const Tensor& grad_hy_r, const Tensor& grad_cy_r,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, TensorList reserve,
     std::array<bool, 4> output_mask) {
   AT_ERROR("mkldnn_rnn_backward: ATen not compiled with MKLDNN support");
@@ -143,7 +160,7 @@ struct RNNDescriptorParams {
 };
 
 struct TensorDescriptorListParams {
-  IntList batch_sizes;
+  IntArrayRef batch_sizes;
   int64_t seq_length;
   int64_t mini_batch;
   int64_t input_size;
@@ -153,7 +170,7 @@ struct TensorDescriptorListParams {
     return batch_sizes.size() != 0;
   }
 
-  void set(IntList input_sizes, IntList batch_sizes_, bool batch_first) {
+  void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first) {
     batch_sizes = batch_sizes_;
     if (is_input_packed()) {
       seq_length = batch_sizes.size();
@@ -612,7 +629,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn(
     const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state) {
 
   auto input = input_r;
@@ -686,7 +703,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> mkldnn_rnn_backward(
     const Tensor& grad_output_r, const Tensor& grad_hy_r, const Tensor& grad_cy_r,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, TensorList reserve,
     std::array<bool, 4> output_mask) {
 
@@ -838,7 +855,7 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
 #define ONE_HIDDEN_RNN(NAME, MODE)                                             \
 std::tuple<Tensor, Tensor> NAME##_mkldnn_stub(                                 \
     const Tensor& input, const Tensor& hx, TensorList params, bool has_biases, \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
                                                                                \
   auto result = mkldnn_impl(input, hx, params, has_biases,                     \
       MODE, num_layers, dropout_p, train, bidirectional, batch_first);         \

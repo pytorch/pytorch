@@ -1432,7 +1432,7 @@
 
 # Only frst three of mkldnn_rnn outputs can have gradients.
 # mkldnn_rnn outputs: (output, hy, cy, reserve)
-- name: mkldnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, Tensor dropout_state)
+- name: mkldnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, Tensor dropout_state)
   output_differentiability: [True, True, True, False]
   input, hx, cx, weight: "mkldnn_rnn_backward(input, weight, weight_stride0, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, result3, grad_input_mask)"
 
