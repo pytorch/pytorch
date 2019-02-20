@@ -828,8 +828,7 @@ RegisterOperators reg({
         return 0;                                                              \
       }),                                                                      \
       Operator(                                                                \
-          #aten_op "(float a, float b) -> " #float_result,                     \
-          [](Stack& stack) {                                                   \
+          #aten_op "(float a, float b) -> " #float_result, [](Stack& stack) {  \
             double a, b;                                                       \
             pop(stack, a, b);                                                  \
             push(stack, float_op);                                             \
@@ -846,8 +845,7 @@ RegisterOperators reg({
         push(stack, op);                                                   \
         return 0;                                                          \
       }),                                                                  \
-      Operator(#aten_op "(float a, int b) -> " #result,                    \
-      [](Stack& stack) {                                                   \
+      Operator(#aten_op "(float a, int b) -> " #result, [](Stack& stack) { \
         double a;                                                          \
         int64_t b;                                                         \
         pop(stack, a, b);                                                  \
@@ -856,8 +854,7 @@ RegisterOperators reg({
       })
 
 #define DEFINE_INT_OP(aten_op, op)                              \
-  Operator(#aten_op "(int a, int b) -> int",                    \
-  [](Stack& stack) {                                            \
+  Operator(#aten_op "(int a, int b) -> int", [](Stack& stack) { \
     int64_t a, b;                                               \
     pop(stack, a, b);                                           \
     push(stack, op); /* NOLINT(hicpp-signed-bitwise) */         \
@@ -871,8 +868,7 @@ RegisterOperators reg({
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool)
 #define DEFINE_BOOL_OP(aten_op, op)                                \
-  Operator(#aten_op "(bool a, bool b) -> bool",                    \
-    [](Stack& stack) {                                             \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
     bool a, b;                                                     \
     pop(stack, a, b);                                              \
     push(stack, op);                                               \
@@ -1025,6 +1021,7 @@ template <typename T>
 int listLen(Stack& stack) {
   T a;
   pop(stack, a);
+
   const int64_t size = a->elements().size();
   push(stack, size);
   return 0;
@@ -1225,8 +1222,7 @@ int dictIndex(Stack& stack) {
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                \
-  Operator(#op_name "(str a, str b) ->" #result,                    \
-  [](Stack& stack) {                                                \
+  Operator(#op_name "(str a, str b) ->" #result, [](Stack& stack) { \
     auto b = pop(stack).toStringRef();                              \
     auto a = pop(stack).toStringRef();                              \
     push(stack, string_op);                                         \
