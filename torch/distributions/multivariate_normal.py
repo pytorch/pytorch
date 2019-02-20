@@ -40,10 +40,10 @@ def _batch_mahalanobis(bL, bx):
     shape, but `bL` one should be able to broadcasted to `bx` one.
     """
     n = bx.size(-1)
-
     bx_batch_shape = bx.shape[:-1]
+
     # Assume that bL.shape = (i, 1, n, n), bx.shape = (..., i, j, n),
-    # we are going to make bx have shape (..., i, 1, n) to apply _batch_trtrs_lower
+    # we are going to make bx have shape (..., 1, j,  i, 1, n) to apply _batch_trtrs_lower
     bx_batch_dims = len(bx_batch_shape)
     bL_batch_dims = bL.dim() - 2
     outer_batch_dims = bx_batch_dims - bL_batch_dims
