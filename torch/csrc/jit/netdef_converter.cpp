@@ -77,11 +77,13 @@ void convertNetDefToIR(
     std::unordered_map<std::string, Value*>* valueMapPtr,
     const std::string& prefix) {
   std::unordered_map<std::string, Value*>& valueMap = *valueMapPtr;
+  std::unordered_map<Value*, std::string> namesMap;
   valueMap.clear();
 
   for (const auto& inputName : net.external_input()) {
     AT_ASSERT(!valueMap.count(inputName));
     valueMap[inputName] = g->addInput();
+    namesMap[valueMap.at(inputName)] = inputName;
   }
 
   for (const auto& op : net.op()) {
@@ -98,7 +100,9 @@ void convertNetDefToIR(
     for (const auto& output : op.output()) {
       // If output already exists in valueMap, overwrite it. This way we will
       // have the last definition of a value named 'output' in valueMap.
-      valueMap[output] = node->outputs()[idx++];
+      Value* v = node->outputs()[idx++];
+      valueMap[output] = v;
+      namesMap[v] = output;
     }
     for (const auto& arg : op.arg()) {
       convertArg(arg, node);
@@ -108,6 +112,31 @@ void convertNetDefToIR(
   for (const auto& outputName : net.external_output()) {
     AT_ASSERT(valueMap.count(outputName));
     g->registerOutput(valueMap.at(outputName));
+    namesMap[valueMap.at(outputName)] = outputName;
+  }
+
+  // Set proper unique names for all values.
+  // We will set the names for external inputs and outputs last, so that if the
+  // names are reused, then intermediate values will be renamed and the external
+  // values will keep the original names.
+  for (const auto& kv : namesMap) {
+    Value* v = kv.first;
+    const std::string& name = kv.second;
+    if (Value::isValidName(name)) {
+      v->setUniqueName(name);
+    }
+  }
+  int idx = 0;
+  for (const auto& name : net.external_input()) {
+    if (Value::isValidName(name)) {
+      g->inputs()[idx++]->setUniqueName(name);
+    }
+  }
+  idx = 0;
+  for (const auto& name : net.external_output()) {
+    if (Value::isValidName(name)) {
+      g->outputs()[idx++]->setUniqueName(name);
+    }
   }
 }
 
