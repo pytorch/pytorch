@@ -5,9 +5,9 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -210,7 +210,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
     return toSugaredValue(member, m, loc, /*is_constant=*/true);
   }
 };
-
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup)
@@ -854,18 +853,20 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_copy_method",
           [](std::shared_ptr<Module> m,
-            std::string name,
-            std::vector<std::tuple<std::shared_ptr<Module>, std::string>> params,
-            std::shared_ptr<Module> orig) {
-              std::vector<at::Tensor*> member_inputs;
-              for (auto& p : params) {
-                NamedParameter* np = std::get<0>(p)->find_parameter(std::get<1>(p));
-                AT_ASSERT(np != nullptr);
-                member_inputs.push_back(np->slot());
-              }
+             std::string name,
+             std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
+                 params,
+             std::shared_ptr<Module> orig) {
+            std::vector<at::Tensor*> member_inputs;
+            for (auto& p : params) {
+              NamedParameter* np =
+                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              AT_ASSERT(np != nullptr);
+              member_inputs.push_back(np->slot());
+            }
 
-              Method* orig_method = orig->find_method(name);
-              m->create_method(name, orig_method->graph()->copy(), member_inputs);
+            Method* orig_method = orig->find_method(name);
+            m->create_method(name, orig_method->graph()->copy(), member_inputs);
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
