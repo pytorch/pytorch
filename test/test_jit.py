@@ -2935,6 +2935,22 @@ class TestScript(JitTestCase):
             # type: (Tensor) -> Tensor
             return fn2(input, [1])
 
+    def test_parser_kwargonly(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x, *, y) -> Tuple[Tensor, Tensor]:
+                return x, x
+            def bar(x):
+                return foo(x, y=x)
+        ''')
+        self.assertTrue('*' in cu.module._get_method('foo').pretty_print_schema())
+        with self.assertRaisesRegex(RuntimeError, "not provided"):
+            torch.jit.CompilationUnit('''
+                def foo(x, *, y) -> Tuple[Tensor, Tensor]:
+                    return x, x
+                def bar(x):
+                    return foo(x, x)
+            ''')
+
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
         mod.inf = float("inf")
