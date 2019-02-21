@@ -91,6 +91,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  check_size_nonnegative(size);
 
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = prod_intlist(size);
@@ -111,12 +112,14 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
 }
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+  check_size_nonnegative(size);
   auto t = at::native::empty_cpu({0}, options);
   at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
 
 Tensor& empty_out(Tensor& result, IntArrayRef size) {
+  check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {

@@ -222,6 +222,7 @@ def build_caffe2(version,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
+    max_jobs = os.getenv('MAX_JOBS', None)
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
@@ -236,13 +237,14 @@ def build_caffe2(version,
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
+            if max_jobs is not None:
+                j = min(int(max_jobs), j)
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
                        cwd=build_dir, env=my_env)
         else:
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
                        cwd=build_dir, env=my_env)
     else:
-        max_jobs = os.getenv('MAX_JOBS', None)
         if USE_NINJA:
             ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:
