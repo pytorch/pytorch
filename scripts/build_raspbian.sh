@@ -28,7 +28,7 @@ sudo apt-get install \
 # python dependencies
 sudo pip install hypothesis
 
-# Now, actually build the android target.
+# Now, actually build the raspbian target.
 echo "Building caffe2"
 cd $BUILD_ROOT
 
