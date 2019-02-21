@@ -8,10 +8,15 @@
 #     Note that a single gradient entry can specify the gradient
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
-#   - An argument can be flagged as 'not_differentiable'. That means this
-#     argument cannot have a derivative defined and must not be used in any
-#     derivative calculations. These arguments will effectively be ignored
-#     during code generation.
+#   - An argument can be flagged as 'not_differentiable'.
+#     In general there are 3 possibilities:
+#       1. An argument has an entry with a specified gradient
+#       2. An argument has an entry specified as not differentiable
+#       3. An argument has no entry
+#     Using the flag 'not_differentiable' resolves to the second case.
+#     The second case was introduced in support for arguments of
+#     type e.g. IndexTensor for 'embedding', that are not differentiable.
+#     TODO: Determine whether case 3 and case 2 can be replaced by one concept.
 #   - Optional entry with key 'output_differentiability' and value a list of the
 #     same length as the number of outputs from the forward function. The list
 #     should contain only booleans, specifying whether each of the output Tensor
