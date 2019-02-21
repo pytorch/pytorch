@@ -10,6 +10,7 @@ namespace torch {
 namespace jit {
 std::string runJITCPPTests() {
   std::stringstream out;
+  testNoneSchemaMatch();
   testAutogradProfiler();
   testADFormulas();
   testArgumentSpec();

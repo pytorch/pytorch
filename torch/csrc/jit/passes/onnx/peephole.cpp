@@ -587,6 +587,20 @@ static void fuseSplitListUnpack(Block *b) {
   }
 }
 
+void removeMaxPoolUnusedOutput(Block* b) {
+    for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    auto n = *it;
+    for (auto* child_block : n->blocks()) {
+      removeMaxPoolUnusedOutput(child_block);
+    }
+    if (strcmp(n->kind().toQualString(), "onnx::MaxPool") == 0) {
+      if (n->outputs().size() == 2 && n->outputs().at(1)->uses().empty()) {
+        it->eraseOutput(1);
+      }
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -620,6 +634,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   speculateOps(graph->block());
   eraseListConstruct(graph->block());
   fuseSplitListUnpack(graph->block());
+  removeMaxPoolUnusedOutput(graph->block());
 }
 
 } // namespace jit
