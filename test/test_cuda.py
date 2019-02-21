@@ -2449,6 +2449,9 @@ class TestCuda(TestCase):
         b = torch.logspace(1, 10, 10)
         self.assertEqual(a, b.cuda())
 
+    def test_lerp(self):
+        _TestTorchMixin._test_lerp(self, lambda t: t.cuda())
+
     def test_diagonal(self):
         _TestTorchMixin._test_diagonal(self, dtype=torch.float32, device='cuda')
 
