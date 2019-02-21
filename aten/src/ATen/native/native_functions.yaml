@@ -3856,6 +3856,10 @@
   matches_jit_signature: True
   variants: method, function
 
+- func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
+  matches_jit_signature: True
+  variants: method, function
+
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!), Tensor(b!))
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor, Tensor)
