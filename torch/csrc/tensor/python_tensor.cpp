@@ -392,6 +392,9 @@ Device getDevice(const at::Tensor& tensor) {
   if (tensor.is_cuda()) {
     return at::Device(at::DeviceType::CUDA, tensor.get_device());
   }
+  if (tensor.type_id() == XLATensorId() || tensor.type_id() == MSNPUTensorId()) {
+    return at::Device(computeDeviceType(tensor.type_id()), tensor.get_device());
+  }
   return at::Device(at::DeviceType::CPU);
 }
 }} // namespace torch::tensors
