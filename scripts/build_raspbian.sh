@@ -1,6 +1,6 @@
 #!/bin/bash
 ##############################################################################
-# Example command to build the android target.
+# Example command to build the Raspbian target.
 ##############################################################################
 # 
 # This script shows how one can build a Caffe2 binary for raspbian. The build
