@@ -2478,6 +2478,7 @@ class _TestTorchMixin(object):
         # test boolean tensor
         res1 = torch.ones(1, 2, dtype=torch.bool)
         expected = torch.tensor([[True, True]], dtype=torch.bool)
+        self.assertEqual(res1, expected)
 
     def test_ones_like(self):
         expected = torch.ones(100, 100)
