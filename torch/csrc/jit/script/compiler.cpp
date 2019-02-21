@@ -2244,11 +2244,13 @@ struct to_ir {
           elem_type = values.at(0)->type();
         }
 
-        // If we inferred the elem_type to be a specialized tensor type, relax
-        // elem_type to be a dynamic Tensor type. This is to allow lists that
-        // look like: [CompleteTensorType, TensorType, ...]
+        // Tensors are special because they have dymnamic properties. So any
+        // list containing tensors should be typed with the unified typeof all
+        // the elements.
         if (elem_type->isSubtypeOf(TensorType::get())) {
-          elem_type = TensorType::get();
+          for (const auto& value : values) {
+            elem_type = unifyTypes(elem_type, value->type()).value();
+          }
         }
         for (auto v : values) {
           if (!v->type()->isSubtypeOf(elem_type)) {
