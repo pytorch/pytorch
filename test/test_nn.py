@@ -6432,7 +6432,8 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(in_t)
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, requires_grad=True)
@@ -6447,7 +6448,8 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, requires_grad=True)
@@ -6457,14 +6459,16 @@ class TestNN(NNTestCase):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9)
         in_t_9[:, :, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, requires_grad=True)
@@ -6483,7 +6487,8 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
@@ -6518,14 +6523,16 @@ class TestNN(NNTestCase):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
         in_t_9[:, :, :4, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
     def test_upsamplingNearest3d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
@@ -6540,7 +6547,8 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
@@ -6554,8 +6562,9 @@ class TestNN(NNTestCase):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9, 9)
         in_t_9[:, :, :4, :4, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5, :5, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
     def test_interpolate(self):
@@ -6563,7 +6572,8 @@ class TestNN(NNTestCase):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             dim = len(in_t.shape) - 2
             out_shape = [1, 1] + [out_size] * dim
-            out_t = m(in_t)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
             self.assertEqual(torch.ones(out_shape), out_t)
 
             self.assertEqual(
