@@ -550,8 +550,11 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 template<template<typename, typename, typename> class Epilogue>
 Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
+  Tensor gI = half_to_float ? at::empty_like(grad_, grad_.options().dtype(ScalarType::Half)) : at::empty_like(grad_);
+  if (grad_.numel() == 0) {
+    return gI;
+  }
   auto grad = grad_.contiguous();
-  Tensor gI = half_to_float ? at::empty_like(grad, grad.options().dtype(ScalarType::Half)) : at::empty_like(grad);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
   AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");

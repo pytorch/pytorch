@@ -81,7 +81,7 @@ struct ConstantTableValue : public script::SugaredValue {
                                      << " is out of bounds (constant table has "
                                      << constants_.size() << " entries).";
     }
-    Value* value = m.graph()->insertConstant(constants_[offset], loc);
+    Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
     return std::make_shared<script::SimpleValue>(value);
   }
 
