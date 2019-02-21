@@ -110,7 +110,7 @@ class TestSparse(TestCase):
             if self.is_uncoalesced and indices.numel() > 0:
                 indices[:, -1] = indices[:, 0]  # make it uncoalesced
             values_numel = values_shape.numel()
-            values = torch.arange(values_numel, dtype=self.value_tensor(0).dtype,
+            values = torch.arange(values_numel, dtype=self.value_dtype,
                                   device=self.device).view(values_shape).div_(values_numel / 2.)
             sp_tensor = self.SparseTensor(indices, values, shape)
 
@@ -1883,10 +1883,6 @@ class TestCudaSparse(TestSparse):
         super(TestCudaSparse, self).setUp()
         self.is_cuda = True
         self.device = 'cuda'
-        self.value_dtype = torch.float64
-        self.value_empty = lambda *args: torch.empty(*args, dtype=self.value_dtype, device=self.device)
-        self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int64, device=self.device)
-        self.value_tensor = lambda *args: torch.tensor(*args, dtype=self.value_dtype, device=self.device)
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
 
 
