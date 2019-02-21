@@ -281,6 +281,31 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
+    def test_scalar(self):
+        # tensor with value
+        a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1), 12.3, [])
+        self.assertEqual(1, a._values().numel())
+        self.assertEqual(a, a.clone())
+        a_coalesced = a.coalesce()
+        self.assertTrue(a_coalesced.is_coalesced())
+        self.assertEqual(self.value_tensor(12.3), a.to_dense())
+
+        # tensor with multiple values
+        a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1).expand(0, 2), [12.3, 12.3], [])
+        self.assertEqual(2, a._values().numel())
+        self.assertEqual(a, a.clone())
+        a_coalesced = a.coalesce()
+        self.assertTrue(a_coalesced.is_coalesced())
+        self.assertEqual(self.value_tensor(12.3 * 2), a.to_dense())
+
+        # tensor without value
+        a = self.sparse_empty(())
+        self.assertEqual(0, a._values().numel())
+        self.assertEqual(a, a.clone())
+        a_coalesced = a.coalesce()
+        self.assertTrue(a_coalesced.is_coalesced())
+        self.assertEqual(self.value_tensor(0), a.to_dense())
+
     def test_shared(self):
         i = self.index_tensor([[2]])
         v = self.value_tensor([5])
