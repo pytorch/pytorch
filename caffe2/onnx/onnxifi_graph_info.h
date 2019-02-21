@@ -16,14 +16,18 @@ struct BackendGraphInfo {
   onnxBackend backend;
   onnxGraph graph;
   onnxifi_library* lib{nullptr};
+
   BackendGraphInfo(
       onnxBackendID backend_id,
       onnxBackend backend,
       onnxGraph graph,
       onnxifi_library* lib)
       : backend_id(backend_id), backend(backend), graph(graph), lib(lib) {}
+
   BackendGraphInfo(const BackendGraphInfo& other) = delete;
+
   BackendGraphInfo& operator=(const BackendGraphInfo& other) = delete;
+
   BackendGraphInfo(BackendGraphInfo&& other) noexcept {
     backend_id = other.backend_id;
     backend = other.backend;
@@ -31,6 +35,7 @@ struct BackendGraphInfo {
     lib = other.lib;
     other.backend_id = other.backend = other.graph = other.lib = nullptr;
   }
+
   BackendGraphInfo& operator=(BackendGraphInfo&& other) {
     backend_id = other.backend_id;
     backend = other.backend;
@@ -39,6 +44,7 @@ struct BackendGraphInfo {
     other.backend_id = other.backend = other.graph = other.lib = nullptr;
     return *this;
   }
+
   ~BackendGraphInfo() {
     if (lib) {
       onnxStatus err;
@@ -74,7 +80,9 @@ class OnnxBackendGraphMap {
   OnnxBackendGraphMap(OnnxBackendGraphMap&&) = delete;
   OnnxBackendGraphMap operator=(const OnnxBackendGraphMap&) = delete;
   OnnxBackendGraphMap operator=(OnnxBackendGraphMap&&) = delete;
+
   SharedPtrBackendGraphInfo lookup(const std::string& key);
+
   // If acquisition of graph_ptr fails then graph already exists. And the
   // corresponding SharedPtrBackendGraphInfo is returned. Otherwise graph_ptr is
   // inserted in the map and the wrapper SharedPtrBackendGraphInfo is
@@ -82,6 +90,7 @@ class OnnxBackendGraphMap {
   SharedPtrBackendGraphInfo insert(
       const std::string& key,
       BackendGraphInfo graph);
+
   void remove(const std::string& key);
 
  private:

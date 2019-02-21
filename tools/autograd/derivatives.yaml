@@ -795,7 +795,7 @@
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
+  self: symeig_backward(grads, self, eigenvectors, upper, eigenvalues, eigenvectors_return)
 
 - name: t(Tensor self)
   self: grad.t()

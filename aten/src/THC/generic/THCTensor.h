@@ -14,6 +14,7 @@
 #define THCudaShortTensor THCTensor
 #define THCudaIntTensor THCTensor
 #define THCudaLongTensor THCTensor
+#define THCudaBoolTensor THCTensor
 
 /**** access methods ****/
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);
