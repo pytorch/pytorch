@@ -11,7 +11,7 @@
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
-#   NO_CUDA
+#   USE_CUDA=0
 #     disables CUDA build
 #
 #   CFLAGS
@@ -27,35 +27,35 @@
 #
 # Environment variables for feature toggles:
 #
-#   NO_CUDNN
+#   USE_CUDNN=0
 #     disables the cuDNN build
 #
-#   NO_FBGEMM
+#   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   NO_TEST
+#   USE_TEST=0
 #     disables the test build
 #
-#   NO_MIOPEN
+#   USE_MIOPEN=0
 #     disables the MIOpen build
 #
-#   NO_MKLDNN
+#   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   NO_NNPACK
+#   USE_NNPACK=0
 #     disables NNPACK build
 #
-#   NO_QNNPACK
+#   USE_QNNPACK=0
 #     disables QNNPACK build (quantized 8-bit operators)
 #
-#   NO_DISTRIBUTED
+#   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
-#   NO_SYSTEM_NCCL
+#   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   NO_CAFFE2_OPS
+#   USE_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
 #   USE_GLOO_IBVERBS
