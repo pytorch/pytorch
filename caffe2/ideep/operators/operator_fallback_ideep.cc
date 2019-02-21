@@ -4,11 +4,10 @@
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/batch_matmul_op.h>
-#include <caffe2/operators/bbox_transform_op.h>
-#include <caffe2/operators/box_with_nms_limit_op.h>
+#include "caffe2/operators/bbox_transform_op.h"
+#include "caffe2/operators/box_with_nms_limit_op.h"
 #include <caffe2/operators/clip_op.h>
 #include <caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h>
-#include <caffe2/operators/conv_transpose_op.h>
 #include <caffe2/operators/cross_entropy_op.h>
 #include <caffe2/operators/ctc_beam_search_decoder_op.h>
 #include <caffe2/operators/ctc_greedy_decoder_op.h>
@@ -62,9 +61,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     AveragedLoss,
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
-REGISTER_IDEEP_OPERATOR(
-    ConvTranspose,
-    IDEEPFallbackOp<ConvTransposeOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
@@ -176,9 +172,6 @@ REGISTER_IDEEP_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         TanhGradientFunctor<CPUContext>>>);
-REGISTER_IDEEP_OPERATOR(
-    ConvTransposeGradient,
-    IDEEPFallbackOp<ConvTransposeGradientOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     MulGradient,
     IDEEPFallbackOp<BinaryElementwiseGradientOp<
