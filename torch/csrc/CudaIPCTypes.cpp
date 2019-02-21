@@ -6,7 +6,7 @@
 namespace torch {
 void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
-  if (not warned) {
+  if (!warned) {
     LOG(WARNING)
         << "Producer process has been terminated before all shared CUDA tensors released.";
     warned = true;

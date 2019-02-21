@@ -11,8 +11,8 @@
 
 namespace torch {
 
-constexpr uint CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
-constexpr uint CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
+constexpr uint CUDA_IPC_REF_COUNTER_FILE_SIZE(10000);
+constexpr uint CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO(1000);
 
 void CudaIPCCollect();
 
