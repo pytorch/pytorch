@@ -39,8 +39,7 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
     const Eigen::ArrayBase<Derived2>& deltas,
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
-    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
-    const bool correct_transform_coords = false) {
+    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
   using EArrX = EArrXt<T>;
@@ -70,17 +69,15 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
   EArrX pred_w = dw.exp() * widths;
   EArrX pred_h = dh.exp() * heights;
 
-  T offset(correct_transform_coords ? 1.0 : 0.0);
-
   EArrXX pred_boxes = EArrXX::Zero(deltas.rows(), deltas.cols());
   // x1
   pred_boxes.col(0) = pred_ctr_x - T(0.5) * pred_w;
   // y1
   pred_boxes.col(1) = pred_ctr_y - T(0.5) * pred_h;
   // x2
-  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w - offset;
+  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w - T(1.0);
   // y2
-  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h - offset;
+  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h - T(1.0);
 
   return pred_boxes;
 }
@@ -169,15 +166,13 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
     const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
-    const bool correct_transform_coords = false,
     const bool angle_bound_on = true,
     const int angle_bound_lo = -90,
     const int angle_bound_hi = 90) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
-    return bbox_transform_upright(
-        boxes, deltas, weights, bbox_xform_clip, correct_transform_coords);
+    return bbox_transform_upright(boxes, deltas, weights, bbox_xform_clip);
   } else {
     // Rotated boxes with angle info
     return bbox_transform_rotated(
