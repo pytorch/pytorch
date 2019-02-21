@@ -27,6 +27,8 @@ static inline bool modulo_wrap(scalar_t a, scalar_t b) {
   return (a != 0) && (a < 0) != (b < 0);
 }
 
+#if !defined(TH_REAL_IS_BOOL)
+
 void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
@@ -1176,5 +1178,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
   c10::raw::intrusive_ptr::decref(matrix1);
   c10::raw::intrusive_ptr::decref(matrix2);
 }
+
+#endif
 
 #endif /* TH_GENERIC_FILE */
