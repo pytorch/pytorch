@@ -66,4 +66,6 @@ TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
 
+#endif /* non bool only part */
+
 #endif

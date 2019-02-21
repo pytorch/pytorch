@@ -10,6 +10,10 @@
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
+inline PyObject* THPUtils_packBool(bool value) {
+  return PyBool_FromLong(value);
+}
+
 inline PyObject* THPUtils_packInt64(int64_t value) {
 #if PY_MAJOR_VERSION == 2
   if (sizeof(long) == sizeof(int64_t)) {
@@ -57,6 +61,18 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int64_t)value;
+}
+
+inline int64_t THPUtils_unpackBool(PyObject* obj) {
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  return (bool)(value);
 }
 
 inline bool THPUtils_checkIndex(PyObject *obj) {
