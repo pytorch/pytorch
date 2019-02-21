@@ -316,26 +316,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         set -e
         cat >/home/circleci/project/ci_build_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
-        set -ex
-        export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
-
-        # Reinitialize submodules
-        git submodule sync && git submodule update -q --init --recursive
-
-        # conda must be added to the path for Anaconda builds (this location must be
-        # the same as that in install_anaconda.sh used to build the docker image)
-        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-          export PATH=/opt/conda/bin:$PATH
-          sudo chown -R jenkins:jenkins '/opt/conda'
-        fi
-
         # Build
         ./.jenkins/caffe2/build.sh
-
-        # Show sccache stats if it is running
-        if pgrep sccache > /dev/null; then
-          sccache --show-stats
-        fi
         # =================== The above code will be executed inside Docker container ===================
         EOL
         chmod +x /home/circleci/project/ci_build_script.sh
@@ -372,34 +354,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        # TODO: merge this into Caffe2 test.sh
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
-        set -ex
-
-        export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
-
-        # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
-        sudo ln /dev/null /dev/raw1394
-
-        # conda must be added to the path for Anaconda builds (this location must be
-        # the same as that in install_anaconda.sh used to build the docker image)
-        if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-          export PATH=/opt/conda/bin:$PATH
-        fi
-
-        # Upgrade SSL module to avoid old SSL warnings
-        pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
-
-        pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-
         # Build
         ./.jenkins/caffe2/test.sh
-
-        # Remove benign core dumps.
-        # These are tests for signal handling (including SIGABRT).
-        rm -f ./crash/core.fatal_signal_as.*
-        rm -f ./crash/core.logging_test.*
         # =================== The above code will be executed inside Docker container ===================
         EOL
         chmod +x /home/circleci/project/ci_test_script.sh

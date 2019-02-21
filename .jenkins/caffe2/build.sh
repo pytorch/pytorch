@@ -1,6 +1,16 @@
-#!/bin/bash
+#!/bin/bash -ex
 
-set -ex
+export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+# Reinitialize submodules
+git submodule sync && git submodule update -q --init --recursive
+
+# conda must be added to the path for Anaconda builds (this location must be
+# the same as that in install_anaconda.sh used to build the docker image)
+if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+  export PATH=/opt/conda/bin:$PATH
+  sudo chown -R jenkins:jenkins '/opt/conda'
+fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -272,3 +282,8 @@ fi
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
+
+# Show sccache stats if it is running
+if pgrep sccache > /dev/null; then
+  sccache --show-stats
+fi

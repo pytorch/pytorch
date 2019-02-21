@@ -1,4 +1,22 @@
-#!/bin/bash
+#!/bin/bash -ex
+
+
+export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+# libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
+sudo ln /dev/null /dev/raw1394
+
+# conda must be added to the path for Anaconda builds (this location must be
+# the same as that in install_anaconda.sh used to build the docker image)
+if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+  export PATH=/opt/conda/bin:$PATH
+fi
+
+# Upgrade SSL module to avoid old SSL warnings
+pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
+
+pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -124,3 +142,8 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install --user torchvision
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
+
+# Remove benign core dumps.
+# These are tests for signal handling (including SIGABRT).
+rm -f ./crash/core.fatal_signal_as.*
+rm -f ./crash/core.logging_test.*
