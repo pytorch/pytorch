@@ -52,7 +52,7 @@ class BackendTransformerBase {
   // Wrap TensorShape into TensorProto
   TensorProto wrapShapeInfoIntoTensorProto(
       const std::string& name,
-      const ShapeInfo& shape_info);
+      const ShapeInfo& shape_info) const;
 
   // Do bound shape inference and collect shape infos
   ShapeInfoMap inferShapes(

@@ -875,7 +875,8 @@ struct DictLiteral : public Expr {
       const SourceRange& range,
       const List<Expr>& keys,
       const List<Expr>& values) {
-    return DictLiteral(Compound::create(TK_DICT_LITERAL, range, {keys, values}));
+    return DictLiteral(
+        Compound::create(TK_DICT_LITERAL, range, {keys, values}));
   }
 };
 

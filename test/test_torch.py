@@ -7141,6 +7141,48 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
 
+        # test symeig, eig
+        fn = ['symeig', 'eig']
+        for f in fn:
+            ret = getattr(torch, f)(a, eigenvectors=True)
+            self.assertEqual(ret.eigenvalues, ret[0])
+            self.assertEqual(ret.eigenvectors, ret[1])
+            ret1 = getattr(torch, f)(a, out=tuple(ret))
+            self.assertEqual(ret1.eigenvalues, ret[0])
+            self.assertEqual(ret1.eigenvectors, ret[1])
+            self.assertEqual(ret1.eigenvalues, ret1[0])
+            self.assertEqual(ret1.eigenvectors, ret1[1])
+
+        # test pstrf
+        b = torch.mm(a, a.t())
+        # add a small number to the diagonal to make the matrix numerically positive semidefinite
+        for i in range(a.size(0)):
+            b[i][i] = b[i][i] + 1e-7
+        ret = b.pstrf()
+        self.assertEqual(ret.u, ret[0])
+        self.assertEqual(ret.pivot, ret[1])
+        ret1 = torch.pstrf(b, out=tuple(ret))
+        self.assertEqual(ret1.u, ret1[0])
+        self.assertEqual(ret1.pivot, ret1[1])
+        self.assertEqual(ret1.u, ret[0])
+        self.assertEqual(ret1.pivot, ret[1])
+
+        # test qr
+        ret = a.qr()
+        self.assertEqual(ret.Q, ret[0])
+        self.assertEqual(ret.R, ret[1])
+        ret1 = torch.qr(a, out=tuple(ret))
+        self.assertEqual(ret1.Q, ret1[0])
+        self.assertEqual(ret1.R, ret1[1])
+
+        # test geqrf
+        ret = a.geqrf()
+        self.assertEqual(ret.a, ret[0])
+        self.assertEqual(ret.tau, ret[1])
+        ret1 = torch.geqrf(a, out=tuple(ret))
+        self.assertEqual(ret1.a, ret1[0])
+        self.assertEqual(ret1.tau, ret1[1])
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
