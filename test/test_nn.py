@@ -3378,39 +3378,48 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @skipIfRocm
     def test_data_parallel_model_device(self):
+        r"""Test device[0] check at forward time.
+        """
         l = nn.Linear(2, 2)
+        inp = torch.randn(2, 2)
+        inp_cuda0 = inp.cuda(0)
+        inp_cuda1 = inp.cuda(1)
+
         error_msg = "module must have its parameters and buffers on device %d "
+
         self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l)(inp))
         self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1)))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1))(inp_cuda0))
         self.assertRaisesRegex(
             RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0]))
+            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0])(inp_cuda0))
 
-        nn.DataParallel(l.cuda())
+        nn.DataParallel(l.cuda())(inp_cuda0)
+        nn.DataParallel(l).cuda()(inp_cuda0)
         nn.DataParallel(l.cuda(1), device_ids=[1, 0])
+        nn.DataParallel(l, device_ids=[1, 0]).cuda(1)(inp_cuda1)
 
         s = nn.Sequential(l.cpu())
         self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
 
         s = nn.Sequential(deepcopy(l), l.cuda())
         self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
         self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
         self.assertRaisesRegex(
             RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(s, device_ids=[1, 0]))
+            lambda: nn.DataParallel(s, device_ids=[1, 0])(inp_cuda1))
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
-        nn.DataParallel(s)
+        nn.DataParallel(s)(inp_cuda0)
 
         s = nn.Sequential(l.cuda(1), deepcopy(l).cuda(1))
-        nn.DataParallel(s, device_ids=[1, 0])
+        nn.DataParallel(s, device_ids=[1, 0])(inp_cuda1)
 
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
     @skipIfRocm

@@ -124,11 +124,6 @@ class DataParallel(Module):
         if output_device is None:
             output_device = device_ids[0]
 
-        if not all(t.is_cuda and t.device.index == device_ids[0]
-                   for t in chain(module.parameters(), module.buffers())):
-            raise RuntimeError("module must have its parameters and buffers "
-                               "on device %d (device_ids[0])" % device_ids[0])
-
         self.dim = dim
         self.module = module
         self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
@@ -142,6 +137,12 @@ class DataParallel(Module):
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
+
+        if not all(t.is_cuda and t.device.index == self.device_ids[0]
+                   for t in chain(self.module.parameters(), self.module.buffers())):
+            raise RuntimeError("module must have its parameters and buffers "
+                               "on device %d (device_ids[0])" % self.device_ids[0])
+
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
