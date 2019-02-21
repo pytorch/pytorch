@@ -505,7 +505,7 @@ def emit_body(declaration):
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    args_with_no_gradients = func['args_with_no_gradients'] if func else []
+    args_with_no_derivatives = func['args_with_no_derivatives'] if func else []
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if func is not None and func.get('output_differentiability') is not None:
@@ -532,7 +532,7 @@ def emit_body(declaration):
         if func is None:
             return setup
 
-        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_gradients'])
+        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_derivatives'])
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
@@ -552,7 +552,7 @@ def emit_body(declaration):
 
             # If there's a single derivative we could compute, we already have
             # a requires_grad check that is sufficient
-            if len(func['args_with_gradients']) <= 1:
+            if len(func['args_with_derivatives']) <= 1:
                 return None
 
             # We really only care about trimming down the amount of tensors we save
@@ -571,7 +571,7 @@ def emit_body(declaration):
             derivative_var_name = derivative['var_names'][0]
 
             # Figure out the offset of the edge that uses this variable
-            for edge_off, arg in enumerate(func['args_with_gradients']):
+            for edge_off, arg in enumerate(func['args_with_derivatives']):
                 if arg['name'] == derivative_var_name:
                     break
             else:
@@ -580,7 +580,7 @@ def emit_body(declaration):
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
         setup.extend(save_variables(func['saved_inputs'], False, guard_for))
-        for arg in func['args_with_gradients']:
+        for arg in func['args_with_derivatives']:
             if arg['type'] == 'TensorList':
                 setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
 
@@ -622,7 +622,7 @@ def emit_body(declaration):
             if arg in args_with_derivatives:
                 continue
             name = arg['name']
-            if name in args_with_no_gradients:
+            if name in args_with_no_derivatives:
                 continue
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
