@@ -254,7 +254,11 @@ bool AsyncSchedulingNet::RunAsync() {
   } catch (const std::exception& e) {
     LOG(ERROR) << "Exception while starting an async run: " << e.what();
     finishRun();
-    return false;
+    throw;
+  } catch (...) {
+    LOG(ERROR) << "Exception while starting an async run: unknown error";
+    finishRun();
+    throw;
   }
 
   // schedule() is not expected to throw, at this moment all the initial tasks
