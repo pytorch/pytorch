@@ -1206,6 +1206,11 @@ class CTCLoss(_Loss):
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Inputs:
         log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1218,12 +1223,6 @@ class CTCLoss(_Loss):
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
-        zero_infinity (bool, optional):
-            Whether to zero infinite losses and the associated gradients.
-            Default: ``False``
-            Infinite losses mainly occur when the inputs are too short
-            to be aligned to the targets.
-
 
     Example::
 
