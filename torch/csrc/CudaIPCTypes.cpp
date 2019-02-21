@@ -3,6 +3,7 @@
 #include <TH/THAllocator.h>
 #include <map>
 #include <mutex>
+#include <random>
 
 #include <sys/types.h>
 #include <unistd.h>
