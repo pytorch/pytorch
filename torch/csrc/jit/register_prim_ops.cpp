@@ -1043,7 +1043,6 @@ int listClear(Stack& stack) {
   return 0;
 }
 
-
 template <typename T>
 Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
@@ -1177,48 +1176,45 @@ Operation listAdd(const Node* node) {
     return 0;
   };
 }
+
 template <class TList, class TElement>
-Operation listMulIntLeft(const Node* node) {
-  return [](Stack& stack) {
-    TList list;
-    int64_t n;
-    pop(stack, list, n);
+int listMulIntLeft(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, list, n);
 
-    std::vector<TElement> ret;
-    const auto size = list->elements().size() * n;
-    ret.reserve(size);
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
 
-    for (auto i = 0; i < n; i++) {
-      for (const auto& e: list->elements()) {
-        ret.push_back(e);
-      }
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
     }
+  }
 
-    push(stack, ret);
-    return 0;
-  };
+  push(stack, ret);
+  return 0;
 }
 
 template <class TList, class TElement>
-Operation listMulIntRight(const Node* node) {
-  return [](Stack& stack) {
-    TList list;
-    int64_t n;
-    pop(stack, n, list);
+int listMulIntRight(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, n, list);
 
-    std::vector<TElement> ret;
-    const auto size = list->elements().size() * n;
-    ret.reserve(size);
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
 
-    for (auto i = 0; i < n; i++) {
-      for (const auto& e: list->elements()) {
-        ret.push_back(e);
-      }
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
     }
+  }
 
-    push(stack, ret);
-    return 0;
-  };
+  push(stack, ret);
+  return 0;
 }
 
 template <typename TList, typename TElement>
@@ -1378,10 +1374,10 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
           listClear<Shared<c_type>>),                                       \
       Operator(                                                             \
-        "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
-        -> " decl_type  "(*)",                                              \
-        listPop<Shared<c_type>>)
-
+          "aten::pop(" decl_type                                            \
+          "[](a!) self, int idx=-1)                    \
+        -> " decl_type "(*)",                                               \
+          listPop<Shared<c_type>>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
@@ -1402,9 +1398,10 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
           listClear<Shared<c_type>>),                                  \
       Operator(                                                        \
-          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
-          -> " decl_type, listPop<Shared<c_type>>)
-
+          "aten::pop(" decl_type                                       \
+          "[](a!) self, int idx=-1)             \
+          -> " decl_type,                                              \
+          listPop<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),

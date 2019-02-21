@@ -400,16 +400,18 @@ const std::vector<std::string> functions = {
 
             return torch.select(self, dim, index), backward
 
-        #def slice(self,
-        #          dim: int=0,
-        #          start: int=0,
-        #          end: int=9223372036854775807,
-        #          step: int=1):
-        #    def backward(grad_output):
-        #        grad_self = ___slice_backward(grad_output, self.size(), dim, start, end, step)
-        #        return grad_self, None, None, None, None
+        # DON'T enable slice unless we can correctly handle view ops in graph executor.
+        # It triggers failure of TestJit.test_sample in test_distributions.py.
+        # def slice(self,
+        #           dim: int=0,
+        #           start: int=0,
+        #           end: int=9223372036854775807,
+        #           step: int=1):
+        #     def backward(grad_output):
+        #         grad_self = ___slice_backward(grad_output, self.size(), dim, start, end, step)
+        #         return grad_self, None, None, None, None
 
-        #    return torch.slice(self, dim, start, end, step), backward
+        #     return torch.slice(self, dim, start, end, step), backward
 
         def sqrt(self):
             result = torch.sqrt(self)
@@ -664,6 +666,7 @@ const std::vector<std::string> functions = {
             else:
                 # NEVER REACH HERE
                 grad_input = torch.zeros_like(input)
+                raise RuntimeError('Input Error: Only 3D, 4D and 5D input Tensors supported')
 
             return grad_input
 
@@ -759,11 +762,12 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
-  if (!schema_name_suffix.empty()
-      && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
-    schema_string.replace(schema_string.find(schema_name),
-                          schema_name.length(),
-                          schema_name.substr(0, pos));
+  if (!schema_name_suffix.empty() &&
+      schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
+    schema_string.replace(
+        schema_string.find(schema_name),
+        schema_name.length(),
+        schema_name.substr(0, pos));
   }
   return schema_string;
 }
