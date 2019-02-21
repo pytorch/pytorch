@@ -9,7 +9,7 @@ set(extra_src)
 # loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    # loop over files which need to be split between types (because of long compile times)
-   foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
+   foreach(THC_FILE TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
          FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
            "#include \"../THC${THC_FILE}.cuh\"\n#include \"THCTensor.hpp\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
@@ -41,10 +41,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorTopK.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
   ${extra_src}
   PARENT_SCOPE)
 
@@ -96,8 +92,6 @@ INSTALL(FILES
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
-          THCTensorMode.cuh
-          THCTensorTopK.cuh
           # See Note [TH abstraction violation]
           THCGenerator.hpp
           THCTensor.hpp
@@ -141,12 +135,6 @@ INSTALL(FILES
           generic/THCTensorScatterGather.cu
           generic/THCTensorIndex.h
           generic/THCTensorIndex.cu
-          generic/THCTensorSort.h
-          generic/THCTensorSort.cu
           generic/THCTensorRandom.h
           generic/THCTensorRandom.cu
-          generic/THCTensorMode.h
-          generic/THCTensorMode.cu
-          generic/THCTensorTopK.h
-          generic/THCTensorTopK.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

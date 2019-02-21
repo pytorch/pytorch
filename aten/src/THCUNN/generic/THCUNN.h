@@ -354,57 +354,6 @@ THC_API void THNN_(SmoothL1Criterion_updateGradInput)(
                   THCTensor *gradInput,
                   int64_t reduction);
 
-THC_API void THNN_(SparseLinear_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight,
-                  THCTensor *bias);
-
-THC_API void THNN_(SparseLinear_accGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  THCTensor *weight,
-                  THCTensor *bias,
-                  accreal weightDecay,
-                  accreal scale);
-
-THC_API void THNN_(SparseLinear_legacyUpdateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight,
-                  THCTensor *bias);
-
-THC_API void THNN_(SparseLinear_legacyAccGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  THCTensor *weight,
-                  THCTensor *bias,
-                  accreal weightDecay,
-                  accreal scale);
-
-THC_API void THNN_(SparseLinear_zeroGradParameters)(
-                  THCState *state,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  THCTensor *lastInput);
-
-THC_API void THNN_(SparseLinear_updateParameters)(
-                  THCState *state,
-                  THCTensor *weight,
-                  THCTensor *bias,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  THCTensor *lastInput,
-                  accreal learningRate);
-
 THC_API void THNN_(IndexLinear_updateOutput)(
                   THCState *state,
                   THCIndexTensor *keys,
