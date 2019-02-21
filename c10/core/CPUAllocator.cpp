@@ -76,6 +76,14 @@ void* alloc_cpu(size_t nbytes) {
   return data;
 }
 
+void free_cpu(void* data) {
+#ifdef _MSC_VER
+  _aligned_free(data);
+#else
+  free(data);
+#endif
+}
+
 // A virtual struct that is used to report C10's memory allocation and
 // deallocation status
 class C10_API MemoryAllocationReporter {
@@ -99,32 +107,22 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
       getMemoryAllocationReporter().New(data, nbytes);
       return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
     }
-    return {data, data, &Delete, at::Device(at::DeviceType::CPU)};
+    return {data, data, &free_cpu, at::Device(at::DeviceType::CPU)};
   }
-
-#ifdef _MSC_VER
-  static void Delete(void* data) {
-    _aligned_free(data);
-  }
-#else
-  static void Delete(void* data) {
-    free(data);
-  }
-#endif
 
   static void ReportAndDelete(void* ptr) {
     if (!ptr) {
       return;
     }
     getMemoryAllocationReporter().Delete(ptr);
-    Delete(ptr);
+    free_cpu(ptr);
   }
 
   at::DeleterFnPtr raw_deleter() const override {
     if (FLAGS_caffe2_report_cpu_memory_usage) {
       return &ReportAndDelete;
     }
-    return &Delete;
+    return &free_cpu;
   }
 
  protected:

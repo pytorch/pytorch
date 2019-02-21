@@ -590,6 +590,7 @@ struct CAFFE2_API Type {
   virtual Tensor max(const Tensor & self) const = 0;
   virtual Tensor median(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) const = 0;
+  virtual Tensor argsort(const Tensor & self, int64_t dim, bool descending) const = 0;
   virtual std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) const = 0;
   virtual Tensor all(const Tensor & self) const = 0;
   virtual Tensor any(const Tensor & self) const = 0;
