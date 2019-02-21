@@ -180,6 +180,19 @@ void AliasTracker::dump() const {
     std::cout << wildcard->uniqueName() << ", ";
   }
   std::cout << "\n";
+
+  std::cout << "\n===4. Writes===\n";
+  for (const auto& pr : writeIndex_) {
+    const auto node = pr.first;
+    const auto& values = pr.second;
+    std::cout << *node;
+    std::cout << "  ";
+    for (const auto value : values) {
+      std::cout << value->uniqueName() << ", ";
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n";
 }
 
 std::unordered_set<const AliasTracker::Element*> AliasTracker::Element::
