@@ -1893,7 +1893,7 @@ at::Tensor cat(const std::vector<at::Tensor>& tensors) {
   return at::cat(tensors);
 }
 
-std::string get_first(const std::vector<std::vector<string>>& strings) {
+std::string get_first(const std::vector<std::vector<std::string>>& strings) {
   return strings[0][0];
 }
 
