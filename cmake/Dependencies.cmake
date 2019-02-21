@@ -806,9 +806,9 @@ if(USE_ROCM)
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    foreach(hcc_amdgpu_target ${HCC_AMDGPU_TARGET})
-      list(APPEND HIP_HCC_FLAGS -amdgpu-target=${hcc_amdgpu_target})
-    endforeach()
+    list(APPEND HIP_HCC_FLAGS --amdgpu-target=gfx803)
+    list(APPEND HIP_HCC_FLAGS --amdgpu-target=gfx900)
+    list(APPEND HIP_HCC_FLAGS --amdgpu-target=gfx906)
 
     set(Caffe2_HIP_INCLUDE
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
