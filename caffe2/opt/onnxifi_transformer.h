@@ -51,8 +51,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights_in_ws,
       Workspace* ws,
       onnx::OnnxExporter* exporter,
-      ShapeInfoMap* shape_hints,
-      std::unordered_map<std::string, TensorShape>* shape_hints_onnx);
+      ShapeInfoMap* shape_hints);
 
   // Convert a cutoff subgraph net to an Onnxifi op
   caffe2::NetDef SubnetToOnnxifiOpViaC2(
@@ -83,6 +82,37 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<int>& blacklisted_ops,
       ShapeInfoMap* shape_hints);
 
+  // Query whether an operator is supported by passing C2 protobuf
+  bool supportOpC2(
+      const caffe2::OperatorDef& op,
+      const ShapeInfoMap& shape_hints,
+      const std::unordered_set<int>& blacklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Query whether an operator is supported by passing ONNX protobuf
+  bool supportOpOnnx(
+      const caffe2::OperatorDef& op,
+      onnx::OnnxExporter* exporter,
+      const std::unordered_set<int>& blacklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Tie the output of Gather to the scalar weight input of the
+  // SparseLengthsWeighted* op. If the latter is disabled, disable the former
+  // too.
+  void tieGatherAndSparseLengthsWeightedSumOps(
+      const NetDef& net,
+      const ShapeInfoMap& shape_hints,
+      std::unordered_set<int>* blacklisted_ops) const;
+
+  // Rule based filtering
+  void applyFilteringRules(
+      const NetDef& net,
+      const ShapeInfoMap& shape_hints,
+      std::unordered_set<int>* blacklisted_ops) const;
+
+  // Determine backend id
+  void getBackendId();
+
   // Options
   OnnxifiTransformerOptions opts_;
 
@@ -103,5 +133,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // Backned IDs
   std::vector<onnxBackendID> backend_ids_;
+
+  // A cache for ONNX shape hints
+  std::unordered_map<std::string, TensorShape> shape_hints_onnx_;
 };
 } // namespace caffe2

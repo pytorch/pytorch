@@ -4112,6 +4112,48 @@ a")
             return len(a) == 0
         self.checkScript(test_clear, ())
 
+    def test_extend_list_mutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[Tensor], List[Tensor]) -> List[Tensor]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            for r in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_extend_list_immutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [1], [1, 2, 3]]:
+            for r in [[], [1], [1, 2, 3]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_copy_list_mutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return a.copy()
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            self.assertEqual(copy_list(l), l)
+
+    def test_copy_list_immutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[int]) -> List[int]
+            return a.copy()
+
+        for l in [[], [1], [1, 2, 3]]:
+            self.assertEqual(copy_list(l), l)
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -10270,6 +10312,19 @@ a")
 
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
+
+    def test_tensor_import_export(self):
+        @torch.jit.script
+        def foo(x):
+            a = torch.tensor(1)
+            b = torch.tensor([1, 2])
+            c = [a, b]
+            return c
+
+        self.run_pass('constant_propagation', foo.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", foo.graph)
+        self.getExportImportCopy(m)
 
 
 class MnistNet(nn.Module):

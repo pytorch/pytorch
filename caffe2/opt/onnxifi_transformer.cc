@@ -12,6 +12,7 @@
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/backend_cutting.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -20,7 +21,7 @@ const std::string kRealBatchSizeBlob("real_batch_size");
 constexpr size_t kBufferSize = 64;
 
 // Convert ShapeInfo map to TensorShape map
-std::unordered_map<std::string, TensorShape> StripShapeInfoMap(
+std::unordered_map<std::string, TensorShape> stripShapeInfoMap(
     const ShapeInfoMap& info_map) {
   std::unordered_map<std::string, TensorShape> shape_map;
   for (const auto& kv : info_map) {
@@ -29,7 +30,7 @@ std::unordered_map<std::string, TensorShape> StripShapeInfoMap(
   return shape_map;
 }
 
-uint64_t OnnxifiDataType(caffe2::TensorProto::DataType t) {
+uint64_t onnxifiDataType(caffe2::TensorProto::DataType t) {
 #define CAFFE2_TO_ONNXIFI_TYPE(x, y) \
   case (caffe2::TensorProto::x):     \
     return y
@@ -50,8 +51,7 @@ uint64_t OnnxifiDataType(caffe2::TensorProto::DataType t) {
 #undef CAFFE2_TO_ONNXIFI_TYPE
 }
 
-
-std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
+std::vector<::ONNX_NAMESPACE::ValueInfoProto> convertToValueInfo(
     const std::vector<std::string>& names,
     const std::unordered_map<std::string, TensorShape>& shape_hints,
     const std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>&
@@ -384,7 +384,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
       const auto& shape = it->second;
       auto* output_shape_hint_arg = op.add_arg();
       output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
-      output_shape_hint_arg->add_ints(OnnxifiDataType(shape.data_type()));
+      output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
       for (const auto& d : shape.dims()) {
         output_shape_hint_arg->add_ints(d);
       }
@@ -516,8 +516,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     const std::unordered_set<std::string>& weights_in_ws,
     Workspace* ws,
     onnx::OnnxExporter* exporter,
-    ShapeInfoMap* shape_hints,
-    std::unordered_map<std::string, TensorShape>* shape_hints_onnx) {
+    ShapeInfoMap* shape_hints) {
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   FillModelInfo(&onnx_model);
 
@@ -527,7 +526,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   auto renaming_map =
       AddAdjustBatchOps(*shape_hints, &onnxifi_net, &input_ops, &output_ops);
   for (const auto& kv : renaming_map) {
-    shape_hints_onnx->emplace(kv.second, shape_hints_onnx->at(kv.first));
+    shape_hints_onnx_.emplace(kv.second, shape_hints_onnx_.at(kv.first));
   }
 
   // Convert c2 ops to onnx ops, add const weights if there are any
@@ -536,7 +535,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   context.SwitchToDevice();
   std::vector<std::string> extra_weights;
   for (const auto& op : onnxifi_net.op()) {
-    const auto results = exporter->Caffe2OpToOnnxNodes(op, *shape_hints_onnx);
+    const auto results = exporter->Caffe2OpToOnnxNodes(op, shape_hints_onnx_);
     for (const auto& n : results.first) {
       onnx_model.mutable_graph()->add_node()->CopyFrom(n);
     }
@@ -544,7 +543,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       VLOG(2) << "Adding extra init tensor: " << t.name();
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
-      auto ret = shape_hints_onnx->emplace(t.name(), std::move(shape));
+      auto ret = shape_hints_onnx_.emplace(t.name(), std::move(shape));
       shape_hints->emplace(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
@@ -593,16 +592,16 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     }
     onnxifi_net_outputs.emplace_back(output);
   }
-  auto io_vec = ConvertToValueInfo(
+  auto io_vec = convertToValueInfo(
       onnxifi_net_outputs,
-      *shape_hints_onnx,
+      shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
   std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints_onnx->find(i.name());
+    const auto it = shape_hints_onnx_.find(i.name());
     CAFFE_ENFORCE(
-        it != shape_hints_onnx->end(),
+        it != shape_hints_onnx_.end(),
         "Cannot find shape info for output ",
         i.name());
     const auto& shape = it->second;
@@ -624,9 +623,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       i = it->second;
     }
   }
-  io_vec = ConvertToValueInfo(
+  io_vec = convertToValueInfo(
       onnxifi_net_inputs,
-      *shape_hints_onnx,
+      shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
@@ -651,91 +650,246 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   return net_opt;
 }
 
+bool OnnxifiTransformer::supportOpOnnx(
+    const caffe2::OperatorDef& op,
+    onnx::OnnxExporter* exporter,
+    const std::unordered_set<int>& blacklisted_ops,
+    onnxBackendID backend_id) const {
+  try {
+    int pos =
+        ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
+    if (blacklisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+      return false;
+    }
+    const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
+    // NB: this might not be a hard constraint as we can just export C2
+    // domain specific ops to ONNX
+    if (!schema || schema->onnx_schema().empty()) {
+      LOG(INFO) << "Cannot export c2 op " << op.type()
+                << " to onnx as there is no corresponding ONNX schema.";
+      return false;
+    }
+
+    ::ONNX_NAMESPACE::ModelProto onnx_model;
+    FillModelInfo(&onnx_model);
+    auto results = exporter->Caffe2OpToOnnxNodes(op, shape_hints_onnx_);
+    std::unordered_set<std::string> used_inputs;
+    std::unordered_set<std::string> used_outputs;
+    std::vector<std::string> boundary_inputs;
+    std::vector<std::string> boundary_outputs;
+    std::unordered_set<std::string> reshape_info;
+    // nodes are in topological order, so we just need to iterate
+    for (const auto& n : results.first) {
+      onnx_model.mutable_graph()->add_node()->CopyFrom(n);
+      for (const auto& i : n.input()) {
+        bool is_new = used_inputs.emplace(i).second;
+        // The input is not seen and it's not referred by any nodes before as
+        // output, we count it as an boudary input
+        if (is_new && !used_outputs.count(i)) {
+          boundary_inputs.emplace_back(i);
+        }
+      }
+      for (const auto& o : n.output()) {
+        used_outputs.emplace(o);
+      }
+
+      // For reshape node, if it has more than 1 inputs, we need to feed the
+      // second input which contains the shape info
+      if (n.op_type() == "Reshape" && n.input_size() > 1) {
+        reshape_info.emplace(n.input(1));
+      }
+    }
+    // Second iteration to account all the boundary outputs, which is a newly
+    // seen output and is not referred as input before
+    used_outputs.clear();
+    for (const auto& n : results.first) {
+      for (const auto& o : n.output()) {
+        bool is_new = used_outputs.emplace(o).second;
+        if (is_new && !used_inputs.count(o)) {
+          boundary_outputs.emplace_back(o);
+        }
+      }
+    }
+    std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>
+        extra_shape_hints;
+    for (const auto& t : results.second) {
+      extra_shape_hints.emplace(t.name(), onnx::ExtraTypeProto(t));
+      if (reshape_info.count(t.name())) {
+        onnx_model.mutable_graph()->add_initializer()->CopyFrom(t);
+      }
+    }
+
+    // Add input/output shape info
+    auto io_vec = convertToValueInfo(
+        boundary_inputs, shape_hints_onnx_, extra_shape_hints);
+    for (const auto& i : io_vec) {
+      onnx_model.mutable_graph()->add_input()->CopyFrom(i);
+    }
+    io_vec = convertToValueInfo(
+        boundary_outputs, shape_hints_onnx_, extra_shape_hints);
+    for (const auto& i : io_vec) {
+      onnx_model.mutable_graph()->add_output()->CopyFrom(i);
+    }
+
+    std::string onnx_model_str;
+    onnx_model.SerializeToString(&onnx_model_str);
+    auto ret = lib_->onnxGetBackendCompatibility(
+        backend_id, onnx_model_str.size(), onnx_model_str.c_str());
+    if (ret != ONNXIFI_STATUS_SUCCESS) {
+      LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op (" << ret
+                << ")";
+      return false;
+    } else {
+      return true;
+    }
+  } catch (const std::exception& ex) {
+    LOG(ERROR) << "Caught exception when converting op " << op.type()
+               << ", what: " << ex.what();
+    return false;
+  }
+}
+
+bool OnnxifiTransformer::supportOpC2(
+    const caffe2::OperatorDef& op,
+    const ShapeInfoMap& shape_hints,
+    const std::unordered_set<int>& blacklisted_ops,
+    onnxBackendID backend_id) const {
+  try {
+    int pos =
+        ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
+    if (blacklisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+      return false;
+    }
+
+    // Build a c2 net with one op
+    NetDef net;
+    net.add_op()->CopyFrom(op);
+    for (const auto& i : op.input()) {
+      net.add_external_input(i);
+    }
+    for (const auto& o : op.output()) {
+      net.add_external_output(o);
+    }
+    // Remove the second output of Concat/Reshape from the external_output
+    if ((op.type() == "Concat" || op.type() == "Reshape") &&
+        op.output_size() == 2) {
+      net.mutable_external_output()->RemoveLast();
+    }
+
+    // Encode the input/output shapes to an argument
+    auto* shape_arg = net.add_arg();
+    shape_arg->set_name("input_shape_info");
+    for (const auto& i : op.input()) {
+      const auto it = shape_hints.find(i);
+      if (it == shape_hints.end()) {
+        return false;
+      }
+      shape_arg->mutable_tensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoTensorProto(i, it->second));
+    }
+    shape_arg = net.add_arg();
+    shape_arg->set_name("output_shape_info");
+    for (const auto& i : op.output()) {
+      const auto it = shape_hints.find(i);
+      if (it == shape_hints.end()) {
+        return false;
+      }
+      shape_arg->mutable_tensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoTensorProto(i, it->second));
+    }
+
+    std::string c2_model_str;
+    net.SerializeToString(&c2_model_str);
+    auto ret = lib_->onnxGetBackendCompatibility(
+        backend_id, c2_model_str.size(), c2_model_str.c_str());
+    if (ret != ONNXIFI_STATUS_SUCCESS) {
+      LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
+      return false;
+    } else {
+      return true;
+    }
+  } catch (const std::exception& ex) {
+    LOG(ERROR) << "Caught exception when converting op " << op.type()
+               << ", what: " << ex.what();
+    return false;
+  }
+}
+
+void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
+    const NetDef& net,
+    const ShapeInfoMap& shape_hints,
+    std::unordered_set<int>* blacklisted_ops) const {
+  std::unordered_map<std::string, int> output_pos;
+  onnx::OnnxExporter exporter(nullptr);
+  onnxBackendID backend_id = backend_ids_[idx_];
+
+  for (const auto& op : net.op()) {
+    if (op.type() == "Gather") {
+      int pos =
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
+      for (const auto& output : op.output()) {
+        output_pos.emplace(output, pos);
+      }
+    } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
+      auto supported = opts_.use_onnx
+          ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
+          : supportOpC2(op, shape_hints, *blacklisted_ops, backend_id);
+      if (!supported && op.input_size() > 1) {
+        const auto it = output_pos.find(op.input(1));
+        if (it == output_pos.end()) {
+          continue;
+        }
+        blacklisted_ops->emplace(it->second);
+        // We know that current op is not going to be supported. Might as well
+        // blacklist it too
+        blacklisted_ops->emplace(
+            ArgumentHelper::GetSingleArgument<OperatorDef, int>(
+                op, kNetPos, -1));
+      }
+    }
+  }
+}
+
+void OnnxifiTransformer::applyFilteringRules(
+    const NetDef& net,
+    const ShapeInfoMap& shape_hints,
+    std::unordered_set<int>* blacklisted_ops) const {
+  tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+}
+
+void OnnxifiTransformer::getBackendId() {
+  idx_ = 0;
+
+  if (opts_.use_onnx) {
+    return;
+  }
+  // Try to find a backend that support Caffe2 proto. Note that this is quite
+  // opportunistic as we don't offcially support Caffe2 proto.
+  char buf[kBufferSize];
+  for (int i = 0; i < backend_ids_.size(); ++i) {
+    size_t len = kBufferSize;
+    auto ret = lib_->onnxGetBackendInfo(
+        backend_ids_[i], ONNXIFI_BACKEND_DEVICE, buf, &len);
+    if (ret == ONNXIFI_STATUS_SUCCESS && strstr(buf, "Caffe2")) {
+      LOG(INFO) << "Using backend with Caffe2 Proto, ID: " << i;
+      idx_ = i;
+      break;
+    }
+  }
+}
+
 NetDef OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     const ShapeInfoMap& shape_hints) {
-  onnxifi_library* backend = lib_;
-  idx_ = 0;
-  // Try to find a backend that support Caffe2 proto. Note that this is quite
-  // opportunistic as we don't offcially support Caffe2 proto.
-  if (!opts_.use_onnx) {
-    char buf[kBufferSize];
-    for (int i = 0; i < backend_ids_.size(); ++i) {
-      size_t len = kBufferSize;
-      auto ret = backend->onnxGetBackendInfo(
-          backend_ids_[i], ONNXIFI_BACKEND_DEVICE, buf, &len);
-      if (ret == ONNXIFI_STATUS_SUCCESS && strstr(buf, "Caffe2")) {
-        LOG(INFO) << "Using backend with Caffe2 Proto, ID: " << i;
-        idx_ = i;
-        break;
-      }
-    }
-  }
   onnxBackendID backend_id = backend_ids_[idx_];
 
-  auto c2_supports = [this, &shape_hints, &blacklisted_ops, backend, backend_id](
+  auto c2_supports = [this, &shape_hints, &blacklisted_ops, backend_id](
                          const caffe2::OperatorDef& op) {
-    try {
-      int pos =
-          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-      if (blacklisted_ops.count(pos)) {
-        return false;
-      }
-
-      // Build a c2 net with one op
-      NetDef net;
-      net.add_op()->CopyFrom(op);
-      for (const auto& i : op.input()) {
-        net.add_external_input(i);
-      }
-      for (const auto& o : op.output()) {
-        net.add_external_output(o);
-      }
-      // Remove the second output of Concat/Reshape from the external_output
-      if ((op.type() == "Concat" || op.type() == "Reshape") &&
-          op.output_size() == 2) {
-        net.mutable_external_output()->RemoveLast();
-      }
-
-      // Encode the input/output shapes to an argument
-      auto* shape_arg = net.add_arg();
-      shape_arg->set_name("input_shape_info");
-      for (const auto& i : op.input()) {
-        const auto it = shape_hints.find(i);
-        if (it == shape_hints.end()) {
-          return false;
-        }
-        shape_arg->mutable_tensors()->Add()->CopyFrom(
-            wrapShapeInfoIntoTensorProto(i, it->second));
-      }
-      shape_arg = net.add_arg();
-      shape_arg->set_name("output_shape_info");
-      for (const auto& i : op.output()) {
-        const auto it = shape_hints.find(i);
-        if (it == shape_hints.end()) {
-          return false;
-        }
-        shape_arg->mutable_tensors()->Add()->CopyFrom(
-            wrapShapeInfoIntoTensorProto(i, it->second));
-      }
-
-      std::string c2_model_str;
-      net.SerializeToString(&c2_model_str);
-      auto ret = backend->onnxGetBackendCompatibility(
-          backend_id, c2_model_str.size(), c2_model_str.c_str());
-      if (ret != ONNXIFI_STATUS_SUCCESS) {
-        LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
-        return false;
-      } else {
-        return true;
-      }
-    } catch (const std::exception& ex) {
-      LOG(ERROR) << "Caught exception when converting op " << op.type()
-                 << ", what: " << ex.what();
-      return false;
-    }
+    return supportOpC2(op, shape_hints, blacklisted_ops, backend_id);
   };
 
   auto c2_converter =
@@ -752,121 +906,23 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     ShapeInfoMap* shape_hints) {
-  onnxifi_library* backend = lib_;
-  onnxBackendID backend_id = backend_ids_[0];
-  auto shape_hints_onnx = StripShapeInfoMap(*shape_hints);
+  onnxBackendID backend_id = backend_ids_[idx_];
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   onnx::OnnxExporter exporter(nullptr);
-  auto onnx_supports = [&exporter,
-                        &shape_hints_onnx,
-                        &blacklisted_ops,
-                        backend,
-                        backend_id](const caffe2::OperatorDef& op) {
-    try {
-      int pos =
-          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-      if (blacklisted_ops.count(pos)) {
-        return false;
-      }
-      const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
-      // NB: this might not be a hard constraint as we can just export C2
-      // domain specific ops to ONNX
-      if (!schema || schema->onnx_schema().empty()) {
-        LOG(INFO) << "Cannot export c2 op " << op.type()
-                  << " to onnx as there is no corresponding ONNX schema.";
-        return false;
-      }
-
-      ::ONNX_NAMESPACE::ModelProto onnx_model;
-      FillModelInfo(&onnx_model);
-      auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints_onnx);
-      std::unordered_set<std::string> used_inputs;
-      std::unordered_set<std::string> used_outputs;
-      std::vector<std::string> boundary_inputs;
-      std::vector<std::string> boundary_outputs;
-      std::unordered_set<std::string> reshape_info;
-      // nodes are in topological order, so we just need to iterate
-      for (const auto& n : results.first) {
-        onnx_model.mutable_graph()->add_node()->CopyFrom(n);
-        for (const auto& i : n.input()) {
-          bool is_new = used_inputs.emplace(i).second;
-          // The input is not seen and it's not referred by any nodes before as
-          // output, we count it as an boudary input
-          if (is_new && !used_outputs.count(i)) {
-            boundary_inputs.emplace_back(i);
-          }
-        }
-        for (const auto& o : n.output()) {
-          used_outputs.emplace(o);
-        }
-
-        // For reshape node, if it has more than 1 inputs, we need to feed the
-        // second input which contains the shape info
-        if (n.op_type() == "Reshape" && n.input_size() > 1) {
-          reshape_info.emplace(n.input(1));
-        }
-      }
-      // Second iteration to account all the boundary outputs, which is a newly
-      // seen output and is not referred as input before
-      used_outputs.clear();
-      for (const auto& n : results.first) {
-        for (const auto& o : n.output()) {
-          bool is_new = used_outputs.emplace(o).second;
-          if (is_new && !used_inputs.count(o)) {
-            boundary_outputs.emplace_back(o);
-          }
-        }
-      }
-      std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>
-          extra_shape_hints;
-      for (const auto& t : results.second) {
-        extra_shape_hints.emplace(t.name(), onnx::ExtraTypeProto(t));
-        if (reshape_info.count(t.name())) {
-          onnx_model.mutable_graph()->add_initializer()->CopyFrom(t);
-        }
-      }
-
-      // Add input/output shape info
-      auto io_vec = ConvertToValueInfo(
-          boundary_inputs, shape_hints_onnx, extra_shape_hints);
-      for (const auto& i : io_vec) {
-        onnx_model.mutable_graph()->add_input()->CopyFrom(i);
-      }
-      io_vec = ConvertToValueInfo(
-          boundary_outputs, shape_hints_onnx, extra_shape_hints);
-      for (const auto& i : io_vec) {
-        onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-      }
-
-      std::string onnx_model_str;
-      onnx_model.SerializeToString(&onnx_model_str);
-      auto ret = backend->onnxGetBackendCompatibility(
-          backend_id, onnx_model_str.size(), onnx_model_str.c_str());
-      if (ret != ONNXIFI_STATUS_SUCCESS) {
-        LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op (" << ret
-                  << ")";
-        return false;
-      } else {
-        return true;
-      }
-    } catch (const std::exception& ex) {
-      LOG(ERROR) << "Caught exception when converting op " << op.type()
-                 << ", what: " << ex.what();
-      return false;
-    }
+  auto onnx_supports = [this, &exporter, &blacklisted_ops, backend_id](
+                           const caffe2::OperatorDef& op) {
+    return supportOpOnnx(op, &exporter, blacklisted_ops, backend_id);
   };
 
   // function to convert runnable subgraph into an onnxifi op. We need to keep
   // the same exporter throughout the process to avoid duplicated dummy name
   // generation
   onnx::OnnxExporter exporter2(nullptr);
-  auto onnx_converter =
-      [this, ws, &weights, shape_hints, &shape_hints_onnx, &exporter2](
-          const caffe2::NetDef& net) mutable {
-        return SubnetToOnnxifiOpViaOnnx(
-            net, weights, ws, &exporter2, shape_hints, &shape_hints_onnx);
-      };
+  auto onnx_converter = [this, ws, &weights, shape_hints, &exporter2](
+                            const caffe2::NetDef& net) mutable {
+    return SubnetToOnnxifiOpViaOnnx(net, weights, ws, &exporter2, shape_hints);
+  };
 
   return opt::OptimizeForBackend(
       *pred_net, onnx_supports, onnx_converter, opts_.debug);
@@ -898,11 +954,23 @@ void OnnxifiTransformer::transform(
   Workspace mapped_ws(ws, input_mapping_);
   ShapeInfoMap shape_hints = inferShapes(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
+  if (opts_.use_onnx) {
+    shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
+  }
+
+  // Get backend id
+  getBackendId();
+
+  // Apply some filtering rules
+  std::unordered_set<int> new_blacklisted_ops(
+      blacklisted_ops.begin(), blacklisted_ops.end());
+  applyFilteringRules(*pred_net, shape_hints, &new_blacklisted_ops);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx
-      ? TransformViaOnnx(ws, pred_net, weights, blacklisted_ops, &shape_hints)
-      : TransformViaC2(pred_net, weights, blacklisted_ops, shape_hints);
+      ? TransformViaOnnx(
+            ws, pred_net, weights, new_blacklisted_ops, &shape_hints)
+      : TransformViaC2(pred_net, weights, new_blacklisted_ops, shape_hints);
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());

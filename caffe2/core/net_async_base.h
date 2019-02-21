@@ -106,7 +106,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
-  bool run(int task_id, int stream_id);
+  bool run(int task_id, int stream_id) noexcept;
   int stream(int task_id);
   TaskThreadPoolBase* pool(const DeviceOption& device_option);
   TaskThreadPoolBase* pool();
@@ -144,7 +144,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       int task_id,
       OperatorBase* op,
       const char* err_msg,
-      bool save_exception = false);
+      bool save_exception = false) noexcept;
   std::atomic<bool> success_;
 
   // Tracing
