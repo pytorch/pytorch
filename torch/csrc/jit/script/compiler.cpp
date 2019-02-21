@@ -662,7 +662,7 @@ struct to_ir {
           type,
           N,
           default_value,
-          /*kwarg_only =*/false);
+          decl_arg.kwarg_only());
       retval.push_back(arg);
     }
     return retval;
@@ -2349,7 +2349,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+      args.emplace_back(
+          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2366,7 +2367,8 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+    NamedValue step =
+        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
