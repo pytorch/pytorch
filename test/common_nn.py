@@ -1928,10 +1928,22 @@ new_module_tests = [
         input_fn=lambda: torch.rand(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5),
+        desc='one_output',
+    ),
+    dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
         input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
+        desc='single_1x1output',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',

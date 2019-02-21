@@ -57,7 +57,7 @@ static inline void swapBytes64(void *ptr)
   uint64_t Byte5 = output & 0x0000FF0000000000;
   uint64_t Byte6 = output & 0x00FF000000000000;
   uint64_t Byte7 = output & 0xFF00000000000000;
-  output = (Byte0 << (7*8)) | (Byte1 << (5*8)) | (Byte2 << (3*8)) | (Byte3 << (1*8)) | 
+  output = (Byte0 << (7*8)) | (Byte1 << (5*8)) | (Byte2 << (3*8)) | (Byte3 << (1*8)) |
            (Byte7 >> (7*8)) | (Byte6 >> (5*8)) | (Byte5 >> (3*8)) | (Byte4 >> (1*8));
 #endif
   memcpy(ptr, &output, sizeof(uint64_t));
@@ -137,6 +137,13 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
     x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     dst[i] = f;
     src += sizeof(uint16_t);
+  }
+}
+
+void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len)
+{
+  for (size_t i = 0; i < len; i++) {
+    dst[i] = (int)src[i] != 0 ? true : false;
   }
 }
 

@@ -384,6 +384,16 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
+Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
+  // invert the permutation
+  auto ndims = fwd_dims.size();
+  std::vector<int64_t> dims(ndims);
+  for (size_t i = 0; i < ndims; i++) {
+    dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
+  }
+  return grad.permute(dims);
+}
+
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   AT_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
@@ -451,6 +461,12 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return self.as_strided(sizes, strides, storage_offset);
 }
 
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -482,6 +498,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
+}
+
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -688,6 +710,28 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+Tensor unsqueeze_to(const Tensor & self, IntArrayRef sizes) {
+  auto result = self;
+
+  int64_t nDims = sizes.size();
+  for (int64_t dim = 0; dim < nDims; dim++) {
+    if (sizes[dim] == 1) {
+      result = result.unsqueeze(dim);
+    }
+  }
+  return result;
+}
+
+Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
+  // unsqueezing in the backward.
+  if (sizes.size() > 0 && sizes[dim] == 1) {
+    return self.unsqueeze(dim);
+  }
+  return self;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {

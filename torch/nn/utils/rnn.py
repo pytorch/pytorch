@@ -25,7 +25,7 @@ class PackedSequence(PackedSequence_):
 
         Batch sizes represent the number elements at each sequence step in
         the batch, not the varying sequence lengths passed to
-        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `x`
+        :func:`pack_padded_sequence`.  For instance, given data ``abc`` and ``x``
         the :class:`PackedSequence` would contain data ``axbc`` with
         ``batch_sizes=[2,1,1]``.
 
@@ -257,7 +257,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
-    r"""Pad a list of variable length Tensors with zero
+    r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
     and pads them to equal length. For example, if the input is list of

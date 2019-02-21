@@ -94,7 +94,7 @@ SchedulerInput loadSchedulerInputFromString(const std::string& fileInput) {
 // constraints.
 class SimpleScheduler : Scheduler {
  public:
-  virtual SchedulerOutput schedule(const SchedulerInput& input) override {
+  SchedulerOutput schedule(const SchedulerInput& input) override {
     int numTasks = input.getNumberOfTasks();
     SchedulerOutput result(numTasks);
 
