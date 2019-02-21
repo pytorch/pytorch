@@ -488,6 +488,13 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     return tuple(o for o in n.outputs())
 
 
+def _export_node_aten(g, n, op_name, inputs):
+    attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+    outputs = n.outputsSize()
+    attrs["outputs"] = outputs
+    return _graph_at(g, op_name, *inputs, aten=True, **attrs)
+
+
 # Note [Export inplace]
 # ~~~~~~~~~~~~~~~~~~~~~
 # In abstract, it would be better for us to export inplace annotations,
@@ -521,11 +528,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
             if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
                 # Direct ATen export requested
-                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-                outputs = n.outputsSize()
-                attrs["outputs"] = outputs
-                return _graph_at(g, op_name, *inputs, aten=True, **attrs)
-
+                return _export_node_aten(g, n, op_name, inputs)
             else:
                 # Export it regularly
                 attrs = {k: n[k] for k in n.attributeNames()}
@@ -534,7 +537,15 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                                   .format(op_name, op_name))
                     return None
                 fn = getattr(torch.onnx.symbolic, op_name)
-                return fn(g, *inputs, **attrs)
+                try:
+                    return fn(g, *inputs, **attrs)
+                except AssertionError:
+                    if is_aten_fallback_export:
+                        # Falling back to ATen
+                        warnings.warn("An assertion error occured when trying to export {}. Falling back to ATen"
+                                      .format(op_name))
+                        return _export_node_aten(g, n, op_name, inputs)
+                    raise
 
         elif ns == "prim":
             if op_name == "Constant" and not n.mustBeNone():
