@@ -6134,6 +6134,17 @@ a")
             i = torch.Tensor(2)
             hs(i)
 
+    def test_constant_insert_fail_lint(self):
+        @torch.jit.script
+        def foo(x):
+            y = x + 1
+            z = torch.tensor([[1.0, 2.5]])
+            print(x, z)
+
+        # check that it doesnt error
+        self.run_pass('constant_propagation', foo.graph)
+        self.assertTrue("aten::tensor" in str(foo.graph))  # not constant propped
+
     def test_script_sequential_in_mod_list(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
