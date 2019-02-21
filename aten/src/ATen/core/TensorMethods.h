@@ -1252,6 +1252,9 @@ inline Tensor Tensor::median() const {
 inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) const {
     return type().sort(*this, dim, descending);
 }
+inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
+    return type().argsort(*this, dim, descending);
+}
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
     return type().topk(*this, k, dim, largest, sorted);
 }
