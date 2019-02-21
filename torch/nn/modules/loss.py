@@ -128,9 +128,9 @@ class NLLLoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &  
+            \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &
             \text{if reduction} = \text{'mean';}\\
-            \sum_{n=1}^N l_n,  &  
+            \sum_{n=1}^N l_n,  &
             \text{if reduction} = \text{'sum'.}
         \end{cases}
 
@@ -715,7 +715,7 @@ class MultiLabelMarginLoss(_Loss):
     Examples::
 
         >>> loss = nn.MultiLabelMarginLoss()
-        >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]]) 
+        >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
         >>> # for target y, only consider labels 3 and 0, not after label -1
         >>> y = torch.LongTensor([[3, 0, -1, 1]])
         >>> loss(x, y)
