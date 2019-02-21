@@ -78,23 +78,18 @@ std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
 
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
-  bool use_newlines;
+  std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      bool use_newlines = false)
-      : values(values), use_newlines(use_newlines) {}
+      const std::string& delim = ", ")
+      : values(values), delim(delim) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
-      if (l.use_newlines) {
-        // TODO: Indent here is hard-coded for "graph(": un-hard-code it
-        out << "\n      ";
-      } else {
-        out << ", ";
-      }
+      out << l.delim;
     }
     printValueRef(out, n);
     out << " : ";
@@ -253,13 +248,12 @@ std::ostream& Node::print(
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
-                           << const_value_list_with_types(b->inputs(), false)
-                           << ") {\n";
+                           << const_value_list_with_types(b->inputs())
+                           << "):\n";
     for (auto nested : b->nodes()) {
       nested->print(out, level + 2, groups);
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
-    indent(out, level + 1) << "}\n";
   }
   return out;
 }
@@ -269,12 +263,13 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
+  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+      << "):\n";
   std::vector<const Node*> groups;
   for (auto n : g.nodes()) {
     n->print(out, 1, &groups);
   }
-  out << "  return (" << g.outputs() << ");\n}\n";
+  out << "  return (" << g.outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -642,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->kind() == prim::None;
+  return node_->mustBeNone();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -758,6 +753,12 @@ bool Node::matches(
     }
   }
   return true;
+}
+
+bool Node::mustBeNone() const {
+  return kind_ == prim::Constant && !this->hasAttributes() &&
+      (output()->type()->cast<OptionalType>() ||
+       output()->type() == NoneType::get());
 }
 
 void Node::dump() const {
@@ -1184,7 +1185,7 @@ Node* Graph::createUndefined() {
 }
 
 Node* Graph::createNone(TypePtr typ) {
-  Node* n = create(prim::None);
+  Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
@@ -1195,9 +1196,11 @@ Node* Graph::createFusionGroup() {
   return n;
 }
 
-Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+Node* Graph::createTuple(
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types));
+  auto tt = TupleType::create(std::move(types), std::move(field_names));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1263,7 +1266,7 @@ Node* Graph::createDict(
     AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
     AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
 
-    n->addInput(keys[i]) ;
+    n->addInput(keys[i]);
     n->addInput(values[i]);
   }
   n->output()->setType(DictType::create(key_type, value_type));
@@ -1315,10 +1318,11 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
+    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+      *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {

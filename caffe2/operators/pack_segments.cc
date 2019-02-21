@@ -67,11 +67,6 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
-  if (!data.size(0)) {
-    // Return empty output (with the proper shape)
-    return true;
-  }
-
   // Do padding
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
@@ -80,6 +75,11 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
         output->template mutable_data<float>(),
         &context_);
   }
+  if (!data.size(0)) {
+    // Return empty output (with the proper shape)
+    return true;
+  }
+
   if (return_presence_mask_) {
     memset(presence_mask_data, (int)false, presence_mask->numel());
   }

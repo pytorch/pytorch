@@ -1,6 +1,7 @@
 import operator
 import torch
 import warnings
+from itertools import chain
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
@@ -47,10 +48,10 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel EXCEPT Tensors. All tensors will be scattered on dim
-    specified (default 0). Primitive types will be broadcasted, but all
-    other types will be a shallow copy and can be corrupted if written to in
-    the model's forward pass.
+    DataParallel but some types are specially handled. tensors will be
+    **scattered** on dim specified (default 0). tuple, list and dict types will
+    be shallow copied. The other types will be shared among different threads
+    and can be corrupted if written to in the model's forward pass.
 
     The parallelized :attr:`module` must have its parameters and buffers on
     ``device_ids[0]`` before running this :class:`~torch.nn.DataParallel`
@@ -105,7 +106,7 @@ class DataParallel(Module):
     Example::
 
         >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
-        >>> output = net(input_var)
+        >>> output = net(input_var)  # input_var can be on any device, including CPU
     """
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
@@ -122,6 +123,11 @@ class DataParallel(Module):
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
             output_device = device_ids[0]
+
+        if not all(t.is_cuda and t.device.index == device_ids[0]
+                   for t in chain(module.parameters(), module.buffers())):
+            raise RuntimeError("module must have its parameters and buffers "
+                               "on device %d (device_ids[0])" % device_ids[0])
 
         self.dim = dim
         self.module = module

@@ -3,6 +3,8 @@ import torch
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.parallel as dp
+import torch.optim as optim
 import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
@@ -886,9 +888,9 @@ class TestJit(JitTestCase):
         traced = torch.jit.trace(f, (x,))
         f(x)
         graph = traced.graph_for(x)
-        # There should be 4 int constants for the right sides of operators, plus two
-        # for alpha arguments for add and sub
-        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
+        # There should be 4 int constants for the right sides of operators, plus one
+        # for the alpha argument for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant') == 5)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -1425,7 +1427,6 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @skipIfRocm
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
 
@@ -1498,7 +1499,6 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
-    @skipIfRocm
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -1743,7 +1743,7 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         graph_str = str(constant_prop.graph)
-        self.assertTrue(graph_str.count("prim::None") == 0)
+        self.assertTrue(graph_str.count("prim::Constant") == 1)
 
     def test_constant_prop_if_inline(self):
         @torch.jit.script
@@ -2783,8 +2783,8 @@ class TestBatched(TestCase):
                 c = c_t.index_select(1, pre_y)
                 iter = int(iter_count[0])
                 idx = torch.cat([idx.narrow(2, 0, iter).index_select(1, pre_y),
-                                torch.fmod(idx_t, vocab_size).unsqueeze(-1),
-                                idx.narrow(2, iter, max_len - iter)], 2)
+                                 torch.fmod(idx_t, vocab_size).unsqueeze(-1),
+                                 idx.narrow(2, iter, max_len - iter)], 2)
                 idx = idx.narrow(2, 0, max_len)
             return idx
 
@@ -3015,6 +3015,53 @@ class TestScript(JitTestCase):
             # type: (List[int]) -> Tuple[Tensor, List[int]]
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
+
+    # to avoid defining sum_list in multiple tests
+    def get_sum_list_fn(self):
+        def sum_list(a):
+            # type: (List[int]) -> int
+            sum = 0
+            for i in a:
+                sum += i
+
+            return sum
+
+        return sum_list
+
+    def test_sum_list_diff_elms(self):
+        self.checkScript(self.get_sum_list_fn(), ([1, 2, 3, 4, 5],))
+
+    def test_sum_list_empty(self):
+        self.checkScript(self.get_sum_list_fn(), ([],))
+
+    def test_sum_list_one(self):
+        self.checkScript(self.get_sum_list_fn(), ([1],))
+
+    def test_sum_list_literal(self):
+
+        def sum_list():
+            # type: () -> int
+            sum = 0
+            for i in [1, 2, 3, 4, 5]:
+                sum += i
+
+            return sum
+
+        self.checkScript(sum_list, ())
+
+    def test_sum_list_wrong_type(self):
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            @torch.jit.script
+            def sum_list(a):
+                # type: (int) -> int
+                sum = 0
+                for i in a:
+                    sum += i
+
+                return sum
+
+            sum_list(1)
 
     def test_bool_list_io(self):
         @torch.jit.script
@@ -3580,9 +3627,9 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
-        self.assertTrue(graph_str.count("int? = prim::None") == 1)
-        self.assertTrue(graph_str.count("None = prim::None") == 1)
+        self.assertTrue(graph_str.count("bool? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("int? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("None = prim::Constant") == 1)
 
     def test_literal(self):
         def func1(a, b):
@@ -3972,6 +4019,141 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    def test_mutable_list_pop_empty(self):
+        @torch.jit.script
+        def test_pop_empty():
+            a = torch.jit.annotate(List[int], [])
+            return a.pop()
+
+        with self.assertRaisesRegex(RuntimeError, "pop from empty list"):
+            test_pop_empty()
+
+    def test_mutable_list_pop(self):
+        def test_pop():
+            a = [1, 2, 3, 4]
+            b = a.pop()
+
+            return b == 4
+
+        self.checkScript(test_pop, ())
+
+    def test_mutable_list_pop2(self):
+        def test_pop2():
+            a = [1, 2, 3, 4]
+            b = a.pop()
+
+            return len(a) == 3
+
+        self.checkScript(test_pop2, ())
+
+    def test_mutable_list_pop_at(self):
+        def test_pop_at():
+            a = [1, 2, 3, 4]
+            b = a.pop(1)
+
+            return b == 2
+
+        self.checkScript(test_pop_at, ())
+
+    def test_mutable_list_pop_at2(self):
+        def test_pop_at2():
+            a = [1, 2, 3, 4]
+            b = a.pop(1)
+
+            return len(a) == 3
+
+        self.checkScript(test_pop_at2, ())
+
+    def test_mutable_list_pop_at_negative(self):
+        def test_pop_at_negative():
+            a = [1, 2, 3, 4]
+            b = a.pop(-2)
+
+            return b == 3
+
+        self.checkScript(test_pop_at_negative, ())
+
+    def test_mutable_list_pop_at_negative2(self):
+        def test_pop_at_negative2():
+            a = [1, 2, 3, 4]
+            b = a.pop(-2)
+
+            return len(a) == 3
+
+        self.checkScript(test_pop_at_negative2, ())
+
+    def test_mutable_list_pop_slice(self):
+        def test_pop_slice():
+            a = [1, 2, 3, 4]
+            b = [1, 2, 3, 4]
+
+            a.pop()
+            b = b[:-1]
+
+            return a == b
+
+        self.checkScript(test_pop_slice, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear_empty(self):
+        def test_clear_empty():
+            a = torch.jit.annotate(List[int], [])
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear_empty, ())
+
+    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
+    def test_mutable_list_clear(self):
+        def test_clear():
+            a = [1, 2, 3, 4]
+            a.clear()
+
+            return len(a) == 0
+        self.checkScript(test_clear, ())
+
+    def test_extend_list_mutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[Tensor], List[Tensor]) -> List[Tensor]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            for r in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_extend_list_immutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [1], [1, 2, 3]]:
+            for r in [[], [1], [1, 2, 3]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_copy_list_mutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return a.copy()
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            self.assertEqual(copy_list(l), l)
+
+    def test_copy_list_immutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[int]) -> List[int]
+            return a.copy()
+
+        for l in [[], [1], [1, 2, 3]]:
+            self.assertEqual(copy_list(l), l)
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -4187,36 +4369,71 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_if_is_none_dispatch(self):
-        class Test(torch.jit.ScriptModule):
-            __constants__ = ['b']
 
-            def __init__(self, b=None):
-                super(Test, self).__init__()
-                self.b = b
+        @torch.jit.script
+        def test_lhs_none_rhs_none():
+            # LHS, RHS both alwaysNone, dispatch always_none_branch
+            # only emit one prim::Constant
+            if None is None:
+                return 1
+            elif None is not None:
+                return 2
+            else:
+                return 3
 
-            @torch.jit.script_method
-            def forward(self, input, opt=None):
-                # type: (Tensor, Optional[Tensor]) -> Tensor
-                x = input
-                if self.b is not None:
-                    x = self.b(input)
+        self.assertTrue(str(test_lhs_none_rhs_none.graph).count(': int = prim::Constant') == 1)
 
-                if self.b is None:
-                    x = input + 2
+        @torch.jit.script
+        def test_lhs_opt_rhs_none(lhs=None):
+            # type: (Optional[Tensor]) -> int
+            # LHS maybeNone: emit normal if stmt that contains 3 constants
+            if lhs is not None:
+                return 2
+            elif lhs is None:
+                return 1
+            else:
+                return 3
 
-                if opt is not None:
-                    opt = torch.jit._unwrap_optional(opt)
-                    x = opt + x
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-                if opt is None:
-                    x = x + 4
+        @torch.jit.script
+        def test_lhs_none_rhs_opt(rhs=None):
+            # type: (Optional[Tensor]) -> int
+            # RHS maybeNone, emit normal if stmt that contains 3 constants
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
 
-                return x
+        self.assertTrue(str(test_lhs_opt_rhs_none.graph).count(': int = prim::Constant') == 3)
 
-        inputs = torch.zeros(1, 2)
-        self.assertExpectedGraph(Test().graph)
-        out = Test()(inputs)
-        self.assertEqual(out, inputs + 6)
+        @torch.jit.script
+        def test_lhs_never_rhs_none(lhs):
+            # LHS neverNone, RHS alwaysNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if lhs is None:
+                return 1
+            elif lhs is not None:
+                return 2
+            else:
+                return 3
+
+        self.assertTrue(str(test_lhs_never_rhs_none.graph).count(': int = prim::Constant') == 1)
+
+        @torch.jit.script
+        def test_lhs_none_rhs_never(rhs):
+            # LHS alwaysNone, RHS neverNone dispatch never_none_branch
+            # only emit one prim::Constant
+            if None is rhs:
+                return 1
+            elif None is not rhs:
+                return 2
+            else:
+                return 3
+
+        self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
@@ -4491,7 +4708,7 @@ a")
             if x is None:
                 res = res + 1
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_tensor_none
@@ -4506,7 +4723,7 @@ a")
             if x is None:
                 res = res + 1.0
             else:
-                res = torch.jit._unwrap_optional(x)
+                res = x
             return res
 
         fn = test_script_optional_other_none
@@ -4982,8 +5199,40 @@ a")
                     self.assertIs(torch.int32, s(b, "t.to(dtype=torch.int32)").dtype)
                     self.assertEqual(b.device, s(b, "t.to(dtype=torch.int32)").device)
 
+        # Test AD: aten::to(Tensor self, int dtype, bool non_blocking, bool copy) -> Tensor
+        t = torch.tensor(5).float().requires_grad_()
+        out_ref = t.to(torch.float32)
+        out = s(t, "t.to(torch.float32)")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Device? device, int? dtype, bool non_blocking, bool copy) -> Tensor
+        out_ref = t.to('cpu')
+        out = s(t, "t.to('cpu')")
+        self.assertEqual(out_ref, out)
+
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
+        # Test AD: aten::to(Tensor self, Tensor other, bool non_blocking, bool copy) -> Tensor
+        @torch.jit.script
+        def func2(t, t_ref):
+            return t.to(t_ref)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        t_ref = torch.tensor(4).double()
+        out_ref = t.to(t_ref)
+        out = func2(t, t_ref)
+        grad_ref = torch.autograd.grad(out_ref.sum(), t)
+        grad = torch.autograd.grad(out.sum(), t)
+        self.assertEqual(grad_ref, grad)
+
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
 
@@ -5330,6 +5579,108 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_filecheck(self):
+        from torch.testing import FileCheck
+
+        # def test_accidental_not_used():
+        #     def unused():
+        #         a = FileCheck()
+        #
+        #     with self.capture_stdout() as captured:
+        #         a = FileCheck()
+        #         del a
+        #     self.assertTrue("You have not run this instance of FileCheck"
+        #                     in captured[0])
+        #
+        # test_accidental_not_used()
+        def test_check():
+            file = "232"
+            FileCheck().check("2").check("3").check("2").run(file)
+            FileCheck().check("232").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().check("22").run(file)
+            with self.assertRaisesRegex(RuntimeError, "CHECK: 3"):
+                FileCheck().check("3").check("3").run(file)
+
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheck().check_count("2", 5).run(file)
+            FileCheck().check_count("22", 2).run(file)
+            FileCheck().check_count("222", 1).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().check_count("22", 3).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "CHECK-COUNT-6: 2"):
+                FileCheck().check_count("2", 6).run(file)
+
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            # FileCheck().check_same("22").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().check_same("33").run(file)
+
+            file = "22  1  3"
+
+            FileCheck().check("2").check_same("3").run(file)
+            FileCheck().check_count("2", 2).check_same("3").run(file)
+
+        test_check_same()
+
+        def test_check_next():
+            file = "\n1\n2\n3"
+            FileCheck().check("1").check_next("2").check_next("3").run(file)
+            FileCheck().check_next("1").check_next("2").check_next("3").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to find"):
+                FileCheck().check("1").check_next("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().check("1").check_next("2").run("1\n\n2")
+
+        test_check_next()
+
+        def test_check_dag():
+            fc = FileCheck().check_dag("1").check_dag("2").check_not("2")
+            fc.run("12")
+            fc.run("21")
+
+            fc = FileCheck()
+            fc.check_not("3").check_dag("1").check_dag("2").check_not("3")
+            fc.run("1 3 2")
+            fc.run("2 3 1")
+
+            fc = FileCheck().check_dag("1").check_dag("2").check("3")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "3" but did not find it'):
+                fc.run("1 3 2")
+
+        test_check_dag()
+
+        def test_check_not():
+            FileCheck().check_not("2").check("1").run("12")
+            FileCheck().check("2").check_not("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "2"'):
+                FileCheck().check_not("2").check("1").run("21")
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
+                FileCheck().check("2").check_not("1").run("21")
+
+            # checks with distinct range matchings
+            fb = FileCheck().check_count("2", 2).check_count("2", 2).check_not("2")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "2"'):
+                fb.run("22 2 22")
+
+            fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
+                fb.run("22 1 22")
+
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -5674,6 +6025,23 @@ a")
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_script_module_list_sequential_error(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            a = M(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -5749,6 +6117,65 @@ a")
             hs = HaveSequential()
             i = torch.Tensor(2)
             hs(i)
+
+    def test_script_sequential_in_mod_list(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = nn.ModuleList([Sub(), nn.Sequential(Sub(), nn.Sequential(Sub(), Sub()), Sub())])
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for mod in self.mods:
+                    v = mod(v)
+                return v
+
+        m = M()
+        graph = str(m.graph)
+        print(graph)
+        return
+        self.assertTrue(graph.count("aten::add") == 4)
+        self.assertTrue("python" not in graph)
+
+    def test_script_nested_mod_list(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = nn.ModuleList([nn.ModuleList([Sub()]), nn.Sequential(Sub()), nn.ModuleList([Sub(), Sub()])])
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for mod in self.mods:
+                    for m in mod:
+                        v = m(v)
+                return v
+
+        m = M()
+        graph = str(m.graph)
+        self.assertTrue(graph.count("aten::add") == 4)
+        self.assertTrue("python" not in graph)
 
     def test_constant_as_attr(self):
         class M(torch.jit.ScriptModule):
@@ -8318,6 +8745,23 @@ a")
         self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
                                     "out of range")
 
+    def test_namedtuple_attr(self):
+        def f(x):
+            return x.max(dim=1).indices + torch.max(x, dim=1).indices
+
+        self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
+            @torch.jit.script
+            def g1(x):
+                return x.max(dim=1).unknown_symbol
+
+        with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
+            @torch.jit.script
+            def g2(x):
+                print((x, x, x).__doc__)
+                return x
+
     def test_tuple_slicing(self):
         def tuple_slice(a):
             if bool(a):
@@ -8865,7 +9309,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
@@ -9857,6 +10301,18 @@ a")
 
         self.checkScript(list_of_dicts, ())
 
+    def dict_to_python(self):
+        def python_lookup(my_dict, keys):
+            # type: (Dict[str, int], List[str]) -> List[int]
+            return [my_dict[k] for k in keys]
+
+        def fn(my_dict, keys):
+            # type: (Dict[str, int], List[str]) -> List[int]
+            return python_lookup(my_dict, keys)
+
+        a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        self.checkScript(fn, (a_dict, ('a', 'c')))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9948,7 +10404,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -10071,13 +10526,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipIfRocm
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace
@@ -10225,16 +10678,13 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
                             inputs_require_grads=False, export_import=check_export_import)
 
-    @skipIfRocm
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
     if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
-        @skipIfRocm
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
@@ -10267,11 +10717,9 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
-    @skipIfRocm
     def test_super_resolution(self):
         self._test_super_resolution(self, device='cpu')
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
     def test_super_resolution_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
@@ -10440,7 +10888,6 @@ class TestPytorchExportModes(JitTestCase):
         x = torch.ones(3)
         torch.onnx._export(foo, (x,), f, example_outputs=(x, x))
 
-    @skipIfRocm
     @skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
@@ -10460,7 +10907,6 @@ class TestPytorchExportModes(JitTestCase):
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
     # please contact @Rui.
-    @skipIfRocm
     def test_onnx_aten(self):
         class ModelWithAtenFmod(nn.Module):
             def forward(self, x, y):
@@ -10544,6 +10990,8 @@ EXCLUDE_SCRIPT_MODULES = {
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_adaptive_avg_pool2d',
+    'test_nn_batch_norm',
+    'test_nn_embedding',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',
@@ -10770,7 +11218,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_arg_configurations_smoke_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
@@ -10899,14 +11346,12 @@ class TestFuser(JitTestCase):
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @skipIfRocm
     @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
     def test_chunk_correctness_cuda(self):
         return self._test_chunk_correctness(self, 'cuda')
 
@@ -11364,8 +11809,6 @@ class TestFuser(JitTestCase):
         (hy + cy).sum().backward()
         self.assertExpectedGraph(backward_graph(module), subname='backward')
 
-    # TODO: At some point we supported fusion of torch.rand_like but not anymore
-    @unittest.expectedFailure
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -11405,19 +11848,40 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(self.fn_test_relu, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @staticmethod
-    def fn_test_erf(x):
-        return F.relu(torch.erf(x) - torch.erfc(x))
-
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_erf_cuda(self):
+        def fn_test_erf(x):
+            return F.relu(torch.erf(x) - torch.erfc(x))
+
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        ge = self.checkTrace(self.fn_test_erf, (x,))
+        ge = self.checkTrace(fn_test_erf, (x,))
         self.assertAllFused(ge.graph_for(x))
         x.requires_grad_(True)
         self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_rand_broadcast_cuda(self):
+        def fn_test_rand(x, y):
+            r = torch.rand_like(y)
+            return r * x + x
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        script_f = torch.jit.script(fn_test_rand, (x, y))
+        out = script_f(x, y)
+        self.assertAllFused(script_f.graph_for(x, y))
+        x.requires_grad_(True)
+        out = script_f(x, y)
+        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        # test that broadcasting random produces correct results
+        x = torch.ones(4, 4, dtype=torch.float, device='cuda')
+        y = torch.ones(4, dtype=torch.float, device='cuda')
+        out = script_f(x, y)
+        self.assertEqual(out[0], out[1])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -11748,10 +12212,9 @@ class TestCustomOperators(JitTestCase):
         input = torch.ones(5, 5)
         trace = torch.jit.trace(torch.ops.aten.relu, [input])
         self.assertExpectedInline(canonical(trace.graph), '''\
-graph(%0 : Double(5, 5)) {
+graph(%0 : Double(5, 5)):
   %1 : Double(5, 5) = aten::relu(%0)
-  return (%1);
-}
+  return (%1)
 ''')
 
     def test_script_graph_contains_custom_op(self):
@@ -11759,10 +12222,9 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor) {
+graph(%x : Tensor):
   %1 : Tensor = aten::relu(%x)
-  return (%1);
-}
+  return (%1)
 ''')
 
 
@@ -12636,6 +13098,168 @@ class TestAsync(JitTestCase):
         # smoke test for ONNX export
         f = io.BytesIO()
         torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
+
+    def test_save_load_with_extra_files(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return a
+
+        expected_extra_files = torch._C.ExtraFilesMap()
+        expected_extra_files['foo'] = 'bar'
+        m = MyMod()
+
+        # Save to file.
+        with TemporaryFileName() as fname:
+            m.save(fname, _extra_files=expected_extra_files)
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+            # Use torch.jit API
+            torch.jit.save(m, fname, _extra_files=expected_extra_files)
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual('bar', extra_files['foo'])
+
+        # Save to buffer.
+        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Use torch.jit API
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
+        buffer.seek(0)
+        extra_files = torch._C.ExtraFilesMap()
+        extra_files['foo'] = ''
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual('bar', extra_files['foo'])
+
+        # Non-existent file 'bar'
+        with self.assertRaises(RuntimeError):
+            extra_files['bar'] = ''
+            torch.jit.load(buffer, _extra_files=extra_files)
+
+
+class TestDataParallel(JitTestCase):
+    class Mpy(torch.nn.Module):
+        def __init__(self):
+            super(TestDataParallel.Mpy, self).__init__()
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
+
+        def forward(self, input):
+            return self.m(input)
+
+    class Mpy1(torch.nn.Module):
+        def __init__(self, block):
+            super(TestDataParallel.Mpy1, self).__init__()
+            self.m = block
+
+        def forward(self, input):
+            return self.m.forward(input)
+
+    class Mpy2(torch.nn.Module):
+        def __init__(self, block1, block2):
+            super(TestDataParallel.Mpy2, self).__init__()
+            self.m1 = block1
+            self.m2 = block2
+
+        def forward(self, input):
+            x = self.m1.forward(input)
+            return self.m2(x)
+
+    class Msm(torch.jit.ScriptModule):
+
+        __constants__ = ['m']
+
+        def __init__(self):
+            super(TestDataParallel.Msm, self).__init__(False)
+            self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
+                                   nn.ReLU(), nn.Linear(2, 2))
+
+        @torch.jit.script_method
+        def forward(self, input):
+            return self.m(input)
+
+    class Msm1(torch.jit.ScriptModule):
+        def __init__(self, block):
+            super(TestDataParallel.Msm1, self).__init__(False)
+            self.block = block
+
+        @torch.jit.script_method
+        def forward(self, input):
+            x = self.block(input)
+            return x
+
+    def check_replicas(self, module, replicas, input_shape=(2, 2)):
+        input = torch.randn(input_shape).cuda()
+        expected_output = module(input).data
+        for i, replica in enumerate(replicas):
+            for p in replica.parameters():
+                self.assertEqual(p.get_device(), i)
+            for b in replica.buffers():
+                self.assertEqual(b.get_device(), i)
+            replica_input = input.cuda(i)
+            self.assertEqual(replica(replica_input).data, expected_output)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_python_submodule_exception(self):
+        module = self.Msm1(self.Mpy()).cuda()
+        msg = "Cannot replicate.*"
+        with self.assertRaisesRegex(Exception, msg):
+            dp.replicate(module, {0, 1})
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_python_submodule_script(self):
+        module = self.Mpy1(self.Msm()).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_shared_module(self):
+        s = self.Msm()
+        p1 = self.Mpy1(s)
+        module = self.Mpy2(p1, s).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_traced_module(self):
+        module = torch.jit.trace(self.Mpy1(self.Mpy()), torch.ones(2, 2)).cuda()
+        replicas = dp.replicate(module, {0, 1})
+        self.check_replicas(module, replicas)
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_tensor_sharing(self):
+        module = self.Msm1(self.Msm()).cuda()
+        replica = dp.replicate(module, {0, 1})
+        optimizer = optim.SGD(module.parameters(), lr=1, momentum=1)
+        x = torch.ones(2, 2, requires_grad=True).cuda()
+        first_forward = module.forward(x)
+        first_forward.sum().backward()
+        optimizer.step()
+        second_forward = module.forward(first_forward)
+
+        # replica which is on the same GPU has a shallow copy of the original
+        # params and buffers
+        r0_forward = replica[0].forward(x)
+        self.assertEqual(second_forward, r0_forward)
+
+        # replca which is on a different GPU has a deep copy of the original
+        # params and buffers
+        x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
+        r1_forward = replica[1].forward(x1)
+        self.assertEqual(first_forward, r1_forward)
 
 
 for test in autograd_method_tests():

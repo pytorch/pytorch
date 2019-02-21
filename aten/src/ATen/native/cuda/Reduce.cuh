@@ -25,6 +25,7 @@ static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
+// returns floor(log2(n))
 static inline int last_pow2(int n) {
   n |= (n >>  1);
   n |= (n >>  2);
@@ -560,7 +561,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  if (config.values_per_thread() >= block_height * 16) {
+  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -570,7 +571,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  if (config.values_per_thread() >= 256 && num_outputs <= 4096) {
+  if (config.input_mult[1] != 0 && config.values_per_thread() >= 256 && num_outputs <= 4096) {
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
     // require a reduction using global memory.
