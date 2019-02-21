@@ -210,6 +210,29 @@ public:
     impl->refresh_numel();
     return impl;
   }
+
+  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    AT_ASSERT(impl->is_sparse());
+    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
+    // TensorImpl general fields
+    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
+    sizes_ = sparse_impl->sizes_;
+    strides_ = sparse_impl->strides_;
+    storage_offset_ = sparse_impl->storage_offset_;
+    is_contiguous_ = sparse_impl->is_contiguous_;
+    is_wrapped_number_ = sparse_impl->is_wrapped_number_;
+    reserved_ = sparse_impl->reserved_;
+
+    // Sparse-specific fields
+    sparse_dim_ = sparse_impl->sparse_dim();
+    dense_dim_ = sparse_impl->dense_dim();
+    indices_ = sparse_impl->indices();
+    values_ = sparse_impl->values();
+    coalesced_ = sparse_impl->coalesced();
+    refresh_numel();
+  }
  private:
   int64_t get_device_slow() const override {
     return values_.get_device();
