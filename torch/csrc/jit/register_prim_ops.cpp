@@ -1105,6 +1105,7 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   }
 
   return 0;
+}
 
 template <typename TList>
 Operation listExtend(const Node* node) {
