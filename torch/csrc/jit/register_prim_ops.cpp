@@ -418,14 +418,6 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::None,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            stack.emplace_back(IValue());
-            return 0;
-          };
-        }),
-    Operator(
         prim::Print,
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();
@@ -1113,6 +1105,32 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   }
 
   return 0;
+
+template <typename TList>
+Operation listExtend(const Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TList b;
+    pop(stack, a, b);
+
+    auto& vec_a = a->elements();
+    const auto& vec_b = b->elements();
+    vec_a.insert(vec_a.end(), vec_b.cbegin(), vec_b.cend());
+    return 0;
+  };
+}
+
+template <typename TList>
+Operation listCopy(const Node* node) {
+  return [](Stack& stack) {
+    TList list;
+    pop(stack, list);
+
+    const auto& vec = list->elements();
+    auto out = vec;
+    push(stack, out);
+    return 0;
+  };
 }
 
 template <typename T>
@@ -1399,6 +1417,15 @@ RegisterOperators reg2({
           "(c) el) -> " decl_type "[](a!)",                                 \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
+          "aten::extend(" decl_type "[](a!) self, " decl_type               \
+          " [] other) -> ()",                                               \
+          listExtend<Shared<c_type>>),                                      \
+      Operator(                                                             \
+          "aten::copy(" decl_type                                           \
+          "[](a) self)"                                                     \
+          " -> " decl_type "[]",                                            \
+          listCopy<Shared<c_type>>),                                        \
+      Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
           " el) -> " decl_type "[](a!)",                                    \
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
@@ -1414,7 +1441,6 @@ RegisterOperators reg2({
         -> " decl_type  "(*)",                                              \
         listPop<Shared<c_type>>)
 
-
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
 
     Operator("aten::remove(Tensor[](a!) self, Tensor el) -> ()",
@@ -1429,6 +1455,15 @@ RegisterOperators reg2({
           "aten::append(" decl_type "[](a!) self, " decl_type          \
           " el) -> " decl_type "[](a!)",                               \
           listAppend<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::extend(" decl_type "[](a!) self, " decl_type          \
+          " [] other) -> ()",                                          \
+          listExtend<Shared<c_type>>),                                 \
+      Operator(                                                        \
+          "aten::copy(" decl_type                                      \
+          "[](a) self)"                                                \
+          " -> " decl_type "[]",                                       \
+          listCopy<Shared<c_type>>),                                   \
       Operator(                                                        \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
           " el) -> " decl_type "[](a!)",                               \
@@ -1447,7 +1482,6 @@ RegisterOperators reg2({
       Operator(                                                        \
           "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
           -> " decl_type, listPop<Shared<c_type>>)
-
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),

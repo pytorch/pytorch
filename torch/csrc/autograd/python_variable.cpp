@@ -184,6 +184,7 @@ PyObject *THPVariable_get_grad_fn(THPVariable *self)
 static int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
   self->cdata.detach_();
   return 0;
@@ -216,9 +217,11 @@ static PyObject * THPVariable_get_data(THPVariable *self)
 int THPVariable_set_data(THPVariable *self, PyObject *data)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
+
   self->cdata.set_data(THPVariable_UnpackData(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -235,7 +238,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  if (py_grad == Py_None) {
+  if (!py_grad || py_grad == Py_None) {
     var.grad().reset();
     return 0;
   }
@@ -299,7 +302,7 @@ PyObject *THPVariable_get_requires_grad(THPVariable *self)
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
+  THPUtils_assertRet(-1, obj && PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = self->cdata;
   auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
@@ -336,6 +339,7 @@ PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, obj, "Deletion of _backwards_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }
