@@ -109,117 +109,15 @@ def _run_with_num_threads(parent_setup_event, child_setup_event, stop_event,
     while not stop_event.is_set():
         fn(*args)
 
+
 # gets the (approximate) max num threads used in `duration` seconds
 def _psutil_get_max_num_threads(psutil_p, duration=3):
     t0 = time.time()
     num_threads = psutil_p.num_threads()
     while time.time() - t0 < duration:
-        time.sleep(0.2)
+        time.sleep(0.05)
         num_threads = max(num_threads, psutil_p.num_threads())
     return num_threads
-
-# send a signal over `heartbeat_q` after each test
-def _test_num_threads_global_setting(heartbeat_q):
-    this_p = psutil.Process()
-
-    heartbeat_q.put(1)
-
-    # main thread + mp.Queue putting thread
-    BASE_NUM_THREAD = 2
-
-    assert this_p.num_threads() == BASE_NUM_THREAD
-
-    stop_event = threading.Event()
-    q = queue.Queue()
-
-    def get_num_threads(q):
-        q.put(torch.get_num_threads())
-
-    num_threads = torch.get_num_threads()
-
-    # initial value in new thread should be correct
-    t = threading.Thread(target=get_num_threads, args=(q,))
-    t.start()
-    t.join()
-    assert q.get() == num_threads
-
-    heartbeat_q.put(1)
-
-    # setting in main thread should affect child thread
-    num_threads += 1
-    torch.set_num_threads(num_threads)
-    t = threading.Thread(target=get_num_threads, args=(q,))
-    t.start()
-    t.join()
-    assert q.get() == num_threads
-
-    heartbeat_q.put(1)
-
-    # setting in main thread should affect child thread even after child starts
-    def get_num_threads_after(parent_setup_event, child_setup_event, q):
-        child_setup_event.set()
-        parent_setup_event.wait()
-        q.put(torch.get_num_threads())
-
-    parent_setup_event = threading.Event()
-    child_setup_event = threading.Event()
-    t = threading.Thread(target=get_num_threads_after, args=(parent_setup_event, child_setup_event, q))
-    t.start()
-
-    child_setup_event.wait()
-    num_threads = 2
-    torch.set_num_threads(num_threads)
-    parent_setup_event.set()
-    t.join()
-    assert q.get() == num_threads
-
-    heartbeat_q.put(1)
-
-    # Next we will change the setting and test that it is actually reflected in
-    # a separate running thread.
-    # We will use values: num_threads -> num_threads + 2 -> num_threads + 4
-
-    x = torch.empty(num_threads + 4, 64, 50, 50)
-    running_mean = torch.empty(64)
-    running_var = torch.empty(64)
-
-    def run_load(done_event):
-        while not done_event.is_set():
-            torch.nn.functional.batch_norm(x, running_mean, running_var)
-
-    done_event = threading.Event()
-
-    t = threading.Thread(target=run_load, args=(done_event,))
-    t.start()
-
-    ret = _psutil_get_max_num_threads(this_p)
-    assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads+BASE_NUM_THREAD)
-    heartbeat_q.put(1)
-
-    # set in main thread
-    num_threads += 2
-    torch.set_num_threads(num_threads)
-    ret = _psutil_get_max_num_threads(this_p)
-    assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads+BASE_NUM_THREAD)
-    # assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
-    heartbeat_q.put(1)
-
-    # set in another thread
-    def set_num_threads(val):
-        torch.set_num_threads(val)
-
-    num_threads += 2
-    _t = threading.Thread(target=set_num_threads, args=(num_threads,))
-    _t.start()
-    _t.join()
-    assert torch.get_num_thread() == num_threads
-    assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
-    heartbeat_q.put(1)
-
-    done_event.set()
-    t.join()
-
-    assert this_p.num_threads() == BASE_NUM_THREAD
 
 
 class TestCPUNumThreads(TestCase):
@@ -265,23 +163,93 @@ class TestCPUNumThreads(TestCase):
     @unittest.skipIf(not torch.backends.openmp.is_available(),
                      "This test relies on OpenMP multithreading of CPU batch_norm operator.")
     def test_global_setting(self):
-        heartbeat_q = mp.Queue()
-        p = mp.Process(target=_test_num_threads_global_setting, args=(heartbeat_q,))
-        try:
-            p.start()
-            while True:
-                try:
-                    heartbeat_q.get(timeout=JOIN_TIMEOUT)
-                    print('got')
-                except queue.Empty:
-                    p.join(timeout=0)
-                    if p.is_alive():
-                        self.fail("test_global_setting: process failed to run subtest within given time")
-                    self.assertEqual(p.exitcode, 0, "test_global_setting: some test failed")
-                    break
-        finally:
-            if p.is_alive():
-                p.terminate()
+        this_p = psutil.Process()
+
+        # main thread + other unittest/pytest things
+        BASE_NUM_THREAD = this_p.num_threads()
+
+        assert this_p.num_threads() == BASE_NUM_THREAD, this_p.num_threads()
+
+        stop_event = threading.Event()
+        q = queue.Queue()
+
+        def get_num_threads(q):
+            q.put(torch.get_num_threads())
+
+        num_threads = torch.get_num_threads()
+
+        # initial value in new thread should be correct
+        t = threading.Thread(target=get_num_threads, args=(q,))
+        t.start()
+        t.join()
+        assert q.get() == num_threads
+
+        # setting in main thread should affect child thread
+        num_threads += 1
+        torch.set_num_threads(num_threads)
+        t = threading.Thread(target=get_num_threads, args=(q,))
+        t.start()
+        t.join()
+        assert q.get() == num_threads
+
+        # setting in main thread should affect child thread even after child starts
+        def get_num_threads_after(parent_setup_event, child_setup_event, q):
+            child_setup_event.set()
+            parent_setup_event.wait()
+            q.put(torch.get_num_threads())
+
+        parent_setup_event = threading.Event()
+        child_setup_event = threading.Event()
+        t = threading.Thread(target=get_num_threads_after, args=(parent_setup_event, child_setup_event, q))
+        t.start()
+
+        child_setup_event.wait()
+        num_threads = 2
+        torch.set_num_threads(num_threads)
+        parent_setup_event.set()
+        t.join()
+        assert q.get() == num_threads
+
+        # Next we will change the setting and test that it is actually reflected in
+        # a separate running thread.
+        # We will use values: num_threads -> num_threads + 2 -> num_threads + 4
+
+        x = torch.empty(num_threads + 4, 64, 50, 50)
+        running_mean = torch.empty(64)
+        running_var = torch.empty(64)
+
+        def run_load(done_event):
+            while not done_event.is_set():
+                torch.nn.functional.batch_norm(x, running_mean, running_var)
+
+        done_event = threading.Event()
+
+        t = threading.Thread(target=run_load, args=(done_event,))
+        t.start()
+
+        ret = _psutil_get_max_num_threads(this_p)
+        assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads + BASE_NUM_THREAD)
+
+        # set in main thread
+        num_threads += 2
+        torch.set_num_threads(num_threads)
+        ret = _psutil_get_max_num_threads(this_p)
+        assert ret == num_threads + BASE_NUM_THREAD, "{}, {}".format(ret, num_threads + BASE_NUM_THREAD)
+        # assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
+
+        # set in another thread
+        def set_num_threads(val):
+            torch.set_num_threads(val)
+
+        num_threads += 2
+        _t = threading.Thread(target=set_num_threads, args=(num_threads,))
+        _t.start()
+        _t.join()
+        assert torch.get_num_threads() == num_threads
+        assert _psutil_get_max_num_threads(this_p) == num_threads + BASE_NUM_THREAD
+
+        done_event.set()
+        t.join()
 
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to

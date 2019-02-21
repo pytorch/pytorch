@@ -17,7 +17,7 @@ from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatD
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from common_utils import (TestCase, run_tests, TEST_NUMPY, TEST_PSUTIL,
-                          IS_WINDOWS, IS_PPC, IS_PYTORCH_CI, MP_JOIN_TIMEOUT
+                          IS_WINDOWS, IS_PPC, IS_PYTORCH_CI, JOIN_TIMEOUT,
                           NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests)
 
 if TEST_PSUTIL:

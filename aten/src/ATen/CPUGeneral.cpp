@@ -30,15 +30,17 @@ std::mutex num_threads_global_mutex;
 thread_local int num_threads_thread_local = -1;
 
 
-static void _set_num_threads_local(int num_threads) {
-  if (num_threads_thread_local != num_threads) {
+static inline void sync_num_threads() {
+  // Get a snapshot of num_threads_global
+  int num_threads_target = num_threads_global;
+  if (num_threads_thread_local != num_threads_target) {
   #ifdef _OPENMP
-    omp_set_num_threads(num_threads);
+    omp_set_num_threads(num_threads_target);
   #endif
   #if AT_MKL_ENABLED()
-    mkl_set_num_threads(num_threads);
+    mkl_set_num_threads(num_threads_target);
   #endif
-    num_threads_thread_local = num_threads;
+    num_threads_thread_local = num_threads_target;
   }
 }
 
@@ -121,7 +123,7 @@ void init_num_threads_for_this_thread() {
   // size of the OpenMP thread pool, resulting in worse performance (and memory
   // leaks in GCC 5.4)
 
-  _set_num_threads_local(num_threads_global);  // possible race
+  sync_num_threads();  // possible race
 }
 
 void set_num_threads(int num_threads) {
@@ -135,12 +137,12 @@ void set_num_threads(int num_threads) {
   }
 #endif
   num_threads_global = num_threads;
-  _set_num_threads_local(num_threads);
+  sync_num_threads();
 }
 
 int get_num_threads() {
   AT_ASSERTM(num_threads_global > 0, "num_threads should be initialized");
-  _set_num_threads_local(num_threads_global);
+  sync_num_threads();
   return num_threads_global;
 }
 
