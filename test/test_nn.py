@@ -3401,8 +3401,8 @@ class TestNN(NNTestCase):
                 expect_device = torch.device("cuda:{}".format(device_ids[0]))
 
             if should_fail:
-                assert_correct = lambda: self.assertRaisesRegex(RuntimeError,
-                                                                error_msg.format(expect_device))
+                def assert_correct():
+                    return self.assertRaisesRegex(RuntimeError, error_msg.format(expect_device))
             else:
                 assert_correct = dummy_ctx_manager
 
