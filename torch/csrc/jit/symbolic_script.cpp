@@ -416,12 +416,11 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
-  if (!schema_name_suffix.empty() &&
-      schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
-    schema_string.replace(
-        schema_string.find(schema_name),
-        schema_name.length(),
-        schema_name.substr(0, pos));
+  if (!schema_name_suffix.empty()
+      && schema_name_suffix.find_first_not_of("0123456789") == std::string::npos) {
+    schema_string.replace(schema_string.find(schema_name),
+                          schema_name.length(),
+                          schema_name.substr(0, pos));
   }
   return schema_string;
 }
