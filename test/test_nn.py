@@ -3385,41 +3385,65 @@ class TestNN(NNTestCase):
         inp_cuda0 = inp.cuda(0)
         inp_cuda1 = inp.cuda(1)
 
-        error_msg = "module must have its parameters and buffers on device %d "
+        error_msg = "module must have its parameters and buffers on device {}"
 
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l)(inp))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1))(inp_cuda0))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0])(inp_cuda0))
+        @contextlib.contextmanager
+        def dummy_ctx_manager():
+            yield
 
-        nn.DataParallel(l.cuda())(inp_cuda0)
-        nn.DataParallel(l).cuda()(inp_cuda0)
-        nn.DataParallel(l.cuda(1), device_ids=[1, 0])
-        nn.DataParallel(l, device_ids=[1, 0]).cuda(1)(inp_cuda1)
+        def test(inner_m, dp_device, inp, device_ids, should_fail):
+            dpm = nn.DataParallel(inner_m, device_ids)
+
+            if device_ids is None:
+                device_ids = dpm.device_ids
+
+            if isinstance(device_ids[0], torch.device):
+                expect_device = device_ids[0]
+            else:
+                expect_device = torch.device("cuda:{}".format(device_ids[0]))
+
+            if should_fail:
+                assert_correct = self.assertRaisesRegex(RuntimeError,
+                                                        error_msg.format(expect_device))
+            else:
+                assert_correct = dummy_ctx_manager()
+
+            if dp_device is not None:
+                dpm = dpm.to(dp_device)
+
+            with assert_correct:
+                dpm(inp)
+
+        test(l.to('cpu'), None, inp, None, should_fail=True)
+        test(l.cuda(1), None, inp_cuda0, None, should_fail=True)
+        test(l.cuda(), None, inp_cuda0, [1, 0], should_fail=True)
+
+        test(l.cuda(), None, inp_cuda0, None, should_fail=False)
+        test(l.cpu(), 'cuda', inp_cuda0, None, should_fail=False)
+        test(l.cuda(1), None, inp_cuda1, [1, 0], should_fail=False)
+        test(l.cpu(), 'cuda:1', inp_cuda1, [1, 0], should_fail=False)
 
         s = nn.Sequential(l.cpu())
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(deepcopy(l), l.cuda())
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
+        s = nn.Sequential(deepcopy(l).cpu(), l.cuda())
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s)(inp))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(s, device_ids=[1, 0])(inp_cuda1))
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
-        nn.DataParallel(s)(inp_cuda0)
-
-        s = nn.Sequential(l.cuda(1), deepcopy(l).cuda(1))
-        nn.DataParallel(s, device_ids=[1, 0])(inp_cuda1)
+        test(s, None, inp, None, should_fail=False)
+        test(s, None, inp, [0, 1], should_fail=False)
+        test(s, None, inp, [1, 0], should_fail=True)
+        test(s.cpu(), None, inp, [1, 0], should_fail=True)
+        test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
     @skipIfRocm
