@@ -5,10 +5,11 @@
 #include <mutex>
 #include <random>
 
-#include <sys/types.h>
-#include <unistd.h>
 #ifdef _MSC_VER
 #include <windows.h>
+#else
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 namespace torch {
