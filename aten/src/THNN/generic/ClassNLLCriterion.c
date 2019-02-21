@@ -39,7 +39,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     for (i = 0; i < batch_size; i++) {
       int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i) - TH_INDEX_BASE;
 
-      if (cur_target >= 0 && cur_target < n_classes) {
+      if ((cur_target >= 0 && cur_target < n_classes) || (cur_target == ignore_index)) {
           if (cur_target == ignore_index) {
             THTensor_(fastSet1d)(output, i, 0.0f);
             continue;
