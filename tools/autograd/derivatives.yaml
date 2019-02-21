@@ -1206,8 +1206,8 @@
   self: log_sigmoid_double_backward(grad * grad_output, self)
 
 - name: _log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
-  grad_output: grad - (grad * output.exp()).sum(dim, true)
-  self: log_softmax_double_backward(grad, grad_output, dim, output).type_as(self)
+  grad_output: grad.type_as(output) - (grad.type_as(output) * output.exp()).sum(dim, true)
+  self: log_softmax_double_backward(grad.type_as(output), grad_output, dim, output).type_as(self)
 
 - name: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope)
   grad_output: leaky_relu_backward(grad, self, negative_slope)
@@ -1270,8 +1270,8 @@
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
-  grad_output: _softmax_backward_data(grad, output, dim, self)
-  self: softmax_double_backward(grad, grad_output, dim, output).type_as(self)
+  grad_output: _softmax_backward_data(grad.type_as(output), output, dim, self)
+  self: softmax_double_backward(grad.type_as(output), grad_output, dim, output).type_as(self)
 
 - name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
   grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
