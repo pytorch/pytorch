@@ -10,20 +10,13 @@
 #include <iostream>
 
 namespace torch {
+bool CudaIPCCollect();
 
-constexpr uint CUDA_IPC_REF_COUNTER_FILE_SIZE(10000);
-constexpr uint CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO(1000);
-
-void CudaIPCCollect();
-
-at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
-
-bool CudaIPCHaveRefCounter();
-void CudaIPCCreateRefCounter(
-    std::string handle,
-    uint64_t size,
-    at::DataPtr data_ptr);
-void ReturnRefCounter(std::string handle, uint64_t offset);
+struct CudaIPCReceivedData final {
+  explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
+      : shared_ptr_(std::move(shared_ptr)){};
+  std::shared_ptr<void> shared_ptr_;
+};
 
 struct CudaIPCSentData final {
   std::string handle_;
@@ -73,11 +66,25 @@ struct CudaIPCSentData final {
   }
 };
 
+at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
+
+namespace {
+
+constexpr uint CUDA_IPC_REF_COUNTER_FILE_SIZE(10000);
+constexpr uint CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO(1000);
+
+bool CudaIPCHaveRefCounter();
+void CudaIPCCreateRefCounter(
+    std::string handle,
+    uint64_t size,
+    at::DataPtr data_ptr);
+void ReturnRefCounter(std::string handle, uint64_t offset);
+
 // All to be deleted data blocks with non zero reference counter goes there
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
 
-  void collect();
+  bool collect();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
   uint64_t size() {
     return shared_blocks_.size();
@@ -142,20 +149,18 @@ struct CudaIPCRefCountersFile final {
   at::DataPtr refcounted_shared_mem_;
 };
 
-struct CudaIPCReceivedData final {
-  explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr);
-  std::shared_ptr<void> shared_ptr_;
-};
-
+} // namespace
 } // namespace torch
 
 namespace c10 {
+namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
-  void Execute() {
-    torch::CudaIPCCollect();
+  bool Execute() {
+    return torch::CudaIPCCollect();
   }
 };
+} // namespace
 
 } // namespace c10
 

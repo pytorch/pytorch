@@ -194,27 +194,28 @@ struct THCCachingAllocator
     Block search_key(device, stream, size);
     auto& free_blocks = small ? small_blocks : large_blocks;
 
-    Block* block = NULL;
-    Block* remaining = NULL;
-
-    for (int i = 0; i < 2; ++i) {
-      if (block == NULL) {
-        auto it = free_blocks.lower_bound(&search_key);
-        if (it != free_blocks.end() && (*it)->device == device &&
-            (*it)->stream == stream) {
-          block = *it;
-          free_blocks.erase(it);
-          break;
-        }
+    auto find_free_block = [&]()->Block*{
+      auto it = free_blocks.lower_bound(&search_key);
+      if (it != free_blocks.end() && (*it)->device == device &&
+          (*it)->stream == stream) {
+        Block* block = *it;
+        free_blocks.erase(it);
+        return block;
       }
+      return NULL;
+    };
 
-      if (block == NULL) {
-        for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
-          FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
-        }
+    Block* block = find_free_block();
+    if (block == NULL) {
+      bool freed_memory = false;
+      for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
+        freed_memory |=
+            FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+      }
+      if (freed_memory) {
+        block = find_free_block();
       }
     }
-
     if (block == NULL) {
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
@@ -259,6 +260,8 @@ struct THCCachingAllocator
       stats.increaseCached(alloc_size);
       block = new Block(device, stream, alloc_size, (char*)ptr);
     }
+
+    Block* remaining = NULL;
 
     if (block->size - size >= (small ? kRoundSmall : kSmallAlloc + 1)) {
       remaining = block;

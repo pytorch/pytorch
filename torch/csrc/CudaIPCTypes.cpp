@@ -1,9 +1,18 @@
 #ifdef USE_CUDA
 #include <torch/csrc/CudaIPCTypes.h>
+#include <TH/THAllocator.h>
 #include <map>
 #include <mutex>
 
+#include <sys/types.h>
+#include <unistd.h>
+#ifdef _MSC_VER
+#include <windows.h>
+#endif
+
 namespace torch {
+
+namespace {
 void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
   if (!warned) {
@@ -39,20 +48,6 @@ struct CudaIPCGlobalEntities {
 
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
-void CudaIPCCollect() {
-  cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
-  if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
-    cuda_ipc_global_entities.safe_clean_current_file();
-  }
-}
-
-CudaIPCReceivedData::CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
-    : shared_ptr_(std::move(shared_ptr)) {}
-
-int64_t CudaIPCSentData::counter_value() {
-  return *counter_ptr_;
-}
-
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   collect();
   if (shared_blocks_.size() > 0) {
@@ -60,28 +55,20 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   }
 }
 
-void CudaIPCSentDataLimbo::collect() {
+bool CudaIPCSentDataLimbo::collect() {
+  bool freed_memory = false;
   std::lock_guard<std::mutex> lock(limbo_mutex_);
   std::vector<std::unique_ptr<CudaIPCSentData>> kept_blocks;
   for (auto& sd : shared_blocks_) {
     if (sd->counter_value() > 0) {
       kept_blocks.push_back(std::move(sd));
     } else {
+      freed_memory = true;
       sd.reset();
     }
   }
   shared_blocks_ = std::move(kept_blocks);
-}
-
-CudaIPCSentData::~CudaIPCSentData() {
-  ReturnRefCounter(handle_, offset_);
-#ifndef __HIP_PLATFORM_HCC__
-  try {
-    at::cuda::CUDAGuard device_guard(device_.index());
-    cudaEventDestroy(event_);
-  } catch (...) { /* No throw */
-  }
-#endif
+  return freed_memory;
 }
 
 void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
@@ -119,27 +106,51 @@ void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
   }
 }
 
-bool CudaIPCHaveRefCounter() {
-  std::lock_guard<std::mutex> lock(
-      cuda_ipc_global_entities.ref_counters_mutex_);
-  return (bool)cuda_ipc_global_entities.next_available_ref_counters_file_;
+} // namespace
+
+CudaIPCSentData::~CudaIPCSentData() {
+  ReturnRefCounter(handle_, offset_);
+#ifndef __HIP_PLATFORM_HCC__
+  try {
+    at::cuda::CUDAGuard device_guard(device_.index());
+    cudaEventDestroy(event_);
+  } catch (...) { /* No throw */
+  }
+#endif
 }
 
-void CudaIPCCreateRefCounter(
-    const std::string handle,
-    uint64_t size,
-    at::DataPtr data_ptr) {
-  auto rc = std::make_shared<CudaIPCRefCountersFile>(
-      handle, size, std::move(data_ptr));
-  std::lock_guard<std::mutex> lock(
-      cuda_ipc_global_entities.ref_counters_mutex_);
-  cuda_ipc_global_entities.ref_counters_files_[handle] = rc;
-  cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
+int64_t CudaIPCSentData::counter_value() {
+  return *counter_ptr_;
 }
 
 at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
-  if (!CudaIPCHaveRefCounter()) {
-    AT_ERROR("GetNewRefCountedSentData() requires initialised IPCRefCounter");
+  {
+    std::lock_guard<std::mutex> lock(
+        cuda_ipc_global_entities.ref_counters_mutex_);
+    if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
+      static std::random_device rd;
+      std::string ref_counter_handle = "/torch_";
+#ifdef _MSC_VER
+      ref_counter_handle += std::to_string(GetCurrentProcessId());
+#else
+      ref_counter_handle += std::to_string(getpid());
+#endif
+      ref_counter_handle += "_";
+      ref_counter_handle += std::to_string(rd());
+
+      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
+      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+          ref_counter_handle.c_str(),
+          flags,
+          sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+          nullptr);
+      auto rc = std::make_shared<CudaIPCRefCountersFile>(
+          ref_counter_handle,
+          torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+          std::move(sptr));
+      cuda_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
+      cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
+    }
   }
   cuda_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
   auto sent_data = new CudaIPCSentData(
@@ -156,10 +167,20 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
 
+bool CudaIPCCollect() {
+  bool freed_memory = cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
+  if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
+    cuda_ipc_global_entities.safe_clean_current_file();
+  }
+  return freed_memory;
+}
+
 } // namespace torch
 
 namespace c10 {
+namespace {
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
+} // namespace c10
 
 #endif

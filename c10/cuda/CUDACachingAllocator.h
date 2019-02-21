@@ -15,7 +15,7 @@ namespace c10 {
 class C10_CUDA_API FreeMemoryCallback {
  public:
   FreeMemoryCallback() = default;
-  virtual void Execute() = 0;
+  virtual bool Execute() = 0;
 };
 
 C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);

@@ -4,10 +4,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #endif
 
-#ifdef _MSC_VER
-#include <windows.h>
-#endif
-
 #include <random>
 
 static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
@@ -249,15 +245,6 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
 
-    if (!torch::CudaIPCHaveRefCounter())
-    {
-      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
-      std::string ref_counter_handle = THPStorage_(__newHandle)();
-      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
-          ref_counter_handle.c_str(), flags, sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, nullptr);
-      torch::CudaIPCCreateRefCounter(ref_counter_handle, torch::CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
-    }
-
     // Put Storage Data behind new ref counting context
     at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(storage->data(), storage->device());
     auto old_data_ptr = storage->set_data_ptr(std::move(sent_data_ptr));
@@ -272,7 +259,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 #ifndef __HIP_PLATFORM_HCC__
     THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
 #else
-    // Pass any uninitialized data, we are not going to use it.
+    // ipc_event_handle unused in storage receiver, we can leave it uninitialized.
 #endif
 
     _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
@@ -305,7 +292,7 @@ static PyObject * THPStorage_(releaseIPCCounter)(PyObject *_unused, PyObject *ar
   THPUtils_assert(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
   PyObject *_ref_counter = PyTuple_GET_ITEM(args, 0);
   PyObject *_ref_counter_offset = PyTuple_GET_ITEM(args, 1);
-  if (!(_ref_counter != Py_None && PyBytes_Check(_ref_counter) &&
+  if (!(PyBytes_Check(_ref_counter) &&
         THPUtils_checkLong(_ref_counter_offset))) {
     THPUtils_invalidArguments(
         args,
@@ -360,10 +347,8 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   PyObject *_ref_counter_offset = PyTuple_GET_ITEM(args, 5);
   PyObject *_event_handle = PyTuple_GET_ITEM(args, 6);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
-        (_handle != Py_None && PyBytes_Check(_handle)) &&
-        (_ref_counter != Py_None && PyBytes_Check(_ref_counter)) &&
-        (_event_handle != Py_None && PyBytes_Check(_event_handle)) &&
-        THPUtils_checkLong(_offset_bytes) &&
+        PyBytes_Check(_handle) && PyBytes_Check(_ref_counter) &&
+        PyBytes_Check(_event_handle) && THPUtils_checkLong(_offset_bytes) &&
         THPUtils_checkLong(_ref_counter_offset))) {
     THPUtils_invalidArguments(
         args,
@@ -390,7 +375,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   cudaIpcOpenEventHandle(&event, *ipc_event_handle);
   cudaEventSynchronize(event);
 #else
-  // Already syncronized inside producer stream
+  // Already synchronized inside producer stream
 #endif
 
   std::string s_handle = THPStorage_(bytesAsHandleString)(_handle);
@@ -412,7 +397,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         // finished (otherwise another process may reuse memory and corrupt
         // data)
 
-        // TODO: Instead of cudaStreamSynchronize it is possibble to add Stream
+        // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance impact)
         cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));
 
