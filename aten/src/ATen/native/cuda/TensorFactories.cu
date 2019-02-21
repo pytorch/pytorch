@@ -45,6 +45,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
+  check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
