@@ -30,7 +30,7 @@ namespace CUDACachingAllocator {
 //   split. If no block is found, the allocator will delegate to cudaMalloc.
 // - If the cudaMalloc fails, the allocator will free all cached blocks that
 //   are not split and retry the allocation.
-// - Large (>1MB) and small allocations are stored in separate free lists.
+// - Large (>1MB) and small allocations are stored in separate pools.
 //   Small requests are packed into 2MB buffers. Large requests will use the
 //   smallest available free block or allocate a new block using cudaMalloc.
 //   To reduce fragmentation, requests between 1MB and 10MB will allocate and
@@ -332,7 +332,7 @@ struct THCCachingAllocator
     return basePtr;
   }
 
-  // Accumulates sizes of all memory blocks for given device in given free list
+  // Accumulates sizes of all memory blocks for given device in given pool
   void cacheInfoAux(BlockPool& blocks, int dev_id, size_t* total, size_t* largest)
   {
     Block search_key(dev_id, 0, 0);
@@ -368,7 +368,7 @@ struct THCCachingAllocator
     block->stream_uses.insert(stream);
   }
 
-  /** moves a block into the free block list */
+  /** moves a block into a pool of cached free blocks */
   void free_block(Block* block)
   {
     AT_ASSERT(!block->allocated && block->event_count == 0);
