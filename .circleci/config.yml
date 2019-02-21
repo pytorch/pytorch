@@ -1122,13 +1122,13 @@ jobs:
   pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
     <<: *pytorch_linux_build_defaults
 
   pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
