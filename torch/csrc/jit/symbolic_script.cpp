@@ -31,6 +31,7 @@ const std::vector<std::string> functions = {
 
         def expand(self,
                    size: List[int],
+                   *,
                    implicit: bool=False):
             self_size = self.size()
             def backward(grad_output):
@@ -415,11 +416,12 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
-  if (!schema_name_suffix.empty()
-      && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
-    schema_string.replace(schema_string.find(schema_name),
-                          schema_name.length(),
-                          schema_name.substr(0, pos));
+  if (!schema_name_suffix.empty() &&
+      schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
+    schema_string.replace(
+        schema_string.find(schema_name),
+        schema_name.length(),
+        schema_name.substr(0, pos));
   }
   return schema_string;
 }
@@ -491,15 +493,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // JIT doesn't support keyword only arguments.
-    // Remove ' *,' in schema before looking up
-    // TODO: #16921 properly support keyword only arguments in JIT.
-    auto n = schema_str.find("*, ");
-    if (n != std::string::npos) {
-      schema_str = schema_str.erase(n, 3);
-    }
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
+
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
