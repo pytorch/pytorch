@@ -332,7 +332,6 @@ const std::vector<std::string> functions = {
                 else:
                     grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
-
             return torch.adaptive_avg_pool2d(self, output_size), backward
 
         def batch_norm(input : Tensor,
@@ -371,6 +370,11 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
+        def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
+            result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
+            def backward(grad):
+                return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
+            return result, backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
@@ -412,7 +416,7 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
   if (!schema_name_suffix.empty()
-      && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
+      && schema_name_suffix.find_first_not_of("0123456789") == std::string::npos) {
     schema_string.replace(schema_string.find(schema_name),
                           schema_name.length(),
                           schema_name.substr(0, pos));

@@ -806,7 +806,9 @@ if(USE_ROCM)
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
+    foreach(hcc_amdgpu_target ${HCC_AMDGPU_TARGET})
+      list(APPEND HIP_HCC_FLAGS -amdgpu-target=${hcc_amdgpu_target})
+    endforeach()
 
     set(Caffe2_HIP_INCLUDE
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
@@ -1026,6 +1028,15 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # not be inline and instead route back to the statically-linked protobuf.
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
+  endif()
+  # Set the ONNX_ML flag for ONNX submodule
+  if (DEFINED ENV{ONNX_ML})
+    set(ONNX_ML $ENV{ONNX_ML})
+    if (ONNX_ML)
+      add_definitions(-DONNX_ML=1)
+    endif()
+  else()
+    set(ONNX_ML OFF)
   endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
