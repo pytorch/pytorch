@@ -5,9 +5,9 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -210,7 +210,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
     return toSugaredValue(member, m, loc, /*is_constant=*/true);
   }
 };
-
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup)

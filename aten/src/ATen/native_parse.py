@@ -66,6 +66,9 @@ def type_argument_translations(arg):
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
+    # Enables str by translating to legacy std::string.
+    elif t == 'str':
+        t = 'std::string'
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)

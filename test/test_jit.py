@@ -10328,6 +10328,19 @@ a")
         m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
         self.assertEqual(m("c"), torch.tensor([103]))
 
+        def test_tensor_import_export(self):
+        @torch.jit.script
+        def foo(x):
+            a = torch.tensor(1)
+            b = torch.tensor([1, 2])
+            c = [a, b]
+            return c
+
+        self.run_pass('constant_propagation', foo.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", foo.graph)
+        self.getExportImportCopy(m)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
