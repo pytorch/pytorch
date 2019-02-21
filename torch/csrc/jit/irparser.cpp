@@ -262,15 +262,11 @@ void IRParser::parseBlocks(Node* parentNode) {
   L.expect(TK_DEDENT);
 }
 
-static bool isNumber(const std::string& s) {
-  return s.find_first_not_of("0123456789") == std::string::npos;
-}
-
 void IRParser::parseBlockInputs(Block* b) {
   parseList('(', ',', ')', [&] {
     VarWithType v = parseVarWithType();
-    // If the name is a number, don't use it
-    std::string uniq_name = isNumber(v.name) ? "" : v.name;
+    // If the name isn't valid, don't use it
+    std::string uniq_name = Value::isValidName(v.name) ? v.name : "";
     vmap[v.name] = b->addInput(uniq_name);
     vmap[v.name]->setType(parseType(v.type));
   });
@@ -365,8 +361,8 @@ void IRParser::parseOperator(Block* b) {
 void IRParser::parseGraphInputs() {
   parseList('(', ',', ')', [&] {
     VarWithType v = parseVarWithType();
-    // If the name is a number, don't use it
-    std::string uniq_name = isNumber(v.name) ? "" : v.name;
+    // If the name isn't valid, don't use it
+    std::string uniq_name = Value::isValidName(v.name) ? v.name : "";
     vmap[v.name] = g->addInput(uniq_name);
     vmap[v.name]->setType(parseType(v.type));
   });
