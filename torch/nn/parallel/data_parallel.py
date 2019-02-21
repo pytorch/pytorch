@@ -191,10 +191,10 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
     output_device = _get_device_index(output_device, True)
-    src_device_obj = torch.device("cuda:{}".format(self.device_ids[0]))
+    src_device_obj = torch.device("cuda:{}".format(device_ids[0]))
 
-    for t in chain(self.module.parameters(), self.module.buffers()):
-        if t.device != self.src_device_obj:
+    for t in chain(module.parameters(), module.buffers()):
+        if t.device != src_device_obj:
             raise RuntimeError("module must have its parameters and buffers "
                                "on device {} (device_ids[0]) but found one of "
                                "them on device: {}".format(src_device_obj, t.device))

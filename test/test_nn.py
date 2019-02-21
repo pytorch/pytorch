@@ -3392,10 +3392,8 @@ class TestNN(NNTestCase):
             yield
 
         def test(inner_m, dp_device, inp, device_ids, should_fail):
-            dpm = nn.DataParallel(inner_m, device_ids)
-
             if device_ids is None:
-                device_ids = dpm.device_ids
+                device_ids = list(range(torch.cuda.device_count()))
 
             if isinstance(device_ids[0], torch.device):
                 expect_device = device_ids[0]
@@ -3403,16 +3401,22 @@ class TestNN(NNTestCase):
                 expect_device = torch.device("cuda:{}".format(device_ids[0]))
 
             if should_fail:
-                assert_correct = self.assertRaisesRegex(RuntimeError,
-                                                        error_msg.format(expect_device))
+                assert_correct = lambda: self.assertRaisesRegex(RuntimeError,
+                                                                error_msg.format(expect_device))
             else:
-                assert_correct = dummy_ctx_manager()
+                assert_correct = dummy_ctx_manager
 
+            # test DataParallel module
+            dpm = nn.DataParallel(inner_m, device_ids)
             if dp_device is not None:
                 dpm = dpm.to(dp_device)
 
-            with assert_correct:
+            with assert_correct():
                 dpm(inp)
+
+            # test functional
+            with assert_correct():
+                nn.parallel.data_parallel(inner_m.to(dp_device), inp, device_ids)
 
         test(l.to('cpu'), None, inp, None, should_fail=True)
         test(l.cuda(1), None, inp_cuda0, None, should_fail=True)
