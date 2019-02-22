@@ -96,6 +96,10 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const ArrayRef<double>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
@@ -113,6 +117,21 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
+
+template<typename T>
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<T>& value) {
+  AT_ERROR("Tracing generic lists currently not supported!");
+}
+template<typename K, typename V>
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::unordered_map<K, V>& value) {
+  AT_ERROR("Tracing generic dicts currently not supported!");
+}
 
 template <size_t N>
 void addInputs(Node* n, const char* name, std::array<bool, N> value) {
