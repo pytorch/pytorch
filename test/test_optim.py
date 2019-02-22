@@ -66,11 +66,11 @@ class TestOptim(TestCase):
                 y = grad[1]
                 v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
-            if sparse_grad:
-                with torch.no_grad():
+            with torch.no_grad():
+                if sparse_grad:
                     params.grad = x
-            else:
-                params.grad.data = x.to_dense()
+                else:
+                    params.grad = x.to_dense()
             return loss
 
         for i in range(2000):
