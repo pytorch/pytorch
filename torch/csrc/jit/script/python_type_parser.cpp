@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/script/python_type_parser.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/tree_views.h>
-#include <torch/csrc/jit/script/type_parser.h>
 
 namespace torch {
 namespace jit {
