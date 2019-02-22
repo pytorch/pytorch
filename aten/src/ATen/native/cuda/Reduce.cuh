@@ -265,6 +265,7 @@ struct ReduceOp {
     std::is_convertible<arg_t, out_scalar_t>::value
     && std::is_convertible<out_scalar_t, arg_t>::value;
 
+  static constexpr float acc_buffer_multiplier = (float)sizeof(arg_t) / sizeof(out_scalar_t);
 
   ops_t ops;
   arg_t ident;
@@ -273,19 +274,21 @@ struct ReduceOp {
   OutputCalculator output_calc;
   const void* src;
   void* dst;
+  void* buf;
   void* buffer;
   int* semaphores;
   bool accumulate;
   bool final_output;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, void* dst, void* buffer, int* semaphores, arg_t ident)
+           const void* src, void* dst, void* buf, void* buffer, int* semaphores, arg_t ident)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
     , output_calc(output_calc)
     , src(src)
     , dst(dst)
+    , buf(buf)
     , buffer(buffer)
     , semaphores(semaphores)
     , ident(ident) {
@@ -311,13 +314,29 @@ struct ReduceOp {
     }
 
     auto out = (out_scalar_t*)((char*)dst + base_offsets[0]);
+    arg_t* acc = nullptr;
+    if (buf != nullptr) {
+      acc = (arg_t*)((char*)buf + (int)(base_offsets[0] * acc_buffer_multiplier));
+    }
+
     if (config.should_global_reduce()) {
-      value = global_reduce(value, out, shared_memory);
+      value = global_reduce(value, out, acc, shared_memory);
     } else if (config.should_store(output_idx)) {
-      if (accumulate) {
-        value = accumulate_in_output<can_accumulate_in_output>(out, value);
+      if (acc == nullptr) {
+        if (accumulate) {
+          value = accumulate_in_output<can_accumulate_in_output>(out, value);
+        }
+        *out = project_if_necessary<can_accumulate_in_output>(value);
+      } else {
+        if (accumulate) {
+          value = ops.combine(*acc, value);
+        }
+        if (final_output) {
+          *out = ops.project(value);
+        } else {
+          *acc = value;
+        }
       }
-      *out = project_if_necessary<can_accumulate_in_output>(value);
     }
   }
 
@@ -449,7 +468,7 @@ struct ReduceOp {
     return ops.project(value);
   }
 
-  C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out, char* shared_memory) const {
+  C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out, arg_t* acc, char* shared_memory) const {
     arg_t* reduce_buffer = (arg_t*)buffer;
 
     bool should_store = config.should_store(config.output_idx());
@@ -486,10 +505,21 @@ struct ReduceOp {
         value = block_x_reduce(value, shared_memory);
       }
       if (should_store) {
-        if (accumulate) {
-          value = accumulate_in_output<can_accumulate_in_output>(out, value);
+        if (acc == nullptr) {
+          if (accumulate) {
+            value = accumulate_in_output<can_accumulate_in_output>(out, value);
+          }
+          *out = project_if_necessary<can_accumulate_in_output>(value);
+        } else {
+          if (accumulate) {
+            value = ops.combine(*acc, value);
+          }
+          if (final_output) {
+            *out = ops.project(value);
+          } else {
+            *acc = value;
+          }
         }
-        *out = project_if_necessary<can_accumulate_in_output>(value);
       }
     }
 
@@ -508,8 +538,38 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+struct AccumulationBuffer {
+  AccumulationBuffer() {}
+
+  AccumulationBuffer(size_t acc_stride, size_t out_stride, char* out_ptr, int64_t size) {
+    out_ptr_ = (char*)out_ptr;
+    if (out_stride > acc_stride) {
+      acc_ptr_ = (char*)out_ptr;
+      size_factor_ = 1;
+    } else {
+      auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
+      buffer_ = allocator.allocate(size);
+      acc_ptr_ = (char*)buffer_.get();
+      size_factor_ = float(out_stride) / acc_stride;
+    }
+  }
+
+  char* get_acc_slice(char* out_ptr) {
+    if (size_factor_ == -1) {
+      return nullptr;
+    }
+    return acc_ptr_ + (int)((out_ptr - out_ptr_) * size_factor_);
+  }
+
+  char* acc_ptr_ = nullptr;
+  char* out_ptr_ = nullptr;
+  float size_factor_ = -1;
+  at::DataPtr buffer_;
+};
+
 template <typename scalar_t, typename out_scalar_t, typename ops_t, typename ident_t=double>
-inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0) {
+inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
+                              std::shared_ptr<AccumulationBuffer> acc_buf_ptr={}) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
 
   using traits = binary_function_traits<decltype(&ops_t::reduce)>;
@@ -518,15 +578,34 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     std::is_convertible<arg_t, out_scalar_t>::value;
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
-  if (can_accumulate_in_output && !can_use_32bit_indexing) {
+
+  // The acc_buf_ptr is a shared pointer. It is create at the first entrance and
+  // reused by all recursive function calls.
+  if (acc_buf_ptr.get() == NULL) {
+    // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
+    // when accumulation in output is not possible. 
+    if (!can_accumulate_in_output && !can_use_32bit_indexing) {
+      // TODO: Allocation should consider non-packed output tensor
+      acc_buf_ptr = std::make_shared<AccumulationBuffer>(sizeof(arg_t),
+                                                         sizeof(out_scalar_t),
+                                                         (char*) iter.data_ptr(0),
+                                                         iter.num_output_elements() * sizeof(arg_t));
+    } else {
+      acc_buf_ptr = std::make_shared<AccumulationBuffer>();
+    }
+  }
+
+  // if (can_accumulate_in_output && !can_use_32bit_indexing) {
+  if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, ops, ident);
+      gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, ops, ident, acc_buf_ptr);
     }
     return;
   }
 
   char* out_data = (char*)iter.data_ptr(0);
   const char* in_data = (char*)iter.data_ptr(1);
+  char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
   // Start by assuming that each thread handles a single output and all
   // the inputs for that output.
@@ -593,42 +672,24 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  if (can_use_32bit_indexing) {
-    auto output_calc = make_output_calculator<uint32_t>(iter);
-    auto input_calc = make_input_calculator<uint32_t>(iter);
-    auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t>(
-        ops,
-        config,
-        input_calc,
-        output_calc,
-        in_data,
-        out_data,
-        buffer.get(),
-        (int*)semaphores.get(),
-        ident);
-    reduce.accumulate = iter.should_accumulate();
-    reduce.final_output = iter.is_final_output();
+  assert(can_use_32bit_indexing);
+  auto output_calc = make_output_calculator<uint32_t>(iter);
+  auto input_calc = make_input_calculator<uint32_t>(iter);
+  auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t>(
+      ops,
+      config,
+      input_calc,
+      output_calc,
+      in_data,
+      out_data,
+      acc_data,
+      buffer.get(),
+      (int*)semaphores.get(),
+      ident);
+  reduce.accumulate = iter.should_accumulate();
+  reduce.final_output = iter.is_final_output();
 
-    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
-  } else {
-    auto output_calc = make_output_calculator<uint64_t>(iter);
-    auto input_calc = make_input_calculator<uint64_t>(iter);
-    auto reduce = ReduceOp<scalar_t, ops_t, uint64_t, out_scalar_t>(
-        ops,
-        config,
-        input_calc,
-        output_calc,
-        in_data,
-        out_data,
-        buffer.get(),
-        (int*)semaphores.get(),
-        ident);
-    AT_ASSERT(!iter.should_accumulate());
-    reduce.accumulate = false;
-    reduce.final_output = true;
-
-    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
-  }
+  launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
 }
 
 }} // namespace at::native
