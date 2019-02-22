@@ -154,8 +154,8 @@
   matches_jit_signature: True
   variants: method
 
-- func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
+- func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) output) -> Tensor(a!)
+  # matches_jit_signature: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor

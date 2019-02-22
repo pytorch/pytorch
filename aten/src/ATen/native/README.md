@@ -112,6 +112,10 @@ argument name you provide, and a rename of an argument name is considered a BC-b
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
 least). For more details please see the section on `variants`.
 
+As a convention we use 'out' to indicate an output argument. This aligns with the
+Python bindings. Even if a function might not be used in the Python bindings, we
+still advise to follow this convention.
+
 TODO: Do argument names affect Python keyword arguments?
 
 **Defaults.** Any suffix of arguments can have a default value defined;
