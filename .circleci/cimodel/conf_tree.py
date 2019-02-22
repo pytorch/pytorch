@@ -1,10 +1,19 @@
-import colorsys
-import sys
-
-from pygraphviz import AGraph
+#!/usr/bin/env python3
 
 
-class ConfigNode:
+class Ver(object):
+    """
+    Represents a product with a version number
+    """
+    def __init__(self, name, version=""):
+        self.name = name
+        self.version = version
+
+    def __str__(self):
+        return self.name + self.version
+
+
+class ConfigNode(object):
     def __init__(self, parent, node_name):
         self.parent = parent
         self.node_name = node_name
@@ -49,50 +58,40 @@ class ConfigNode:
             return None
 
 
-def rgb2hex(rgb_tuple):
-    def toHex(f):
-        return "%02x" % int(f * 255)
+def dfs_recurse(
+        node,
+        leaf_callback=lambda x: None,
+        discovery_callback=lambda x, y, z: None,
+        child_callback=lambda x, y: None,
+        sibling_index=0,
+        sibling_count=1):
 
-    return "#" + "".join(map(toHex, list(rgb_tuple)))
+    discovery_callback(node, sibling_index, sibling_count)
+
+    node_children = node.get_children()
+    if node_children:
+        for i, child in enumerate(node_children):
+            child_callback(node, child)
+
+            dfs_recurse(
+                child,
+                leaf_callback,
+                discovery_callback,
+                child_callback,
+                i,
+                len(node_children),
+            )
+    else:
+        leaf_callback(node)
 
 
 def dfs(toplevel_config_node):
 
-    dot = AGraph()
-
     config_list = []
 
-    MAX_DEPTH = 7  # FIXME traverse once beforehand to find max depth
+    def leaf_callback(node):
+        config_list.append(node)
 
-    def dfs_recurse(node):
+    dfs_recurse(toplevel_config_node, leaf_callback)
 
-        this_node_key = node.get_node_key()
-
-        depth = node.get_depth()
-
-        rgb_tuple = colorsys.hsv_to_rgb(depth / float(MAX_DEPTH), 0.5, 1)
-        hex_color = rgb2hex(rgb_tuple)
-
-        dot.add_node(
-            this_node_key,
-            label=node.get_label(),
-            style="filled",
-            color="black",
-            # fillcolor=hex_color + ":orange",
-            fillcolor=hex_color,
-        )
-
-        node_children = node.get_children()
-
-        if node_children:
-            for child in node_children:
-
-                child_node_key = child.get_node_key()
-                dot.add_edge((this_node_key, child_node_key))
-
-                dfs_recurse(child)
-        else:
-            config_list.append(node)
-
-    dfs_recurse(toplevel_config_node)
-    return config_list, dot
+    return config_list
