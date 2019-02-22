@@ -157,7 +157,8 @@ def process_definition(defn, declarations_by_signature):
                 not_differentiable_args_names += derivative['var_names']
             else:
                 derivatives.append(derivative)
-        args_with_derivatives = list(filter(lambda x: x['name'] not in not_differentiable_args_names, args_with_derivatives))
+        args_with_derivatives = list(filter(lambda x: x['name'] not in not_differentiable_args_names,
+                                            args_with_derivatives))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
