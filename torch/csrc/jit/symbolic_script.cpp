@@ -31,6 +31,7 @@ const std::vector<std::string> functions = {
 
         def expand(self,
                    size: List[int],
+                   *,
                    implicit: bool=False):
             self_size = self.size()
             def backward(grad_output):
@@ -491,15 +492,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // JIT doesn't support keyword only arguments.
-    // Remove ' *,' in schema before looking up
-    // TODO: #16921 properly support keyword only arguments in JIT.
-    auto n = schema_str.find("*, ");
-    if (n != std::string::npos) {
-      schema_str = schema_str.erase(n, 3);
-    }
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
+
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
