@@ -99,4 +99,4 @@ class Independent(Distribution):
 
     def __repr__(self):
         string = '{}({}, {})'
-        return string.format(self.__class__.__name__, self.reinterpreted_batch_dims, self.base_dist)
+        return string.format(self.__class__.__name__, self.base_dist, self.reinterpreted_batch_dims)
