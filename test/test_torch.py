@@ -2476,8 +2476,13 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
         # test boolean tensor
+<<<<<<< HEAD
         res1 = torch.ones(1, 2, dtype=torch.bool)
         expected = torch.tensor([[True, True]], dtype=torch.bool)
+=======
+        res1 = torch.ones([1,2], dtype=torch.bool)
+        expected = torch.tensor([True, True], dtype=torch.bool)
+>>>>>>> Added tests for a bool tensor (CPU)
         self.assertEqual(res1, expected)
 
     def test_ones_like(self):
@@ -2864,13 +2869,21 @@ class _TestTorchMixin(object):
     # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
     # will be done, these test cases will be moved down to test_tensor_factories_empty test
     def test_tensor_factories_empty_bool(self):
+<<<<<<< HEAD
         expectedShape = (1, 2)
+=======
+        expectedShape = (1,2)
+>>>>>>> Added tests for a bool tensor (CPU)
         test = torch.empty(expectedShape, dtype=torch.bool)
         self.assertEqual(expectedShape, test.shape)
         self.assertEqual(expectedShape, torch.empty_like(test).shape)
 
         test = torch.full(expectedShape, True, dtype=torch.bool)
+<<<<<<< HEAD
         self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+=======
+        self.assertEqual(test, torch.tensor([True, True], dtype=torch.bool))
+>>>>>>> Added tests for a bool tensor (CPU)
         self.assertEqual(expectedShape, test.shape)
         self.assertEqual(expectedShape, torch.full_like(test, True).shape)
 
