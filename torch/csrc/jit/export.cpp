@@ -118,12 +118,12 @@ class EncoderBase {
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::vector<at::Tensor>& initializers = {});
+      const std::unordered_map<std::string, at::Tensor>& initializers = {});
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::vector<at::Tensor>& initializers = {});
+      const std::unordered_map<std::string, at::Tensor>& initializers = {});
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -209,14 +209,14 @@ void EncoderBase::EncodeValueInfo(
 void EncoderBase::EncodeGraph(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers) {
+    const std::unordered_map<std::string, at::Tensor>& initializers) {
   EncodeBlock(graph_proto, graph->block(), initializers);
 }
 
 void EncoderBase::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
-    const std::vector<at::Tensor>& initializers) {
+    const std::unordered_map<std::string, at::Tensor>& initializers) {
   AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
@@ -303,16 +303,10 @@ void EncoderBase::EncodeBlock(
       EncodeBlock(false_g, node->blocks()[1]);
     }
   }
-  auto num_initializers = initializers.size();
-  AT_ASSERT(block->inputs().size() >= num_initializers);
-  size_t inputs_count = block->inputs().size() - num_initializers;
-  for (auto& tensor : initializers) {
-    // TODO: stop using positions to determine which initializers
-    // match to which inputs
-    std::string name = graph_proto->input(inputs_count++).name();
+  for (auto& name_tensor_pair : initializers) {
     auto p = graph_proto->add_initializer();
-    p->set_name(name);
-    EncodeTensor(p, tensor, name);
+    p->set_name(name_tensor_pair.first);
+    EncodeTensor(p, name_tensor_pair.second, name_tensor_pair.first);
   }
 }
 
@@ -386,7 +380,7 @@ class GraphEncoder : public EncoderBase {
       const std::shared_ptr<Graph>& graph,
       int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
-      const std::vector<at::Tensor>& initializers,
+      const std::unordered_map<std::string, at::Tensor>& initializers,
       bool defer_weight_export,
       bool strip_doc);
 
@@ -408,7 +402,7 @@ GraphEncoder::GraphEncoder(
     const std::shared_ptr<Graph>& graph,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
-    const std::vector<at::Tensor>& initializers,
+    const std::unordered_map<std::string, at::Tensor>& initializers,
     bool defer_weight_export,
     bool strip_doc)
     : EncoderBase(operator_export_type, strip_doc),
@@ -858,7 +852,7 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers,
+    const std::unordered_map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
@@ -883,7 +877,7 @@ std::string pretty_print_onnx(
 // libtorch will be able to import the IR and play it back.
 std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers,
+    const std::unordered_map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
