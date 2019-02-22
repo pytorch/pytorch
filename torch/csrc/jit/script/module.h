@@ -75,16 +75,8 @@ struct Method {
   }
 
   void run(Stack& stack) {
-    std::cout << "The stack has " << stack.size() << " things\n";
-    for (auto i : stack) {
-      std::cout << i << "\n";
-    }
     for (auto input : member_inputs_) {
       push(stack, *input);
-    }
-    std::cout << "The stack has " << stack.size() << " things\n";
-    for (auto i : stack) {
-      std::cout << i << "\n";
     }
     get_executor().run(stack);
   }
@@ -137,31 +129,16 @@ struct Method {
     // add it as a new parameter
     member_inputs_.push_back(slot);
     member_input_index[slot] = graph()->inputs().size();
-    std::cout << "Param added!\n";
-    std::cout << member_inputs_.size() << "\n";
     return graph()->addInput();
   }
-  //
-  // TORCH_API Value* add_attribute(TypePtr type, IValue* slot) {
-  //   auto it = member_input_index.find(slot);
-  //   if (it != member_input_index.end()) {
-  //     return graph()->inputs().at(it->second);
-  //   }
-  //   member_inputs_.push_back(slot);
-  //   member_input_index[slot] = graph()->inputs().size();
-  //   return graph()->addInput()->setType(type);
-  // }
 
-  TORCH_API Value* get_or_add_input(TypePtr type, IValue* slot) {
+  TORCH_API Value* get_or_add_attribute(TypePtr type, IValue* slot) {
     auto it = member_input_index.find(slot);
     if (it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
     }
     member_inputs_.push_back(slot);
     member_input_index[slot] = graph()->inputs().size();
-    std::cout << "Input added!\n";
-    std::cout << *slot << "\n";
-    std::cout << member_inputs_.size() << "\n";
     return graph()->addInput()->setType(type);
   }
 
@@ -354,13 +331,11 @@ struct Method {
   // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
-  // std::vector<at::Tensor*> member_inputs;
   std::vector<IValue*> member_inputs_;
 
   // map from a at::Tensor* in member_inputs to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
   std::unordered_map<IValue*, size_t> member_input_index;
-  // std::unordered_map<IValue*, size_t> attributes_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.
@@ -390,12 +365,6 @@ struct NamedModule {
   std::shared_ptr<Module> module;
 };
 
-// struct NamedInput {
-//   NamedInput(std::string name) : name(name) {}
-//
-//   const std::string name;
-// };
-
 struct NamedAttribute {
   NamedAttribute(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
@@ -417,26 +386,6 @@ struct NamedAttribute {
   bool is_parameter;
   std::unique_ptr<IValue> ivalue_;
 };
-
-//  struct NamedParameter {
-//   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
-//       : name(std::move(name)),
-//         is_buffer(is_buffer),
-//         parameter(torch::make_unique<at::Tensor>(std::move(tensor))) {}
-//
-//   const std::string name;
-//   bool is_buffer; // buffers are part of the module state but
-//                   // are not modified by optimizers during SGD
-//   at::Tensor* slot() const {
-//     return parameter.get();
-//   }
-//
-//  private:
-//   // the extra level of indirection allows Methods to safely store pointers
-//   // to the slots where parameters are kept while also allow parameters
-//   // to be reassigned
-//   std::unique_ptr<at::Tensor> parameter;
-// };
 
 struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);

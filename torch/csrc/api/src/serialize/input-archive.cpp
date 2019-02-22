@@ -28,8 +28,7 @@ void InputArchive::read(
   // clang-format off
   auto read_tensor = read_param->slot()->toTensor();
   AT_CHECK(
-      true,
-      // read_tensor->is_buffer == is_buffer, // TODO: fix
+      read_param->is_parameter == !is_buffer,
       "Expected deserialized tensor for key '", key,
       "' to ", is_buffer ? "not " : "", "be a buffer, but it was not");
   // clang-format on

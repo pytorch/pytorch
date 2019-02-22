@@ -674,7 +674,7 @@ void ScriptModuleSerializer::convertParameter(
     const script::NamedAttribute& param,
     torch::ParameterDef* param_def) {
   param_def->set_name(param.name_);
-  param_def->set_is_buffer(true); // TODO fix
+  param_def->set_is_buffer(!param.is_parameter);
   param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
 

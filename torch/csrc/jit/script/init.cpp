@@ -283,7 +283,8 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
     if (auto value = module->find_attribute(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_input(value->type_, value->slot()));
+      return std::make_shared<SimpleValue>(
+          m.get_or_add_attribute(value->type_, value->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -718,7 +719,9 @@ void initJitScriptBindings(PyObject* module) {
               auto& p = parameters[i];
               py::tuple r(3);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()), true);
+                  p.key(),
+                  autograd::as_variable_ref(p->slot()->toTensor()),
+                  !p->is_parameter);
             }
             return result;
           })
