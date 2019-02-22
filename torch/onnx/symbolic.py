@@ -175,7 +175,7 @@ def _try_get_scalar_type(*args):
 # ONNX operator version
 # ---------------------------------------------------------------------
 
-# READ ME BEFORE EDITING _onnx_opset_version:
+# READ ME BEFORE EDITING _default_onnx_opset_version:
 #
 # The variable below controls which ONNX operator set version we are
 # targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
@@ -192,7 +192,19 @@ def _try_get_scalar_type(*args):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 9
+_default_onnx_opset_version = 9
+_export_onnx_opset_version = _default_onnx_opset_version
+_onnx_stable_opsets = [9]
+
+
+def _set_opset_version(opset_version):
+    global _export_onnx_opset_version
+    if opset_version == _export_onnx_opset_version:
+        return
+    if opset_version in _onnx_stable_opsets:
+        _export_onnx_opset_version = opset_version
+        return
+    raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
 
 # ---------------------------------------------------------------------
