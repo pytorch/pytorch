@@ -94,11 +94,6 @@ else:
 
 del _dl_flags
 
-try:
-    import torch._nvrtc
-except ImportError:
-    pass
-
 from torch._C import *
 
 __all__ += [name for name in dir(_C)
