@@ -135,6 +135,10 @@ void createTensorToParameterNameMap(
     const script::NamedAttribute& param = elem.value();
     result[param.slot()] = QualifiedName::create(prefix, param.name_);
   }
+  for (const auto& elem : module.get_attributes()) {
+    const script::NamedAttribute& param = elem.value();
+    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+  }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
         *elem->module, QualifiedName::create(prefix, elem.key()), result);
@@ -1003,7 +1007,7 @@ struct PythonPrintPass {
       const std::unordered_map<IValue*, QualifiedNamePtr>&
           extra_input_names) {
     std::vector<std::string> input_names = fmap(
-        method.params(),
+        method.member_inputs(),
         [&](IValue* slot) { return extra_input_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();

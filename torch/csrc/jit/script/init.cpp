@@ -726,8 +726,7 @@ void initJitScriptBindings(PyObject* module) {
           "_has_parameter",
           [](Module& self, const std::string& name) {
             if (auto r = self.find_parameter(name)) {
-              // return !r->is_buffer;
-              return true;
+              return r->is_parameter;
             }
             return false;
           })
@@ -735,8 +734,7 @@ void initJitScriptBindings(PyObject* module) {
           "_has_buffer",
           [](Module& self, const std::string& name) {
             if (auto r = self.find_parameter(name)) {
-              return true;
-              // return r->is_buffer;
+              return !r->is_parameter;
             }
             return false;
           })
@@ -896,7 +894,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("params", &Method::params)
+      .def("member_inputs", &Method::member_inputs)
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {

@@ -48,7 +48,7 @@ Value* try_emit_call_to(
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-  for (auto member : callee.params()) {
+  for (auto member : callee.member_inputs()) {
     if (!caller) {
       throw ErrorReport(loc)
           << " attempting to call a method with parameters/attributes"
