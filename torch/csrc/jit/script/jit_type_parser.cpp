@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/script/internal_type_parser.h>
+#include <torch/csrc/jit/script/jit_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <string>
@@ -150,8 +150,9 @@ std::pair<TypePtr, c10::optional<AliasInfo>> JitTypeParser::parseType() {
     auto key_type = parseType().first;
     L.expect(',');
     auto value_type = parseType().first;
-    alias_info = parseAliasAnnotation();
     L.expect(')');
+    alias_info = parseAliasAnnotation();
+
     value = DictType::create(key_type, value_type);
   } else {
     c10::optional<at::ScalarType> dtype = c10::nullopt;
