@@ -10,7 +10,6 @@
 #include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
-#include <ATen/SparseTensorImpl.h>
 #include <c10/util/Exception.h>
 
 #include <list>
