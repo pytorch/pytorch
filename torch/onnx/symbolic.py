@@ -701,7 +701,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # It is also supported for cases where the output size is a factor of the input size.
         # For these cases the stride and kernel size are uniform along all the indices of
         # the same dimension, which makes it possible to export it to ONNX.
-        
+
         # for MaxPool, GlobalMaxPool does not return indices,
         # so we try using max_poolxd_with_indices, and if it is not possible
         # (input is not CompleteTensorType or output size not factor of input size)
@@ -714,6 +714,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 return g.op("GlobalMaxPool", input), None
             return _unimplemented(name, 'input size not accesible')
         dim = input.type().sizes()[2:]
+
         # verify if output size % input size = 0 for all dim
         mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
         if mod != [0] * len(mod):
