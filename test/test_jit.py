@@ -10191,6 +10191,24 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_nn_LSTM(self):
+        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.x = torch.nn.LSTM(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+                return self.x(input)
+
+        eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
+        script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]
+
+        self.assertEqual(eager_out, script_out)
+
     def test_list_python_op(self):
         def python_list_op(lst):
             # type: (List[Tensor]) -> Tensor
