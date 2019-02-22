@@ -1,8 +1,8 @@
-This directory contains the usful tools.
+This directory contains the useful tools.
 
 
 ## build_android.sh
-This script is to build PyTorch/Caffe2 library for Android. Take following steps to start the build:
+This script is to build PyTorch/Caffe2 library for Android. Take the following steps to start the build:
 
 - set ANDROID_NDK to the location of ndk
 
