@@ -174,7 +174,8 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
