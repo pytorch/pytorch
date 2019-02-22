@@ -33,7 +33,18 @@ class TestDocCoverage(unittest.TestCase):
                     everything.add(name[0])
         everything -= set(whitelist)
         # get symbols in functional.py and _torch_docs.py
-        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate']
+        whitelist2 = ['product',
+                      'inf',
+                      'math',
+                      'reduce',
+                      'warnings',
+                      'torch',
+                      'annotate',
+                      'get_state',
+                      'set_state',
+                      'initial_seed',
+                      'manual_seed',
+                      'seed']
         everything2 = set()
         with open(pypath, 'r') as f:
             body = ast.parse(f.read()).body
@@ -46,8 +57,12 @@ class TestDocCoverage(unittest.TestCase):
                 if i.func.id != 'add_docstr':
                     continue
                 i = i.args[0]
-                if i.value.id != 'torch':
-                    continue
+                try:
+                    if i.value.id != 'torch':
+                        continue
+                except:
+                    if i.value.value.id != 'torch':
+                        continue
                 i = i.attr
                 everything2.add(i)
             for p in dir(torch.functional):

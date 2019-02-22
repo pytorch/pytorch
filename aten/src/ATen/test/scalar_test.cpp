@@ -59,8 +59,8 @@ TEST(TestScalar, TestScalar) {
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
        << bar.toDouble() << " " << what.isIntegral() << "\n";
-  auto& gen = at::globalContext().getDefaultGenerator(at::kCPU);
-  ASSERT_NO_THROW(gen.setCurrentSeed(std::random_device()()));
+  auto& gen = at::detail::getDefaultCPUGenerator();
+  ASSERT_NO_THROW(gen->setCurrentSeed(std::random_device()()));
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);

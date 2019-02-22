@@ -59,7 +59,7 @@ NO_HALF_TENSORTYPES = [torch.float,
 
 DOUBLE_TENSORTYPES = [torch.double]
 
-dtype2prec = {torch.float: 2.5e-5,
+dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
               torch.half: 1e-2}
 
@@ -476,7 +476,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # dtype can be None, so set precision in this way instead of a precision map
-            test_case.assertEqual(cpu_output, gpu_output, 1.5e-1 if dtype == torch.half else 4e-4)
+            test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.half else 4e-4)
 
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
@@ -2276,7 +2276,6 @@ class TestNN(NNTestCase):
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
         # check a known test example
-        torch.manual_seed(2147483647)
         device = torch.device("cuda") if cuda else torch.device("cpu")
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
         es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
@@ -2388,7 +2387,7 @@ class TestNN(NNTestCase):
                 es_weight_grad = es.weight.grad.data.to_dense()
 
             # We have more floating point error here because we are dealing with larger numbers
-            needed_prec = dtype2prec[dtype] * 10
+            needed_prec = dtype2prec[dtype] * 2
             self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)

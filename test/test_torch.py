@@ -6040,6 +6040,7 @@ class _TestTorchMixin(object):
         from common_utils import random_symmetric_pd_matrix
 
         def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+            torch.manual_seed(123)
             A = cast(random_symmetric_pd_matrix(*A_dims))
             L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))

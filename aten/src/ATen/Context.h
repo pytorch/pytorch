@@ -56,24 +56,7 @@ class CAFFE2_API Context {
     globalLegacyTHDispatch().registerDispatcher(b, s,
       LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
-
-  // PyTorch maintains a collection of default generators that get
-  // inialized once. The purpose of these default generator is to
-  // maintain a running state of the pseudo random number generation. 
-  // getDefaultGenerator gets the default generator for a particular
-  // device
-  Generator& getDefaultGenerator(Device device) {
-    initCUDAIfNeeded(device.type());
-    initHIPIfNeeded(device.type());
-    if(device.type() == kCPU) {
-      return at::detail::getDefaultCPUGenerator();
-    } else {
-      auto & generator = generator_registry[static_cast<int>(device.type())];
-      if(!generator)
-        AT_ERROR(DeviceTypeName(device.type()), " backend type not enabled.");
-      return *generator;
-    }
-  }
+  
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
@@ -237,11 +220,16 @@ static inline bool hasMAGMA() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  globalContext().getDefaultGenerator(Device(kCPU)).setCurrentSeed(seed);
+  detail::getDefaultCPUGenerator()->setCurrentSeed(seed);
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
-    globalContext().getDefaultGenerator(Device(kCUDA)).manualSeedAll(seed);
+    globalContext().lazyInitCUDA();
+    auto& generator = globalContext().generator_registry[static_cast<int>(DeviceType::CUDA)];
+    if(!generator) {
+      AT_ERROR(DeviceTypeName(DeviceType::CUDA), " backend type not enabled.");
+    }
+    generator->manualSeedAll(seed);
   }
 }
 

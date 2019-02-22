@@ -57,11 +57,12 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
   if(is_default_generator) {
-    self->cdata = &at::globalContext().getDefaultGenerator(device);
+    self->cdata = at::detail::getDefaultCPUGenerator().get();
     self->owner = false;
   }else{
-    if(device.type() == at::kCPU)
+    if(device.type() == at::kCPU) {
       self->cdata = new CPUGenerator();
+    }  
     self->owner = true;
   }
   return (PyObject*)self.release();

@@ -34,7 +34,6 @@ struct CAFFE2_API ${Type} : public TypeDefault {
 
   Allocator* allocator() const override;
   Device getDeviceFromPtr(void * data) const override;
-  std::unique_ptr<Generator> generator() const override;
   virtual Backend backend() const override;
 
   ${type_method_declarations}

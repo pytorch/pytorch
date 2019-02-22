@@ -1245,6 +1245,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
 
     def test_relaxed_one_hot_categorical_2d(self):
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         temp = torch.tensor([3.0], requires_grad=True)
@@ -1315,7 +1316,7 @@ class TestDistributions(TestCase):
         self.assertEqual(uniform.cdf(below_low).item(), 0)
         self.assertEqual(uniform.cdf(above_high).item(), 1)
 
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
@@ -1343,7 +1344,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self._gradcheck_log_prob(Cauchy, (loc, scale))
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
@@ -1369,7 +1370,7 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfCauchy(scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(HalfCauchy(1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
@@ -1393,7 +1394,7 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfNormal(50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of std
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
                          prec=1e-4)
@@ -1440,7 +1441,7 @@ class TestDistributions(TestCase):
         self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
                          prec=1e-4)
@@ -1490,7 +1491,7 @@ class TestDistributions(TestCase):
         self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self.assertEqual(LogisticNormal(mean_delta, std_delta).sample(),
                          torch.tensor([math.exp(1) / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1)),
@@ -1556,7 +1557,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
+        set_rng_seed(1) # see Note [Randomized statistical tests]
         self.assertEqual(Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
@@ -1701,7 +1702,7 @@ class TestDistributions(TestCase):
         self.assertEqual(m1.entropy(), m2.entropy())
 
     def test_lowrank_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(2)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         cov_factor = torch.randn(5, 2)
         cov_diag = torch.randn(5).abs()
@@ -1886,7 +1887,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(0)
+        set_rng_seed(0) # see Note [Randomized statistical tests]
         self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
@@ -1967,7 +1968,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
@@ -1977,7 +1978,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @skipIfRocm
     def test_gamma_gpu_sample(self):
-        set_rng_seed(0)
+        set_rng_seed(0) # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             a, b = torch.tensor([alpha]).cuda(), torch.tensor([beta]).cuda()
             self._check_sampler_sampler(Gamma(a, b),
@@ -2070,7 +2071,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor_sample(self):
-        set_rng_seed(5)  # see note [Randomized statistical tests]
+        set_rng_seed(1)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
             self._check_sampler_sampler(FisherSnedecor(df1, df2),
                                         scipy.stats.f(df1, df2),
@@ -2127,7 +2128,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
-        set_rng_seed(17)  # see Note [Randomized statistical tests]
+        set_rng_seed(6)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
                                         scipy.stats.t(df=df, loc=loc, scale=scale),
@@ -2198,7 +2199,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(2)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Beta(con1, con0),
                                         scipy.stats.beta(con1, con0),
@@ -2543,6 +2544,7 @@ class TestRsample(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_on_diagonal(self):
+        set_rng_seed(0) # see Note [Randomized statistical tests]
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
         for a0, a1, a2 in product(grid, grid, grid):
@@ -2655,7 +2657,7 @@ class TestRsample(TestCase):
             ]))
 
     def test_dirichlet_tangent_field(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
 
@@ -3639,7 +3641,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        set_rng_seed(0)
+        set_rng_seed(0) # see Note [Randomized statistical tests]
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)

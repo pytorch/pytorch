@@ -122,7 +122,7 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
-  CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, &globalContext().getDefaultGenerator(at::kCPU));
+  CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
   int64_t seed;
   {
     seed = generator->random64();

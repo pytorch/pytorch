@@ -6339,9 +6339,12 @@ Example::
 add_docstr(torch.Generator.set_state,
            r"""
 Generator.set_state(new_state)
+
 Sets the Generator state..
-Args:
+
+Arguments:
     new_state (torch.ByteTensor): The desired state
+
 Example::
     >>> g_cpu = torch.Generator()
     >>> g_cpu_default = torch.Generator(default=True)

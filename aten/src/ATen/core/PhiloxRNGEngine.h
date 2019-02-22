@@ -82,11 +82,11 @@ public:
   C10_HOST_DEVICE_INLINE philox_engine(unsigned long long seed = 67280421310721,
                                  unsigned long long subsequence = 0,
                                  unsigned long long offset = 0) {
-    key[0] = (unsigned int)seed;
-    key[1] = (unsigned int)(seed >> 32);
+    key[0] = static_cast<unsigned int>(seed);
+    key[1] = static_cast<unsigned int>(seed >> 32);
     counter = UINT4(0);
-    counter[2] = (unsigned int)(subsequence);
-    counter[3] = (unsigned int)(subsequence >> 32);
+    counter[2] = static_cast<unsigned int>(subsequence);
+    counter[3] = static_cast<unsigned int>(subsequence >> 32);
     STATE = 0;
     incr_n(offset);
   }
@@ -120,8 +120,8 @@ public:
   * Function that Skips N 128 bit numbers in a subsequence
   */
   C10_HOST_DEVICE_INLINE void incr_n(unsigned long long n) {
-    unsigned int nlo = (unsigned int)(n);
-    unsigned int nhi = (unsigned int)(n >> 32);
+    unsigned int nlo = static_cast<unsigned int>(n);
+    unsigned int nhi = static_cast<unsigned int>(n >> 32);
     counter[0] += nlo;
     // if overflow in x has occured, carry over to nhi
     if (counter[0] < nlo) {
@@ -176,8 +176,8 @@ private:
       return a*b;
     #else
       const unsigned long long product = static_cast<unsigned long long>(a) * b;
-      *result_high = (unsigned int)(product >> 32);
-      return (unsigned int)(product);
+      *result_high = static_cast<unsigned int>(product >> 32);
+      return static_cast<unsigned int>(product);
     #endif
   }
 

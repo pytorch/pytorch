@@ -15,7 +15,7 @@ void THNN_(RReLU_updateOutput)(
           bool inplace,
           at::Generator *generator)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator().get());
 
   scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
   scalar_t upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);

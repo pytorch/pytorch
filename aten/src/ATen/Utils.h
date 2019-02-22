@@ -138,8 +138,9 @@ template <typename T>
 static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
   if (!expr)
     expr = defaultValue;
-  if(auto result = dynamic_cast<T*>(expr))
-    return result;
+  T temp_gen;
+  if (temp_gen.getDevice().type() == expr->getDevice().type())
+    return static_cast<T*>(expr);
   AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 
@@ -149,8 +150,9 @@ static inline T * check_generator_with_default(Generator * expr, Generator * def
 */
 template <typename T>
 static inline T * check_generator(Generator * expr) {
-  if(auto result = dynamic_cast<T*>(expr))
-    return result;
+  T temp_gen;
+  if (temp_gen.getDevice().type() == expr->getDevice().type())
+    return static_cast<T*>(expr);
   AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 

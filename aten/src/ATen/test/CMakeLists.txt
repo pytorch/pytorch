@@ -22,7 +22,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/tbb_init_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS

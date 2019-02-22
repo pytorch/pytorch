@@ -77,7 +77,7 @@ void THFloatVector_normal_fill_AVX2(float *data,
                                     const float stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for AVX2 normal fill");
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator().get());
 
   const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
   const __m256 one = _mm256_set1_ps(1.0f);

@@ -9,7 +9,7 @@
 namespace at {
 
 class Context;
-struct ${name}Generator : public Generator {
+struct ${name}Generator : public CloneableGenerator<${name}Generator, Generator> {
   CAFFE2_API ${name}Generator(Context * context);
   CAFFE2_API ~${name}Generator();
 
@@ -17,8 +17,8 @@ struct ${name}Generator : public Generator {
   CAFFE2_API ${name}Generator& free();
 
   CAFFE2_API uint64_t seed();
-  CAFFE2_API uint64_t initialSeed();
-  CAFFE2_API ${name}Generator& manualSeed(uint64_t seed);
+  CAFFE2_API uint64_t getCurrentSeed() const override;
+  CAFFE2_API void setCurrentSeed(uint64_t seed) override;
   CAFFE2_API ${name}Generator& manualSeedAll(uint64_t seed) override;
   CAFFE2_API void * unsafeGetTH();
 
@@ -26,6 +26,9 @@ struct ${name}Generator : public Generator {
 public:
   Context * context;
   ${th_generator}
+
+private:
+  CloneableGenerator<${name}Generator, Generator>* clone_impl() const override;
 };
 
 }

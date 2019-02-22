@@ -25,9 +25,7 @@
 namespace at {
 
 /*
-* Samples a uniform distribution in the range [0,1) of type T
-* Note: how to get a range of [0,1) from {0,1,..2^32-1}
-* https://lemire.me/blog/2017/02/28/how-many-floating-point-numbers-are-in-the-interval-01/
+* Samples a uniform distribution in the range [0,1] of type T
 */
 template <typename T>
 struct uniform_real_distribution {
@@ -47,10 +45,10 @@ struct uniform_real_distribution {
   template<typename U = T> 
   C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(Philox4_32_10& engine){
-    uint64_t hi = (((uint64_t)engine()) << 32);
-    uint64_t lo = (uint64_t)engine();
+    uint64_t hi = static_cast<uint64_t>(engine()) << 32;
+    uint64_t lo = static_cast<uint64_t>(engine());
     uint64_t random = hi | lo;
-    double x = (random & ((1ULL << 53) - 1)) * ::ldexp(1.0, -53);    
+    double x = static_cast<double>(random) / static_cast<double>(std::numeric_limits<uint64_t>::max());
     return (x * (b - a) + a);
 
   }
@@ -59,14 +57,14 @@ struct uniform_real_distribution {
   C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(Philox4_32_10& engine){
-    float x = (engine() & ((1 << 24) - 1)) * ::ldexp(1.0, -24);
+    float x = static_cast<float>(engine()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
     return (x * (b - a) + a);
   }
 
   template<typename U = T> 
   C10_HOST_INLINE typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(at::CPUGenerator* generator){
-    double x = (generator->random64() & ((1ULL << 53) - 1)) * ::ldexp(1.0, -53);    
+    double x = static_cast<double>(generator->random64()) / static_cast<double>(std::numeric_limits<uint64_t>::max());
     return (x * (b - a) + a);
 
   }
@@ -75,7 +73,7 @@ struct uniform_real_distribution {
   C10_HOST_INLINE typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(at::CPUGenerator* generator){
-    float x = (generator->random() & ((1 << 24) - 1)) * ::ldexp(1.0, -24);
+    float x = static_cast<float>(generator->random()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
     return (x * (b - a) + a);
   }
 

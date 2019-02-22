@@ -46,7 +46,7 @@ graph {
     dims: 2
     data_type: 1
     name: "1"
-    raw_data: "\231\372a?8\230\003?"
+    raw_data: "\365\303\257>\230\203\030?"
   }
   initializer {
     dims: 2

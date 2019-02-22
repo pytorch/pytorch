@@ -19,38 +19,24 @@ TEST(CPUGenerator, TestDefaultGenerator) {
   // Test Description: 
   // Check if default generator is created only once
   // address of generator should be same in all calls
-  auto foo = &at::detail::getDefaultCPUGenerator();
-  auto bar = &globalContext().getDefaultGenerator(kCPU);
+  auto& foo = at::detail::getDefaultCPUGenerator();
+  auto& bar = at::detail::getDefaultCPUGenerator();
   ASSERT_EQ(foo, bar);
 }
 
-TEST(CPUGenerator, TestCopyAssignment) {
+TEST(CPUGenerator, TestCloning) {
   // Test Description: 
   // Check copy assignment
   auto new_gen = at::detail::createCPUGenerator();
   new_gen->random(); // advance new gen_state
   new_gen->random();
-  auto default_gen = &at::detail::getDefaultCPUGenerator();
-  *default_gen = *new_gen;
+  auto& default_gen = at::detail::getDefaultCPUGenerator();
+  default_gen = new_gen->clone();
   ASSERT_EQ(new_gen->random(), default_gen->random());
 }
 
-TEST(CPUGenerator, TestCopyAndMoveConstructor) {
-  // Test Description: 
-  // Check copy constructor
-  at::CPUGenerator gen1;
-  gen1.random(); // advance new gen_state
-  gen1.random();
-  at::CPUGenerator gen2 = gen1;
-  ASSERT_EQ(gen1.random(), gen2.random());
-
-  // Check move constructor
-  at::CPUGenerator gen3 = std::move(gen1);
-  ASSERT_EQ(gen2.random(), gen3.random());
-}
-
-void thread_func_get_engine_op(at::CPUGenerator& generator) {
-  generator.random();
+void thread_func_get_engine_op(CPUGenerator* generator) {
+  generator->random();
 }
 
 TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
@@ -60,29 +46,29 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   // random samples.
   auto& gen1 = at::detail::getDefaultCPUGenerator();
   auto gen2 = at::detail::createCPUGenerator();
-  *gen2 = gen1; // capture the current state of default generator
-  std::thread t0{thread_func_get_engine_op, std::ref(gen1)};
-  std::thread t1{thread_func_get_engine_op, std::ref(gen1)};
-  std::thread t2{thread_func_get_engine_op, std::ref(gen1)};
+  gen2 = gen1->clone(); // capture the current state of default generator
+  std::thread t0{thread_func_get_engine_op, gen1.get()};
+  std::thread t1{thread_func_get_engine_op, gen1.get()};
+  std::thread t2{thread_func_get_engine_op, gen1.get()};
   t0.join();
   t1.join();
   t2.join();
   gen2->random();
   gen2->random();
   gen2->random();
-  ASSERT_EQ(gen1.random(), gen2->random());
+  ASSERT_EQ(gen1->random(), gen2->random());
 }
 
 TEST(CPUGenerator, TestGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter
-  auto foo = &at::detail::getDefaultCPUGenerator();
+  auto& foo = at::detail::getDefaultCPUGenerator();
   foo->setCurrentSeed(123);
   auto current_seed = foo->getCurrentSeed();
   ASSERT_EQ(current_seed, 123);
 }
 
-void thread_func_get_set_current_seed(at::CPUGenerator* generator) {
+void thread_func_get_set_current_seed(CPUGenerator* generator) {
   auto current_seed = generator->getCurrentSeed();
   current_seed++;
   generator->setCurrentSeed(current_seed);
@@ -91,11 +77,11 @@ void thread_func_get_set_current_seed(at::CPUGenerator* generator) {
 TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter are thread safe
-  auto gen1 = &at::detail::getDefaultCPUGenerator();
+  auto& gen1 = at::detail::getDefaultCPUGenerator();
   auto initial_seed = gen1->getCurrentSeed();
-  std::thread t0{thread_func_get_set_current_seed, gen1};
-  std::thread t1{thread_func_get_set_current_seed, gen1};
-  std::thread t2{thread_func_get_set_current_seed, gen1};
+  std::thread t0{thread_func_get_set_current_seed, gen1.get()};
+  std::thread t1{thread_func_get_set_current_seed, gen1.get()};
+  std::thread t2{thread_func_get_set_current_seed, gen1.get()};
   t0.join();
   t1.join();
   t2.join();
@@ -106,9 +92,9 @@ TEST(CPUGenerator, TestRNGForking) {
   // Test Description: 
   // Test that state of a generator can be frozen and
   // restored
-  auto default_gen = &at::detail::getDefaultCPUGenerator();
+  auto& default_gen = at::detail::getDefaultCPUGenerator();
   auto current_gen = at::detail::createCPUGenerator();
-  *current_gen = *default_gen;
+  current_gen = default_gen->clone();
 
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator

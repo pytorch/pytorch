@@ -157,7 +157,7 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator().get());
 
   for (int64_t i = 0; i < size; ++i) {
 #ifdef TH_REAL_IS_FLOAT

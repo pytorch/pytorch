@@ -32,31 +32,57 @@
 
 namespace at {
 
+/*
+* CloneableGenerator class based on CRTP pattern. It is a
+* helper class used for cloning Generator subclasses while 
+* preserving covariance in clone() method.
+*/
+template <typename Derived, typename Base>
+struct CloneableGenerator : public Base {
+
+  CloneableGenerator(Device device_in) : Base(device_in) {}
+  virtual ~CloneableGenerator() = default;
+
+  std::unique_ptr<Derived> clone() const {
+    return std::unique_ptr<Derived>(static_cast<Derived*>(this->clone_impl()));
+  }
+
+  private:
+    virtual CloneableGenerator* clone_impl() const = 0;
+};
+
+// The default seed is selected to be a large number
+// with good distribution of 0s and 1s in bit representation
 constexpr uint64_t default_rng_seed_val = 67280421310721;
 
 struct CAFFE2_API Generator {
   // Constructors
-  Generator(Device device_in, uint64_t seed_in);
-  Generator(const Generator& other);
-  Generator(Generator&& other);
+  Generator(Device device_in);
+
+  // Delete all copy and move assignment in favor of clone()
+  // method
+  Generator(const Generator& other) = delete;
+  Generator(Generator&& other) = delete;
+  Generator& operator=(Generator& other) = delete;
+  Generator& operator=(Generator&& other) = delete;
+
   virtual ~Generator() = default;
+  std::unique_ptr<Generator> clone() const;
 
   // Common methods for all generators
-  virtual void setCurrentSeed(uint64_t seed);
-  uint64_t getCurrentSeed();
-  Device getDevice();
+  virtual void setCurrentSeed(uint64_t seed) = 0;
+  virtual uint64_t getCurrentSeed() const = 0;
+  Device getDevice() const;
 
   // stubbed. will be removed
   virtual Generator& manualSeedAll(uint64_t seed);
 
   protected:
-    mutable std::mutex mutex;
-    Device device_;
-    uint64_t current_seed_;
+    mutable std::mutex mutex_;
 
-    // constructor forwarding to grab mutex before any copying or moving
-    Generator(const Generator &other, const std::lock_guard<std::mutex> &);
-    Generator(const Generator &&other, const std::lock_guard<std::mutex> &);
+  private:
+    Device device_;
+    virtual Generator* clone_impl() const = 0;
 };
 
 } // namespace at

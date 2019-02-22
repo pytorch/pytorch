@@ -13,7 +13,7 @@
 
 void THTensor_(random)(THTensor *self, at::Generator *_generator)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
 #if defined(TH_REAL_IS_BYTE)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(gen->random() % (UINT8_MAX + 1)););
 #elif defined(TH_REAL_IS_CHAR)
@@ -39,7 +39,7 @@ void THTensor_(random)(THTensor *self, at::Generator *_generator)
 void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max) {
   THArgCheck(max > min, 2, "max must be greater than min, but got: min = %lld, max = %lld", min, max);
   uint64_t range = max - min;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     if (range >= 1ULL << 32) {
       TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((gen->random64() % range) + min));)
@@ -56,7 +56,7 @@ void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t 
 
 void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   
   #if defined(TH_REAL_IS_FLOAT)
   at::geometric_distribution<float> geometric(p);
@@ -77,7 +77,7 @@ void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 
 void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, double b)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   
   #if defined(TH_REAL_IS_FLOAT)
   at::uniform_real_distribution<float> uniform((float)a, (float)b);
@@ -95,7 +95,7 @@ void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, d
     THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
   } else {
     //TODO: normal returns two samples at a time. utilize the second element.
-    auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+    auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
     
     #if defined(TH_REAL_IS_FLOAT)
     at::normal_distribution<float> normal(mean, stddev);
@@ -132,7 +132,7 @@ void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTenso
 
 void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double lambda)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   
   at::exponential_distribution<double> exponential(lambda);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)exponential(gen););
@@ -142,7 +142,7 @@ void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double la
 
 void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median, double sigma)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   
   at::cauchy_distribution<double> cauchy(median, sigma);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
@@ -151,7 +151,7 @@ void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median,
 
 void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   //TODO: normal returns two samples at a time. utilize the second element.
   
   at::lognormal_distribution<double> logNormal(mean, stdv);
@@ -252,7 +252,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generat
   int64_t i = 0, _mask=0;
   scalar_t _q;
   int64_t rand_ind, sample_idx, J_sample;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
 
   for (i=0; i < output_nelem; i++)
     {
@@ -277,7 +277,7 @@ void THTensor_(multinomial)(THLongTensor *self, at::Generator *_generator, THTen
   int64_t n_categories;
   THDoubleTensor* cum_dist;
   int64_t i,j,k;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, &at::globalContext().getDefaultGenerator(at::kCPU));
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   
   if (start_dim == 1)
   {
