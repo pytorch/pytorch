@@ -1,13 +1,14 @@
+#include <torch/csrc/jit/operator.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/script/edit_distance.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
+#include <torch/csrc/jit/script/schema_type_parser.h>
 #include <torch/csrc/jit/script/tree.h>
-#include <torch/csrc/jit/script/edit_distance.h>
 
 #include <functional>
 #include <memory>
@@ -20,7 +21,8 @@ namespace jit {
 
 namespace script {
 struct SchemaParser {
-  SchemaParser(const std::string& str) : L(str) {}
+  SchemaParser(const std::string& str)
+      : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   FunctionSchema parseDeclaration() {
     auto name = L.expect(TK_IDENT).text();
@@ -73,131 +75,10 @@ struct SchemaParser {
   TreeRef parseIdent() {
     return String::create(L.expect(TK_IDENT).text());
   }
-  using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
-  TypeAndAlias parseBaseType() {
-    static std::unordered_map<std::string, TypePtr> type_map = {
-        {"Generator", GeneratorType::get()},
-        {"ScalarType", IntType::get()},
-        {"Layout", IntType::get()},
-        {"Device", DeviceObjType::get()},
-        {"Scalar", NumberType::get()},
-        {"str", StringType::get()},
-        {"float", FloatType::get()},
-        {"int", IntType::get()},
-        {"bool", BoolType::get()},
-    };
-    auto tok = L.expect(TK_IDENT);
-    auto text = tok.text();
-    auto it = type_map.find(text);
-    if (it == type_map.end()) {
-      if (text.size() > 0 && islower(text[0])) {
-        // lower case identifiers that are not otherwise valid types
-        // are treated as type variables
-        return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
-      }
-      throw ErrorReport(tok.range) << "unknown type specifier";
-    }
-    return TypeAndAlias(it->second, c10::nullopt);
-  }
-  // Examples:
-  // Tensor(a) // Tensor is in set a
-  // Tensor(a!) // it is also written to
-  // Tensor!  // shorthand for Tensor(fresh_identifier!)
-  // Tensor(a! -> a|b) // Tensor is in set a, written to,
-  //                      and after the write is in set a AND b.
-  c10::optional<AliasInfo> parseAliasAnnotation() {
-    std::set<Symbol> sets;
-    AliasInfo alias_info;
-    if (L.nextIf('(')) {
-      // optional 'alias set annotation'
-      parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
-        if (L.nextIf('*')) {
-          alias_info = AliasInfo::createWildcard();
-
-          // If we found a wildcard, ignore all subsequent annotations
-        } else if (!alias_info.isWildcard()) {
-          alias_info.addSet(
-              Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
-        }
-      });
-      if (L.nextIf('!')) {
-        alias_info.setIsWrite(true);
-      }
-      L.expect(')');
-    } else if (L.nextIf('!')) {
-      alias_info.addSet(
-          Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
-      alias_info.setIsWrite(true);
-    } else {
-      return c10::nullopt;
-    }
-
-    return alias_info;
-  }
-
-  std::pair<TypePtr, c10::optional<AliasInfo>> parseType() {
-    TypePtr value;
-    c10::optional<AliasInfo> alias_info;
-    // Tuple type
-    if (L.cur().kind == '(') {
-      std::vector<TypePtr> types;
-      parseList('(', ',', ')', [&] {
-        auto r = parseType();
-        types.push_back(std::move(r.first));
-        if (alias_info && r.second) {
-          alias_info->addContainedType(std::move(*r.second));
-        }
-      });
-      value = TupleType::create(std::move(types));
-    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
-      L.next(); // Future
-      L.expect('(');
-      auto p = parseType();
-      auto subtype = std::move(p.first);
-      auto subalias = std::move(p.second);
-      L.expect(')');
-      value = FutureType::create(subtype);
-    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
-      L.next();
-      value = TensorType::get();
-      alias_info = parseAliasAnnotation();
-    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
-      L.next();
-      L.expect('(');
-      auto key_type = parseType().first;
-      L.expect(',');
-      auto value_type = parseType().first;
-      L.expect(')');
-      alias_info = parseAliasAnnotation();
-
-      value = DictType::create(key_type, value_type);
-    } else {
-      auto value_alias = parseBaseType();
-      value = value_alias.first;
-      alias_info = value_alias.second;
-    }
-    while (true) {
-      if (L.cur().kind == '[' && L.lookahead().kind == ']') {
-        L.next(); // [
-        L.next(); // ]
-        value = ListType::create(value);
-        auto container = parseAliasAnnotation();
-        if (container && alias_info) {
-          container->addContainedType(std::move(*alias_info));
-        }
-        alias_info = std::move(container);
-      } else if (L.nextIf('?')) {
-        value = OptionalType::create(value);
-      } else {
-        break;
-      }
-    }
-    return std::make_pair(std::move(value), std::move(alias_info));
-  }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     Argument result;
-    auto p = parseType();
+    auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
     c10::optional<int32_t> N;
@@ -209,7 +90,7 @@ struct SchemaParser {
       type = ListType::create(type);
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-      auto container = parseAliasAnnotation();
+      auto container = type_parser.parseAliasAnnotation();
       if (container && alias_info) {
         container->addContainedType(std::move(*alias_info));
       }
@@ -369,9 +250,8 @@ struct SchemaParser {
       L.expect(end);
   }
   Lexer L;
-  size_t next_id = 0;
+  SchemaTypeParser type_parser;
 };
-
 } // namespace script
 
 namespace {
@@ -457,7 +337,8 @@ struct OperatorRegistry {
       return lhs.first > rhs.first;
     };
 
-    std::priority_queue<EntryPair, std::vector<EntryPair>, decltype(cmp)> rankings(cmp);
+    std::priority_queue<EntryPair, std::vector<EntryPair>, decltype(cmp)>
+        rankings(cmp);
     static constexpr size_t MAX_EDIT_DIST = 2u;
     for (const auto& op : operators) {
       auto edit_dist = script::ComputeEditDistance(
@@ -479,7 +360,6 @@ OperatorRegistry& getRegistry() {
   static OperatorRegistry r;
   return r;
 }
-
 } // anonymous namespace
 
 void registerOperator(Operator&& op) {
@@ -641,6 +521,5 @@ Operator* OperatorSet::find(const Node* n) const {
   }
   return nullptr;
 }
-
 } // namespace jit
 } // namespace torch
