@@ -31,7 +31,19 @@ bool SumOp<CUDAContext>::RunOnDevice() {
   } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<at::Half, at::Half>();
   } else {
-    CAFFE_THROW("Unsupported inputs");
+    CAFFE_THROW("Unsupported inputs:", Input(0).dtype().name());
+  }
+  return false;
+}
+
+template <>
+bool SumGradientOp<CUDAContext>::RunOnDevice() {
+  CAFFE_ENFORCE_GT(InputSize(), 1);
+
+  if (Input(1).IsType<float>()) {
+    return DoRunWithType<float>();
+  } else {
+    CAFFE_THROW("Unsupported inputs:", Input(1).dtype().name());
   }
   return false;
 }
@@ -42,6 +54,7 @@ REGISTER_CUDA_OPERATOR(FlattenToVec, FlattenToVecOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(SumGradient, SumGradientOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
 
 CAFFE_KNOWN_TYPE(const float*);

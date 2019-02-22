@@ -17,6 +17,9 @@ CAFFE2_API std::vector<int> ComputeBinaryBroadcastForwardDims(
     const std::vector<int>& A_dims,
     const std::vector<int>& B_dims);
 
+CAFFE2_API std::vector<int> ComputeBroadcastDims(
+    const std::vector<std::vector<int>>& input_dims_list);
+
 CAFFE2_API void ComputeBinaryBroadcastBackwardAxes(
     const std::vector<int>& A_dims,
     const std::vector<int>& B_dims,

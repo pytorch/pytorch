@@ -726,17 +726,6 @@ REGISTER_GRADIENT(Alias, GetAliasGradient);
 
 SHOULD_NOT_DO_GRADIENT(ResizeLike);
 
-class GetSumGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    for (auto i = 0; i < def_.input_size(); ++i) {
-      SetDense(i, GO(0));
-    }
-    return vector<OperatorDef>();
-  }
-};
-REGISTER_GRADIENT(Sum, GetSumGradient);
-
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
 

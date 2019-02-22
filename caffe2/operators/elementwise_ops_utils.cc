@@ -71,6 +71,50 @@ std::vector<int> ComputeBinaryBroadcastForwardDims(
   return C_dims;
 }
 
+std::vector<int> ComputeBroadcastDims(
+    const std::vector<std::vector<int>>& input_dims_list) {
+  // get output rank first
+  int output_rank = 0;
+  for (auto input_dims : input_dims_list) {
+    if (input_dims.size() > output_rank)
+      output_rank = input_dims.size();
+  }
+
+  // fill output dims in reversed order
+  std::vector<int> output_dims;
+  for (int i = 0; i < output_rank; i++) {
+    int dim_value = 1;
+    for (auto input_dims : input_dims_list) {
+      if (i >= input_dims.size())
+        continue;
+      int dim_value_cur = *(input_dims.rbegin() + i);
+
+      CAFFE_ENFORCE(
+          dim_value == dim_value_cur || dim_value <= 1 || dim_value_cur <= 1,
+          "Unable to broadcast! Current dim ",
+          dim_value_cur,
+          " is not compatible with inferred dim ",
+          dim_value,
+          ". This happens at index ",
+          i,
+          " starting from right hand side.");
+
+      if (dim_value == 0 || dim_value_cur == 0) {
+        dim_value = 0;
+      } else {
+        dim_value = std::max(dim_value, dim_value_cur);
+      }
+    }
+
+    output_dims.push_back(dim_value);
+  }
+
+  // reverse it back
+  std::reverse(output_dims.begin(), output_dims.end());
+
+  return output_dims;
+}
+
 void ComputeBinaryBroadcastBackwardAxes(
     const std::vector<int>& A_dims,
     const std::vector<int>& B_dims,

@@ -10,6 +10,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/operators/gather_op.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
@@ -210,8 +211,7 @@ class FlattenToVecOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    CAFFE_ENFORCE_GE(
-        input.dim(), 1, "The rank of the tensor must be >= 1.");
+    CAFFE_ENFORCE_GE(input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
@@ -256,48 +256,89 @@ class SumOp : public Operator<Context> {
     auto& input0 = Input(0);
 
     if (InputSize() == 1) {
-      // TODO: better TensorOptions argument passing(e.g. default argument)
-      OutputTensorCopyFrom(
-          0,
-          // I'll change the order of argument in another diff, so that we don't
-          // need to write this
-          at::dtype(input0.dtype()),
-          input0,
-          true /*async*/);
+      auto* output = Output(0, input0.sizes(), at::dtype<T>());
+      output->CopyFrom(input0, true /*async*/);
       return true;
     }
-    auto* output = Output(0, input0.sizes(), at::dtype<T>());
-    T* output_data = output->template mutable_data<T>();
-    // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
-      if (output->sizes() != Input(i).sizes()) {
-        CAFFE_THROW(
-            "Check failed: output->sizes() == Input(i).sizes().",
-            "Description: Input #",
-            i,
-            ", input dimension:",
-            Input(i).sizes(),
-            " should match output dimension: ",
-            output->sizes());
+
+    if (InputSize() == 2) {
+      std::vector<int> input0_dims(
+          input0.sizes().cbegin(), input0.sizes().cend());
+      std::vector<int> input1_dims(
+          Input(1).sizes().cbegin(), Input(1).sizes().cend());
+      std::vector<int> output_dims_int =
+          elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+              input0_dims, input1_dims);
+      std::vector<int64_t> output_dims(
+          output_dims_int.cbegin(), output_dims_int.cend());
+
+      if (IsInputOutputAlias(0, 0)) {
+        CAFFE_ENFORCE_EQ(
+            output_dims_int,
+            input0_dims,
+            "Cannot broadcast output to the dimensions of first input.");
       }
+
+      auto* output = Output(0, output_dims, at::dtype<T>());
+      math::Add(
+          input0_dims.size(),
+          input0_dims.data(),
+          input1_dims.size(),
+          input1_dims.data(),
+          input0.template data<T>(),
+          Input(1).template data<T>(),
+          output->template mutable_data<T>(),
+          &context_);
+
+      return true;
     }
 
-    // Add the first two - works if in-place or not.
-    math::Add(
-        output->numel(),
+    // infer output shape based on broadcasting
+    // and perform dimension check at the same time
+    std::vector<std::vector<int>> input_dims_list;
+    for (int i = 0; i < InputSize(); i++) {
+      std::vector<int> input_dims(
+          Input(i).sizes().cbegin(), Input(i).sizes().cend());
+      input_dims_list.push_back(input_dims);
+    }
+    std::vector<int> output_dims_int =
+        elementwise_ops_utils::ComputeBroadcastDims(input_dims_list);
+    std::vector<int64_t> output_dims =
+        std::vector<int64_t>(output_dims_int.cbegin(), output_dims_int.cend());
+
+    // check for in-place case
+    if (IsInputOutputAlias(0, 0)) {
+      CAFFE_ENFORCE_EQ(
+          output_dims_int,
+          input_dims_list[0],
+          "Unable to broadcast output to the dimension of first input in in-place mode");
+    }
+
+    // initialize output with first input, but broadcasted to final shape
+    auto* output = Output(0, output_dims, at::dtype<T>());
+    math::Broadcast(
+        input_dims_list[0].size(),
+        input_dims_list[0].data(),
+        output_dims_int.size(),
+        output_dims_int.data(),
+        T(1),
         input0.template data<T>(),
-        Input(1).template data<T>(),
-        output_data,
+        output->template mutable_data<T>(),
         &context_);
-    // Add remaining.
-    for (int i = 2; i < InputSize(); ++i) {
+
+    // summation of the rest
+    for (int i = 1; i < InputSize(); ++i) {
       math::Add(
-          output->numel(),
-          output_data,
+          output_dims_int.size(),
+          output_dims_int.data(),
+          input_dims_list[i].size(),
+          input_dims_list[i].data(),
+          output->template data<T>(),
           Input(i).template data<T>(),
-          output_data,
+          output->template mutable_data<T>(),
           &context_);
     }
+
     return true;
   }
 
@@ -311,6 +352,59 @@ class SumOp : public Operator<Context> {
           "Sum operator only supports 32-bit float and ints, but",
           " input was of type ",
           Input(0).dtype().name());
+    }
+  }
+};
+
+template <class Context>
+class SumGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(SumGradientOp);
+
+  template <typename DstType>
+  bool DoRunWithType() {
+    CAFFE_ENFORCE_GT(InputSize(), 1);
+    CAFFE_ENFORCE_EQ(OutputSize(), InputSize() - 1);
+
+    const auto& dY = Input(0);
+    std::vector<int> dY_dims(dY.sizes().cbegin(), dY.sizes().cend());
+
+    for (auto i = 1; i < InputSize(); i++) {
+      const auto& X = Input(i);
+      std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+
+      std::vector<int> dY_dims_backward, X_dims_backward;
+      elementwise_ops_utils::ComputeBinaryBroadcastBackwardDims(
+          dY_dims, X_dims, &dY_dims_backward, &X_dims_backward);
+
+      auto* dX = Output(i - 1, X.sizes(), at::dtype<DstType>());
+
+      math::ReduceSum(
+          dY_dims.size(),
+          dY_dims.data(),
+          X_dims_backward.data(),
+          DstType(1),
+          dY.template data<DstType>(),
+          dX->template mutable_data<DstType>(),
+          &context_);
+    }
+
+    return true;
+  }
+
+  bool RunOnDevice() override {
+    CAFFE_ENFORCE_GT(InputSize(), 1);
+
+    if (Input(1).template IsType<float>()) {
+      return DoRunWithType<float>();
+    } else if (Input(1).template IsType<int>()) {
+      return DoRunWithType<int>();
+    } else {
+      CAFFE_THROW(
+          "SumGradient operator only supports 32-bit float and ints, but",
+          " input was of type ",
+          Input(1).dtype().name());
     }
   }
 };
