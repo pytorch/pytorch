@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/edit_distance.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/internal_type_parser.h>
+#include <torch/csrc/jit/script/jit_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/tree.h>

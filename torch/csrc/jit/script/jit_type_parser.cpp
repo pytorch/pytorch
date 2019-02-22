@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/script/internal_type_parser.h>
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/script/internal_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <string>
