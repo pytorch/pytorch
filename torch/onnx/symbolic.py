@@ -724,7 +724,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
-            return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)     
+            return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
         output = g.op(type, input,
                       kernel_shape_i=tuple_fn(k),
                       strides_i=tuple_fn(k))

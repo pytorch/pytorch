@@ -686,12 +686,12 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_adaptive_avg_pool2D(self):
-        model = torch.nn.AdaptiveAvgPool2d((5,4))
+        model = torch.nn.AdaptiveAvgPool2d((5, 4))
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_adaptive_avg_pool3D(self):
-        model = torch.nn.AdaptiveAvgPool3d((5,4,3))
+        model = torch.nn.AdaptiveAvgPool3d((5, 4, 3))
         x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
