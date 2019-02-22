@@ -34,7 +34,7 @@ DynamicLibrary::~DynamicLibrary() {
 }
 
 std::string DynamicLibrary::directoryOf(void* addr) {
-  Dl_info info;
+  Dl_info info = {};
   if (!dladdr(addr, &info)) {
     AT_ERROR("could not look up address: ", addr);
   }

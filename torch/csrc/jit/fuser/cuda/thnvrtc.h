@@ -19,7 +19,8 @@
   _(cuLaunchKernel)                              \
   _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \
-  _(cuModuleUnload)
+  _(cuModuleUnload)                              \
+  _(cuDevicePrimaryCtxGetState)
 
 extern "C" typedef struct THNVRTC {
 #define CREATE_MEMBER(name) decltype(&name) name;
