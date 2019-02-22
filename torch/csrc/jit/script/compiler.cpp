@@ -622,7 +622,7 @@ struct to_ir {
       const SugaredValuePtr& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
-    if (self && !dynamic_cast<UserTypeValue*>(self.get())) {
+    if (self) {
       ++params_begin;
     }
     std::vector<Argument> retval;
@@ -709,9 +709,8 @@ struct to_ir {
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
-    auto userType = dynamic_cast<UserTypeValue*>(self.get());
     auto expected_annotation_size = def.decl().params().size();
-    if (self && !userType) {
+    if (self) {
       expected_annotation_size--;
     }
     if (schema.arguments().size() != expected_annotation_size) {
@@ -722,24 +721,21 @@ struct to_ir {
           << expected_annotation_size << ")!";
     }
 
-    size_t arg_annotation_idx = 0;
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      environment_stack->setSugaredVar(def.range(), name, self);
-      // If this is a first-class type, we also need to bind "self" to a block
-      // input.
-      // TODO simplify this code and merge with below
-      if (userType) {
-        Value* new_input = block->addInput();
-        new_input->setUniqueName(name);
-        userType->value_ = new_input;
-
-        arguments.push_back(schema.arguments().at(arg_annotation_idx++));
-        new_input->setType(arguments.back().type());
+      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
+        const auto type = userType->type_;
+        Value* new_input =
+            block->addInput()->setUniqueName(name)->setType(type);
+        environment_stack->setVar((*it).ident().range(), name, new_input);
+        arguments.emplace_back(name, type);
+      } else {
+        environment_stack->setSugaredVar(def.range(), name, self);
       }
       ++it;
     }
+    size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
@@ -1833,7 +1829,10 @@ struct to_ir {
     const auto rhsValue =
         emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->assign(stmt.range(), method, lhs.selector().name(), rhsValue);
+    const bool shouldDefine =
+        method.name() == "__init__" && basename.name() == "self";
+    userObject->setAttr(
+        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {

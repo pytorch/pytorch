@@ -91,28 +91,35 @@ using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
-
 // User-defined object.
-// TODO this is templated to avoid circularity with IValue. Should be a better
-// way to do this
 template <typename Elem>
 struct CAFFE2_API UserObjectGeneric final : c10::intrusive_ptr_target {
  public:
-  UserObjectGeneric(std::string name) : typename_(std::move(name)) {}
-  static c10::intrusive_ptr<UserObjectGeneric> create(std::string name) {
-    return c10::make_intrusive<UserObjectGeneric>(std::move(name));
-  }
-  void setAttr(const std::string& name, Elem v) {
-    namespace_[name] = v;
+  UserObjectGeneric(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+    attrs_.resize(numSlots);
   }
 
-  Elem getAttr(const std::string& name) const {
-    return namespace_.at(name);
+  static c10::intrusive_ptr<UserObjectGeneric> create(
+      Symbol name,
+      size_t numSlots) {
+    return c10::make_intrusive<UserObjectGeneric>(std::move(name), numSlots);
+  }
+
+  void setAttr(size_t slot, Elem v) {
+    attrs_[slot] = v;
+  }
+
+  Elem getAttr(size_t slot) const {
+    return attrs_.at(slot);
+  }
+
+  Symbol name() const {
+    return typename_;
   }
 
  private:
-  const std::string typename_;
-  std::unordered_map<std::string, Elem> namespace_;
+  const Symbol typename_;
+  std::vector<Elem> attrs_;
 };
 
 using UserObject = UserObjectGeneric<IValue>;

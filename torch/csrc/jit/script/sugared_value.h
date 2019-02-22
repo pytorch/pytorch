@@ -41,11 +41,12 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   }
 
   // assign an attribute on it, e.g. `this.field = newValue`
-  virtual void assign(
+  virtual void setAttr(
       const SourceRange& loc,
       Method& m,
       const std::string& field,
-      Value* newValue) {
+      Value* newValue,
+      bool shouldDefine) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
                            << kind();
   }
@@ -93,17 +94,17 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 // most things in the environment are just simple value types
 // and not special python syntax sugar types
 struct TORCH_API SimpleValue : public SugaredValue {
-  SimpleValue(Value* value) : value(value) {}
+  SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     return "value";
   }
   Value* asValue(const SourceRange& range, Method& m) override {
-    return value;
+    return value_;
   }
   NoneStatus isNone() override {
-    if (value->mustBeNone())
+    if (value_->mustBeNone())
       return ALWAYS;
-    else if (value->type()->cast<OptionalType>())
+    else if (value_->type()->cast<OptionalType>())
       return MAYBE;
     else
       return NEVER;
@@ -116,12 +117,20 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Method& m,
       const std::string& field) override;
+
+  void setAttr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field,
+      Value* newValue,
+      bool shouldDefine) override;
+
   Value* getValue() const {
-    return value;
+    return value_;
   }
 
  private:
-  Value* value;
+  Value* value_;
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
@@ -167,23 +176,12 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   c10::optional<int64_t> version;
 };
 
-// TODO right now this is doing double duty as a type and an instance of that
-// type, need to separate
+// Represents a user type, analagous to `int` or `dict`
 struct TORCH_API UserTypeValue : public SugaredValue {
   UserTypeValue(UserTypePtr type) : type_(std::move(type)) {}
 
-  void assign(
-      const SourceRange& loc,
-      Method& m,
-      const std::string& field,
-      Value* newValue) override;
-
-  std::shared_ptr<SugaredValue> attr(
-      const SourceRange& loc,
-      Method& m,
-      const std::string& field) override;
-
-  // This corresponds to a call to the UserType's constructor.
+  // Call the type's constructor, as in:
+  //    n = Foo(constructor_arg)
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Method& m,
@@ -191,20 +189,11 @@ struct TORCH_API UserTypeValue : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
 
-  Value* asValue(const SourceRange& loc, Method& m) {
-    return value_;
-  }
-
-  std::string getName() const {
-    return type_->name();
-  }
-
   std::string kind() const override {
     return type_->str();
   }
 
   UserTypePtr type_;
-  Value* value_;
 };
 
 // defines how a method obtained from a module behaves in script
@@ -220,15 +209,18 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    c10::optional<NamedValue> self;
-    if (auto userType = dynamic_cast<UserTypeValue*>(self_.get())) {
+    if (auto userType = dynamic_cast<SimpleValue*>(self_.get())) {
       // If self_ is a user-defined type, then it will be expected as part of
-      // the schema.
-      // TODO is there a better way to factor this?
-      self = NamedValue(loc, "self", userType->asValue(loc, caller));
+      // the schema. Add it to the front of the inputs.
+      std::vector<NamedValue> inputsWithSelf;
+      inputsWithSelf.emplace_back(loc, userType->getValue());
+      inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
+      return std::make_shared<SimpleValue>(
+          caller.emit_call_to(loc, method, inputsWithSelf, attributes));
     }
+
     return std::make_shared<SimpleValue>(
-        caller.emit_call_to(loc, method, self, inputs, attributes));
+        caller.emit_call_to(loc, method, inputs, attributes));
   }
 
  private:

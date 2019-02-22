@@ -108,7 +108,6 @@ struct Method {
   Value* emit_call_to(
       const SourceRange& loc,
       Method& callee,
-      c10::optional<NamedValue> self,
       ArrayRef<NamedValue> args,
       ArrayRef<NamedValue> kwargs);
 

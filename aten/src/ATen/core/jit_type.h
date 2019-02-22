@@ -9,6 +9,7 @@
 #include <caffe2/core/common.h>
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <memory>
 #include <iostream>
@@ -18,6 +19,7 @@ namespace torch {
 namespace jit {
 namespace script {
 struct Module;
+struct Method;
 }
 } // namespace jit
 } // namespace torch
@@ -1084,6 +1086,7 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct UserType;
 using UserTypePtr = std::shared_ptr<UserType>;
 using ::torch::jit::script::Module;
+using ::torch::jit::script::Method;
 
 // This represents a user-defined type in TorchScript.
 struct CAFFE2_API UserType : public Type {
@@ -1110,26 +1113,51 @@ struct CAFFE2_API UserType : public Type {
   }
 
   TypePtr getAttribute(const std::string& name) const {
-    if (namespace_.count(name)) {
-      return namespace_.at(name);
+    const auto it = std::find_if(
+        attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
+          return attr.name == name;
+        });
+    if (it == attributes_.cend()) {
+      return nullptr;
     }
-    return nullptr;
+
+    return it->type;
   }
+
+  Method* getMethod(const std::string& name) const;
 
   std::string name() const {
     return typename_;
   }
 
-  std::shared_ptr<Module> module() const {
-    return module_;
+  size_t numAttributes() const {
+    return attributes_.size();
+  }
+
+  // Attributes are stored in a specific slot at runtime for effiency.
+  // When emitting instructions we specify the slot so that attribute access is
+  // a constant lookup
+  size_t getAttributeSlot(const std::string& name) const {
+    size_t slot = 0;
+    for (const auto& attr : attributes_) {
+      if (name == attr.name) {
+        return slot;
+      }
+      slot++;
+    }
+    throw std::runtime_error("Couldn't find attribute: " + name);
   }
 
   bool hasAttribute(const std::string& name) const {
-    return namespace_.count(name);
+    return std::find_if(
+               attributes_.cbegin(),
+               attributes_.cend(),
+               [&](const Attribute& attr) { return attr.name == name; }) !=
+        attributes_.cend();
   }
 
   void addAttribute(const std::string& name, TypePtr type) {
-    namespace_.emplace(name, type);
+    attributes_.emplace_back(name, type);
   }
 
   static const TypeKind Kind = TypeKind::UserType;
@@ -1147,7 +1175,13 @@ struct CAFFE2_API UserType : public Type {
   // NOTE: this does not contain methods, which are stored in the module
   // TODO: once modules support arbitrary ivalue attributes, we don't need this
   // anymore.
-  std::unordered_map<std::string, TypePtr> namespace_;
+  struct Attribute {
+    Attribute(std::string n, TypePtr t)
+        : name(std::move(n)), type(std::move(t)) {}
+    std::string name;
+    TypePtr type;
+  };
+  std::vector<Attribute> attributes_;
   // Holds method attributes
   std::shared_ptr<Module> module_;
 

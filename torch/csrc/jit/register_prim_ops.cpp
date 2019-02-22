@@ -822,29 +822,30 @@ RegisterOperators reg({
            auto type = node->output()->type()->cast<UserType>();
            AT_ASSERT(type);
            return [=](Stack& stack) {
-             auto userObj = c10::ivalue::UserObject::create(type->name());
-             push(stack, userObj);
+             const auto name = Symbol::user(type->name());
+             auto userObj =
+                 c10::ivalue::UserObject::create(name, type->numAttributes());
+             push(stack, std::move(userObj));
              return 0;
            };
          }),
-     // TODO schematize?
      Operator(
          prim::GetAttr,
          [](const Node* node) {
-           return [](Stack& stack) {
-             auto fieldname = pop(stack).toString();
+           return [node](Stack& stack) {
              auto userObj = pop(stack).toUserObject();
-             auto value = userObj->getAttr(*fieldname);
-             push(stack, value);
+             const auto slot = node->i(attr::slot);
+             auto value = userObj->getAttr(slot);
+             push(stack, std::move(value));
              return 0;
            };
-         }), // TODO schematize?
+         }),
      Operator(prim::SetAttr, [](const Node* node) {
-       return [](Stack& stack) {
+       return [node](Stack& stack) {
          auto v = pop(stack);
-         auto fieldname = pop(stack).toString();
          auto userObj = pop(stack).toUserObject();
-         userObj->setAttr(*fieldname, v);
+         const auto slot = node->i(attr::slot);
+         userObj->setAttr(slot, std::move(v));
          return 0;
        };
      })});

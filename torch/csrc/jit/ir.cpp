@@ -1314,20 +1314,32 @@ Node* Graph::createUserObject(UserTypePtr type) {
   result->output()->setType(type);
   return result;
 }
+
 Node* Graph::createSetAttr(Value* obj, const std::string& field, Value* newValue) {
-  Value* fieldValue = insertConstant(field);
-  return create(prim::SetAttr, {obj, fieldValue, newValue}, /*num_outputs=*/0);
+  const auto userType = obj->type()->cast<UserType>();
+  AT_ASSERT(userType);
+
+  auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
+  n->i_(attr::slot, userType->getAttributeSlot(field));
+
+  // Not strictly necessary but makes graphs more readable
+  n->s_(attr::name, field);
+  return n;
 }
 
 Node* Graph::createGetAttr(Value* obj, const std::string& field) {
-  Value* fieldValue = insertConstant(field);
-  auto result = create(prim::GetAttr, {obj, fieldValue}, /*num_outputs=*/1);
-  auto userType = obj->type()->cast<UserType>();
+  const auto userType = obj->type()->cast<UserType>();
   AT_ASSERT(userType);
-  auto outputType = userType->getAttribute(field);
 
-  result->output()->setType(outputType);
-  return result;
+  auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
+  n->i_(attr::slot, userType->getAttributeSlot(field));
+
+  // Not strictly necessary but makes graphs more readable
+  n->s_(attr::name, field);
+
+  const auto outputType = userType->getAttribute(field);
+  n->output()->setType(outputType);
+  return n;
 }
 
 Node* Graph::createClone(

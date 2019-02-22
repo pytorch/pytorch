@@ -62,7 +62,6 @@ Value* try_emit_call_to(
 Value* Method::emit_call_to(
     const SourceRange& loc,
     Method& callee,
-    c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs) {
   AT_ASSERT(!executor);
@@ -71,7 +70,7 @@ Value* Method::emit_call_to(
           *graph(),
           loc,
           callee,
-          self,
+          c10::nullopt,
           args,
           kwargs,
           failure_messages,

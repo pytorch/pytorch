@@ -970,12 +970,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_jit_script_class_compile",
       [](std::shared_ptr<Module> module,
-         const ClassDef& def,
+         const ClassDef& classDef,
          ResolutionCallback rcb) {
-        auto userType = UserType::create(def.name().name(), module);
+        auto userType = UserType::create(classDef.name().name(), module);
         std::vector<Resolver> rcbs;
         std::vector<Def> methodDefs;
-        for (const auto& def : def.defs()) {
+        for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
           rcbs.push_back(pythonResolver(rcb));
         }

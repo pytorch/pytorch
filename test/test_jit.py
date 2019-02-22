@@ -13479,7 +13479,7 @@ class TestUserType(JitTestCase):
     def test_set_attr_non_initialized(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "Tried to assign to nonexistent attribute"):
+            with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
                 @torch.jit.script
                 class Foo:
                     def __init__(self, x):
@@ -13503,6 +13503,38 @@ class TestUserType(JitTestCase):
                     Foo(x)
 
                 fn(2)
+
+    def test_conditional_set_attr(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
+                @torch.jit.script
+                class Foo:
+                    def __init__(self, x):
+                        if True:
+                            self.attr = x
+
+    def test_user_type_as_param(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            @torch.jit.script
+            class Foo:
+                def __init__(self, x):
+                    self.attr = x
+
+            @torch.jit.script
+            def fn(foo):
+                # type: (Foo)
+                return foo.attr
+
+            @torch.jit.script
+            def fn2(x):
+                foo = Foo(x)
+                return fn(foo)
+
+            input = torch.ones(1)
+            self.assertEqual(fn2(input), input)
+
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

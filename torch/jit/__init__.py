@@ -1289,6 +1289,7 @@ else:
         def __init__(self, name):
             super(ScriptClass, self).__init__()
 
+
 def _get_weak_stubs(cls):
     """
     Calls script_method for each method on the type of the object passed in and
