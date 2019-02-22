@@ -390,6 +390,11 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x.item(), y, prec, message, allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif isinstance(x, torch.BoolTensor) and isinstance(y, torch.BoolTensor):
+            self.assertEqual(x.storage(), y.storage())
+        elif ((isinstance(x, torch.BoolTensor) and isinstance(y, Number)) or
+             (isinstance(y, torch.BoolTensor) and isinstance(x, Number))):
+                self.fail("Expected two boolean tensors - x={}, y={}".format(x, y))
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
@@ -403,6 +408,7 @@ class TestCase(expecttest.TestCase):
                         b = b.to(a.dtype).to(a.device)
                     else:
                         b = b.to(a)
+
                     diff = a - b
                     if a.is_floating_point():
                         # check that NaNs are in the same locations
