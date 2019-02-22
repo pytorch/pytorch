@@ -632,6 +632,10 @@ binary_checkout: &binary_checkout
       # "smoke" binary build on master on PR merges
       git reset --hard "$CIRCLE_SHA1"
       git checkout -q -B master
+    else
+      # nightly binary builds. These run at 05:05 UTC every day. 
+      last_commit="$(git rev-list --before "$(date +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+      git checkout "$last_commit"
     fi
     git submodule update --init --recursive --quiet
     echo "Using Pytorch from "
