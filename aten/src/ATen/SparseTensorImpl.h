@@ -216,6 +216,9 @@ public:
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
     auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
+    type_id_ = sparse_impl->type_id();
+    data_type_ = sparse_impl->dtype();
+
     // TensorImpl general fields
     // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
     sizes_ = sparse_impl->sizes_;
