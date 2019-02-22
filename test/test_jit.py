@@ -5590,7 +5590,7 @@ a")
             FileCheck().check_count("22", 2).run(file)
             FileCheck().check_count("222", 1).run(file)
 
-            with self.assertRaisesRegex(RuntimeError, 'CHECK-COUNT-EXACTLY'):
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find'):
                 FileCheck().check_count("2", 4, exactly=True).run(file)
 
             with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
