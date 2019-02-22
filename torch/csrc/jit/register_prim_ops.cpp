@@ -1177,6 +1177,46 @@ int listAdd(Stack& stack) {
   return 0;
 }
 
+template <class TList, class TElement>
+int listMulIntLeft(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, list, n);
+
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
+
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
+    }
+  }
+
+  push(stack, ret);
+  return 0;
+}
+
+template <class TList, class TElement>
+int listMulIntRight(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, n, list);
+
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
+
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
+    }
+  }
+
+  push(stack, ret);
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSlice(Stack& stack) {
   TList list;
@@ -1415,10 +1455,17 @@ RegisterOperators reg2({
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
           listSlice<Shared<c_type>, c_type::ElemType>),                             \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
+      Operator(                                                                     \
+          "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
+          listMulIntLeft<Shared<c_type>, c_type::ElemType>),                        \
+      Operator(                                                                     \
+          "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
+          listMulIntRight<Shared<c_type>, c_type::ElemType>)
 
     CREATE_LIST_OPS("int", IntList),
     CREATE_LIST_OPS("float", DoubleList),
+    CREATE_LIST_OPS("bool", BoolList),
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
