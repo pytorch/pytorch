@@ -744,7 +744,12 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      IF(CUDNN_STATIC_LINKAGE)
+	LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+	  caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+      ELSE()
+	list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -806,7 +811,9 @@ if(USE_ROCM)
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
+    foreach(hcc_amdgpu_target ${HCC_AMDGPU_TARGET})
+      list(APPEND HIP_HCC_FLAGS -amdgpu-target=${hcc_amdgpu_target})
+    endforeach()
 
     set(Caffe2_HIP_INCLUDE
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
@@ -1312,7 +1319,6 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(AT_CUDA_ENABLED 0)
   else()
     SET(AT_CUDA_ENABLED 1)
-    find_package(CUDA 5.5 REQUIRED)
   endif()
 
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)

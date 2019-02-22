@@ -26,8 +26,7 @@ class Conf:
                  is_xla=False,
                  restrict_phases=None,
                  cuda_docker_phases=None,
-                 gpu_resource=None,
-                 docker_version_override=None):
+                 gpu_resource=None):
 
         self.distro = distro
         self.pyver = pyver
@@ -41,9 +40,6 @@ class Conf:
         self.cuda_docker_phases = cuda_docker_phases or []
 
         self.gpu_resource = gpu_resource
-
-        # FIXME is this different docker version intentional?
-        self.docker_version_override = docker_version_override
 
     def getParms(self):
         leading = ["pytorch"]
@@ -65,7 +61,7 @@ class Conf:
 
         base_build_env_name = "-".join(build_env_pieces)
 
-        docker_version = self.docker_version_override or DEFAULT_DOCKER_VERSION
+        docker_version = DEFAULT_DOCKER_VERSION
 
         return miniutils.quote(DOCKER_IMAGE_PATH_BASE + base_build_env_name + ":" + str(docker_version))
 
@@ -118,7 +114,7 @@ BUILD_ENV_LIST = [
     Conf("trusty", ["py3.5"]),
     Conf("trusty", ["py3.6", "gcc4.8"]),
     Conf("trusty", ["py3.6", "gcc5.4"]),
-    Conf("trusty", ["py3.6", "gcc5.4"], is_xla=True, docker_version_override=278),
+    Conf("trusty", ["py3.6", "gcc5.4"], is_xla=True),
     Conf("trusty", ["py3.6", "gcc7"]),
     Conf("trusty", ["pynightly"]),
     Conf("xenial", ["py3", "clang5", "asan"], pyver="3.6"),

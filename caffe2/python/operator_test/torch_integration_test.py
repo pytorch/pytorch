@@ -10,6 +10,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
+
 def generate_rois(roi_counts, im_dims):
     assert len(roi_counts) == len(im_dims)
     all_rois = []
@@ -36,6 +37,7 @@ def generate_rois(roi_counts, im_dims):
         return np.vstack(all_rois)
     return np.empty((0, 5)).astype(np.float32)
 
+
 def generate_rois_rotated(roi_counts, im_dims):
     rois = generate_rois(roi_counts, im_dims)
     # [batch_id, ctr_x, ctr_y, w, h, angle]
@@ -48,6 +50,7 @@ def generate_rois_rotated(roi_counts, im_dims):
     rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
     return rotated_rois
 
+
 class TorchIntegration(hu.HypothesisTestCase):
 
     @given(
@@ -58,7 +61,8 @@ class TorchIntegration(hu.HypothesisTestCase):
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         **hu.gcs_cpu_only
     )
-    def test_bbox_transform(self,
+    def test_bbox_transform(
+        self,
         roi_counts,
         num_classes,
         rotated,
@@ -66,7 +70,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         clip_angle_thresh,
         gc,
         dc,
-            ):
+    ):
         """
         Test with rois for multiple images in a batch
         """
@@ -91,7 +95,6 @@ class TorchIntegration(hu.HypothesisTestCase):
                 ["rois", "deltas", "im_info"],
                 ["box_out"],
                 apply_scale=False,
-                correct_transform_coords=True,
                 rotated=rotated,
                 angle_bound_on=angle_bound_on,
                 clip_angle_thresh=clip_angle_thresh,
@@ -107,7 +110,7 @@ class TorchIntegration(hu.HypothesisTestCase):
                 torch.tensor(rois), torch.tensor(deltas),
                 torch.tensor(im_info),
                 [1.0, 1.0, 1.0, 1.0],
-                False, True, rotated, angle_bound_on,
+                False, rotated, angle_bound_on,
                 -90, 90, clip_angle_thresh)
 
         torch.testing.assert_allclose(box_out, a)
@@ -117,7 +120,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         H=st.integers(min_value=10, max_value=10),
         W=st.integers(min_value=8, max_value=8),
         img_count=st.integers(min_value=3, max_value=3),
-        )
+    )
     def test_generate_proposals(self, A, H, W, img_count):
         scores = np.ones((img_count, A, H, W)).astype(np.float32)
         bbox_deltas = np.linspace(0, 10, num=img_count*4*A*H*W).reshape(
@@ -145,6 +148,6 @@ class TorchIntegration(hu.HypothesisTestCase):
         a, b = torch.ops._caffe2.GenerateProposals(
                 torch.tensor(scores), torch.tensor(bbox_deltas),
                 torch.tensor(im_info), torch.tensor(anchors),
-                2.0, 6000, 300, 0.7, 16, False, True, -90, 90, 1.0)
+                2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0)
         torch.testing.assert_allclose(rois, a)
         torch.testing.assert_allclose(rois_probs, b)
