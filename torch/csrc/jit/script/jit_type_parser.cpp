@@ -11,6 +11,38 @@ namespace torch {
 namespace jit {
 namespace script {
 
+TypeAndAlias JitTypeParser::parseBaseType() {
+  static std::unordered_map<std::string, TypePtr> type_map = {
+      {"Generator", GeneratorType::get()},
+      {"ScalarType", IntType::get()},
+      {"Layout", IntType::get()},
+      {"Device", DeviceObjType::get()},
+      {"Scalar", NumberType::get()},
+      {"str", StringType::get()},
+      {"float", FloatType::get()},
+      {"int", IntType::get()},
+      {"bool", BoolType::get()},
+  };
+  auto tok = L.expect(TK_IDENT);
+  auto text = tok.text();
+  auto it = type_map.find(text);
+  if (it == type_map.end()) {
+    if (text.size() > 0 && islower(text[0])) {
+      // lower case identifiers that are not otherwise valid types
+      // are treated as type variables
+      return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
+    }
+    throw ErrorReport(tok.range) << "unknown type specifier";
+  }
+  return TypeAndAlias(it->second, c10::nullopt);
+}
+
+// Examples:
+// Tensor(a) // Tensor is in set a
+// Tensor(a!) // it is also written to
+// Tensor!  // shorthand for Tensor(fresh_identifier!)
+// Tensor(a! -> a|b) // Tensor is in set a, written to,
+//                      and after the write is in set a AND b.
 c10::optional<AliasInfo> JitTypeParser::parseAliasAnnotation() {
   std::set<Symbol> sets;
   AliasInfo alias_info;
@@ -39,32 +71,6 @@ c10::optional<AliasInfo> JitTypeParser::parseAliasAnnotation() {
   }
 
   return alias_info;
-}
-
-TypeAndAlias JitTypeParser::parseBaseType() {
-  static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Generator", GeneratorType::get()},
-      {"ScalarType", IntType::get()},
-      {"Layout", IntType::get()},
-      {"Device", DeviceObjType::get()},
-      {"Scalar", NumberType::get()},
-      {"str", StringType::get()},
-      {"float", FloatType::get()},
-      {"int", IntType::get()},
-      {"bool", BoolType::get()},
-  };
-  auto tok = L.expect(TK_IDENT);
-  auto text = tok.text();
-  auto it = type_map.find(text);
-  if (it == type_map.end()) {
-    if (text.size() > 0 && islower(text[0])) {
-      // lower case identifiers that are not otherwise valid types
-      // are treated as type variables
-      return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
-    }
-    throw ErrorReport(tok.range) << "unknown type specifier";
-  }
-  return TypeAndAlias(it->second, c10::nullopt);
 }
 
 c10::optional<at::ScalarType> JitTypeParser::parseTensorDType(
