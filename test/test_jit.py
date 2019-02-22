@@ -4128,6 +4128,73 @@ a")
             return len(a) == 0
         self.checkScript(test_clear, ())
 
+    def test_mutable_list_insert(self):
+        def test_list_insert():
+            a = [1, 2, 3, 4]
+            a.insert(2, 5)
+
+            return a == [1, 2, 5, 3, 4]
+        self.checkScript(test_list_insert, ())
+
+    def test_mutable_list_insert_negative(self):
+        def test_list_insert_negative():
+            a = [1, 2, 3, 4]
+            a.insert(-1, 5)
+
+            return a == [1, 2, 3, 5, 4]
+        self.checkScript(test_list_insert_negative, ())
+
+    def test_mutable_list_insert_neg_out_of_bounds(self):
+        def test_list_insert_neg_out_of_bounds():
+            a = [1, 2, 3, 4]
+            a.insert(-10, 5)
+
+            return a == [5, 1, 2, 3, 4]
+        self.checkScript(test_list_insert_neg_out_of_bounds, ())
+
+    def test_mutable_list_insert_out_of_bounds(self):
+        def test_list_insert_out_of_bounds():
+            a = [1, 2, 3, 4]
+            a.insert(10, 5)
+
+            return a == [1, 2, 3, 4, 5]
+        self.checkScript(test_list_insert_out_of_bounds, ())
+
+    def test_mutable_list_remove_not_existing(self):
+        @torch.jit.script
+        def test_list_remove_not_existing():
+            a = [1, 2, 3, 4]
+            a.remove(5)
+
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "x not in list"):
+            test_list_remove_not_existing()
+
+    def test_mutable_list_remove(self):
+        def test_list_remove():
+            a = [1, 2, 3, 4]
+            a.remove(3)
+
+            return a == [1, 2, 4]
+        self.checkScript(test_list_remove, ())
+
+    def test_mutable_list_remove_tensor(self):
+        def test_list_remove_tensor():
+            a = [torch.ones(1), torch.zeros(1), torch.ones(2)]
+            a.remove(torch.zeros(1))
+
+            return len(a) == 2
+        self.checkScript(test_list_remove_tensor, ())
+
+    def test_mutable_list_remove2(self):
+        def test_list_remove2():
+            a = [1]
+            a.remove(1)
+
+            return len(a) == 0
+        self.checkScript(test_list_remove2, ())
+
     def test_extend_list_mutable(self):
         @torch.jit.script
         def extend_list(a, b):

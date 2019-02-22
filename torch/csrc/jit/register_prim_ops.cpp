@@ -17,6 +17,7 @@
 #include <ATen/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -967,6 +968,69 @@ int listClear(Stack& stack) {
   return 0;
 }
 
+template <typename TList, typename TElement>
+int listInsert(Stack& stack) {
+  TList list;
+  int64_t idx;
+  TElement elem;
+  pop(stack, list, idx, elem);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    if (normalized_idx < 0) {
+      elements.insert(elements.begin(), elem);
+    } else {
+      elements.push_back(elem);
+    }
+  } else {
+    elements.insert(elements.begin() + normalized_idx, elem);
+  }
+
+  return 0;
+}
+
+template <typename TList, typename TElement>
+int listRemove(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
 template <typename TList>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
@@ -1280,12 +1344,18 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
           listClear<Shared<c_type>>),                                       \
       Operator(                                                             \
-          "aten::pop(" decl_type                                            \
-          "[](a!) self, int idx=-1)                    \
-        -> " decl_type "(*)",                                               \
-          listPop<Shared<c_type>>)
+          "aten::insert( " decl_type "[](a!) self, int idx,                 \
+          " decl_type " el) -> ()",                                         \
+          listInsert<Shared<c_type>, c_type::ElemType>),                    \
+      Operator(                                                             \
+        "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
+        -> " decl_type  "(*)",                                              \
+        listPop<Shared<c_type>>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
+
+    Operator("aten::remove(Tensor[](a!) self, Tensor el) -> ()",
+        listRemove<Shared<TensorList>, at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
@@ -1313,10 +1383,16 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
           listClear<Shared<c_type>>),                                  \
       Operator(                                                        \
-          "aten::pop(" decl_type                                       \
-          "[](a!) self, int idx=-1)             \
-          -> " decl_type,                                              \
-          listPop<Shared<c_type>>)
+          "aten::insert( " decl_type "[](a!) self, int idx,            \
+          " decl_type " el) -> ()",                                    \
+          listInsert<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::remove(" decl_type "[](a!) self,                      \
+          " decl_type " el) -> ()",                                    \
+          listRemove<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
+          -> " decl_type, listPop<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
