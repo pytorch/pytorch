@@ -1,7 +1,6 @@
+#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/sugared_value.h>
-#include <torch/csrc/jit/script/python_type_parser.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {

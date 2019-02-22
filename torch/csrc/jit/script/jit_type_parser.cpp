@@ -1,8 +1,7 @@
+#include <torch/csrc/jit/script/jit_type_parser.h>
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/script/jit_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <string>
@@ -87,9 +86,11 @@ c10::optional<at::ScalarType> JitTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
-TypePtr JitTypeParser::parseTensorAnnotation(at::ScalarType dtype) {
+TypePtr JitTypeParser::parseRefinedTensor() {
+  auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
+  AT_ASSERT(maybe_dtype);
+  at::ScalarType dtype = *maybe_dtype;
   TypePtr ptr;
-  L.next();
   L.expect('(');
   TypePtr tensor_type;
   if (L.cur().kind == '*') {
@@ -152,21 +153,16 @@ std::pair<TypePtr, c10::optional<AliasInfo>> JitTypeParser::parseType() {
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-
     value = DictType::create(key_type, value_type);
+  } else if (
+      complete_tensor_types && L.cur().kind == TK_IDENT &&
+      parseTensorDType(L.cur().text())) {
+    value = parseRefinedTensor();
+    alias_info = parseAliasAnnotation();
   } else {
-    c10::optional<at::ScalarType> dtype = c10::nullopt;
-    if (complete_tensor_types && L.cur().kind == TK_IDENT) {
-      dtype = parseTensorDType(L.cur().text());
-    }
-    if (dtype) {
-      value = parseTensorAnnotation(*dtype);
-      alias_info = parseAliasAnnotation();
-    } else {
-      auto value_alias = parseBaseType();
-      value = value_alias.first;
-      alias_info = value_alias.second;
-    }
+    auto value_alias = parseBaseType();
+    value = value_alias.first;
+    alias_info = value_alias.second;
   }
   while (true) {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {

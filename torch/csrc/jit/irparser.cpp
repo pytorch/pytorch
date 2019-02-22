@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/jit_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
@@ -14,7 +13,6 @@ namespace script {
 
 struct VarWithType;
 struct ParsedLiteral;
-using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
 
 class IRParser {
   friend void parseIR(const std::string& str, torch::jit::Graph* graph);
@@ -91,6 +89,7 @@ VarWithType IRParser::parseVarWithType() {
   r.type = TensorType::get();
   if (L.nextIf(':')) {
     auto type_alias = type_parser.parseType();
+    AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
     r.type = type_alias.first;
   }
   return r;
