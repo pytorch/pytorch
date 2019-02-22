@@ -195,7 +195,8 @@ class Module(object):
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
                 if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+                    with torch.no_grad():
+                        param._grad = fn(param._grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
