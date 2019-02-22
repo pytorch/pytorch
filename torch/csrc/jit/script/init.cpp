@@ -818,8 +818,8 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<IValue*> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (auto param : parameters) {
-              inputs.emplace_back(param);
+            for (IValue* param : parameters) {
+              inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
                 func,

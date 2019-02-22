@@ -608,7 +608,7 @@ struct Module {
       curr->register_parameter(
           kv.key(),
           kv.value().slot()->toTensor(),
-          kv.value().is_parameter);
+          /*is_buffer=*/!kv.value().is_parameter);
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto& kv : modules) {
