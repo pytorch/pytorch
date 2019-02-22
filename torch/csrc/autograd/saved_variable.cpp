@@ -20,7 +20,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
     has_grad_fn_ = !variable.is_leaf();
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
-    data_impl_ = variable.getIntrusivePtr();
+    data_ = at::Tensor(variable.unsafeGetTensorImpl()->shallow_copy_and_detach());
     if (variable.is_leaf()) {
       grad_accumulator_ = variable.grad_accumulator();
     } else if (!is_output) {
@@ -32,7 +32,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
 }
 
 Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
-  if (!data_impl_) {
+  if (!data_.defined()) {
     if (!was_default_constructed_) {
       throw std::runtime_error(ERR_BACKWARD_TWICE);
     }
@@ -60,9 +60,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // in-place functions on unpacked variables.
   Variable var;
   if (grad_fn) {
-    var = make_variable(at::Tensor(data_impl_), Edge(std::move(grad_fn), output_nr_));
+    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
   } else {
-    var = make_variable(at::Tensor(data_impl_), requires_grad_);
+    var = make_variable(data_, requires_grad_);
   }
   var.set_version_counter(saved_version_);
 
