@@ -1179,6 +1179,15 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
   return 0;
 }
 
+int dictSetItem(Stack& stack) {
+  auto value = pop(stack);
+  auto idx = pop(stack);
+  auto& dict = pop(stack).toGenericDict()->elements();
+  dict[idx] = value;
+  push(stack, dict);
+  return 0;
+}
+
 int dictLen(Stack& stack) {
   auto dict = pop(stack).toGenericDictRef();
   push(stack, int64_t(dict.size()));
@@ -1316,6 +1325,8 @@ RegisterOperators reg2({
     // NOTE: this must be after the other list specializations so that operator
     // resolution doesn't pick this up first
     CREATE_MUTABLE_LIST_OPS("t", GenericList),
+#undef CREATE_IMMUTABLE_LIST_OPS
+#undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
   Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
@@ -1506,13 +1517,17 @@ RegisterOperators reg2({
 #define CREATE_DICT_OPS(key_type)                                              \
   Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),           \
       Operator(                                                                \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",          \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",       \
           dictKeys),                                                           \
-      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues), \
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),\
       Operator(                                                                \
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type              \
-          " key) -> t",                                                        \
-          dictIndex)
+          " key) -> t(*)",                                                     \
+          dictIndex),                                                          \
+      Operator(                                                                \
+          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type             \
+          " idx, t v) -> ()",                                                  \
+          dictSetItem)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),

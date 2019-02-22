@@ -41,7 +41,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
-from typing import List, Optional
+from typing import List, Dict, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 
@@ -10327,6 +10327,16 @@ a")
             return [{'word': torch.ones(2) + 3}, {'other word': torch.ones(1) + 2}]
 
         self.checkScript(list_of_dicts, ())
+
+    def test_dict_mutability(self):
+        @torch.jit.script
+        def fn():
+            # type: () -> Dict[str, int]
+            a = torch.jit.annotate(Dict[str, int], {})
+            a['ok'] = 10
+            return a
+
+        self.assertEqual(fn(), {'ok': 10})
 
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
