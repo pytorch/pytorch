@@ -68,7 +68,6 @@ struct Method {
         method_creator(std::move(method_creator)) {
     AT_ASSERT(graph_->inputs().size() >= member_inputs_.size());
     int i = graph_->inputs().size() - member_inputs_.size();
-    std::cout << "Method " << name << " created with " << member_inputs_.size() << "\n";
     for (auto member : member_inputs_) {
       member_input_index[member] = i++;
     }
@@ -122,6 +121,7 @@ struct Method {
     return graph()->inputs().size() - member_inputs_.size();
   }
   TORCH_API Value* get_or_add_parameter(IValue* slot) {
+    AT_ASSERT(slot->isTensor());
     auto it = member_input_index.find(slot);
     if (it != member_input_index.end()) {
       return graph()->inputs().at(it->second);

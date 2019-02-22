@@ -54,7 +54,7 @@ Value* try_emit_call_to(
           << " attempting to call a method with parameters/attributes"
              " from a raw graph. File a bug report";
     }
-    matched_schema->inputs.push_back(caller->get_or_add_input(TensorType::get(), member));
+    matched_schema->inputs.push_back(caller->get_or_add_parameter(member));
   }
   callee.check_single_output();
   return inlineCallTo(graph, *callee.graph(), matched_schema->inputs).at(0);
