@@ -124,15 +124,11 @@ class DataParallel(Module):
         if output_device is None:
             output_device = device_ids[0]
 
-        if not all(t.is_cuda and t.device.index == device_ids[0]
-                   for t in chain(module.parameters(), module.buffers())):
-            raise RuntimeError("module must have its parameters and buffers "
-                               "on device %d (device_ids[0])" % device_ids[0])
-
         self.dim = dim
         self.module = module
         self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
         self.output_device = _get_device_index(output_device, True)
+        self.src_device_obj = torch.device("cuda:{}".format(self.device_ids[0]))
 
         _check_balance(self.device_ids)
 
@@ -142,6 +138,13 @@ class DataParallel(Module):
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
+
+        for t in chain(self.module.parameters(), self.module.buffers()):
+            if t.device != self.src_device_obj:
+                raise RuntimeError("module must have its parameters and buffers "
+                                   "on device {} (device_ids[0]) but found one of "
+                                   "them on device: {}".format(self.src_device_obj, t.device))
+
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
@@ -185,6 +188,16 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     if output_device is None:
         output_device = device_ids[0]
+
+    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+    output_device = _get_device_index(output_device, True)
+    src_device_obj = torch.device("cuda:{}".format(device_ids[0]))
+
+    for t in chain(module.parameters(), module.buffers()):
+        if t.device != src_device_obj:
+            raise RuntimeError("module must have its parameters and buffers "
+                               "on device {} (device_ids[0]) but found one of "
+                               "them on device: {}".format(src_device_obj, t.device))
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     if len(device_ids) == 1:
