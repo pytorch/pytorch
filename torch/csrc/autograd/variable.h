@@ -508,9 +508,6 @@ inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -526,9 +523,6 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
