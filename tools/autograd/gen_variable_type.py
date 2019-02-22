@@ -505,7 +505,7 @@ def emit_body(declaration):
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    not_differentiable_args = func['not_differentiable_args'] if func else []
+    not_differentiable_args_names = func['not_differentiable_args_names'] if func else []
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if func is not None and func.get('output_differentiability') is not None:
@@ -622,7 +622,7 @@ def emit_body(declaration):
             if arg in args_with_derivatives:
                 continue
             name = arg['name']
-            if name in not_differentiable_args:
+            if name in not_differentiable_args_names:
                 continue
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
