@@ -350,6 +350,12 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
             return 0;
           };
         }),
+    Operator(
+        "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
+        "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
+        [](Stack& stack) {
+          return 0;
+        })
 
 });
 }
