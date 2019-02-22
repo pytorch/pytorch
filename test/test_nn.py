@@ -2142,8 +2142,7 @@ class TestNN(NNTestCase):
 
     def _test_softmax_backward(self, device):
         if device.type == 'cuda':
-            dtypes = [torch.float]
-            # FIXME: add torch.half after https://github.com/pytorch/pytorch/issues/17261 is fixed
+            dtypes = [torch.float, torch.half]
         else:
             dtypes = [torch.float]
         # FIXME: add (10, 0) after https://github.com/pytorch/pytorch/issues/17262 is fixed
