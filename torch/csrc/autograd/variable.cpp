@@ -85,7 +85,7 @@ void Variable::backward(
 }
 
 void Variable::set_data(Tensor new_data) const {
-  AT_CHECK(is_sparse() == new_data.is_sparse(), "expected new_data.is_sparse() to be ", is_sparse(), ", but got ", new_data.is_sparse());
+  AT_ASSERT(is_sparse() == new_data.is_sparse());
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
