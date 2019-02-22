@@ -4084,7 +4084,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) output) -> Tensor(a!)
+- func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
