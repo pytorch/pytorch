@@ -121,6 +121,7 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
