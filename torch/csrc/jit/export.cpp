@@ -498,7 +498,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedAttribute& param,
+      const script::NamedInput& param,
       torch::ParameterDef* param_def);
 
   std::ofstream ofs_;
@@ -671,7 +671,7 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedAttribute& param,
+    const script::NamedInput& param,
     torch::ParameterDef* param_def) {
   param_def->set_name(param.name_);
   param_def->set_is_buffer(!param.is_parameter);

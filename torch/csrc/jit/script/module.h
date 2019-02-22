@@ -365,14 +365,14 @@ struct NamedModule {
   std::shared_ptr<Module> module;
 };
 
-struct NamedAttribute {
-  NamedAttribute(std::string name, TypePtr type, IValue ivalue)
+struct NamedInput {
+  NamedInput(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
         type_(type),
         is_parameter(false),
         ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
 
-  NamedAttribute(std::string name, IValue ivalue, bool is_parameter)
+  NamedInput(std::string name, IValue ivalue, bool is_parameter)
       : name_(name),
         type_(TensorType::get()),
         is_parameter(is_parameter),
@@ -422,13 +422,13 @@ struct Module {
     }
     parameters.insert(
         name,
-        NamedAttribute(name, std::move(v), is_parameter));
+        NamedInput(name, std::move(v), is_parameter));
   }
   void register_attribute(
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    attributes.insert(name, NamedAttribute(name, type, ivalue));
+    attributes.insert(name, NamedInput(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
@@ -489,11 +489,11 @@ struct Module {
   const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::OrderedDict<std::string, NamedAttribute>& get_parameters()
+  const torch::OrderedDict<std::string, NamedInput>& get_parameters()
       const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, NamedAttribute>& get_attributes()
+  const torch::OrderedDict<std::string, NamedInput>& get_attributes()
       const {
     return attributes;
   }
@@ -502,10 +502,10 @@ struct Module {
     return methods;
   }
 
-  NamedAttribute* find_parameter(const std::string& name) {
+  NamedInput* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  NamedAttribute* find_attribute(const std::string& name) {
+  NamedInput* find_attribute(const std::string& name) {
     return attributes.find(name);
   }
   NamedModule* find_module(const std::string& name) {
@@ -638,8 +638,8 @@ struct Module {
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
-  torch::OrderedDict<std::string, NamedAttribute> parameters;
-  torch::OrderedDict<std::string, NamedAttribute> attributes;
+  torch::OrderedDict<std::string, NamedInput> parameters;
+  torch::OrderedDict<std::string, NamedInput> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
