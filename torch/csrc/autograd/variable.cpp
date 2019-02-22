@@ -100,11 +100,7 @@ void Variable::set_data(Tensor new_data) const {
     }
   }
 
-  bool allow_tensor_metadata_change = get()->allow_tensor_metadata_change();
-  get()->set_allow_tensor_metadata_change(true);
   get()->shallow_copy_from(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  get()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-
   get()->set_autograd_meta(std::move(get()->detach_autograd_meta()));
   get()->set_is_variable(true);
 }
