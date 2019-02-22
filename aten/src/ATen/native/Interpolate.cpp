@@ -82,16 +82,26 @@ Tensor& lerp_out(Tensor& result, const Tensor& self, const Tensor& end, Scalar w
 }
 
 Tensor& lerp_(Tensor& self, const Tensor& end, const Tensor& weight) {
-  Tensor result_tmp;
-  result_tmp = at::lerp(self, end, weight);
-  self.resize_as_(result_tmp).copy_(result_tmp);
+  Tensor result_tmp, b_self, b_end, b_weight;
+  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp");
+  AT_CHECK(b_self.sizes() == self.sizes(),
+           "output with shape ", self.sizes(),
+           " doesn't match the broadcast shape ", b_self.sizes());
+  AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
+           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
+  result_tmp = at::lerp(b_self, b_end, b_weight);
+  self.copy_(result_tmp);
   return self;
 }
 
 Tensor& lerp_(Tensor& self, const Tensor& end, Scalar weight) {
-  Tensor result_tmp;
-  result_tmp = at::lerp(self, end, weight);
-  self.resize_as_(result_tmp).copy_(result_tmp);
+  Tensor result_tmp, b_self, b_end;
+  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp");
+  AT_CHECK(b_self.sizes() == self.sizes(),
+           "output with shape ", self.sizes(),
+           " doesn't match the broadcast shape ", b_self.sizes());
+  result_tmp = at::lerp(b_self, b_end, weight);
+  self.copy_(result_tmp);
   return self;
 }
 
