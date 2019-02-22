@@ -2456,10 +2456,6 @@ class TestAutograd(TestCase):
     def test_lerp_tensor_weights(self):
         self._test_lerp_tensor_weights(lambda t: t)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_lerp_tensor_weights_cuda(self):
-        self._test_lerp_tensor_weights(lambda t: t.cuda())
-
     def test_reduce_dtype(self):
         def test_reduction(op, has_no_dim):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)

@@ -635,7 +635,10 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
         except RuntimeError as e:
             reason = e.args[0]
-            if 'only supports floating-point types' in reason or 'unimplemented data type' in reason:
+            data_type_reasons = {'only supports floating-point types',
+                                 'unimplemented data type',
+                                 'not implemented for'}
+            if any(data_type_reason in reason for data_type_reason in data_type_reasons):
                 raise unittest.SkipTest('unimplemented data type')
             raise
         except AttributeError as e:
