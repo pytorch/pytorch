@@ -98,6 +98,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
     "torch/csrc/jit/script/parser.cpp",
+    "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_method.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",

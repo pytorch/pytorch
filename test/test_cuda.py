@@ -807,6 +807,28 @@ class TestCuda(TestCase):
         for _ in self._test_memory_stats_generator(self):
             pass
 
+    def test_cuda_get_device_name(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_name = torch.cuda.get_device_name(current_device)
+        device_name_None = torch.cuda.get_device_name(None)
+        self.assertEqual(current_device_name, device_name_None)
+
+        # Testing the behaviour for No argument
+        device_name_no_argument = torch.cuda.get_device_name()
+        self.assertEqual(current_device_name, device_name_no_argument)
+
+    def test_cuda_get_device_capability(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_capability = torch.cuda.get_device_capability(current_device)
+        device_capability_None = torch.cuda.get_device_capability(None)
+        self.assertEqual(current_device_capability, device_capability_None)
+
+        # Testing the behaviour for No argument
+        device_capability_no_argument = torch.cuda.get_device_capability()
+        self.assertEqual(current_device_capability, device_capability_no_argument)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):
         # advance a generator with a end flag

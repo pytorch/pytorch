@@ -41,7 +41,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
-from typing import List, Optional
+from typing import List, Dict, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 
@@ -1743,7 +1743,7 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         graph_str = str(constant_prop.graph)
-        self.assertTrue(graph_str.count("prim::None") == 0)
+        self.assertTrue(graph_str.count("prim::Constant") == 1)
 
     def test_constant_prop_if_inline(self):
         @torch.jit.script
@@ -2935,6 +2935,22 @@ class TestScript(JitTestCase):
             # type: (Tensor) -> Tensor
             return fn2(input, [1])
 
+    def test_parser_kwargonly(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x, *, y) -> Tuple[Tensor, Tensor]:
+                return x, x
+            def bar(x):
+                return foo(x, y=x)
+        ''')
+        self.assertTrue('*' in cu.module._get_method('foo').pretty_print_schema())
+        with self.assertRaisesRegex(RuntimeError, "not provided"):
+            torch.jit.CompilationUnit('''
+                def foo(x, *, y) -> Tuple[Tensor, Tensor]:
+                    return x, x
+                def bar(x):
+                    return foo(x, x)
+            ''')
+
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
         mod.inf = float("inf")
@@ -3627,9 +3643,9 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
-        self.assertTrue(graph_str.count("int? = prim::None") == 1)
-        self.assertTrue(graph_str.count("None = prim::None") == 1)
+        self.assertTrue(graph_str.count("bool? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("int? = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("None = prim::Constant") == 1)
 
     def test_literal(self):
         def func1(a, b):
@@ -4111,6 +4127,48 @@ a")
 
             return len(a) == 0
         self.checkScript(test_clear, ())
+
+    def test_extend_list_mutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[Tensor], List[Tensor]) -> List[Tensor]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            for r in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_extend_list_immutable(self):
+        @torch.jit.script
+        def extend_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+
+            a.extend(b)
+            return a
+
+        for l in [[], [1], [1, 2, 3]]:
+            for r in [[], [1], [1, 2, 3]]:
+                self.assertEqual(extend_list(l, r), l + r)
+
+    def test_copy_list_mutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return a.copy()
+
+        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
+            self.assertEqual(copy_list(l), l)
+
+    def test_copy_list_immutable(self):
+        @torch.jit.script
+        def copy_list(a):
+            # type: (List[int]) -> List[int]
+            return a.copy()
+
+        for l in [[], [1], [1, 2, 3]]:
+            self.assertEqual(copy_list(l), l)
 
     def test_func_call(self):
         script = '''
@@ -5537,6 +5595,108 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_filecheck(self):
+        from torch.testing import FileCheck
+
+        # def test_accidental_not_used():
+        #     def unused():
+        #         a = FileCheck()
+        #
+        #     with self.capture_stdout() as captured:
+        #         a = FileCheck()
+        #         del a
+        #     self.assertTrue("You have not run this instance of FileCheck"
+        #                     in captured[0])
+        #
+        # test_accidental_not_used()
+        def test_check():
+            file = "232"
+            FileCheck().check("2").check("3").check("2").run(file)
+            FileCheck().check("232").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().check("22").run(file)
+            with self.assertRaisesRegex(RuntimeError, "CHECK: 3"):
+                FileCheck().check("3").check("3").run(file)
+
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheck().check_count("2", 5).run(file)
+            FileCheck().check_count("22", 2).run(file)
+            FileCheck().check_count("222", 1).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().check_count("22", 3).run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "CHECK-COUNT-6: 2"):
+                FileCheck().check_count("2", 6).run(file)
+
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            # FileCheck().check_same("22").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().check_same("33").run(file)
+
+            file = "22  1  3"
+
+            FileCheck().check("2").check_same("3").run(file)
+            FileCheck().check_count("2", 2).check_same("3").run(file)
+
+        test_check_same()
+
+        def test_check_next():
+            file = "\n1\n2\n3"
+            FileCheck().check("1").check_next("2").check_next("3").run(file)
+            FileCheck().check_next("1").check_next("2").check_next("3").run(file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to find"):
+                FileCheck().check("1").check_next("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().check("1").check_next("2").run("1\n\n2")
+
+        test_check_next()
+
+        def test_check_dag():
+            fc = FileCheck().check_dag("1").check_dag("2").check_not("2")
+            fc.run("12")
+            fc.run("21")
+
+            fc = FileCheck()
+            fc.check_not("3").check_dag("1").check_dag("2").check_not("3")
+            fc.run("1 3 2")
+            fc.run("2 3 1")
+
+            fc = FileCheck().check_dag("1").check_dag("2").check("3")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "3" but did not find it'):
+                fc.run("1 3 2")
+
+        test_check_dag()
+
+        def test_check_not():
+            FileCheck().check_not("2").check("1").run("12")
+            FileCheck().check("2").check_not("2").run("12")
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "2"'):
+                FileCheck().check_not("2").check("1").run("21")
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
+                FileCheck().check("2").check_not("1").run("21")
+
+            # checks with distinct range matchings
+            fb = FileCheck().check_count("2", 2).check_count("2", 2).check_not("2")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "2"'):
+                fb.run("22 2 22")
+
+            fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
+                fb.run("22 1 22")
+
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -5973,6 +6133,17 @@ a")
             hs = HaveSequential()
             i = torch.Tensor(2)
             hs(i)
+
+    def test_constant_insert_fail_lint(self):
+        @torch.jit.script
+        def foo(x):
+            y = x + 1
+            z = torch.tensor([[1.0, 2.5]])
+            print(x, z)
+
+        # check that it doesnt error
+        self.run_pass('constant_propagation', foo.graph)
+        self.assertTrue("aten::tensor" in str(foo.graph))  # not constant propped
 
     def test_script_sequential_in_mod_list(self):
         class Sub(torch.jit.ScriptModule):
@@ -10020,6 +10191,24 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_nn_LSTM(self):
+        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.x = torch.nn.LSTM(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+                return self.x(input)
+
+        eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
+        script_out = self.runAndSaveRNG(lambda x: S()(x), (input,))[0]
+
+        self.assertEqual(eager_out, script_out)
+
     def test_list_python_op(self):
         def python_list_op(lst):
             # type: (List[Tensor]) -> Tensor
@@ -10157,6 +10346,16 @@ a")
 
         self.checkScript(list_of_dicts, ())
 
+    def test_dict_mutability(self):
+        @torch.jit.script
+        def fn():
+            # type: () -> Dict[str, int]
+            a = torch.jit.annotate(Dict[str, int], {})
+            a['ok'] = 10
+            return a
+
+        self.assertEqual(fn(), {'ok': 10})
+
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
             # type: (Dict[str, int], List[str]) -> List[int]
@@ -10168,6 +10367,19 @@ a")
 
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
+
+    def test_tensor_import_export(self):
+        @torch.jit.script
+        def foo(x):
+            a = torch.tensor(1)
+            b = torch.tensor([1, 2])
+            c = [a, b]
+            return c
+
+        self.run_pass('constant_propagation', foo.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", foo.graph)
+        self.getExportImportCopy(m)
 
 
 class MnistNet(nn.Module):
@@ -11665,8 +11877,6 @@ class TestFuser(JitTestCase):
         (hy + cy).sum().backward()
         self.assertExpectedGraph(backward_graph(module), subname='backward')
 
-    # TODO: At some point we supported fusion of torch.rand_like but not anymore
-    @unittest.expectedFailure
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -11706,19 +11916,40 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(self.fn_test_relu, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @staticmethod
-    def fn_test_erf(x):
-        return F.relu(torch.erf(x) - torch.erfc(x))
-
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_erf_cuda(self):
+        def fn_test_erf(x):
+            return F.relu(torch.erf(x) - torch.erfc(x))
+
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        ge = self.checkTrace(self.fn_test_erf, (x,))
+        ge = self.checkTrace(fn_test_erf, (x,))
         self.assertAllFused(ge.graph_for(x))
         x.requires_grad_(True)
         self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_rand_broadcast_cuda(self):
+        def fn_test_rand(x, y):
+            r = torch.rand_like(y)
+            return r * x + x
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        script_f = torch.jit.script(fn_test_rand, (x, y))
+        out = script_f(x, y)
+        self.assertAllFused(script_f.graph_for(x, y))
+        x.requires_grad_(True)
+        out = script_f(x, y)
+        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        # test that broadcasting random produces correct results
+        x = torch.ones(4, 4, dtype=torch.float, device='cuda')
+        y = torch.ones(4, dtype=torch.float, device='cuda')
+        out = script_f(x, y)
+        self.assertEqual(out[0], out[1])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser

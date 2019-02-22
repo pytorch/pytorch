@@ -31,6 +31,7 @@ const std::vector<std::string> functions = {
 
         def expand(self,
                    size: List[int],
+                   *,
                    implicit: bool=False):
             self_size = self.size()
             def backward(grad_output):
@@ -332,7 +333,6 @@ const std::vector<std::string> functions = {
                 else:
                     grad_self = torch._adaptive_avg_pool2d_backward(grad_output, self)
                 return grad_self, None
-
             return torch.adaptive_avg_pool2d(self, output_size), backward
 
         def batch_norm(input : Tensor,
@@ -371,6 +371,11 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
+        def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
+            result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
+            def backward(grad):
+                return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
+            return result, backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
@@ -412,7 +417,7 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
   if (!schema_name_suffix.empty()
-      && schema_name_suffix.find_first_not_of("0123456789") == string::npos) {
+      && schema_name_suffix.find_first_not_of("0123456789") == std::string::npos) {
     schema_string.replace(schema_string.find(schema_name),
                           schema_name.length(),
                           schema_name.substr(0, pos));
@@ -487,15 +492,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // JIT doesn't support keyword only arguments.
-    // Remove ' *,' in schema before looking up
-    // TODO: #16921 properly support keyword only arguments in JIT.
-    auto n = schema_str.find("*, ");
-    if (n != std::string::npos) {
-      schema_str = schema_str.erase(n, 3);
-    }
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
+
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
