@@ -317,7 +317,7 @@ struct ModuleValue : public SugaredValue {
     }
     if (auto value = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(value->type_, value->slot()));
+          m.get_or_add_attribute(value->type, value->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain

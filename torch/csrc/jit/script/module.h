@@ -368,23 +368,23 @@ struct NamedModule {
 struct NamedInput {
   NamedInput(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
-        type_(type),
+        type(type),
         is_parameter(false),
-        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
+        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
 
   NamedInput(std::string name, IValue ivalue, bool is_parameter)
       : name_(name),
-        type_(TensorType::get()),
+        type(TensorType::get()),
         is_parameter(is_parameter),
-        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
+        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
 
   IValue* slot() const {
-    return ivalue_.get();
+    return ivalue.get();
   }
   const std::string name_;
-  const TypePtr type_;
+  const TypePtr type;
   bool is_parameter;
-  std::unique_ptr<IValue> ivalue_;
+  std::unique_ptr<IValue> ivalue;
 };
 
 struct Module {
