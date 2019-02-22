@@ -238,6 +238,39 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 };
 
+// Represents all the parameters of a module as a List[Tensor]
+struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
+  ConstantParameterList(std::shared_ptr<Module> module)
+      : module_(std::move(module)) {}
+
+  std::string kind() const override {
+    return "constant parameter list";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    // Add all module parameters as inputs to the graph
+    std::vector<Value*> params;
+    const auto& param_list = module_->get_parameters().items();
+    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
+      auto& param = *it;
+      if (!param->is_buffer) {
+        params.push_back(caller.get_or_add_parameter(param->slot()));
+      }
+    }
+    auto list = caller.graph()->createList(TensorType::get(), params);
+    caller.graph()->insertNode(list);
+    return toSimple(list->output());
+  }
+
+ private:
+  std::shared_ptr<Module> module_;
+};
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -286,6 +319,11 @@ struct ModuleValue : public SugaredValue {
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
+      if (py::isinstance<py::function>(attr) &&
+          py::hasattr(attr, "_is_parameter_list") &&
+          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+        return std::make_shared<ConstantParameterList>(module);
+      }
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
