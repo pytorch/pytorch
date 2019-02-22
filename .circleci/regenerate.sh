@@ -1,3 +1,6 @@
 #!/bin/bash -xe
 
-./generate-config-yml.py > config.yml
+# Allows this script to be invoked from any directory:
+cd `dirname "$0"`
+
+./generate_config_yml.py > config.yml

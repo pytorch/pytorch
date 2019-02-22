@@ -20,7 +20,7 @@ matrix:
           - sudo apt update
           - sudo apt install graphviz
           - pip3 install pygraphviz
-        script: cd .circleci && ./ensure-consistency.sh
+        script: cd .circleci && ./ensure-consistency.py
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
