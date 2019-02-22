@@ -488,7 +488,7 @@ class JitTestCase(TestCase):
                                            allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge)
+            self.assertEqual(grads, grads_ge, prec=3e-5)
 
         # test the grad grad case
 
@@ -517,7 +517,7 @@ class JitTestCase(TestCase):
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge)
+            self.assertEqual(grads, grads_ge, prec=3e-5)
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
