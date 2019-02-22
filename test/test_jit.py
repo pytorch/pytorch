@@ -950,11 +950,11 @@ class TestJit(JitTestCase):
 
         trace, _ = torch.jit.get_trace_graph(fn, (x, y))
         self.run_pass('cse', trace)
-        FileCheck().check_count("add", 1).check_count("mul", 2, True) \
-            .check_count("tanh", 1, True).check_count("add", 2, True).check_next("return")  \
+        do_exactly = True
+        FileCheck().check_count("add", 1).check_count("mul", 2, do_exactly) \
+            .check_count("tanh", 1, do_exactly).check_count("add", 2, do_exactly).check_next("return")  \
             .run(str(trace))
 
-        self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
     def test_recursive_cse(self):
@@ -3622,25 +3622,11 @@ a")
             b = b - a
             return a, b, c, x, y
 
-        constants_expected = ["abc", "bcd", "abc", 1, 0, 3, 6]
         self.checkScript(func, torch.tensor([1]))
         graph = torch.jit.script(func).graph
         self.run_pass('constant_propagation', graph)
         self.run_pass('constant_pooling', graph)
-
-        # constants = graph.findAllNodes("prim::Constant")
-        # constants_found = list(map(lambda x: x.output().toIValue(), constants))
-        # tensor_type = type(torch.tensor([1]))
-        # for c_exp in constants_expected:
-        #     found = False
-        #     for c_found in constants_found:
-        #         if not found and type(c_exp) == type(c_found):
-        #             if isinstance(c_found, tensor_type):
-        #
-        #             else:
-        #                 found = c_exp == c_found
-        #     assert found
-        # # self.assertExpectedGraph(graph)
+        self.assertExpectedGraph(graph)
 
     def test_constant_pooling_none(self):
         @torch.jit.script
@@ -4798,6 +4784,16 @@ a")
                 c1 = 0
             return c1
 
+        self.assertEqual(0, testNoThrows(torch.randn(0)))
+        ifs = testNoThrows.graph.findAllNodes("prim::If", recurse=False)
+
+        # three ifs at the top level, and the second one has a nested if for
+        # the or (True or bool(t[1])) expression
+        self.assertTrue(len(ifs) == 3)
+        self.assertTrue(ifs[0].findNode("prim::If") is None)
+        self.assertTrue(ifs[1].findNode("prim::If").findNode("prim::If") is None)
+        self.assertTrue(ifs[2].findNode("prim::If") is None)
+
         @torch.jit.script
         def throwsOr(t):
             c0 = False or bool(t[1])
@@ -4809,18 +4805,6 @@ a")
             print(c0)
 
         t = torch.randn(0)
-        self.assertEqual(0, testNoThrows(torch.randn(0)))
-        ifs = testNoThrows.graph.findAllNodes("prim::If", recurse=False)
-
-        # three ifs at the top level, and the second one has a nested if for
-        # the or (True or bool(t[1])) expression
-        self.assertTrue(len(ifs) == 3)
-        self.assertTrue(ifs[0].findNode("prim::If") is None)
-        self.assertTrue(ifs[1].findNode("prim::If").findNode("prim::If") is None)
-        self.assertTrue(ifs[2].findNode("prim::If") is None)
-        self.run_pass('constant_propagation', testNoThrows.graph)
-        self.assertTrue("prim::If" not in str(testNoThrows.graph))
-
         with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
             throwsOr(t)
         with self.assertRaisesRegex(RuntimeError, "index 1 out of range for tensor of size"):
@@ -6022,6 +6006,23 @@ a")
                 return v
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
+
+    # def test_script_module_list_sequential_error(self):
+    #     class M(torch.jit.ScriptModule):
+    #         def __init__(self, mod_list):
+    #             super(M, self).__init__(False)
+    #             self.mods = mod_list
+    #
+    #         @torch.jit.script_method
+    #         def forward(self, v):
+    #             for m in self.mods:
+    #                 v = m(v)
+    #             return v
+    #
+    #      with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+    #         a = M(nn.Sequential(nn.ReLU()))
+    #     with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+    #         a = M(nn.ModuleList([nn.ReLU()]))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -9312,7 +9313,7 @@ a")
     def test_builtin_error_messsage(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
-        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
