@@ -1121,8 +1121,8 @@ void testGraphExecutor() {
   ASSERT_EQ(stack.size(), 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  ASSERT_TRUE(almostEqual(stack[0].toTensor(), r0));
-  ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
+  ASSERT_TRUE(almostEqual(stack[0].toTensor(), v(r0)));
+  ASSERT_TRUE(almostEqual(stack[1].toTensor(), v(r1)));
 }
 
 void testBlocks(std::ostream& out = std::cout) {
