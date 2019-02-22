@@ -258,7 +258,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     const auto& param_list = module_->get_parameters().items();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      if (!param->is_buffer) {
+      if (param->is_parameter) {
         params.push_back(caller.get_or_add_parameter(param->slot()));
       }
     }

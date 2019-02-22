@@ -202,7 +202,7 @@ struct Method {
     return retval;
   }
 
-  std::vector<IValue*> member_inputs() const {
+  const std::vector<IValue*>& member_inputs() const {
     return member_inputs_;
   }
 
@@ -606,7 +606,9 @@ struct Module {
     auto curr = module_lookup(names);
     for (auto& kv : parameters) {
       curr->register_parameter(
-          kv.key(), kv.value().slot()->toTensor(), false);
+          kv.key(),
+          kv.value().slot()->toTensor(),
+          kv.value().is_parameter);
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto& kv : modules) {
