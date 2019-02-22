@@ -20,11 +20,7 @@ class ConfigNode(object):
         self.props = {}
 
     def get_label(self):
-        label = self.node_name
-        if not label:
-            # FIXME this shouldn't be necessary
-            label = "<None>"
-        return label
+        return self.node_name
 
     def get_children(self):
         return []
