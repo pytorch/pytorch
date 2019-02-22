@@ -119,23 +119,27 @@ void convertNetDefToIR(
   // We will set the names for external inputs and outputs last, so that if the
   // names are reused, then intermediate values will be renamed and the external
   // values will keep the original names.
-  for (const auto& kv : namesMap) {
-    Value* v = kv.first;
-    const std::string& name = kv.second;
+  for (Node* n : g->nodes()) {
+    for (Value* v : n->outputs()) {
+      AT_ASSERT(namesMap.count(v));
+      const std::string& name = namesMap.at(v);
+      if (Value::isValidName(name)) {
+        v->setUniqueName(name);
+      }
+    }
+  }
+  for (Value* v : g->inputs()) {
+    AT_ASSERT(namesMap.count(v));
+    const std::string& name = namesMap.at(v);
     if (Value::isValidName(name)) {
       v->setUniqueName(name);
     }
   }
-  int idx = 0;
-  for (const auto& name : net.external_input()) {
+  for (Value* v : g->outputs()) {
+    AT_ASSERT(namesMap.count(v));
+    const std::string& name = namesMap.at(v);
     if (Value::isValidName(name)) {
-      g->inputs()[idx++]->setUniqueName(name);
-    }
-  }
-  idx = 0;
-  for (const auto& name : net.external_output()) {
-    if (Value::isValidName(name)) {
-      g->outputs()[idx++]->setUniqueName(name);
+      v->setUniqueName(name);
     }
   }
 }
