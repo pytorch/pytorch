@@ -710,7 +710,6 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
-
     def test_weight_norm(self):
         model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
         input = torch.randn(1, 1, 5, requires_grad=True)

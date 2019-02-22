@@ -713,7 +713,6 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return _unimplemented(name, 'input size not accesible')
-
         dim = input.type().sizes()[2:]
         # verify if output size % input size = 0 for all dim
         mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
