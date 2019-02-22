@@ -24,7 +24,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         # Pull Docker image and run build
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
-        export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+        export id=$(docker run --network none -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
         git submodule sync && git submodule update -q --init
 
@@ -57,9 +57,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --network none --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --network none -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         if [ -n "${MULTI_GPU}" ]; then
           export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -113,7 +113,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
-        export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+        export id=$(docker run --network none -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -183,9 +183,9 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --network none --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --network none -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
