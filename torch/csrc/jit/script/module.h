@@ -49,47 +49,37 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 struct Module;
 
+using ModuleLookup = std::function<std::shared_ptr<Module>(
+    const std::vector<std::string>&)>;
+
 struct Method {
   Method(
       Module* owner,
       std::string name,
       bool optimize,
       std::shared_ptr<Graph> graph,
-      std::vector<at::Tensor*> initial_members,
-      std::vector<IValue*> attributes,
+      std::vector<IValue*> initial_members,
       std::function<void(Method&)> method_creator)
       : owner_(owner),
         name_(std::move(name)),
         graph_(std::move(graph)),
         optimize(optimize),
         member_inputs(std::move(initial_members)),
-        attributes(std::move(attributes)),
         method_creator(std::move(method_creator)) {
     AT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
-    for (at::Tensor* member : member_inputs) {
+    for (auto member : member_inputs) {
       member_input_index[member] = i++;
     }
   }
 
   void run(Stack& stack) {
-    auto params_it = member_inputs.begin();
-    auto attr_it = attributes.begin();
-    for (size_t i = stack.size();
-         params_it != member_inputs.end() || attr_it != attributes.end();
-         ++i) {
-      if (attr_it != attributes.end() &&
-          i == attributes_index.find(*attr_it)->second) {
-        stack.emplace_back(*(*attr_it));
-        ++attr_it;
-      } else if (
-          params_it != member_inputs.end() &&
-          i == member_input_index.find(*params_it)->second) {
-        stack.emplace_back(*(*params_it));
-        ++params_it;
-      } else {
-        AT_ERROR("Unknown parameter or attribute");
-      }
+    for (auto input : member_inputs) {
+      push(stack, input);
+    }
+    std::cout << "The stack has " << stack.size() << " things\n";
+    for (auto i : stack) {
+      std::cout << i << "\n";
     }
     get_executor().run(stack);
   }
@@ -105,7 +95,7 @@ struct Method {
   }
 
   std::shared_ptr<Graph> graph_for(Stack inputs) {
-    for (at::Tensor* tp : member_inputs) {
+    for (auto tp : member_inputs) {
       inputs.emplace_back(*tp);
     }
     return get_executor().graphFor(inputs);
@@ -134,7 +124,7 @@ struct Method {
   size_t num_inputs() const {
     return graph()->inputs().size() - member_inputs.size();
   }
-  TORCH_API Value* get_or_add_parameter(at::Tensor* slot) {
+  TORCH_API Value* get_or_add_parameter(IValue* slot) {
     auto it = member_input_index.find(slot);
     if (it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
@@ -144,14 +134,24 @@ struct Method {
     member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
+  //
+  // TORCH_API Value* add_attribute(TypePtr type, IValue* slot) {
+  //   auto it = member_input_index.find(slot);
+  //   if (it != member_input_index.end()) {
+  //     return graph()->inputs().at(it->second);
+  //   }
+  //   member_inputs.push_back(slot);
+  //   member_input_index[slot] = graph()->inputs().size();
+  //   return graph()->addInput()->setType(type);
+  // }
 
-  TORCH_API Value* add_attribute(TypePtr type, IValue* slot) {
-    auto it = attributes_index.find(slot);
-    if (it != attributes_index.end()) {
+  TORCH_API Value* get_or_add_input(TypePtr type, IValue* slot) {
+    auto it = member_input_index.find(slot);
+    if (it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
     }
-    attributes.push_back(slot);
-    attributes_index[slot] = graph()->inputs().size();
+    member_inputs.push_back(slot);
+    member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput()->setType(type);
   }
 
@@ -164,7 +164,7 @@ struct Method {
     for (at::Tensor& i : inputs) {
       stack.emplace_back(std::move(i));
     }
-    for (at::Tensor* inp : member_inputs) {
+    for (IValue* inp : member_inputs) {
       stack.push_back(*inp);
     }
     const auto size = stack.size();
@@ -180,7 +180,9 @@ struct Method {
       bool propagate = true) {
     auto retval = graph_->copy();
     for (auto inp : member_inputs) {
-      inputs.push_back(*inp);
+      if (inp->isTensor()) {
+        inputs.push_back(inp->toTensor());
+      }
     }
     if (propagate) {
       setInputTypes(
@@ -213,7 +215,7 @@ struct Method {
     return retval;
   }
 
-  std::vector<at::Tensor*> params() const {
+  std::vector<IValue*> member_inputs() const {
     return member_inputs;
   }
 
@@ -342,13 +344,13 @@ struct Method {
   // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
-  std::vector<at::Tensor*> member_inputs;
-  std::vector<IValue*> attributes;
+  // std::vector<at::Tensor*> member_inputs;
+  std::vector<IValue*> member_inputs;
 
   // map from a at::Tensor* in member_inputs to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
-  std::unordered_map<at::Tensor*, size_t> member_input_index;
-  std::unordered_map<IValue*, size_t> attributes_index;
+  std::unordered_map<IValue*, size_t> member_input_index;
+  // std::unordered_map<IValue*, size_t> attributes_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.
@@ -377,6 +379,12 @@ struct NamedModule {
   std::string name;
   std::shared_ptr<Module> module;
 };
+
+// struct NamedInput {
+//   NamedInput(std::string name) : name(name) {}
+//
+//   const std::string name;
+// };
 
 struct NamedAttribute {
   NamedAttribute(std::string name, TypePtr type, IValue ivalue)
@@ -444,7 +452,9 @@ struct Module {
       p->is_buffer = is_buffer;
       return;
     }
-    parameters.insert(name, NamedParameter(name, std::move(v), is_buffer));
+    parameters.insert(
+        name,
+        NamedParameter(name, std::move(v), is_buffer));
   }
   void register_attribute(
       const std::string& name,
@@ -461,8 +471,7 @@ struct Module {
   Method& create_method(
       const std::string& name,
       std::shared_ptr<Graph> graph,
-      std::vector<at::Tensor*> member_inputs,
-      std::vector<IValue*> attributes) {
+      std::vector<IValue*> member_inputs) {
     AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
@@ -470,7 +479,6 @@ struct Module {
         optimize,
         std::move(graph),
         std::move(member_inputs),
-        std::move(attributes),
         nullptr));
     return *methods.insert(name, std::move(method));
   }
@@ -483,7 +491,6 @@ struct Module {
         name,
         optimize,
         std::make_shared<Graph>(),
-        {},
         {},
         std::move(creator)));
     return *methods.insert(name, std::move(method));
@@ -623,8 +630,7 @@ struct Module {
       const ExtraFilesMap& extra_files = ExtraFilesMap());
 
   void copy_into(
-      std::function<std::shared_ptr<Module>(std::vector<std::string>)>
-          module_lookup,
+      ModuleLookup module_lookup,
       // parameter_remap is needed when a parent module uses a parameter of a
       // submodule
       std::unordered_map<at::Tensor*, at::Tensor*>& parameter_remap,
@@ -632,7 +638,7 @@ struct Module {
     auto curr = module_lookup(names);
     for (auto& kv : parameters) {
       curr->register_parameter(
-          kv.key(), *kv.value().slot(), kv.value().is_buffer);
+          kv.key(), *kv.value().slot(), false);
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto& kv : modules) {
@@ -643,11 +649,12 @@ struct Module {
       names.pop_back();
     }
     for (auto& kv : methods) {
-      std::vector<at::Tensor*> params;
-      for (auto& p : kv.value()->params()) {
-        params.push_back(parameter_remap.at(p));
+      std::vector<IValue*> member_inputs;
+      for (auto& p : kv.value()->member_inputs()) {
+        // IValue v = *(parameter_remap.at(p));
+        // member_inputs.push_back(parameter_remap.at(p));
       }
-      curr->create_method(kv.key(), kv.value()->graph()->copy(), params, {});
+      curr->create_method(kv.key(), kv.value()->graph()->copy(), member_inputs);
     }
   }
 

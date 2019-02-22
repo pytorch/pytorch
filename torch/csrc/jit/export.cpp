@@ -498,7 +498,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedParameter& param,
+      const script::NamedAttribute& param,
       torch::ParameterDef* param_def);
 
   std::ofstream ofs_;
@@ -671,11 +671,11 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedParameter& param,
+    const script::NamedAttribute& param,
     torch::ParameterDef* param_def) {
-  param_def->set_name(param.name);
-  param_def->set_is_buffer(param.is_buffer);
-  param_def->set_tensor_id(addTensor(*param.slot()));
+  param_def->set_name(param.name_);
+  param_def->set_is_buffer(true); // TODO fix
+  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
 
 // Pretty printing for ONNX

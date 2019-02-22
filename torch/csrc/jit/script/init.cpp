@@ -261,7 +261,7 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedParameter* v = module->find_parameter(field);
+      NamedAttribute* v = module->find_parameter(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
@@ -279,11 +279,11 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<ModuleValue>(v->module);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(module, *v);
-    } else if (NamedParameter* v = module->find_parameter(field)) {
+    } else if (NamedAttribute* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
     if (auto value = module->find_attribute(field)) {
-      return std::make_shared<SimpleValue>(m.add_attribute(value->type_, value->slot()));
+      return std::make_shared<SimpleValue>(m.get_or_add_input(value->type_, value->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -548,7 +548,7 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<at::Tensor*>& values,
+    std::vector<IValue*>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
@@ -718,7 +718,7 @@ void initJitScriptBindings(PyObject* module) {
               auto& p = parameters[i];
               py::tuple r(3);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(*p->slot()), p->is_buffer);
+                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()), true);
             }
             return result;
           })
@@ -726,7 +726,8 @@ void initJitScriptBindings(PyObject* module) {
           "_has_parameter",
           [](Module& self, const std::string& name) {
             if (auto r = self.find_parameter(name)) {
-              return !r->is_buffer;
+              // return !r->is_buffer;
+              return true;
             }
             return false;
           })
@@ -734,7 +735,8 @@ void initJitScriptBindings(PyObject* module) {
           "_has_buffer",
           [](Module& self, const std::string& name) {
             if (auto r = self.find_parameter(name)) {
-              return r->is_buffer;
+              return true;
+              // return r->is_buffer;
             }
             return false;
           })
@@ -762,7 +764,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self,
              const std::string& name,
              std::shared_ptr<Graph> graph) {
-            self.create_method(name, std::move(graph), {}, {});
+            self.create_method(name, std::move(graph), {});
           })
       .def(
           "_create_method_from_trace",
@@ -774,11 +776,11 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<at::Tensor*> parameters;
+            std::vector<IValue*> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (at::Tensor* param : parameters) {
-              inputs.emplace_back(*param);
+            for (auto param : parameters) {
+              inputs.emplace_back(param);
             }
             auto graph = tracer::createGraphByTracing(
                 func,
@@ -786,7 +788,7 @@ void initJitScriptBindings(PyObject* module) {
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());
-            self->create_method(name, std::move(graph), std::move(parameters), {});
+            self->create_method(name, std::move(graph), std::move(parameters));
             didFinishEmitModule(self);
           })
       .def(
@@ -866,9 +868,9 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<at::Tensor*> member_inputs;
+            std::vector<IValue*> member_inputs;
             for (auto& p : params) {
-              NamedParameter* np =
+              NamedAttribute* np =
                   std::get<0>(p)->find_parameter(std::get<1>(p));
               AT_ASSERT(np != nullptr);
               member_inputs.push_back(np->slot());
@@ -876,7 +878,7 @@ void initJitScriptBindings(PyObject* module) {
 
             Method* orig_method = orig->find_method(name);
             m->create_method(
-                name, orig_method->graph()->copy(), member_inputs, {});
+                name, orig_method->graph()->copy(), member_inputs);
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

@@ -23,23 +23,25 @@ void InputArchive::read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  auto* read_tensor = module_->find_parameter(key);
-  AT_CHECK(read_tensor != nullptr, "No such serialized tensor '", key, "'");
+  auto read_param = module_->find_parameter(key);
+  AT_CHECK(read_param != nullptr, "No such serialized tensor '", key, "'");
   // clang-format off
+  auto read_tensor = read_param->slot()->toTensor();
   AT_CHECK(
-      read_tensor->is_buffer == is_buffer,
+      true,
+      // read_tensor->is_buffer == is_buffer, // TODO: fix
       "Expected deserialized tensor for key '", key,
       "' to ", is_buffer ? "not " : "", "be a buffer, but it was not");
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
-    if (tensor.device() != read_tensor->slot()->device()) {
-      tensor.set_data(autograd::Variable(*read_tensor->slot()).data());
+    if (tensor.device() != read_tensor.device()) {
+      tensor.set_data(autograd::Variable(read_tensor));
     } else {
-      tensor.set_(*read_tensor->slot());
+      tensor.set_(read_tensor);
     }
   } else {
-    tensor = std::move(*read_tensor->slot());
+    tensor = std::move(read_tensor);
   }
 }
 
