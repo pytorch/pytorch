@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/script/python_type_parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/tree_views.h>
 

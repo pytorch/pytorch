@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/script/jit_type_parser.h>
+#include <torch/csrc/jit/script/schema_type_parser.h>
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-TypeAndAlias JitTypeParser::parseBaseType() {
+TypeAndAlias SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"ScalarType", IntType::get()},
@@ -42,7 +42,7 @@ TypeAndAlias JitTypeParser::parseBaseType() {
 // Tensor!  // shorthand for Tensor(fresh_identifier!)
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
-c10::optional<AliasInfo> JitTypeParser::parseAliasAnnotation() {
+c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
   std::set<Symbol> sets;
   AliasInfo alias_info;
   if (L.nextIf('(')) {
@@ -72,7 +72,7 @@ c10::optional<AliasInfo> JitTypeParser::parseAliasAnnotation() {
   return alias_info;
 }
 
-c10::optional<at::ScalarType> JitTypeParser::parseTensorDType(
+c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
     const std::string& dtype) {
 #define DEFINE_SCALAR_TYPE(_1, n, _2) {#n, at::ScalarType::n},
 
@@ -86,7 +86,7 @@ c10::optional<at::ScalarType> JitTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
-TypePtr JitTypeParser::parseRefinedTensor() {
+TypePtr SchemaTypeParser::parseRefinedTensor() {
   auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
   AT_ASSERT(maybe_dtype);
   at::ScalarType dtype = *maybe_dtype;
@@ -119,7 +119,7 @@ TypePtr JitTypeParser::parseRefinedTensor() {
   return ptr;
 }
 
-std::pair<TypePtr, c10::optional<AliasInfo>> JitTypeParser::parseType() {
+std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
   TypePtr value;
   c10::optional<AliasInfo> alias_info;
   // Tuple type
@@ -183,7 +183,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> JitTypeParser::parseType() {
   return std::make_pair(std::move(value), std::move(alias_info));
 }
 
-void JitTypeParser::parseList(
+void SchemaTypeParser::parseList(
     int begin,
     int sep,
     int end,

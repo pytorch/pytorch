@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/jit_type_parser.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
+#include <torch/csrc/jit/script/schema_type_parser.h>
 
 #include <string>
 #include <vector>
@@ -51,7 +51,7 @@ class IRParser {
   torch::jit::script::Lexer L;
   torch::jit::Graph* g = nullptr;
   std::unordered_map<std::string, Value*> vmap;
-  JitTypeParser type_parser;
+  SchemaTypeParser type_parser;
 };
 
 struct ParsedLiteral {

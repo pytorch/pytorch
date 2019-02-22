@@ -10,14 +10,14 @@ namespace script {
 using TypePtr = c10::TypePtr;
 using TypeAndAlias = std::pair<TypePtr, c10::optional<AliasInfo>>;
 
-struct JitTypeParser {
+struct SchemaTypeParser {
   TypeAndAlias parseBaseType();
   c10::optional<AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<AliasInfo>> parseType();
   c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
   TypePtr parseRefinedTensor();
 
-  JitTypeParser(Lexer& L, bool parse_complete_tensor_types) : L(L) {
+  SchemaTypeParser(Lexer& L, bool parse_complete_tensor_types) : L(L) {
     complete_tensor_types = parse_complete_tensor_types;
   }
 
