@@ -10380,8 +10380,11 @@ a")
                 # type: (str) -> Tensor
                 return self.table[key] + self.x
 
-        m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
-        self.assertEqual(m("c"), torch.tensor([103]))
+        with self.disableModuleHook():
+            # TODO: re-enable module hook when Python printing of attributes is
+            # supported
+            m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
+            self.assertEqual(m("c"), torch.tensor([103]))
 
     def test_tensor_import_export(self):
         @torch.jit.script

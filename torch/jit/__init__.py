@@ -1157,6 +1157,9 @@ if _enabled:
             if attr in containers:
                 return False
             for container in containers:
+                if not hasattr(self, container):
+                    return False
+            for container in containers:
                 if attr in getattr(self, container):
                     return False
             return True
