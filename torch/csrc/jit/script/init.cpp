@@ -1014,7 +1014,7 @@ void initJitScriptBindings(PyObject* module) {
           "Check Count",
           py::arg("str"),
           py::arg("count"),
-          py::arg("exactly") = true)
+          py::arg("exactly") = false)
       .def("run", &testing::FileCheck::run);
 }
 } // namespace script
