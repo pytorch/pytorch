@@ -24,3 +24,13 @@ Furthermore, consistency is enforced within the YAML config itself, by using a s
 multiple parts of the file.
 
 See https://github.com/pytorch/pytorch/issues/17038
+
+
+Future direction
+----------------
+
+### Declaring sparse config subsets
+See comment [here](https://github.com/pytorch/pytorch/pull/17323#pullrequestreview-206945747):
+
+In contrast with a full recursive tree traversal of configuration dimensions,
+> in the future future I think we actually want to decrease our matrix somewhat and have only a few mostly-orthogonal builds that taste as many different features as possible on PRs, plus a more complete suite on every PR and maybe an almost full suite nightly/weekly (we don't have this yet). Specifying PR jobs in the future might be easier to read with an explicit list when we come to this.
