@@ -27,7 +27,7 @@ class ProfDAGStats {
   std::pair<float, float> computeMoments() const {
     CAFFE_ENFORCE_GT(cnt_, 0);
     float mean = sum_ / cnt_;
-    float stddev = std::sqrt(sqrsum_ / cnt_ - mean * mean);
+    float stddev = std::sqrt(std::abs(sqrsum_ / cnt_ - mean * mean));
     return {mean, stddev};
   }
 
@@ -68,6 +68,8 @@ class ProfDAGReport {
       const std::string& name,
       const ProfDAGStats& stats,
       const std::vector<std::string>& op_extra_info) const;
+
+  bool hasStats() const;
 
   std::vector<std::string> op_types_;
   std::vector<std::vector<std::string>> op_extra_info_;
