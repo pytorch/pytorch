@@ -32,8 +32,12 @@ struct FileCheck {
   // previous match
   TORCH_API FileCheck* check_next(const std::string& str);
 
-  // Checks that the string occurs count number of times
-  TORCH_API FileCheck* check_count(const std::string& str, size_t count);
+  // Checks that the string occurs count number of times. If exactly is true,
+  // checks that there are exactly count many matches
+  TORCH_API FileCheck* check_count(
+      const std::string& str,
+      size_t count,
+      bool exactly = false);
 
   // A series of consecutive check_dags get turned into a group of checks
   // which can appear in any order relative to each other.
@@ -46,7 +50,6 @@ struct FileCheck {
   bool has_run = false;
   std::unique_ptr<FileCheckImpl> fcImpl;
 };
-
 } // namespace testing
 } // namespace jit
 } // namespace torch
