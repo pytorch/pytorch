@@ -33,7 +33,7 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_TEST=0
+#   BUILD_TEST=0
 #     disables the test build
 #
 #   USE_MIOPEN=0
@@ -55,7 +55,7 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   USE_CAFFE2_OPS=0
+#   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
 #   USE_GLOO_IBVERBS
