@@ -1910,16 +1910,11 @@ at::Tensor cat(const std::vector<at::Tensor>& tensors) {
   return at::cat(tensors);
 }
 
-std::string get_first(const std::vector<std::vector<std::string>>& strings) {
-  return strings[0][0];
-}
-
 static auto reg4 =
     torch::jit::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",
             &leaky_relu)
-        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)
-        .op("_test::get_first", &get_first);
+        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
 
 } // namespace
 } // namespace jit
