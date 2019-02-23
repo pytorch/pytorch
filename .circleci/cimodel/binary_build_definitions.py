@@ -91,10 +91,10 @@ class Conf(object):
         return d
 
 
-def get_root(smoke):
+def get_root(smoke, name):
 
     return make_build_configs.TopLevelNode(
-        "Builds",
+        name,
         make_build_configs.CONFIG_TREE_DATA,
         smoke,
     )
@@ -102,7 +102,7 @@ def get_root(smoke):
 
 def gen_build_env_list(smoke):
 
-    root = get_root(smoke)
+    root = get_root(smoke, "N/A")
     config_list = conf_tree.dfs(root)
 
     newlist = []
@@ -214,7 +214,7 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
 
     jobs_dict[toplevel_key] = d
 
-    graph = visualization.generate_graph(get_root(smoke))
+    graph = visualization.generate_graph(get_root(smoke, toplevel_key))
     graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
 
 
