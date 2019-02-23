@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/tree_views.h>
-#include <torch/csrc/jit/script/type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -67,19 +67,18 @@ subscript_to_type_fns() {
                  parseTypeFromExpr(*subscript.subscript_exprs().begin());
              return FutureType::create(elem_type);
            }},
-           {"Dict",
-            [](Subscript subscript) -> TypePtr {
-              if (subscript.subscript_exprs().size() != 2) {
-                throw ErrorReport(subscript)
-                    << " expected exactly 2 element types but found "
-                    << subscript.subscript_exprs().size();
-              }
-              auto key_type =
-                  parseTypeFromExpr(subscript.subscript_exprs()[0]);
-              auto value_type =
-                  parseTypeFromExpr(subscript.subscript_exprs()[1]);
-              return DictType::create(key_type, value_type);
-            }},
+          {"Dict",
+           [](Subscript subscript) -> TypePtr {
+             if (subscript.subscript_exprs().size() != 2) {
+               throw ErrorReport(subscript)
+                   << " expected exactly 2 element types but found "
+                   << subscript.subscript_exprs().size();
+             }
+             auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
+             auto value_type =
+                 parseTypeFromExpr(subscript.subscript_exprs()[1]);
+             return DictType::create(key_type, value_type);
+           }},
       };
   return map;
 }

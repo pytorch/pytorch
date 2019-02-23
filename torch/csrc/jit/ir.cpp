@@ -653,10 +653,23 @@ std::string Value::uniqueNameBase() const {
   return name_base;
 }
 
+bool Value::isValidName(const std::string& name) {
+  // Empty strings are legal
+  if (!name.size()) {
+    return true;
+  }
+
+  // Numbers are not legal
+  if (name.find_first_not_of("0123456789") == std::string::npos) {
+    return false;
+  }
+
+  return true;
+}
+
 Value* Value::setUniqueName(const std::string& name) {
-  if (name.size() > 0 &&
-      name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
+  if (!isValidName(name)) {
+    throw std::runtime_error("Invalid name: '" + name + "'");
   }
 
   auto& names = node()->owningGraph()->unique_names_;
