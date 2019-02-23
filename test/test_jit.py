@@ -2242,7 +2242,7 @@ class TestJit(JitTestCase):
                 warnings.warn("x is less than 2")
             return x
 
-        self.assertTrue(str(fn.graph).count("aten::warn") == 1)
+        FileCheck().check("aten::warn").run(str(fn.graph))
 
     def test_no_erroneous_warnings(self):
         import warnings
@@ -7846,15 +7846,11 @@ a")
             return c
 
         graph = torch.jit.script(func).graph
-        self.assertTrue("int = prim::Constant" in str(graph))
-        self.assertTrue("aten::add_" in str(graph))
-
+        FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
         self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
         self.run_pass('dce', graph)
-
-        self.assertTrue("int = prim::Constant" not in str(graph))
-        self.assertTrue("aten::add_" not in str(graph))
+        FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
     def test_mm_batching(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -7879,11 +7875,6 @@ a")
         self.assertEqual(slstm(*inputs), lstm(*inputs))
         self.assertEqual(torch.autograd.grad(slstm(*inputs).sum(), inputs),
                          torch.autograd.grad(lstm(*inputs).sum(), inputs))
-
-    def test_generic_list_equal(self):
-        @torch.jit.script
-        def test_gen_list(self):
-            return [[1, 2], [3]] == [[3, 4], [5]]
 
     def test_loop_unrolling(self):
         def fn(x):
