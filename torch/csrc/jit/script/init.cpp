@@ -488,7 +488,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (py::isinstance<py::float_>(obj)) {
       return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
+      return toSimple(
+          g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
     } else if (obj.is(py::none())) {
       return toSimple(g.insertConstant(IValue(), nullptr, loc));
     } else if (THPDevice_Check(obj.ptr())) {
@@ -605,7 +606,6 @@ Resolver pythonResolver(const ResolutionCallback& rcb) {
     return toSugaredValue(obj, m, loc);
   };
 }
-
 } // namespace
 
 FunctionSchema getSchemaWithNameAndDefaults(
@@ -1005,9 +1005,18 @@ void initJitScriptBindings(PyObject* module) {
       .def("check_count", &testing::FileCheck::check_count)
       .def("check_dag", &testing::FileCheck::check_dag)
       .def("check_count", &testing::FileCheck::check_count)
+      .def(
+          "check_count",
+          [](testing::FileCheck& f,
+             const std::string& str,
+             size_t count,
+             bool exactly) { return f.check_count(str, count, exactly); },
+          "Check Count",
+          py::arg("str"),
+          py::arg("count"),
+          py::arg("exactly") = false)
       .def("run", &testing::FileCheck::run);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
