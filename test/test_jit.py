@@ -12335,9 +12335,6 @@ graph(%x : Tensor):
   return (%1)
 ''')
 
-    def test_generic_list(self):
-        self.assertEqual(torch.ops._test.get_first([['hello']]), 'hello')
-
 
 class TestJitGeneratedAutograd(JitTestCase):
     pass
