@@ -293,6 +293,10 @@ class ChunkDataset final
         running_preloaders_(0) {}
 
   virtual ~ChunkDataset() {
+    // stop batch buffer first.
+    if (batch_buffer_) {
+      batch_buffer_->stop();
+    }
     free_workers();
   }
 
@@ -317,6 +321,10 @@ class ChunkDataset final
   /// This will clear any internal state and starts the internal prefetching
   /// mechanism for the chunk dataset.
   void reset() override {
+    // We need this to support partial data reads via dataloader iterator.     
+    if (batch_buffer_) {
+      batch_buffer_->stop();
+    }
     // free workers from previous reset if there is any.
     free_workers();
     preload_threads_.clear();
