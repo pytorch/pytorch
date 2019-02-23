@@ -397,38 +397,3 @@ def sparse_(tensor, sparsity, std=0.01):
             zero_indices = row_indices[:num_zeros]
             tensor[zero_indices, col_idx] = 0
     return tensor
-
-
-# for backward compatibility
-def _make_deprecate(meth):
-    new_name = meth.__name__
-    old_name = new_name[:-1]
-
-    def deprecated_init(*args, **kwargs):
-        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
-                      .format(old_name, new_name), stacklevel=2)
-        return meth(*args, **kwargs)
-
-    deprecated_init.__doc__ = r"""
-    {old_name}(...)
-
-    .. warning::
-        This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
-
-    See :func:`~torch.nn.init.{new_name}` for details.""".format(
-        old_name=old_name, new_name=new_name)
-    deprecated_init.__name__ = old_name
-    return deprecated_init
-
-
-uniform = _make_deprecate(uniform_)
-normal = _make_deprecate(normal_)
-constant = _make_deprecate(constant_)
-eye = _make_deprecate(eye_)
-dirac = _make_deprecate(dirac_)
-xavier_uniform = _make_deprecate(xavier_uniform_)
-xavier_normal = _make_deprecate(xavier_normal_)
-kaiming_uniform = _make_deprecate(kaiming_uniform_)
-kaiming_normal = _make_deprecate(kaiming_normal_)
-orthogonal = _make_deprecate(orthogonal_)
-sparse = _make_deprecate(sparse_)

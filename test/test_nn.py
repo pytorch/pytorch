@@ -7440,13 +7440,6 @@ class TestNNInit(TestCase):
                     self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
                                      torch.eye(rows) * gain ** 2, prec=1e-6)
 
-    def test_deprecation(self):
-        x = torch.randn(3, 3)
-
-        def fn():
-            init.normal(x)
-        self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
-
 
 def add_test(test, decorator=None):
     def add(test_name, fn):
