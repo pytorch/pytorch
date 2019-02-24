@@ -1309,7 +1309,7 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createUserObject(UserTypePtr type) {
+Node* Graph::createUserObject(const UserTypePtr& type) {
   auto result = create(prim::CreateUserObject);
   result->output()->setType(type);
   return result;
