@@ -9,7 +9,6 @@
 #include <caffe2/core/common.h>
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <memory>
 #include <iostream>

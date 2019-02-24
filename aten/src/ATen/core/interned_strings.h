@@ -164,6 +164,7 @@ namespace c10 {
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
+  _(namespaces, user)              \
   _(namespaces, namespaces)
 #endif
 
