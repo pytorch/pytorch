@@ -139,7 +139,8 @@ def _uses_true_division(fn):
 
 def get_jit_class_def(cls, self_name=None):
     # Get defs for each method independently
-    methods = inspect.getmembers(cls, predicate=inspect.isfunction)
+    methods = inspect.getmembers(
+        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
     method_defs = [get_jit_def(method[1],
                    self_name=cls.__name__) for method in methods]
 
