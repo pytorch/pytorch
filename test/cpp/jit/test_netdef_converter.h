@@ -9,6 +9,21 @@
 namespace torch {
 namespace jit {
 
+static caffe2::OperatorDef createOperator(
+    const std::string& name,
+    const std::vector<std::string>& inputs,
+    const std::vector<std::string>& outputs) {
+  caffe2::OperatorDef op;
+  op.set_type(name);
+  for (const auto& input : inputs) {
+    op.add_input(input);
+  }
+  for (const auto& output : outputs) {
+    op.add_output(output);
+  }
+  return op;
+}
+
 void testNetDefConverter(std::ostream& out = std::cout) {
   {
     // Check a simple net conversion back and forth.
@@ -140,6 +155,69 @@ void testNetDefConverter(std::ostream& out = std::cout) {
     AT_ASSERT(
         n->ss(Symbol::fromQualString("attr::ss_attr")) ==
         std::vector<std::string>({"Winter", "Summer"}));
+  }
+  {
+    // Check how value names are preserved in conversion. They naturally might
+    // change as IR is in SSA form, but we should try not to change names of
+    // external inputs and outputs.
+
+    // Create a simple net:
+    //  net(ext_inputs = {a, b, c})
+    //    a = foo::bar(a, b)
+    //    u = foo::baz(b, c)
+    //    x = foo::qux(u, a)
+    //    x = foo::quux(a, x)
+    //    -> (ext_outputs = {x})
+    //
+    caffe2::NetDef net;
+
+    *net.add_op() = createOperator("foo::bar", {"a", "b"}, {"a"});
+    *net.add_op() = createOperator("foo::baz", {"b", "c"}, {"u"});
+    *net.add_op() = createOperator("foo::qux", {"u", "a"}, {"x"});
+    *net.add_op() = createOperator("foo::quux", {"a", "x", "u"}, {"x"});
+    net.add_external_input("a");
+    net.add_external_input("b");
+    net.add_external_input("c");
+    net.add_external_output("x");
+
+    // Expect the following graph to be generated:
+    //    graph(%a : Tensor,
+    //          %b : Tensor,
+    //          %c : Tensor) {
+    //      %a.1 : Tensor = foo::bar(%a, %b)
+    //      %u : Tensor = foo::baz(%b, %c)
+    //      %x.1 : Tensor = foo::qux(%u, %a.1)
+    //      %x : Tensor = foo::quux(%a.1, %x.1, u)
+    //      return (%x)
+    //    }
+    Graph graph;
+    std::unordered_map<std::string, Value*> vmap;
+    convertNetDefToIR(net, &graph, &vmap);
+    AT_ASSERT(graph.inputs().size() == 3);
+    AT_ASSERT(graph.inputs()[0]->uniqueName() == "a");
+    AT_ASSERT(graph.inputs()[1]->uniqueName() == "b");
+    AT_ASSERT(graph.inputs()[2]->uniqueName() == "c");
+
+    AT_ASSERT(graph.outputs().size() == 1);
+    AT_ASSERT(graph.outputs()[0]->uniqueName() == "x");
+
+    Node* quux = graph.outputs()[0]->node();
+    Value* a0 = quux->inputs()[0];
+    Value* x0 = quux->inputs()[1];
+    Value* u = quux->inputs()[2];
+    AT_ASSERT(a0->uniqueName() != "a" && a0->uniqueNameBase() == "a");
+    AT_ASSERT(x0->uniqueName() != "x" && x0->uniqueNameBase() == "x");
+    AT_ASSERT(u->uniqueName() == "u");
+
+    // Convert back to netdef and check if the names are preserved.
+    // We still expect them to be in SSA form, but we should preserve names for
+    // external inputs and outputs.
+    caffe2::NetDef net2;
+    convertIRToNetDef(&net2, graph);
+    AT_ASSERT(net2.external_input().Get(0) == "a");
+    AT_ASSERT(net2.external_input().Get(1) == "b");
+    AT_ASSERT(net2.external_input().Get(2) == "c");
+    AT_ASSERT(net2.external_output().Get(0) == "x");
   }
 }
 } // namespace jit

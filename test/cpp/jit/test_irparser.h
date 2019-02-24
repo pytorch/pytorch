@@ -150,6 +150,67 @@ graph(%0 : Tensor,
   return (%7)
 )IR");
   }
+
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : int? = prim::Constant()
+  return (%3)
+)IR");
+  }
+
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : Float(*, *, *) = prim::Constant()
+  return (%3)
+)IR");
+  }
+
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : Long() = prim::Constant()
+  return (%3)
+)IR");
+  }
+
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : Double(4, 4, 5) = prim::Constant()
+  return (%3)
+)IR");
+  }
+
+  {
+    bool error_thrown = false;
+    try {
+      checkRoundtrip(
+          R"IR(
+graph(%0 : Tensor,
+    %1 : Tensor,
+    %2 : Tensor):
+  %3 : Double(4!, 4, 5) = prim::Constant()
+  return (%3)
+)IR");
+    } catch (const std::exception& error) {
+      error_thrown = true;
+    }
+    AT_ASSERT(error_thrown);
+  }
 }
 } // namespace jit
 } // namespace torch

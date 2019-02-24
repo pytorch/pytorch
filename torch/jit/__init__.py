@@ -490,7 +490,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
                 if n_mod.kind() != n_check.kind():
                     break  # Graphs have already diverged
 
-                if n_mod.kind() == n_check.kind() and n_mod.kind() == 'prim::Constant':
+                if n_mod.kind() == 'prim::Constant' and not (n_mod.mustBeNone() or n_check.mustBeNone()):
                     if n_mod.kindOf('value') != 't' or n_check.kindOf('value') != 't':
                         continue
 
@@ -1495,6 +1495,7 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
     _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
+    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
 
     return _builtin_table
 
