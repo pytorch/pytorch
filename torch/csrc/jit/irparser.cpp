@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
+#include <torch/csrc/jit/script/schema_type_parser.h>
 
 #include <string>
 #include <vector>
@@ -16,7 +17,9 @@ struct ParsedLiteral;
 class IRParser {
   friend void parseIR(const std::string& str, torch::jit::Graph* graph);
   IRParser(const std::string& str, torch::jit::Graph* graph)
-      : L(str), g(graph) {}
+      : L(str),
+        g(graph),
+        type_parser(L, /*parse_complete_tensor_types*/ true) {}
 
   std::string parseVar();
   VarWithType parseVarWithType();
@@ -48,6 +51,7 @@ class IRParser {
   torch::jit::script::Lexer L;
   torch::jit::Graph* g = nullptr;
   std::unordered_map<std::string, Value*> vmap;
+  SchemaTypeParser type_parser;
 };
 
 struct ParsedLiteral {
@@ -66,29 +70,12 @@ struct ParsedLiteral {
 struct VarWithType {
   VarWithType() = default;
   std::string name;
-  std::string type;
+  TypePtr type;
 };
 
 void parseIR(const std::string& str, torch::jit::Graph* graph) {
   torch::jit::script::IRParser p(str, graph);
   p.parse();
-}
-
-TypePtr parseType(const std::string& s) {
-  if (s == "Tensor") {
-    return TensorType::get();
-  }
-  if (s == "int") {
-    return IntType::get();
-  }
-  if (s == "float") {
-    return FloatType::get();
-  }
-  if (s == "string") {
-    return StringType::get();
-  }
-  // TODO: Support other types.
-  AT_ASSERTM(false, "Type not supported by parser:", s);
 }
 
 VarWithType IRParser::parseVarWithType() {
@@ -99,9 +86,11 @@ VarWithType IRParser::parseVarWithType() {
   } else {
     r.name = L.expect(TK_NUMBER).text();
   }
-  r.type = "Tensor";
+  r.type = TensorType::get();
   if (L.nextIf(':')) {
-    r.type = L.expect(TK_IDENT).text();
+    auto type_alias = type_parser.parseType();
+    AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+    r.type = type_alias.first;
   }
   return r;
 }
@@ -268,7 +257,7 @@ void IRParser::parseBlockInputs(Block* b) {
     // If the name isn't valid, don't use it
     std::string uniq_name = Value::isValidName(v.name) ? v.name : "";
     vmap[v.name] = b->addInput(uniq_name);
-    vmap[v.name]->setType(parseType(v.type));
+    vmap[v.name]->setType(v.type);
   });
 }
 
@@ -345,7 +334,7 @@ void IRParser::parseOperator(Block* b) {
   int idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx++];
-    vmap[v.name]->setType(parseType(v.type));
+    vmap[v.name]->setType(v.type);
   }
 
   // Insert the new node into block B.
@@ -364,7 +353,7 @@ void IRParser::parseGraphInputs() {
     // If the name isn't valid, don't use it
     std::string uniq_name = Value::isValidName(v.name) ? v.name : "";
     vmap[v.name] = g->addInput(uniq_name);
-    vmap[v.name]->setType(parseType(v.type));
+    vmap[v.name]->setType(v.type);
   });
 }
 
@@ -433,7 +422,6 @@ void IRParser::parseList(
     L.expect(end);
   }
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
