@@ -7988,10 +7988,9 @@ class _TestTorchMixin(object):
         self.assertRaises(TypeError, lambda: data.flip())
 
         # not allow size of flip dim > total dims
-        exc = RuntimeError if use_cuda else IndexError
-        self.assertRaises(exc, lambda: data.flip(0, 1, 2, 3))
+        self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))
         # not allow dim > max dim
-        self.assertRaises(exc, lambda: data.flip(3))
+        self.assertRaises(IndexError, lambda: data.flip(3))
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
