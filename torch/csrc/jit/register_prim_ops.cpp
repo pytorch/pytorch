@@ -1031,6 +1031,74 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
+template <typename TList, typename TElement>
+int listIndex(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    push(stack, std::distance(elements.begin(), pos));
+  } else {
+    AT_ERROR("'", elem, "' is not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
+
+  if (pos != elements.end()) {
+    push(stack, std::distance(elements.begin(), pos));
+  } else {
+    AT_ERROR("'", elem, "' is not in list");
+  }
+
+  return 0;
+}
+
+template <typename TList, typename TElement>
+int listCount(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  const int64_t count = std::count(elements.begin(), elements.end(), elem);
+  push(stack, count);
+
+  return 0;
+}
+
+template <>
+int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  const int64_t count = std::count_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
+  push(stack, count);
+
+  return 0;
+}
+
 template <typename TList>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
@@ -1396,6 +1464,10 @@ RegisterOperators reg2({
 
     Operator("aten::remove(Tensor[](a!) self, Tensor el) -> ()",
         listRemove<Shared<TensorList>, at::Tensor>),
+    Operator("aten::index(Tensor[] self, Tensor el) -> int",
+        listIndex<Shared<c_type>, c_type::ElemType>),
+    Operator("aten::count(Tensor[] self, Tensor el) -> int",
+        listCount<Shared<c_type>, c_type::ElemType>),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
@@ -1430,6 +1502,14 @@ RegisterOperators reg2({
           "aten::remove(" decl_type "[](a!) self,                      \
           " decl_type " el) -> ()",                                    \
           listRemove<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::index(" decl_type "[] self,                           \
+          " decl_type " el) -> int",                                   \
+          listIndex<Shared<c_type>, c_type::ElemType>),                \
+      Operator(                                                        \
+          "aten::count(" decl_type "[] self,                           \
+          " decl_type " el) -> int",                                   \
+          listCount<Shared<c_type>, c_type::ElemType>),                \
       Operator(                                                        \
           "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
           -> " decl_type, listPop<Shared<c_type>>)
