@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 
 #include <thread>
 #include <mutex>
@@ -47,6 +48,14 @@ Context::Context()
 Context & globalContext() {
   static Context globalContext_;
   return globalContext_;
+}
+
+Context::ErrorLevel Context::deterministicCUDA() {
+  return deterministic_cuda;
+}
+
+void Context::setDeterministicCUDA(Context::ErrorLevel e) {
+  deterministic_cuda = e;
 }
 
 // NB: This method is *purely* whether or not a user requested
@@ -154,4 +163,16 @@ struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
 };
 REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
+void alertCUDADeterministic(const char* caller) {
+  auto deterministic = globalContext().deterministicCUDA();
+  switch (deterministic) {
+    case Context::ErrorLevel::Warn:
+      AT_WARN(caller, " is not deterministic");
+      break;
+    case Context::ErrorLevel::Error:
+      AT_ERROR(caller, " is not deterministic");
+      break;
+    case Context::ErrorLevel::None:;
+  }
+}
 }

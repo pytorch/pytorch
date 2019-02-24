@@ -130,10 +130,16 @@ Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & wei
 }
 
 std::tuple<Tensor &,Tensor &> nll_loss2d_forward_out(Tensor & output, Tensor & total_weight, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  if (self.type().backend() == Backend::CUDA) {
+    alertCUDADeterministic("nll_loss2d");
+  }
   return at::legacy::th::_thnn_nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index);
 }
 
 std::tuple<Tensor,Tensor> nll_loss2d_forward(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  if (self.type().backend() == Backend::CUDA) {
+    alertCUDADeterministic("nll_loss2d");
+  }
   return at::legacy::th::_thnn_nll_loss2d_forward(self, target, weight, reduction, ignore_index);
 }
 

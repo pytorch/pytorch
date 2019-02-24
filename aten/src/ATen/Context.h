@@ -115,6 +115,12 @@ class CAFFE2_API Context {
   }
   bool setFlushDenormal(bool on);
 
+  // ErrorLevel for deterministic flag
+  enum ErrorLevel { None, Warn, Error };
+
+  ErrorLevel deterministicCUDA();
+  void setDeterministicCUDA(ErrorLevel e);
+
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
   // whether or not CuDNN is actually usable.  Use cudnn_is_acceptable
@@ -149,6 +155,7 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  ErrorLevel deterministic_cuda = ErrorLevel::None;
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
@@ -238,5 +245,7 @@ static inline void manual_seed(uint64_t seed) {
     globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
   }
 }
+
+CAFFE2_API void alertCUDADeterministic(const char* caller);
 
 } // namespace at

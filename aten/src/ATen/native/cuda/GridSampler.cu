@@ -840,6 +840,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * H * W);
   if (count > 0) {
+    alertCUDADeterministic("grid_sampler_2d_backward_cuda");
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_backward_cuda", [&] {
       grid_sampler_2d_backward_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -868,6 +869,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * D * H * W);
   if (count > 0) {
+    alertCUDADeterministic("grid_sampler_3d_backward_cuda");
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_3d_backward_cuda", [&] {
       grid_sampler_3d_backward_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
