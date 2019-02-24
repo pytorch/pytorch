@@ -901,31 +901,77 @@ class TestCuda(TestCase):
             self.assertEqual(z.get_device(), 0)
             self.assertIs(z.cuda(0), z)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_copy_non_default_stream(self):
-        def _test_copy(self, x, y, output):
-            s0 = torch.cuda.Stream()
-            with torch.cuda.stream(s0):
-                torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
-                y.copy_(x + 1, non_blocking=True)
+    def _test_copy_sync_current_stream(self, x, y):
+        x_plus_one = x + 1
+        s0 = torch.cuda.Stream(device=x.device)
+        s1 = torch.cuda.Stream(device=y.device)
+        s2 = torch.cuda.Stream(device=x.device)
+        s3 = torch.cuda.Stream(device=y.device)
 
-            s1 = torch.cuda.Stream()
+        # same dst stream different src streams
+        with torch.cuda.stream(s0):
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
             with torch.cuda.stream(s1):
-                y.copy_(x, non_blocking=True)
+                y.copy_(x_plus_one)
 
-            s0.synchronize()
-            s1.synchronize()
-            self.assertEqual(y, output)
+        with torch.cuda.stream(s2), torch.cuda.stream(s1):
+            y.copy_(x)
 
+        s1.synchronize()
+        # The copy() is synchronized on the current streams of both src and dst.
+        # In the above test, the _sleep() op on s0 will not block the copy() on
+        # s2, but both copies are synchronized on s1 in the dst device. Hence,
+        # x is copied to y after x_plus_one is copied to y. If x and y are on
+        # the same device, both copy() ops are synchronized on s1.
+        self.assertEqual(y, x)
+
+        # same src stream different dst streams
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+            with torch.cuda.stream(s0):
+                y.copy_(x_plus_one)
+
+        with torch.cuda.stream(s3), torch.cuda.stream(s0):
+            y.copy_(x)
+
+        s0.synchronize()
+        # Similarly, both copy() ops are synchronized on s0.
+        self.assertEqual(y, x)
+
+    def _test_copy_concurrent_streams(self, x, y):
+        x_plus_one = x + 1
+        s0 = torch.cuda.Stream(device=x.device)
+        s1 = torch.cuda.Stream(device=y.device)
+        s2 = torch.cuda.Stream(device=x.device)
+        s3 = torch.cuda.Stream(device=y.device)
+
+        with torch.cuda.stream(s0), torch.cuda.stream(s1):
+            torch.cuda._sleep(TestCuda.FIFTY_MIL_CYCLES)
+            y.copy_(x_plus_one)
+
+        with torch.cuda.stream(s2), torch.cuda.stream(s3):
+            y.copy_(x)
+
+        s1.synchronize()
+        s3.synchronize()
+        # Two copy() ops are on different src and dst streams, and hence can run
+        # concurrently. Due to the _sleep() op, x_plus_one is copied to y after
+        # x is copied to y.
+        self.assertEqual(y, x_plus_one)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_copy_streams(self):
         d0 = torch.device('cuda:0')
         x0 = torch.zeros(5, 5, device=d0)
 
         d1 = torch.device('cuda:1')
         x1 = torch.zeros(5, 5, device=d1)
-        _test_copy(self, x0, x1, torch.zeros(5, 5, device=d1))
+        self._test_copy_sync_current_stream(x0, x1)
+        self._test_copy_concurrent_streams(x0, x1)
 
         x2 = torch.zeros(5, 5, device=d0)
-        _test_copy(self, x0, x2, torch.ones(5, 5, device=d1))
+        self._test_copy_sync_current_stream(x0, x2)
+        self._test_copy_concurrent_streams(x0, x2)
 
     def test_copy_non_blocking(self):
         x = torch.randn(5, 5).cuda()

@@ -61,13 +61,13 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
       globalContext().getTHCState(), src_device.index(), dst_device.index());
 
   // We always perform the copy on the source device, using the current stream
-  // on the source device, and we fully synchronize both src and dst's streams
-  // for completion of the copy. We have to explicitly do this for non-contig
-  // copies. This mimics the behavior of cross-device cudaMemcpyAsync on the
-  // default stream.
+  // on the source device, and we fully synchronize on both src and dst's
+  // current streams for completion of the copy. We have to explicitly do this
+  // for non-contig copies. This mimics the behavior of cross-device
+  // cudaMemcpyAsync on the default stream.
   CUDAStream copy_stream = getCurrentCUDAStream(src_device.index());
   if (src_device != dst_device) {
-    // This is a cross-device copy on the src current stream and dst default
+    // This is a cross-device copy on the src current stream and dst current
     // stream. We perform a two-way barrier between both devices' streams
     // before the copy. This ensures that any write-after-write and
     // write-after-read dependencies on the destination side are handled, so
@@ -75,7 +75,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     // src waits on dst barrier (src already waits on src)
     CUDAEvent dst_ready;
     device_guard.set_device(dst_device);
-    dst_ready.record(getDefaultCUDAStream(dst_device.index()));
+    dst_ready.record(getCurrentCUDAStream(dst_device.index()));
 
     device_guard.set_device(src_device);
     dst_ready.block(copy_stream);
@@ -150,7 +150,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     src_ready.record(copy_stream);
 
     device_guard.set_device(dst_device);
-    src_ready.block(getDefaultCUDAStream(dst_device.index()));
+    src_ready.block(getCurrentCUDAStream(dst_device.index()));
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
