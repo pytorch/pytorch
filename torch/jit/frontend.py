@@ -221,7 +221,7 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif self_name is not None and py_arg.arg == 'self':
+    elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
         annotation_expr = Var(Ident(r, 'Tensor'))

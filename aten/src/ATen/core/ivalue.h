@@ -91,38 +91,7 @@ using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
-// User-defined object.
-template <typename Elem>
-struct CAFFE2_API UserObjectGeneric final : c10::intrusive_ptr_target {
- public:
-  UserObjectGeneric(Symbol name, size_t numSlots) : typename_(std::move(name)) {
-    attrs_.resize(numSlots);
-  }
-
-  static c10::intrusive_ptr<UserObjectGeneric> create(
-      Symbol name,
-      size_t numSlots) {
-    return c10::make_intrusive<UserObjectGeneric>(std::move(name), numSlots);
-  }
-
-  void setAttr(size_t slot, Elem v) {
-    attrs_[slot] = v;
-  }
-
-  Elem getAttr(size_t slot) const {
-    return attrs_.at(slot);
-  }
-
-  Symbol name() const {
-    return typename_;
-  }
-
- private:
-  const Symbol typename_;
-  std::vector<Elem> attrs_;
-};
-
-using UserObject = UserObjectGeneric<IValue>;
+struct UserObject;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -707,6 +676,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;
+};
+
+// User-defined object.
+struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
+ public:
+  UserObject(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+    attrs_.resize(numSlots);
+  }
+
+  static c10::intrusive_ptr<UserObject> create(
+      Symbol name,
+      size_t numSlots) {
+    return c10::make_intrusive<UserObject>(std::move(name), numSlots);
+  }
+
+  void setAttr(size_t slot, IValue v) {
+    attrs_[slot] = v;
+  }
+
+  IValue getAttr(size_t slot) const {
+    return attrs_.at(slot);
+  }
+
+  Symbol name() const {
+    return typename_;
+  }
+
+ private:
+  const Symbol typename_;
+  std::vector<IValue> attrs_;
 };
 
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
