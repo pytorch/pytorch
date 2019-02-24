@@ -4216,6 +4216,38 @@ a")
         with self.assertRaisesRegex(RuntimeError, "is not in list"):
             test_tensor_list_index_not_existing()
 
+    def test_mutable_list_count(self):
+        def test_list_count():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(4)
+
+            return i == 3
+        self.checkScript(test_list_count, ())
+
+    def test_mutable_list_count_not_existing(self):
+        def test_list_count_not_existing():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(5)
+
+            return i == 0
+        self.checkScript(test_list_count_not_existing, ())
+
+    def test_mutable_tensor_list_count(self):
+        def test_tensor_list_count():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(4))
+
+            return i == 3
+        self.checkScript(test_tensor_list_count, ())
+
+    def test_mutable_tensor_list_count_not_existing(self):
+        def test_tensor_list_count_not_existing():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(5))
+
+            return i == 0
+        self.checkScript(test_tensor_list_count_not_existing, ())
+
     def test_mutable_list_remove_tensor(self):
         def test_list_remove_tensor():
             a = [torch.ones(1), torch.zeros(1), torch.ones(2)]
