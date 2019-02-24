@@ -6,28 +6,32 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence
+from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
 from .. import _VF
-from ..._jit_internal import weak_module, weak_script_method
+from ..._jit_internal import weak_module, weak_script_method, weak_script, \
+    _parameter_list
 
 _rnn_impls = {
-    'LSTM': _VF.lstm,
     'GRU': _VF.gru,
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
 }
 
 
+@weak_script
 def apply_permutation(tensor, permutation, dim=1):
+    # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
 
 
 class RNNBase(Module):
+    __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
+                     'batch_first', 'dropout', 'bidirectional', '_flat_parameters']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0., bidirectional=False):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -129,9 +133,14 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    def check_forward_args(self, input, hidden, batch_sizes):
-        is_input_packed = batch_sizes is not None
-        expected_input_dim = 2 if is_input_packed else 3
+    @_parameter_list
+    def get_flat_weights(self):
+        return self._flat_weights
+
+    @weak_script_method
+    def check_input(self, input, batch_sizes):
+        # type: (Tensor, Optional[Tensor]) -> None
+        expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
                 'input must have {} dimensions, got {}'.format(
@@ -141,34 +150,34 @@ class RNNBase(Module):
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
                     self.input_size, input.size(-1)))
 
-        if is_input_packed:
+    @weak_script_method
+    def get_expected_hidden_size(self, input, batch_sizes):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
+        if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
-
         num_directions = 2 if self.bidirectional else 1
         expected_hidden_size = (self.num_layers * num_directions,
                                 mini_batch, self.hidden_size)
+        return expected_hidden_size
 
-        def check_hidden_size(hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-            if tuple(hx.size()) != expected_hidden_size:
-                raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+    @weak_script_method
+    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+        # type: (Tensor, Tuple[int, int, int], str) -> None
+        if hx.size() != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
-        if self.mode == 'LSTM':
-            check_hidden_size(hidden[0], expected_hidden_size,
-                              'Expected hidden[0] size {}, got {}')
-            check_hidden_size(hidden[1], expected_hidden_size,
-                              'Expected hidden[1] size {}, got {}')
-        else:
-            check_hidden_size(hidden, expected_hidden_size)
+    def check_forward_args(self, input, hidden, batch_sizes):
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
+
+        self.check_hidden_size(hidden, expected_hidden_size)
 
     def permute_hidden(self, hx, permutation):
         if permutation is None:
             return hx
-        if self.mode == 'LSTM':
-            return tuple(apply_permutation(state, permutation) for state in hx)
-        else:
-            return apply_permutation(hx, permutation)
+        return apply_permutation(hx, permutation)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
@@ -186,8 +195,6 @@ class RNNBase(Module):
             hx = torch.zeros(self.num_layers * num_directions,
                              max_batch_size, self.hidden_size,
                              dtype=input.dtype, device=input.device)
-            if self.mode == 'LSTM':
-                hx = (hx, hx)
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
@@ -196,13 +203,13 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _impl(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _impl(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
-        hidden = result[1:] if self.mode == 'LSTM' else result[1]
+        hidden = result[1]
 
         if is_packed:
             output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
@@ -363,6 +370,7 @@ class RNN(RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 
+@weak_module
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
@@ -467,9 +475,83 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+
+    @weak_script_method
+    def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
+
+        self.check_hidden_size(hidden[0], expected_hidden_size,
+                               'Expected hidden[0] size {}, got {}')
+        self.check_hidden_size(hidden[1], expected_hidden_size,
+                               'Expected hidden[1] size {}, got {}')
+
+    @weak_script_method
+    def permute_hidden(self, hx, permutation):
+        # type: (Tuple[Tensor, Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        if permutation is None:
+            return hx
+        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
+
+    @weak_script_method
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            zeros = torch.zeros(self.num_layers * num_directions,
+                                max_batch_size, self.hidden_size,
+                                dtype=input.dtype, device=input.device)
+            hx = (zeros, zeros)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+                              self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+                              self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1:]
+
+        return output, hidden
+
+    @weak_script_method
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @weak_script_method
+    def forward_packed(self, input, hx=None):
+        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = int(batch_sizes[0])
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
 
 
 class GRU(RNNBase):

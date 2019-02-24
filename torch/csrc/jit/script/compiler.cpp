@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,11 +6,10 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/type_parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -662,7 +662,7 @@ struct to_ir {
           type,
           N,
           default_value,
-          /*kwarg_only =*/false);
+          decl_arg.kwarg_only());
       retval.push_back(arg);
     }
     return retval;
@@ -2243,6 +2243,15 @@ struct to_ir {
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
         }
+
+        // Tensors are special because they have dymnamic properties. So any
+        // list containing tensors should be typed with the unified typeof all
+        // the elements.
+        if (elem_type->isSubtypeOf(TensorType::get())) {
+          for (const auto& value : values) {
+            elem_type = unifyTypes(elem_type, value->type()).value();
+          }
+        }
         for (auto v : values) {
           if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
@@ -2340,7 +2349,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+      args.emplace_back(
+          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2357,7 +2367,8 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+    NamedValue step =
+        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
@@ -2599,7 +2610,8 @@ struct to_ir {
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples";
+             "tensors, and tuples, but got type '"
+          << gatherable->type()->str() << "'";
     }
   }
 };
@@ -2684,7 +2696,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

@@ -1495,6 +1495,7 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
     _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
+    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
 
     return _builtin_table
 
