@@ -251,11 +251,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-Tensor batch_norm(
+// _batch_norm_impl_index(_backward) are used in the JIT be able to keep the run-time selection
+// of backends, while enabling it to keep the information about the used backend, so that it can
+// use its corresponding backward implementation.
+// XXX: The indices of backends need to be kept synchronized between this function and its _backward.
+std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
-
   auto num_features = input.sizes()[1];
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
@@ -286,12 +289,14 @@ Tensor batch_norm(
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
-    return std::get<0>(at::cudnn_batch_norm(
-                        input.contiguous(), weight.contiguous(),
-                        bias.contiguous(),
-                        running_mean.defined() ? running_mean.contiguous() : running_mean,
-                        running_var.defined() ? running_var.contiguous() : running_var,
-                        training, momentum, eps));
+    return std::tuple_cat(
+             at::cudnn_batch_norm(
+               input.contiguous(), weight.contiguous(),
+               bias.contiguous(),
+               running_mean.defined() ? running_mean.contiguous() : running_mean,
+               running_var.defined() ? running_var.contiguous() : running_var,
+               training, momentum, eps),
+             std::make_tuple(1));
   }
 
   bool use_miopen = (input.is_cuda()
@@ -305,15 +310,43 @@ Tensor batch_norm(
                );
 
   if (use_miopen) {
-    return std::get<0>(at::miopen_batch_norm(
-                        input.contiguous(), weight.contiguous(), bias.contiguous(),
-                        running_mean.defined() ? running_mean.contiguous() : running_mean,
-                        running_var.defined() ? running_var.contiguous() : running_var,
-                        training, momentum, eps));
+    return std::tuple_cat(
+             at::miopen_batch_norm(
+               input.contiguous(), weight.contiguous(), bias.contiguous(),
+               running_mean.defined() ? running_mean.contiguous() : running_mean,
+               running_var.defined() ? running_var.contiguous() : running_var,
+               training, momentum, eps),
+             std::make_tuple(2));
   }
 
-  return std::get<0>(at::native_batch_norm(input, weight, bias,
-                                           running_mean, running_var, training, momentum, eps));
+  return std::tuple_cat(
+           at::native_batch_norm(
+             input, weight, bias, running_mean, running_var, training, momentum, eps),
+           std::make_tuple(0));
+}
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
+    int64_t impl_index,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight /* optional */,
+    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    const Tensor& save_mean /* optional */, const Tensor& save_var_transform /* optional */,
+    bool train, double epsilon, std::array<bool, 3> output_mask) {
+  if (impl_index == 0) {
+    return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
+  } else if (impl_index == 1) {
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
+  } else if (impl_index == 2) {
+    return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
+  }
+  AT_ASSERTM(false, "Unsupported impl_index in _batch_norm_impl_index_backward: ", impl_index);
+}
+
+Tensor batch_norm(
+    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    bool training, double momentum, double eps, bool cudnn_enabled) {
+  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
+                                                training, momentum, eps, cudnn_enabled));
 }
 
 Tensor instance_norm(

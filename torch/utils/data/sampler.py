@@ -57,7 +57,7 @@ class RandomSampler(Sampler):
                              "since a random permute will be performed.")
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError("num_samples should be a positive integeral "
+            raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(self.num_samples))
         if not isinstance(self.replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
@@ -111,7 +111,7 @@ class WeightedRandomSampler(Sampler):
     def __init__(self, weights, num_samples, replacement=True):
         if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
-            raise ValueError("num_samples should be a positive integeral "
+            raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
@@ -150,7 +150,7 @@ class BatchSampler(Sampler):
                              .format(sampler))
         if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
-            raise ValueError("batch_size should be a positive integeral value, "
+            raise ValueError("batch_size should be a positive integer value, "
                              "but got batch_size={}".format(batch_size))
         if not isinstance(drop_last, bool):
             raise ValueError("drop_last should be a boolean value, but got "

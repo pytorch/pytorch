@@ -845,8 +845,8 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout2d` for details.
 
@@ -870,8 +870,8 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout3d` for details.
 
@@ -953,16 +953,16 @@ def glu(input, dim=-1):
     The gated linear unit. Computes:
 
     .. math ::
+        \text{GLU}(a, b) = a \otimes \sigma(b)
 
-        H = A \times \sigma(B)
-
-    where `input` is split in half along `dim` to form `A` and `B`.
+    where `input` is split in half along `dim` to form `a` and `b`, :math:`\sigma`
+    is the sigmoid function and :math:`\otimes` is the element-wise product between matrices.
 
     See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
 
     Args:
         input (Tensor): input tensor
-        dim (int): dimension on which to split the input
+        dim (int): dimension on which to split the input. Default: -1
     """
     if input.dim() == 0:
         raise RuntimeError("glu does not suppport scalars because halving size must be even")
@@ -1139,7 +1139,7 @@ In-place version of :func:`~rrelu`.
 logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
 logsigmoid(input) -> Tensor
 
-Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
+Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
 
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
@@ -1211,8 +1211,8 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
@@ -1233,7 +1233,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
     It is applied to all slices along dim, and will re-scale them so that the elements
-    lie in the range `(0, 1)` and sum to 1.
+    lie in the range `[0, 1]` and sum to 1.
 
     See :class:`~torch.nn.Softmax` for more details.
 
@@ -1241,9 +1241,8 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
-
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
 
     .. note::
         This function doesn't work directly with NLLLoss,
@@ -1335,8 +1334,8 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        If specified, the input tensor is casted to :attr:`dtype` before the operation
-        is performed. This is useful for preventing data type overflows. Default: None.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
@@ -1504,10 +1503,11 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
-    r"""Computes sums, means or maxes of 'bags' of embeddings, without instantiating the
+    r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
+
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -1534,25 +1534,25 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-          - If :attr:`input` is 2D of shape ``B x N``,
+          - If :attr:`input` is 2D of shape `(B, N)`,
 
             it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
             this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
             :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-          - If :attr:`input` is 1D of shape ``N``,
+          - If :attr:`input` is 1D of shape `(N)`,
 
             it will be treated as a concatenation of multiple bags (sequences).
             :attr:`offsets` is required to be a 1D tensor containing the
             starting index positions of each bag in :attr:`input`. Therefore,
-            for :attr:`offsets` of shape ``B``, :attr:`input` will be viewed as
+            for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
             having ``B`` bags. Empty bags (i.e., having 0-length) will have
             returned vectors filled by zeros.
 
         - :attr:`weight` (Tensor): the learnable weights of the module of
-          shape ``(num_embeddings x embedding_dim)``
+          shape `(num_embeddings, embedding_dim)`
 
-        - :attr:`output`: aggregated embedding values of shape ``B x embedding_dim``
+        - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
     Examples::
 

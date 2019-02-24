@@ -25,7 +25,7 @@ std::string BackendTransformerBase::getModelId(const NetDef& net) {
 
 TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
     const std::string& name,
-    const ShapeInfo& shape_info) {
+    const ShapeInfo& shape_info) const {
   TensorProto t;
   t.set_name(name);
   t.set_data_type(shape_info.shape.data_type());
