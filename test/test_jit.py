@@ -4185,9 +4185,9 @@ a")
             a = [4, 1, 3, 2]
             i = a.index(5)
 
-            return a
+            return i
 
-        with self.assertRaisesRegex(RuntimeError, "5 is not in list"):
+        with self.assertRaisesRegex(RuntimeError, "'5' is not in list"):
             test_list_index_not_existing()
 
     def test_mutable_list_index(self):
@@ -4207,11 +4207,12 @@ a")
         self.checkScript(test_tensor_list_index, ())
 
     def test_mutable_tensor_list_index_not_existing(self):
+        @torch.jit.script
         def test_tensor_list_index_not_existing():
             a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
             i = a.index(torch.tensor(5))
 
-            return a
+            return i
 
         with self.assertRaisesRegex(RuntimeError, "is not in list"):
             test_tensor_list_index_not_existing()
