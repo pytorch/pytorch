@@ -38,7 +38,7 @@ void NonVariableTypeMode::set_enabled(bool enabled) {
   NonVariableTypeMode_enabled = enabled;
 }
 
-#else // C10_MOBILE || defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#else // defined(C10_MOBILE) || defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 bool NonVariableTypeMode::is_enabled() {
   throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
