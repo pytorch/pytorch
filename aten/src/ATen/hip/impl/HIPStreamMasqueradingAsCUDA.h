@@ -16,7 +16,7 @@ public:
   explicit HIPStreamMasqueradingAsCUDA(Stream stream)
     : HIPStreamMasqueradingAsCUDA(UNCHECKED, stream) {
     // We did the coercion unchecked; check that it was right.
-    AT_CHECK(stream_.device_type() == DeviceType::CUDA /* !!! */);
+    AT_CHECK(stream.device().type() == DeviceType::CUDA /* !!! */);
   }
 
   explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream)
