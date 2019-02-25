@@ -2,7 +2,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor.h"
 
-#if defined(CAFFE2_USE_MPSCNN) && C10_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && defined(C10_MOBILE)
 #include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
