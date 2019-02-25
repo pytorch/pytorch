@@ -253,7 +253,7 @@ SHOULD_NOT_DO_GRADIENT(IndexSize);
 class IndexSerializer : public BlobSerializerBase {
  public:
   IndexSerializer() {}
-  ~IndexSerializer() {}
+  ~IndexSerializer() override {}
 
   void Serialize(
       const void* pointer,

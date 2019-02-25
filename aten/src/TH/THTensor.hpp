@@ -127,3 +127,6 @@ TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THTensor.hpp>
+#include <TH/THGenerateBoolType.h>

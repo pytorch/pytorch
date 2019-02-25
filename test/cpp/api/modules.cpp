@@ -248,9 +248,9 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->running_mean.dim(), 1);
   ASSERT_EQ(bn->running_mean.size(0), 5);
 
-  ASSERT_TRUE(bn->running_variance.defined());
-  ASSERT_EQ(bn->running_variance.dim(), 1);
-  ASSERT_EQ(bn->running_variance.size(0), 5);
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
 
   // Is affine by default.
   ASSERT_TRUE(bn->options.affine());
@@ -267,7 +267,7 @@ TEST_F(ModulesTest, BatchNormStateless) {
   BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
-  ASSERT_FALSE(bn->running_variance.defined());
+  ASSERT_FALSE(bn->running_var.defined());
   ASSERT_FALSE(bn->weight.defined());
   ASSERT_FALSE(bn->bias.defined());
 

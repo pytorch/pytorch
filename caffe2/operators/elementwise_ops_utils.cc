@@ -108,5 +108,17 @@ void ComputeBinaryBroadcastBackwardAxes(
   std::reverse(B_axes->begin(), B_axes->end());
 }
 
+void ComputeBinaryBroadcastBackwardDims(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    std::vector<int>* A_back_dims,
+    std::vector<int>* B_back_dims) {
+  const int ndim = std::max(A_dims.size(), B_dims.size());
+  A_back_dims->assign(ndim, 1);
+  B_back_dims->assign(ndim, 1);
+  std::copy(A_dims.crbegin(), A_dims.crend(), A_back_dims->rbegin());
+  std::copy(B_dims.crbegin(), B_dims.crend(), B_back_dims->rbegin());
+}
+
 } // namespace elementwise_ops_utils
 } // namespace caffe2

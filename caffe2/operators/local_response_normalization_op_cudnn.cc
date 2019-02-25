@@ -24,7 +24,7 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
         cudnnSetLRNDescriptor(norm_desc_, size_, alpha_, beta_, bias_));
   }
 
-  ~CuDNNLRNOp() {
+  ~CuDNNLRNOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyLRNDescriptor(norm_desc_));
   }
@@ -67,7 +67,7 @@ class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
         cudnnSetLRNDescriptor(norm_desc_, size_, alpha_, beta_, bias_));
   }
 
-  ~CuDNNLRNGradientOp() {
+  ~CuDNNLRNGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyLRNDescriptor(norm_desc_));
   }
