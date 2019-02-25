@@ -146,7 +146,7 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
+If you want to build on Windows, at least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and NVTX are also needed.
 Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
 The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
@@ -184,16 +184,21 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 
 On Windows
 ```cmd
-set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
+REM The folowing line is for Visual Studio 2017 Enterprise only
+set VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build
+REM The folowing line is for Visual Studio 2017 Professional only
+set VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\VC\Auxiliary\Build
+REM The folowing line is for Visual Studio 2017 Community only
+set VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
 REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
 set FORCE_PY27_BUILD=1
 REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following line.
-set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
+set CUDAHOSTCXX=%VS140COMNTOOLS%..\..\VC\bin\amd64\cl.exe
 
-call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
+call "%VS150COMNTOOLS%\vcvarsall.bat" x64
 python setup.py install
 ```
 
