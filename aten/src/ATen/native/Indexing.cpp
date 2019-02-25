@@ -179,10 +179,12 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   if (index.numel() != 0) {
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
-    AT_CHECK(max_idx < dim_size,
-             "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    AT_CHECK(min_idx >= -dim_size,
-             "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    if (max_idx >= dim_size) {
+      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
+    if (min_idx < -dim_size) {
+      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
   }
   return index.remainder(dim_size);
 }
@@ -432,8 +434,9 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
-  AT_CHECK(indices.size() <= (size_t)self.dim(),
-           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  if (indices.size() > (size_t)self.dim()) {
+    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
 
   auto info = make_info(self, indices);
   auto iter = make_index_iterator(info);
@@ -446,8 +449,9 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
 }
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  AT_CHECK(indices.size() <= (size_t)self.dim(),
-           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  if (indices.size() > (size_t)self.dim()) {
+    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
   if (accumulate && self.type().device_type() == kCUDA) {
     Tensor src, linearIndex, expandedValue;
     std::tie(src, linearIndex) = makeLinearIndex(self, indices);
@@ -463,14 +467,17 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, boo
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  AT_CHECK(index.dim() < 2,
-           "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  if (index.dim() >= 2) {
+    AT_INDEX_ERROR("index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  }
 
   int64_t numIndices = index.numel();
-  AT_CHECK(source.dim() != 0 || numIndices == 1,
-           "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  AT_CHECK(index.type().scalarType() == ScalarType::Long,
-           "index_copy_(): Expected LongTensor for index");
+  if (source.dim() == 0 && numIndices != 1) {
+    AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  }
+  if (index.type().scalarType() != ScalarType::Long) {
+    AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
+  }
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -491,7 +498,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     AT_ERROR(ss.str());
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {
-     AT_ERROR(
+     AT_INDEX_ERROR(
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
