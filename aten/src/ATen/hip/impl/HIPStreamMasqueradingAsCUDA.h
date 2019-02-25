@@ -13,16 +13,22 @@ public:
 
   enum Unchecked { UNCHECKED };
 
-  explicit HIPStreamMasqueradingAsCUDA(Stream stream) {
+  explicit HIPStreamMasqueradingAsCUDA(Stream stream)
+    : HIPStreamMasqueradingAsCUDA(UNCHECKED, stream) {
+    // We did the coercion unchecked; check that it was right.
     AT_CHECK(stream_.device_type() == DeviceType::CUDA /* !!! */);
-    // Unsafely coerce the "CUDA" stream into a HIP stream
-    stream_ = HIPStream(Stream(Stream::UNSAFE, Device(DeviceType::HIP, stream.device_index()), stream.id()));
   }
 
-  explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream) : stream_(stream) {
+  explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream)
     // Unsafely coerce the "CUDA" stream into a HIP stream
-    stream_ = HIPStream(Stream(Stream::UNSAFE, Device(DeviceType::HIP, stream.device_index()), stream.id()));
-  }
+    : stream_(
+        HIPStream(
+          Stream(
+            Stream::UNSAFE,
+            Device(DeviceType::HIP, stream.device_index()),
+            stream.id())
+        )
+      ) {}
 
   // New constructor, just for this.  Does NOT coerce.
   explicit HIPStreamMasqueradingAsCUDA(HIPStream stream) : stream_(stream) {}
