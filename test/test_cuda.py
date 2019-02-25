@@ -1209,6 +1209,7 @@ class TestCuda(TestCase):
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=0)
 
+    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
     @skipIfRocm
     def test_scatter_gpu_dim(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=1)
@@ -2580,6 +2581,7 @@ class TestCuda(TestCase):
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
     @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
