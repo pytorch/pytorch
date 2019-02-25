@@ -199,13 +199,20 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
-
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
     return t1;
+  } else {
+    return c10::nullopt;
+  }
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
+    return *maybe_supertype;
   }
 
   // NB: we do not return NumberType because there is not currently enough
@@ -224,12 +231,14 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
-    if (unified_type) {
-      return static_cast<TypePtr>(ListType::create(*unified_type));
-    } else {
-      return c10::nullopt;
-    }
+    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
+    // int?[] = std::vector<IValue>  we don't allow type coercion,
+    // since t1 & t2 may have different runtime representations.
+
+    // allow Lists of different tensor types
+    auto unshaped_t1 = unshapedType(t1);
+    auto unshaped_t2 = unshapedType(t2);
+    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
   } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
