@@ -82,3 +82,6 @@
 [submodule "third_party/fbgemm"]
 	path = third_party/fbgemm
 	url = https://github.com/pytorch/fbgemm
+[submodule "third_party/foxi"]
+	path = third_party/foxi
+	url = https://github.com/houseroad/foxi.git

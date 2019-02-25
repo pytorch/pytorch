@@ -28,6 +28,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'docs_coverage',
     'expecttest',
     'indexing',
     'indexing_cuda',
@@ -44,6 +45,7 @@ TESTS = [
     'type_info',
     'type_hints',
     'utils',
+    'namedtuple_return_api',
 ]
 
 WINDOWS_BLACKLIST = [

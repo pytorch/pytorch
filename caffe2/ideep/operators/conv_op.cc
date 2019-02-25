@@ -17,7 +17,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
   }
-  virtual ~IDEEPConvOp() {}
+  ~IDEEPConvOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
@@ -131,7 +131,7 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
-  virtual ~IDEEPConvGradientOp() {}
+  ~IDEEPConvGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
