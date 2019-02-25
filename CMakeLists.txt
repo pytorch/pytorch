@@ -89,7 +89,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
+option(BUILD_CAFFE2_OPS "Build Caffe2 operators" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -103,11 +103,11 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
-option(USE_CUDA "Use CUDA" ON)
-option(USE_ROCM "Use ROCm" ON)
+option(USE_CUDA "Use CUDA" OFF)
+option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
-    USE_CUDNN "Use cuDNN" ON
+    USE_CUDNN "Use cuDNN" OFF
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
@@ -118,21 +118,21 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
-option(USE_NCCL "Use NCCL" ON)
+option(USE_NCCL "Use NCCL" OFF)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
-option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+option(USE_NNPACK "Use NNPACK" OFF)
+option(USE_NUMA "Use NUMA (only available on Linux)" OFF)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
-option(USE_NUMPY "Use NumPy" ON)
+option(USE_NUMPY "Use NumPy" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
-option(USE_OPENMP "Use OpenMP for parallel code" ON)
+option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
-option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
+option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" OFF)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
@@ -142,12 +142,12 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
+option(USE_DISTRIBUTED "Use distributed" OFF)
 cmake_dependent_option(
-    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
+    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." OFF
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
+    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." OFF
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
