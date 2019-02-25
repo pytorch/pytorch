@@ -891,7 +891,9 @@ def get_python_signature(declaration, include_out):
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        if len(output_args) == 1:
+        # The nn module bindings are not exposed to the user directly
+        # but via torch.nn modules and functionals.
+        if len(output_args) == 1 and declaration['python_module'] != 'nn':
             assert output_args[0]['name'] == 'out', \
                 "For function named {}: Our Python frontend uses out as" \
                 " the keyword argument name for output arguments.".format(name)
