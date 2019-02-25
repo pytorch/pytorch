@@ -199,7 +199,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
-c10::optional<TypePtr> tryFindSuperType(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
@@ -211,7 +211,7 @@ c10::optional<TypePtr> tryFindSuperType(const TypePtr& t1, const TypePtr& t2) {
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
-  if (auto maybe_supertype = tryFindSuperType(t1, t2)) {
+  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
     return *maybe_supertype;
   }
 
@@ -238,7 +238,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     // allow Lists of different tensor types
     auto unshaped_t1 = unshapedType(t1);
     auto unshaped_t2 = unshapedType(t2);
-    return tryFindSuperType(unshaped_t1, unshaped_t2);
+    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
   } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
