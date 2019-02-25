@@ -22,6 +22,8 @@ TH_API void THVector_(normal_fill)(scalar_t *data,
 								   const scalar_t mean,
 								   const scalar_t stddev);
 
+#endif /* non bool only part */
+
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 #endif
@@ -63,7 +65,5 @@ TH_API void THVector_(frac)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
-
-#endif /* non bool only part */
 
 #endif

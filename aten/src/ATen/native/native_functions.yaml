@@ -561,7 +561,6 @@
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   matches_jit_signature: True
   cpu_half: True
-  cpu_bool: True
   dispatch:
     CUDA: _s_copy_from_cuda
 

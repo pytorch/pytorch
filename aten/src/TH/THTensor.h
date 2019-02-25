@@ -35,6 +35,9 @@
 #include <TH/generic/THTensorFill.h>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THTensorFill.h>
+#include <TH/THGenerateBoolType.h>
+
 /* convolutions */
 #include <TH/generic/THTensorConv.h>
 #include <TH/THGenerateAllTypes.h>

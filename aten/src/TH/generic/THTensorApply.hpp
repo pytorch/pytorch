@@ -160,7 +160,7 @@ if (std::isnan(val)) break;
 static inline scalar_t THTensor_(powOne)(scalar_t x, scalar_t y) {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_HALF)
   return powf(x, y);
-#elif defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BOOL)
+#elif defined(TH_REAL_IS_DOUBLE)
   return pow(x, y);
 #else
   THArgCheck(y >= 0, 1,
