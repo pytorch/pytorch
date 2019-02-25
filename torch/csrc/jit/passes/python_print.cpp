@@ -801,9 +801,10 @@ struct PythonPrintPass {
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        if (node->inputs().size() == 0 &&
-            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
+        bool is_default_type =
+            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
+        if (node->inputs().size() == 0 && !is_default_type) {
           stmt << "annotate(" << node->output()->type()->python_str()
                << ", {})";
         } else {

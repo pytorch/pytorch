@@ -94,7 +94,8 @@ libtorch_sources = [
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
-    "torch/csrc/jit/script/type_parser.cpp",
+    "torch/csrc/jit/script/schema_type_parser.cpp",
+    "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
     "torch/csrc/jit/script/parser.cpp",
@@ -121,6 +122,7 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -212,6 +214,7 @@ def add_torch_libs():
         link_whole=True,
         propagated_pp_flags=[
             "-DUSE_CUDA",
+            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",

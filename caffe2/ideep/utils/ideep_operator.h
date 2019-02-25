@@ -18,6 +18,14 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
+#define REGISTER_IDEEP_COMPARE_OPERATOR(Op)                    \
+  REGISTER_IDEEP_OPERATOR(                                     \
+      Op,                                                      \
+      IDEEPFallbackOp<BinaryElementwiseOp<                     \
+          TensorTypes<bool, int32_t, int64_t, float, double>,  \
+          CPUContext,                                          \
+          Op##Functor<CPUContext>,                             \
+          FixedType<bool>>>)
 
 #define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
   C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)

@@ -1,6 +1,6 @@
 ir_version: 4
 producer_name: "pytorch"
-producer_version: "0.4"
+producer_version: "1.1"
 graph {
   node {
     input: "tensor"
