@@ -180,7 +180,7 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 
 // TODO Also register c10 operators on mobile
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)  \
