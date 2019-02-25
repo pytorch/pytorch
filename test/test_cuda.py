@@ -961,6 +961,7 @@ class TestCuda(TestCase):
         self.assertEqual(y, x)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_copy_streams(self):
         d0 = torch.device('cuda:0')
         x0 = torch.zeros(5, 5, device=d0)
