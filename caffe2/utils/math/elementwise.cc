@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <functional>
 
+#ifdef CAFFE2_USE_ACCELERATE
+#include <Accelerate/Accelerate.h>
+#endif // CAFFE2_USE_ACCELERATE
+
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
@@ -73,25 +77,25 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Erf, vsErf)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Erf, vdErf)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
-#define DELEGATE_SINCOS_FUNCTION(T, MKLFunc)                            \
+#define DELEGATE_SINCOS(T, MKLFunc)                                     \
   template <>                                                           \
   C10_EXPORT void SinCos<T, CPUContext>(                                \
       const int N, const T* X, T* S, T* C, CPUContext* /* context */) { \
     MKLFunc(N, X, S, C);                                                \
   }
-DELEGATE_SINCOS_FUNCTION(float, vsSinCos)
-DELEGATE_SINCOS_FUNCTION(double, vdSinCos)
-#undef DELEGATE_SINCOS_FUNCTION
+DELEGATE_SINCOS(float, vsSinCos)
+DELEGATE_SINCOS(double, vdSinCos)
+#undef DELEGATE_SINCOS
 
-#define DELEGATE_POWX_FUNCTION(T, MKLFunc)                                   \
+#define DELEGATE_POWX(T, MKLFunc)                                            \
   template <>                                                                \
   C10_EXPORT void Powx<T, CPUContext>(                                       \
       const int N, const T* A, const T b, T* Y, CPUContext* /* context */) { \
     MKLFunc(N, A, b, Y);                                                     \
   }
-DELEGATE_POWX_FUNCTION(float, vsPowx)
-DELEGATE_POWX_FUNCTION(double, vdPowx)
-#undef DELEGATE_POWX_FUNCTION
+DELEGATE_POWX(float, vsPowx)
+DELEGATE_POWX(double, vdPowx)
+#undef DELEGATE_POWX
 
 #define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, MKLFunc)                     \
   template <>                                                                 \
@@ -228,6 +232,155 @@ DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Div, /)
 
 #endif // CAFFE2_USE_MKL
 
+////////////////////////////////////////////////////////////////////////////////
+// BLAS alternatives.
+// Depending on whether we have specified an external BLAS library or not, we
+// will delegate the Caffe math functions that are BLAS-related to either the
+// CBLAS call or the Eigen implementation.
+////////////////////////////////////////////////////////////////////////////////
+#ifdef CAFFE2_USE_EIGEN_FOR_BLAS
+
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha alpha,                                                     \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (X == Y) {                                                             \
+      EigenVectorArrayMap<TData>(Y, N) *= static_cast<TData>(alpha);          \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(alpha);  \
+    }                                                                         \
+  }                                                                           \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha* alpha,                                                    \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (X == Y) {                                                             \
+      EigenVectorArrayMap<TData>(Y, N) *= static_cast<TData>(*alpha);         \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(*alpha); \
+    }                                                                         \
+  }
+CAFFE2_SPECIALIZED_SCALE(float, float)
+CAFFE2_SPECIALIZED_SCALE(double, double)
+CAFFE2_SPECIALIZED_SCALE(float, double)
+#undef CAFFE2_SPECIALIZED_SCALE
+
+#else // CAFFE2_USE_EIGEN_FOR_BLAS
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_SCALE(TAlpha, TData, MKLFunc1, MKLFunc2)            \
+  template <>                                                        \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
+      const int N,                                                   \
+      const TAlpha alpha,                                            \
+      const TData* X,                                                \
+      TData* Y,                                                      \
+      CPUContext* /* context */) {                                   \
+    if (Y == X) {                                                    \
+      MKLFunc1(N, static_cast<TData>(alpha), Y, 1);                  \
+    } else {                                                         \
+      MKLFunc2(N, static_cast<TData>(alpha), X, 1, TData(0), Y, 1);  \
+    }                                                                \
+  }                                                                  \
+  template <>                                                        \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
+      const int N,                                                   \
+      const TAlpha* alpha,                                           \
+      const TData* X,                                                \
+      TData* Y,                                                      \
+      CPUContext* /* context */) {                                   \
+    if (Y == X) {                                                    \
+      MKLFunc1(N, static_cast<TData>(*alpha), Y, 1);                 \
+    } else {                                                         \
+      MKLFunc2(N, static_cast<TData>(*alpha), X, 1, TData(0), Y, 1); \
+    }                                                                \
+  }
+DELEGATE_SCALE(float, float, cblas_sscal, cblas_saxpby)
+DELEGATE_SCALE(double, double, cblas_dscal, cblas_daxpby)
+DELEGATE_SCALE(float, double, cblas_dscal, cblas_daxpby)
+#undef DELEGATE_SCALE
+
+#else // CAFFE2_USE_MKL
+
+#define DELEGATE_SCALE(TAlpha, TData, BLASFunc)                               \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha alpha,                                                     \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (Y == X) {                                                             \
+      BLASFunc(N, static_cast<TData>(alpha), Y, 1);                           \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(alpha);  \
+    }                                                                         \
+  }                                                                           \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha* alpha,                                                    \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (Y == X) {                                                             \
+      BLASFunc(N, static_cast<TData>(*alpha), Y, 1);                          \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(*alpha); \
+    }                                                                         \
+  }
+DELEGATE_SCALE(float, float, cblas_sscal)
+DELEGATE_SCALE(double, double, cblas_dscal)
+DELEGATE_SCALE(float, double, cblas_dscal)
+#undef DELEGATE_SCALE
+
+#endif // CAFFE2_USE_MKL
+
+#endif // CAFFE2_USE_EIGEN_FOR_BLAS
+
+////////////////////////////////////////////////////////////////////////////////
+// Common math functions being used in Caffe that do not have a BLAS or MKL
+// equivalent. For all these functions, we will simply implement them either via
+// Eigen or via custom code.
+////////////////////////////////////////////////////////////////////////////////
+
+#define CAFFE2_SPECIALIZED_SET(T)                                    \
+  template <>                                                        \
+  C10_EXPORT void Set<T, CPUContext>(                                \
+      const int N, const T alpha, T* Y, CPUContext* /* context */) { \
+    if (N == 0) {                                                    \
+      return;                                                        \
+    }                                                                \
+    if (alpha == T(0)) {                                             \
+      std::memset(Y, 0, N * sizeof(T));                              \
+    } else {                                                         \
+      EigenVectorArrayMap<T>(Y, N).setConstant(alpha);               \
+    }                                                                \
+  }
+CAFFE2_SPECIALIZED_SET(float)
+CAFFE2_SPECIALIZED_SET(double)
+CAFFE2_SPECIALIZED_SET(int)
+CAFFE2_SPECIALIZED_SET(std::int8_t)
+CAFFE2_SPECIALIZED_SET(std::int16_t)
+CAFFE2_SPECIALIZED_SET(std::int64_t)
+CAFFE2_SPECIALIZED_SET(bool)
+CAFFE2_SPECIALIZED_SET(char)
+CAFFE2_SPECIALIZED_SET(std::uint8_t)
+CAFFE2_SPECIALIZED_SET(std::uint16_t)
+#undef CAFFE2_SPECIALIZED_SET
+
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Func, EigenFunc)        \
   template <>                                                     \
   C10_EXPORT void Func<T, CPUContext>(                            \
@@ -262,6 +415,39 @@ CAFFE2_SPECIALIZED_NEG(float)
 CAFFE2_SPECIALIZED_NEG(double)
 #undef CAFFE2_SPECIALIZED_NEG
 
+#define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha alpha,                                                     \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (X == Y) {                                                             \
+      EigenVectorArrayMap<TData>(Y, N) *= static_cast<TData>(alpha);          \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(alpha);  \
+    }                                                                         \
+  }                                                                           \
+  template <>                                                                 \
+  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
+      const int N,                                                            \
+      const TAlpha* alpha,                                                    \
+      const TData* X,                                                         \
+      TData* Y,                                                               \
+      CPUContext* /* context */) {                                            \
+    if (X == Y) {                                                             \
+      EigenVectorArrayMap<TData>(Y, N) *= static_cast<TData>(*alpha);         \
+    } else {                                                                  \
+      EigenVectorArrayMap<TData>(Y, N) =                                      \
+          ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(*alpha); \
+    }                                                                         \
+  }
+CAFFE2_SPECIALIZED_SCALE(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_SCALE(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_SCALE
+
 #define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp)   \
   template <>                                                                 \
   C10_EXPORT void Func<T, CPUContext>(                                        \
@@ -286,8 +472,12 @@ DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(std::int64_t, Div, /)
     EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N).EigenFunc(    \
         ConstEigenVectorArrayMap<T>(B, N));                                   \
   }
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(std::int32_t, Min, min)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(std::int64_t, Min, min)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(float, Min, min)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(double, Min, min)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(std::int32_t, Max, max)
+DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(std::int64_t, Max, max)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(float, Max, max)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(double, Max, max)
 #undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION
