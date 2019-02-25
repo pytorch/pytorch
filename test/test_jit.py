@@ -6610,8 +6610,8 @@ a")
                 print(c0)
             return 1
 
-    def test_if_list(self):
-        # testing that different length lists don't throw error
+    def test_if_list_cat(self):
+        # testing that different length lists don't throw error on cat in shape prop
         @torch.jit.script
         def test_list(x):
             if bool(x.sum() < 1):
