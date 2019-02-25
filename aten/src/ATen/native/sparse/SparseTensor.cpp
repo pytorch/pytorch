@@ -86,9 +86,6 @@ SparseTensor new_sparse(const TensorOptions& options) {
 
 SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
   SparseTensor self = new_sparse(options);
-  AT_CHECK(size.size() != 0,
-    "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
-or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
