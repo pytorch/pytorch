@@ -436,6 +436,7 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
     def test_event_handle_multi_gpu(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')

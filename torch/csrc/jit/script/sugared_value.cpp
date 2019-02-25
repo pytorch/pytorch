@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/tree_views.h>
-#include <torch/csrc/jit/script/type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -56,6 +56,16 @@ builtin_cast_methods() {
   return builtin_cast_methods;
 }
 
+std::shared_ptr<SugaredValue> BuiltinFunction::call(
+    const SourceRange& loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  return std::make_shared<SimpleValue>(
+      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
+}
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
@@ -95,7 +105,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     auto names = tuple_type->names();
     for (int i = 0; i < names.size(); i++) {
       if (names[i] == field) {
-        auto r = m.graph()->insertNode(m.graph()->createTupleIndex(getValue(), i))->output();
+        auto r = m.graph()
+                     ->insertNode(m.graph()->createTupleIndex(getValue(), i))
+                     ->output();
         return std::make_shared<SimpleValue>(r);
       }
     }
@@ -129,7 +141,6 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   throw ErrorReport(loc) << value->type()->str()
                          << " cannot be used as a tuple";
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

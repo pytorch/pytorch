@@ -1,4 +1,5 @@
 #include "sigmoid.h"
+#include <c10/util/Exception.h>
 
 namespace dnnlowp {
 
@@ -22,8 +23,8 @@ Sigmoid<T>::Sigmoid(double max_abs_err) : tanh_(max_abs_err) {
 template <typename T>
 T Sigmoid<T>::Compute(T x) const {
   T temp = tanh_.Compute(x);
-  AT_ASSERT(temp >= 1);
-  AT_ASSERT(temp < (1 << num_out_bits_));
+  assert(temp >= 1);
+  assert(temp < (1 << num_out_bits_));
   return temp - 1;
 }
 

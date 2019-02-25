@@ -1,4 +1,4 @@
-#include "tanh.h">
+#include "tanh.h"
 #include "caffe2/core/logging.h"
 
 namespace dnnlowp {

@@ -133,7 +133,7 @@ struct DefaultDtypeTest : ::testing::Test {
   DefaultDtypeTest() {
     set_default_dtype(caffe2::TypeMeta::Make<float>());
   }
-  ~DefaultDtypeTest() {
+  ~DefaultDtypeTest() override {
     set_default_dtype(caffe2::TypeMeta::Make<float>());
   }
 };
