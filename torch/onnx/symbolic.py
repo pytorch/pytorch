@@ -28,9 +28,9 @@ import itertools
 #   transparently dispatched to their non inplace versions in
 #   'run_symbolic_function'.   See Note [Export inplace]
 #
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------
 # A note on Tensor types
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------
 #
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
@@ -38,30 +38,30 @@ import itertools
 # type information, note that there are several levels of Tensor types, defined
 # in aten/src/ATen/core/jit_type.h:
 #
-# DynamicType - This is a Tensor, but we don't know anything about its
+# TensorType -  This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
-# UndefinedTensorType <: DynamicType - Denotes an undefined Tensor
-# TensorType <: DynamicType - Denotes a Tensor for which we know the scalar
-#                             type and number of dimensions, but not the concrete
-#                             shapes. For example, appears as 'Float(*, *)' in
-#                             graph print-outs. Useful accessor methods include
-#                             dim() and scalarType()
-# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                    concrete sizes in addition to the information
-#                                    contained in TensorTyper. This adds a sizes()
-#                                    method which can be used to retrieve the
-#                                    concrete sizes.
+# UndefinedTensorType <: TensorType - Denotes an undefined Tensor
+# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
+#                                       type and number of dimensions, but not the concrete
+#                                       shapes. For example, appears as 'Float(*, *)' in
+#                                       graph print-outs. Useful accessor methods include
+#                                       dim() and scalarType()
+# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
+#                                               concrete sizes in addition to the information
+#                                               contained in TensorTyper. This adds a sizes()
+#                                               method which can be used to retrieve the
+#                                               concrete sizes.
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (TensorType) which is better than relying on
+# on the number of dimensions (DimensionedTensorType) which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------
 
 # Save some builtins as locals, because we'll shadown them below
 _sum = sum
