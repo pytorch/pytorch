@@ -82,7 +82,7 @@ void gamma_cuda_kernel(
         };
         BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
         auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-        auto min_value = std::numeric_limits<scalar_t>::lowest();
+        auto min_value = std::numeric_limits<scalar_t>::min();
         ret_val = (min_value > sample) ? min_value : sample;
       });
 }
@@ -197,6 +197,25 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "gamma", [&] {
      gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
    });
+  return ret;
+}
+
+Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
+  Tensor ret = at::empty(alpha.sizes(), alpha.options());
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "dirichlet", [&] {
+    Tensor gamma = at::empty(alpha.sizes(), alpha.options());
+    gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
+    Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
+    at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, gamma, gamma_sum,
+      [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
+        ret_val = gamma / gamma_sum;
+        auto min_value = std::numeric_limits<scalar_t>::min();
+        auto max_value = 1 - min_value;
+        ret_val = (min_value > ret_val) ? min_value : ret_val;
+        ret_val = (max_value < ret_val) ? max_value : ret_val;
+      }
+    );
+  });
   return ret;
 }
 

@@ -2208,6 +2208,32 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
+    def test_beta_underflow(self):
+        # For low values of (alpha, beta), the gamma samples can underflow
+        # with float32 and result in a spurious mode at 0.5. To prevent this,
+        # torch._sample_dirichlet works with double precision for intermediate
+        # calculations.
+        set_rng_seed(1)
+        num_samples = 10000
+        beta_samples = Beta(1e-2, 1e-2).sample([num_samples])
+        # assert support is concentrated around 0 and 1
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        self.assertEqual(frac_zeros, 0.5, 0.05)
+        self.assertEqual(frac_ones, 0.5, 0.05)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_beta_underflow_gpu(self):
+        set_rng_seed(1)
+        num_samples = 10000
+        conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
+        beta_samples = Beta(conc, conc).sample([num_samples])
+        # assert support is concentrated around 0 and 1
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        self.assertEqual(frac_zeros, 0.5, 0.05)
+        self.assertEqual(frac_ones, 0.5, 0.05)
+
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
