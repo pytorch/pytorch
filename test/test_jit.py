@@ -6614,7 +6614,7 @@ a")
         # testing that different length lists don't throw error
         @torch.jit.script
         def test_list(x):
-            if True:
+            if bool(x.sum() < 1):
                 c = [x, x]
             else:
                 c = [x, x, x]
@@ -6622,12 +6622,10 @@ a")
 
         b = torch.zeros(2, 4)
         test_list.graph.propagate_shapes((b,), False)
-        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
         def tensor_unifying(x, y, z):
-
             # testing dynamic is appropriately set for y and z
             if True:
                 x, y, z = x, y, z
@@ -6641,7 +6639,10 @@ a")
         c = torch.zeros(2, 4, dtype=torch.float)
 
         tensor_unifying.graph.propagate_shapes((a, b, c), False)
-        self.assertExpected(canonical(tensor_unifying.graph))
+        if_outputs = list(tensor_unifying.graph.findNode("prim::If").outputs())
+        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor")
 
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
@@ -7526,7 +7527,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        self.assertExpected(canonical(foo.graph))
+        FileCheck().check("Double(2, 4)").run(str(foo.graph))
 
     def test_onnx_export_speculate(self):
 
