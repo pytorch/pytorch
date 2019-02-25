@@ -1,5 +1,4 @@
-graph(%0 : Double(1)
-      %1 : Double(1)) {
+graph(%0 : Double(1),
+      %1 : Double(1)):
   %2 : Double(1) = aten::type_as(%0, %1)
-  return (%2);
-}
+  return (%2)

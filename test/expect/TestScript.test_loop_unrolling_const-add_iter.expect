@@ -1,4 +1,4 @@
-graph() {
+graph():
   %y.1 : int = prim::Constant[value=0]()
   %1 : int = prim::Constant[value=0]()
   %y.11 : int = aten::add(%y.1, %1)
@@ -29,5 +29,4 @@ graph() {
   %27 : int = prim::Constant[value=1]()
   %28 : int = aten::add(%25, %27)
   %y.10 : int = aten::add(%y.9, %28)
-  return (%y.10);
-}
+  return (%y.10)

@@ -21,8 +21,12 @@
 
 set -e
 
-CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+# Android specific flags
+ANDROID_ABI="armeabi-v7a with NEON"
+ANDROID_NATIVE_API_LEVEL="21"
+echo "Build with ANDROID_ABI[$ANDROID_ABI], ANDROID_NATIVE_API_LEVEL[$ANDROID_NATIVE_API_LEVEL]"
 
+CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 if [ -z "$ANDROID_NDK" ]; then
   echo "ANDROID_NDK not set; please set it to the Android NDK directory"
   exit 1
@@ -43,6 +47,7 @@ $CAFFE2_ROOT/scripts/build_host_protoc.sh
 
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 
@@ -74,7 +79,6 @@ CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
-
 # Only toggle if VERBOSE=1
 if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
@@ -82,15 +86,15 @@ fi
 
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
-CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
-CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
+CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
+CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_INSTALL_PREFIX=../install \
+    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=Release \
     "${CMAKE_ARGS[@]}"
 
@@ -103,3 +107,8 @@ if [ -z "$MAX_JOBS" ]; then
   fi
 fi
 cmake --build . -- "-j${MAX_JOBS}"
+
+# copy headers and libs to install directory
+echo "Will install headers and libs to $INSTALL_PREFIX for further Android project usage."
+make install
+echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your Android project directory."
