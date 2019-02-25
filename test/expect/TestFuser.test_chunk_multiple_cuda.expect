@@ -1,14 +1,13 @@
-graph(%s : Float(*, *, *)
-      %x : Float(*, *, *)
-      %y : Float(*, *, *)
-      %z : Float(*, *, *)) {
+graph(%s : Float(*, *, *),
+      %x : Float(*, *, *),
+      %y : Float(*, *, *),
+      %z : Float(*, *, *)):
   %4 : Float(*, *, *) = prim::FusionGroup_0(%s, %y, %x, %z)
-  return (%4);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *, *)
-      %1 : Float(*, *, *)
-      %2 : Float(*, *, *)
-      %3 : Float(*, *, *)) {
+  return (%4)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *, *),
+      %1 : Float(*, *, *),
+      %2 : Float(*, *, *),
+      %3 : Float(*, *, *)):
   %4 : Float(*, *, *), %5 : Float(*, *, *) = prim::ConstantChunk[chunks=2, dim=2](%3)
   %6 : Float(*, *, *), %7 : Float(*, *, *), %8 : Float(*, *, *) = prim::ConstantChunk[chunks=3, dim=1](%2)
   %9 : Float(*, *, *), %10 : Float(*, *, *) = prim::ConstantChunk[chunks=2, dim=0](%1)
@@ -20,5 +19,4 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *, *)
   %16 : Float(*, *, *) = aten::add(%15, %10, %11)
   %17 : Float(*, *, *) = aten::add(%16, %4, %11)
   %18 : Float(*, *, *) = aten::add(%17, %5, %11)
-  return (%18);
-}
+  return (%18)

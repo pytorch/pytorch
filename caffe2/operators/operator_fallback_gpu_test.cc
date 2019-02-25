@@ -12,7 +12,7 @@ class IncrementByOneOp final : public Operator<CPUContext> {
   template <class... Args>
   explicit IncrementByOneOp(Args&&... args)
       : Operator<CPUContext>(std::forward<Args>(args)...) {}
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& in = Input(0);
 
     auto* out = Output(0, in.sizes(), at::dtype<float>());

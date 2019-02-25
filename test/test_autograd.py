@@ -1140,6 +1140,21 @@ class TestAutograd(TestCase):
                             self.assertIs(dtype, output.dtype)
                             self.assertEqual(1, output.get_device())
 
+    def test_attribute_deletion(self):
+        x = torch.randn((5, 5), requires_grad=True)
+        del x.grad
+        self.assertIsNone(x.grad)
+        with self.assertRaises(RuntimeError):
+            del x.data
+        with self.assertRaises(TypeError):
+            x.data = None
+        with self.assertRaises(RuntimeError):
+            del x.requires_grad
+        with self.assertRaises(RuntimeError):
+            del x._grad_fn
+        with self.assertRaises(RuntimeError):
+            del x._backward_hooks
+
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
 

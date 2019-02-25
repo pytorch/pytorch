@@ -14,7 +14,7 @@ OPERATOR_SCHEMA(ATen);
 namespace math {
 template <>
 void Set<at::Half, CPUContext>(
-    const size_t /*N*/,
+    const int /*N*/,
     const at::Half h,
     at::Half* v,
     CPUContext* c) {

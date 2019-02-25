@@ -46,7 +46,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   shape_info_ = info;
 
   for (const auto& op : net.op()) {
-    LOG(INFO) << op.type();
+    VLOG(1) << op.type();
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise" ||
         op.type() == "SparseLengthsWeightedSum" ||
@@ -137,6 +137,7 @@ void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
       TensorProto_DataType_INT32);
+  current_dim_type_ = ShapeInfo::DimType::SEQ;
 }
 
 void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {

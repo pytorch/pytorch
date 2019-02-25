@@ -8,7 +8,7 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
  public:
   template<class... Args> explicit GetGPUMemoryUsageOp(Args&&... args)
       : Operator<CUDAContext>(std::forward<Args>(args)...) {}
-  ~GetGPUMemoryUsageOp() {}
+  ~GetGPUMemoryUsageOp() override {}
 
   bool RunOnDevice() override {
     CHECK_EQ(InputSize(), 0);

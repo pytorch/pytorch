@@ -12,5 +12,6 @@ std::vector<TensorShape> FCShapeInference(
 
 OpSchema::Cost CostInferenceForFC(
     const OperatorDef& def,
-    const vector<TensorShape>& in);
+    const vector<TensorShape>& in,
+    bool pretransposed_weight = false);
 } // namespace caffe2
