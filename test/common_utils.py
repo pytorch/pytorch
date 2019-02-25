@@ -394,7 +394,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x.storage(), y.storage())
         elif ((isinstance(x, torch.BoolTensor) and isinstance(y, Number)) or
              (isinstance(y, torch.BoolTensor) and isinstance(x, Number))):
-                self.fail("Expected two boolean tensors - x={}, y={}".format(x, y))
+            self.fail("Expected two boolean tensors - x={}, y={}".format(x, y))
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 if isinstance(x, torch.BoolTensor) and isinstance(y, torch.BoolTensor):
