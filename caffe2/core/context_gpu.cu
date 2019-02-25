@@ -304,10 +304,14 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     if (IsNUMAEnabled()) {
+      at::DeleterFnPtr expected_deleter = baseAllocator_->raw_deleter();
       data_ptr = baseAllocator_->allocate(nbytes);
       data = data_ptr.get();
       CAFFE_ENFORCE(data);
       CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
+      CAFFE_ENFORCE(
+          data_ptr.compare_exchange_deleter(expected_deleter, &Delete),
+          "Failed to swap deleter (already swapped?)");
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
       data_ptr = {data, data, &Delete, at::Device(CPU)};

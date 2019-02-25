@@ -137,7 +137,7 @@ class ConvConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ConvConverter() {}
+  ~ConvConverter() override {}
 };
 
 REGISTER_CONVERTER(Conv, ConvConverter);
@@ -175,7 +175,7 @@ class ClipConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ClipConverter() {}
+  ~ClipConverter() override {}
 };
 REGISTER_CONVERTER(Clip, ClipConverter);
 
@@ -190,7 +190,7 @@ class AveragePoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~AveragePoolConverter() {}
+  ~AveragePoolConverter() override {}
 };
 REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
 
@@ -205,7 +205,7 @@ class MaxPoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~MaxPoolConverter() {}
+  ~MaxPoolConverter() override {}
 };
 REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
 
@@ -231,7 +231,7 @@ class ConcatConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ConcatConverter() {}
+  ~ConcatConverter() override {}
 };
 REGISTER_CONVERTER(Concat, ConcatConverter);
 
@@ -258,7 +258,7 @@ class FCConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~FCConverter() {}
+  ~FCConverter() override {}
 };
 REGISTER_CONVERTER(FC, FCConverter);
 

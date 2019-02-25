@@ -1,7 +1,6 @@
-graph(%x : Tensor
-      %1 : Tensor
-      %3 : Tensor) {
+graph(%x : Tensor,
+      %1 : Tensor,
+      %3 : Tensor):
   %2 : Tensor = aten::mm(%x, %1)
   %4 : Double(3, 5) = aten::mm(%2, %3), scope: TracedMod
-  return (%4);
-}
+  return (%4)

@@ -23,7 +23,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
-  ~CuDNNSoftmaxOp() {
+  ~CuDNNSoftmaxOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
@@ -86,7 +86,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
-  ~CuDNNSoftmaxGradientOp() {
+  ~CuDNNSoftmaxGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 

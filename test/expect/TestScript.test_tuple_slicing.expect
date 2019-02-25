@@ -1,19 +1,16 @@
-graph(%a : Tensor) {
+graph(%a : Tensor):
   %1 : int = prim::Constant[value=1]()
   %2 : int = prim::Constant[value=2]()
   %3 : int = prim::Constant[value=3]()
   %4 : int = prim::Constant[value=4]()
   %5 : bool = prim::Bool(%a)
   %b : (int, int, int, int) = prim::If(%5)
-    block0() {
+    block0():
       %b.1 : (int, int, int, int) = prim::TupleConstruct(%1, %2, %3, %4)
       -> (%b.1)
-    }
-    block1() {
+    block1():
       %b.2 : (int, int, int, int) = prim::TupleConstruct(%4, %3, %2, %1)
       -> (%b.2)
-    }
   %c : (int, int, int, int) = prim::TupleSlice[beg=0, end=4](%b)
   %e : (int, int) = prim::TupleSlice[beg=1, end=3](%c)
-  return (%e);
-}
+  return (%e)
