@@ -96,7 +96,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   PyObject *obj = nullptr;
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
-  Py_buffer buffer;
+  Py_buffer buffer = {};
   static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
   const char* argtypes;
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
@@ -160,6 +160,11 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
   memcpy(THWStorage_(data)(storage), src + offset, count);
+#elif defined(TH_REAL_IS_BOOL)
+  // Because of ASAN checks, that are failing in the THStorage.cpp whenever
+  // we are trying to get a value which is not 0 or 1, we have to manually
+  // convert original values to boolean ones.
+  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
   THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
