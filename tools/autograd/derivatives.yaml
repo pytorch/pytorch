@@ -905,7 +905,7 @@
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)
 
-- name: _standard_gamma_grad(Tensor self, Tensor output)
+- name: _standard_gamma_grad(Tensor self, Tensor out)
   self: not_implemented("_standard_gamma_grad")
 
 - name: values(Tensor self)
@@ -1181,9 +1181,9 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   self: zeros_like(self)
 
-- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
-  grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
+- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor out)
+  grad_output: elu_backward(grad, alpha, scale, input_scale, out)
+  out: grad * grad_output * input_scale * (out < 0).toType(grad.type())
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
@@ -1274,8 +1274,8 @@
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
 
-- name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output)
-  grad_output: softplus_backward(grad, self, beta, threshold, output)
+- name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor out)
+  grad_output: softplus_backward(grad, self, beta, threshold, out)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
@@ -1315,13 +1315,13 @@
 - name: upsample_nearest3d_backward(Tensor grad_output, IntArrayRef output_size, IntArrayRef input_size)
   grad_output: upsample_nearest3d(grad, output_size)
 
-- name: sigmoid_backward(Tensor grad_output, Tensor output)
-  grad_output: sigmoid_backward(grad, output)
-  output: grad * grad_output * (-2 * output + 1)
+- name: sigmoid_backward(Tensor grad_output, Tensor out)
+  grad_output: sigmoid_backward(grad, out)
+  out: grad * grad_output * (-2 * out + 1)
 
-- name: tanh_backward(Tensor grad_output, Tensor output)
-  grad_output: tanh_backward(grad, output)
-  output: -2 * output * grad * grad_output
+- name: tanh_backward(Tensor grad_output, Tensor out)
+  grad_output: tanh_backward(grad, out)
+  out: -2 * out * grad * grad_output
 
 # cudnn
 - name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t blank, bool deterministic, bool zero_infinity)

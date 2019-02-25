@@ -4059,7 +4059,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor out) -> Tensor
@@ -4167,7 +4167,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor out) -> Tensor
@@ -4629,14 +4629,14 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: sigmoid_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: sigmoid_backward(Tensor grad_output, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
 - func: sigmoid_backward(Tensor grad_output, Tensor out) -> Tensor
   matches_jit_signature: True
   python_module: nn
 
-- func: tanh_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: tanh_backward(Tensor grad_output, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
 - func: tanh_backward(Tensor grad_output, Tensor out) -> Tensor
