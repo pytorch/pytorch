@@ -891,12 +891,12 @@ def get_python_signature(declaration, include_out):
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        if len(output_args) == 1 and output_args[0]['name'] != 'out':
-            print("output_args")
-            print(output_args)
-#            assert output_args[0]['name'] == 'out', \
-            print(    "For function named {}: Our Python frontend uses out as the keyword argument name for output arguments.".format(name))
-            #TODO: FINISH THIS!
+        if len(output_args) == 1:
+            assert output_args[0]['name'] == 'out', \
+                "For function named {}: Our Python frontend uses out as" \
+                " the keyword argument name for output arguments.".format(name)
+        # NB: For more than 1 output args the type name is a TensorList
+        # and as such we don't (yet) need to consider the naming.
         py_formal_args.append(typename + ' out=None')
 
     # we could put this in the loop above but we want to ensure both type dispatched args
