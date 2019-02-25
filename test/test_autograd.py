@@ -2094,6 +2094,14 @@ class TestAutograd(TestCase):
                               False, f_args_variable, f_args_tensor)
         self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
 
+    def test_cat_empty(self):
+        f_args_variable = (torch.randn(0, S, requires_grad=True),
+                           torch.randn(S, S, requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat_empty", "cat",
+                              lambda a, b: torch.cat((a, b)),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cdist(self):
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             f_args_variable = (torch.randn(S, S, requires_grad=True),
@@ -2102,15 +2110,6 @@ class TestAutograd(TestCase):
             f_args_tensor = deepcopy(unpack_variables(f_args_variable))
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
-            self.assertTrue(gradcheck(f, f_args_variable, eps=1e-6, atol=PRECISION))
-
-    def test_cat_empty(self):
-        f_args_variable = (torch.randn(0, S, requires_grad=True),
-                           torch.randn(S, S, requires_grad=True))
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_cat_empty", "cat",
-                              lambda a, b: torch.cat((a, b)),
-                              True, f_args_variable, f_args_tensor)
 
     @skipIfNoLapack
     def test_cholesky(self):
@@ -2881,6 +2880,9 @@ def gradgradcheck_method_precision_override(test_name):
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+    print("===========================")
+    print(test_name)
+    print("===========================")
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
