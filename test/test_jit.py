@@ -6643,6 +6643,37 @@ a")
         tensor_unifying.graph.propagate_shapes((a, b, c), False)
         self.assertExpected(canonical(tensor_unifying.graph))
 
+    def test_list_unify(self):
+        # allowing a unififed int?[] would cause a runtime error b/c
+        # the index operation expects int?[] to be a generic list,
+        # but in the true branch the IValue will be a int list
+        with self.assertRaisesRegex(RuntimeError, "int[] in the true branch and type None[]"):
+            @torch.jit.script
+            def list_optional_fails(x):
+                # type: (bool) -> Optional[int]
+                if x:
+                    y = [1]
+                else:
+                    y = [None]
+                return y[0]
+
+        @torch.jit.script
+        def list_tensors(x):
+            # type: (bool) -> Tuple[Tensor, List[Tensor]]
+            if x:
+                a = torch.zeros([1, 1])
+                y = [a]
+            else:
+                a = torch.zeros([1, 2])
+                y = [a]
+            return a, y
+
+        self.run_pass('constant_propagation', list_tensors.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", list_tensors.graph)
+        # testing that tensor type of lists is unified
+        self.getExportImportCopy(m)
+
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
