@@ -3880,16 +3880,19 @@
   matches_jit_signature: True
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   matches_jit_signature: True
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   matches_jit_signature: True
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   matches_jit_signature: True
@@ -3899,6 +3902,7 @@
   variants: method, function
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   matches_jit_signature: True
@@ -3906,6 +3910,7 @@
 ## NN wrappers
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
@@ -3913,6 +3918,7 @@
   python_module: nn
 
 - func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction) -> Tensor
@@ -3920,6 +3926,7 @@
   python_module: nn
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -3927,6 +3934,7 @@
   python_module: nn
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
@@ -3934,6 +3942,7 @@
   python_module: nn
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -3941,6 +3950,7 @@
   python_module: nn
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
@@ -3948,6 +3958,7 @@
   python_module: nn
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
@@ -3955,6 +3966,7 @@
   python_module: nn
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction) -> Tensor
@@ -3962,6 +3974,7 @@
   python_module: nn
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -3976,6 +3989,7 @@
   python_module: nn
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
@@ -3983,6 +3997,7 @@
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
@@ -3997,6 +4012,7 @@
   python_module: nn
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
@@ -4004,6 +4020,7 @@
   python_module: nn
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
@@ -4018,6 +4035,7 @@
   python_module: nn
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
@@ -4025,6 +4043,7 @@
   python_module: nn
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -4032,6 +4051,7 @@
   python_module: nn
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
@@ -4039,6 +4059,7 @@
   python_module: nn
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -4046,6 +4067,7 @@
   python_module: nn
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
@@ -4053,6 +4075,7 @@
   python_module: nn
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
@@ -4060,6 +4083,7 @@
   python_module: nn
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor out) -> Tensor
@@ -4071,6 +4095,7 @@
   python_module: nn
 
 - func: glu(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
@@ -4078,6 +4103,7 @@
   python_module: nn
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
@@ -4085,6 +4111,7 @@
   python_module: nn
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
@@ -4092,6 +4119,7 @@
   python_module: nn
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
@@ -4103,6 +4131,7 @@
   python_module: nn
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
@@ -4110,6 +4139,7 @@
   python_module: nn
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
@@ -4121,6 +4151,7 @@
   python_module: nn
 
 - func: log_sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid(Tensor self) -> Tensor
@@ -4135,6 +4166,7 @@
   python_module: nn
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
@@ -4150,6 +4182,7 @@
   python_module: nn
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
@@ -4161,6 +4194,7 @@
   python_module: nn
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
@@ -4168,6 +4202,7 @@
   python_module: nn
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor out) -> Tensor
@@ -4175,6 +4210,7 @@
   python_module: nn
 
 - func: softshrink(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
@@ -4182,6 +4218,7 @@
   python_module: nn
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
@@ -4189,6 +4226,7 @@
   python_module: nn
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool2d_out_cpu
@@ -4212,6 +4250,7 @@
     CUDA: adaptive_avg_pool2d_backward_cuda
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
@@ -4219,6 +4258,7 @@
   python_module: nn
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
@@ -4235,6 +4275,7 @@
   python_module: nn
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
@@ -4251,6 +4292,7 @@
   python_module: nn
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
@@ -4258,6 +4300,7 @@
   python_module: nn
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
@@ -4265,6 +4308,7 @@
   python_module: nn
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
@@ -4272,6 +4316,7 @@
   python_module: nn
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
@@ -4279,6 +4324,7 @@
   python_module: nn
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
@@ -4301,6 +4347,7 @@
     CUDA: fractional_max_pool2d_cuda
 
 - func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_backward_out_cpu
@@ -4329,6 +4376,7 @@
     CUDA: fractional_max_pool3d_cuda
 
 - func: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_backward_out_cpu
@@ -4351,6 +4399,7 @@
   python_module: nn
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
@@ -4367,6 +4416,7 @@
   python_module: nn
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
@@ -4374,6 +4424,7 @@
   python_module: nn
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
@@ -4381,6 +4432,7 @@
   python_module: nn
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
@@ -4388,6 +4440,7 @@
   python_module: nn
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
@@ -4395,6 +4448,7 @@
   python_module: nn
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
@@ -4402,6 +4456,7 @@
   python_module: nn
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_out_cpu
@@ -4415,6 +4470,7 @@
     CUDA: reflection_pad1d_cuda
 
 - func: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_backward_out_cpu
@@ -4428,6 +4484,7 @@
     CUDA: reflection_pad1d_backward_cuda
 
 - func: reflection_pad2d(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_out_cpu
@@ -4441,6 +4498,7 @@
     CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_backward_out_cpu
@@ -4454,6 +4512,7 @@
     CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_out_cpu
@@ -4467,6 +4526,7 @@
     CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_backward_out_cpu
@@ -4480,6 +4540,7 @@
     CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_out_cpu
@@ -4493,6 +4554,7 @@
     CUDA: replication_pad2d_cuda
 
 - func: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_backward_out_cpu
@@ -4506,6 +4568,7 @@
     CUDA: replication_pad2d_backward_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_out_cpu
@@ -4519,6 +4582,7 @@
     CUDA: replication_pad3d_cuda
 
 - func: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_backward_out_cpu
@@ -4532,6 +4596,7 @@
     CUDA: replication_pad3d_backward_cuda
 
 - func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners) -> Tensor
@@ -4539,6 +4604,7 @@
   python_module: nn
 
 - func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners) -> Tensor
@@ -4546,6 +4612,7 @@
   python_module: nn
 
 - func: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
@@ -4553,6 +4620,7 @@
   python_module: nn
 
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
@@ -4560,6 +4628,7 @@
   python_module: nn
 
 - func: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
@@ -4567,6 +4636,7 @@
   python_module: nn
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
@@ -4574,6 +4644,7 @@
   python_module: nn
 
 - func: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners) -> Tensor
@@ -4581,6 +4652,7 @@
   python_module: nn
 
 - func: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners) -> Tensor
@@ -4588,6 +4660,7 @@
   python_module: nn
 
 - func: upsample_nearest1d(Tensor self, int[1] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest1d(Tensor self, int[1] output_size) -> Tensor
@@ -4595,6 +4668,7 @@
   python_module: nn
 
 - func: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size) -> Tensor
@@ -4602,6 +4676,7 @@
   python_module: nn
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size) -> Tensor
@@ -4609,6 +4684,7 @@
   python_module: nn
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size) -> Tensor
@@ -4616,6 +4692,7 @@
   python_module: nn
 
 - func: upsample_nearest3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest3d(Tensor self, int[3] output_size) -> Tensor
@@ -4623,6 +4700,7 @@
   python_module: nn
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size) -> Tensor
@@ -4630,6 +4708,7 @@
   python_module: nn
 
 - func: sigmoid_backward(Tensor grad_output, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: sigmoid_backward(Tensor grad_output, Tensor out) -> Tensor
@@ -4637,6 +4716,7 @@
   python_module: nn
 
 - func: tanh_backward(Tensor grad_output, Tensor out, *, Tensor(a!) grad_input) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: tanh_backward(Tensor grad_output, Tensor out) -> Tensor
@@ -4644,6 +4724,7 @@
   python_module: nn
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
@@ -4665,6 +4746,7 @@
   python_module: nn
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
@@ -4686,6 +4768,7 @@
   python_module: nn
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0) -> Tensor
@@ -4707,6 +4790,7 @@
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
@@ -4714,6 +4798,7 @@
   python_module: nn
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
@@ -4728,6 +4813,7 @@
   python_module: nn
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor
@@ -4749,6 +4835,7 @@
   python_module: nn
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
@@ -4770,6 +4857,7 @@
   python_module: nn
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
