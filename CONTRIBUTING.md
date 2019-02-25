@@ -335,6 +335,9 @@ Hope this helps, and thanks for considering to contribute.
 
 ## Windows development tips
 
+For building from source on Windows, consult 
+[our documentation](https://pytorch.org/docs/stable/notes/windows.html) on it.
+
 Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
 There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
 than Linux, which are worth keeping in mind when fixing these problems.
