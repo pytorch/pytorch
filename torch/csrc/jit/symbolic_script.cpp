@@ -603,6 +603,31 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
+        def _convolution(input, weight,
+                         bias: Optional[Tensor],
+                         stride: List[int],
+                         padding: List[int],
+                         dilation: List[int],
+                         transposed: bool,
+                         output_padding: List[int],
+                         groups: int,
+                         benchmark: bool,
+                         deterministic: bool,
+                         cudnn_enabled: bool):
+            has_bias = bias is not None
+            output, save1, save2, impl_idx = torch._convolution_impl_index(input, weight, bias, stride,
+                    padding, dilation, transposed, output_padding, groups, benchmark, deterministic,
+                    cudnn_enabled)
+
+            def backward(grad_output):
+                grad_input, grad_weight, grad_bias = torch._convolution_impl_index_backward(
+                        impl_idx, input, grad_output, weight, stride, padding, dilation,
+                        output_padding, transposed, groups, benchmark, deterministic,
+                        [True, True, has_bias], save1, save2)
+                return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None
+
+            return output, backward
+
         def embedding(weight,
                       indices,
                       padding_idx: int,
@@ -729,23 +754,21 @@ std::unordered_map<std::string, GradientPair> schema_to_graphs;
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
-std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
+std::unordered_map<const FunctionSchema *, GradientPair> cached_gradient_pairs;
 } // anonymous namespace
 
-std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
-  AT_CHECK(
-      closure->node()->kind() == prim::TupleConstruct,
-      "closure must be a literal tuple construct");
-  Value* fn = closure->node()->inputs().at(0);
-  Value* context = closure->node()->inputs().at(1);
+std::pair<std::shared_ptr<Graph>, Value *> extractClosure(Value *closure) {
+  AT_CHECK(closure->node()->kind() == prim::TupleConstruct,
+           "closure must be a literal tuple construct");
+  Value *fn = closure->node()->inputs().at(0);
+  Value *context = closure->node()->inputs().at(1);
 
-  AT_CHECK(
-      fn->node()->kind() == prim::Function,
-      "closure tuple must contain a prim::Function");
+  AT_CHECK(fn->node()->kind() == prim::Function,
+           "closure tuple must contain a prim::Function");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
-Argument originalReturnType(const TupleTypePtr& tup) {
+Argument originalReturnType(const TupleTypePtr &tup) {
   AT_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
@@ -758,44 +781,42 @@ Argument originalReturnType(const TupleTypePtr& tup) {
 // overloaded functions of `func`.
 // Remove the suffix before adding the schema string to map
 // schema_to_graphs.
-std::string overloadedSchemaString(const FunctionSchema& schema) {
-  const auto& schema_name = schema.name();
+std::string overloadedSchemaString(const FunctionSchema &schema) {
+  const auto &schema_name = schema.name();
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
   std::string schema_string = canonicalSchemaString(schema);
   if (!schema_name_suffix.empty() &&
       schema_name_suffix.find_first_not_of("0123456789") == std::string::npos) {
-    schema_string.replace(
-        schema_string.find(schema_name),
-        schema_name.length(),
-        schema_name.substr(0, pos));
+    schema_string.replace(schema_string.find(schema_name), schema_name.length(),
+                          schema_name.substr(0, pos));
   }
   return schema_string;
 }
 
-bool isHelperFunction(const std::string& method_name) {
+bool isHelperFunction(const std::string &method_name) {
   std::string helper_prefix = "AD_";
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const std::shared_ptr<script::Module>& module) {
-  for (const auto& method_ : module->get_methods()) {
+void loadModule(const std::shared_ptr<script::Module> &module) {
+  for (const auto &method_ : module->get_methods()) {
     if (isHelperFunction(method_.key()))
       continue;
 
-    const auto& method = method_.value();
+    const auto &method = method_.value();
     GradientPair pair;
     pair.forward = method->graph();
 
     // lookup the backward function
-    Node* forward_tuple = pair.forward->outputs().at(0)->node();
+    Node *forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
       throw script::ErrorReport(forward_tuple->getSourceLocation())
           << "gradient must return literal a tuple";
     }
 
-    Value* context;
+    Value *context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
 
@@ -805,9 +826,9 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
     //  return original, backward
     //  -----
     //  return original, context_tuple
-    std::vector<Value*> new_inputs = forward_tuple->inputs().vec();
+    std::vector<Value *> new_inputs = forward_tuple->inputs().vec();
     new_inputs.back() = context;
-    Value* new_tuple =
+    Value *new_tuple =
         pair.forward->appendNode(pair.forward->createTuple(new_inputs))
             ->output();
     pair.forward->eraseOutput(0);
@@ -815,10 +836,9 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
     forward_tuple->destroy();
 
     // derive schema from original function's schema:
-    const FunctionSchema& loaded_schema = method->getSchema();
+    const FunctionSchema &loaded_schema = method->getSchema();
     FunctionSchema actual_schema(
-        Symbol::aten(loaded_schema.name()),
-        loaded_schema.arguments(),
+        Symbol::aten(loaded_schema.name()), loaded_schema.arguments(),
         {originalReturnType(new_tuple->type()->expect<TupleType>())});
 
     // modify canonical string for function overloading
@@ -830,15 +850,15 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
 }
 
 void loadFunctions() {
-  for (const std::string& str : functions) {
+  for (const std::string &str : functions) {
     auto cu = std::make_shared<script::Module>();
     script::defineMethodsInModule(cu, str, script::nativeResolver, nullptr);
     loadModule(cu);
   }
 }
 
-c10::optional<GradientPair> gradientInfoForSchema(
-    const FunctionSchema& schema) {
+c10::optional<GradientPair>
+gradientInfoForSchema(const FunctionSchema &schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (schema_to_graphs.size() == 0) {
     loadFunctions();
@@ -851,15 +871,15 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {
-      cached_gradient_pairs.emplace_hint(
-          cache_it, &schema, sym_script_it->second);
+      cached_gradient_pairs.emplace_hint(cache_it, &schema,
+                                         sym_script_it->second);
       return sym_script_it->second;
     }
   }
   return c10::nullopt;
 }
 
-bool hasGradientInfoForSchema(const FunctionSchema& schema) {
+bool hasGradientInfoForSchema(const FunctionSchema &schema) {
   return gradientInfoForSchema(schema).has_value();
 }
 
