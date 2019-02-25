@@ -72,7 +72,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     } else {
       // We didn't encounter an ->, so assume the "after set" is identical
       // to the "before set"
-      AT_ASSERT(alias_info.beforeSets().empty());
+      AT_ASSERT(alias_info.afterSets().empty());
       for (const auto& set : alias_info.beforeSets()) {
         alias_info.addAfterSet(set);
       }

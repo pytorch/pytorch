@@ -104,7 +104,14 @@ void checkAliases(
         const auto inputSet = input.aliasInfo;
         const auto outputSet = output.aliasInfo;
         AT_ASSERT(inputSet && outputSet);
-        AT_ASSERT(inputSet->isSubsetOf(*outputSet));
+        bool found = false;
+        for (const auto& set : inputSet->beforeSets()) {
+          if (outputSet->beforeSets().count(set)) {
+            found = true;
+            break;
+          }
+        }
+        AT_ASSERT(found);
       }
     }
   }
