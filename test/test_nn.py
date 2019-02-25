@@ -4301,6 +4301,19 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
+    def test_poisson_nll_loss_reduction_modes(self):
+        input = torch.tensor([0.5, 1.5, 2.5])
+        target = torch.tensor([1., 2., 3.])
+        component_wise_loss = torch.exp(input) - target * input
+        self.assertEqual(component_wise_loss,
+                         F.poisson_nll_loss(input, target, reduction='none'))
+        self.assertEqual(torch.sum(component_wise_loss),
+                         F.poisson_nll_loss(input, target, reduction='sum'))
+        self.assertEqual(torch.mean(component_wise_loss),
+                         F.poisson_nll_loss(input, target, reduction='mean'))
+        with self.assertRaisesRegex(ValueError, 'is not valid'):
+            F.poisson_nll_loss(input, target, reduction='total')
+
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)

@@ -1728,18 +1728,6 @@
   variants: method
   device_guard: False
 
-- func: RoiPooling2d_forward(Tensor input, Tensor rois, int pooledHeight, int pooledWidth, float spatialScale) -> (Tensor, Tensor)
-  matches_jit_signature: True
-  dispatch:
-    CPU: RoiPooling2d_forward_cpu
-    CUDA: RoiPooling2d_forward_cuda
-
-- func: RoiPooling2d_backward(Tensor input, Tensor rois, int pooledHeight, int pooledWidth, float spatialScale, Tensor gradOutput, Tensor argmaxes) -> Tensor
-  matches_jit_signature: True
-  dispatch:
-    CPU: RoiPooling2d_backward_cpu
-    CUDA: RoiPooling2d_backward_cuda
-
 - func: round(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: function, method
