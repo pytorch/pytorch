@@ -8,7 +8,7 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
  public:
   GetGPUMemoryUsageOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws) {}
-  ~GetGPUMemoryUsageOp() {}
+  ~GetGPUMemoryUsageOp() override {}
 
   bool RunOnDevice() override {
     CHECK_EQ(InputSize(), 0);
