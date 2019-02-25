@@ -578,7 +578,7 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
     for (size_t i = 0; i < outputs.size(); i++) {
       tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
     }
-    return tuple;
+    return std::move(tuple);
   }
 }
 

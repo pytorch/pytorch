@@ -284,14 +284,16 @@ SparseTensor dense_to_sparse(const Tensor& self){
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
-  AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() > 0,
+  // but this would take some work and doesn't seem particularly useful.
+  AT_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
   AT_CHECK(sparse_dim <= dims, 
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
 
   Tensor nz = self.nonzero().transpose(0, 1);
-  if (nz.numel() == 0) {
+  if (nz.size(1) == 0) {
     return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
   }
   LongTensor indices;
@@ -303,8 +305,16 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
     indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
   }
 
-  std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
-  Tensor values = self.index(ix).squeeze(0).clone();
+  Tensor values;
+  if (self.dim() > 0) {
+    std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+    values = self.index(ix).squeeze(0).clone();
+  } else {
+    AT_ASSERT(nz.sizes().equals({0, 1}));
+    // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
+    // Given sparse tensor invariants, values should be shape (1,)
+    values = self.unsqueeze(0).clone();
+  }
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
