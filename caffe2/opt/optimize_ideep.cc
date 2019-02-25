@@ -638,6 +638,159 @@ void setPoolingInferenceMode(repr::NNModule* nn) {
   }
 }
 
+void fuseOrderSwitchToQuantizeOp(repr::NNModule* nn) {
+  // In INT8 module, the quantize/dequantize op always appears
+  // along with corresponding order switch op, which aims to switch
+  // between INT8 computation domain and others.
+  // Here we assume they always obey below combination and order:
+  // NCHW2NHWC followed by Int8Quantize, or Int8Dequantize followed by NHWC2NCHW
+  // On iDEEP, there is chance to fuse the order switch op into the
+  // quantize/dequantize op, in order to improve the module performance.
+  auto fuser = [&nn]() {
+    auto allNodes = nn->dataFlow.getMutableNodes();
+    for (int i = 0; i < allNodes.size(); ++i) {
+      auto osNode = allNodes[i];
+      if (osNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(osNode)) {
+        continue;
+      }
+
+      if (isOpType(osNode, "NCHW2NHWC")) {
+        auto output = repr::nn::getOutputs(osNode).front();
+        auto consumers = repr::nn::getConsumers(output);
+        if (consumers.size() != 1) {
+          continue;
+        }
+
+        auto seqNode = consumers.front();
+        if (!isOpType(seqNode, "Int8Quantize")) {
+          continue;
+        }
+
+        auto seq = repr::nn::get<repr::NeuralNetOperator>(seqNode);
+        removeArg(*seq, "output_order");
+
+        auto* seqOp = getMutableOpDef(*seq);
+        auto* arg = seqOp->add_arg();
+        arg->set_name("output_order");
+        arg->set_i(iformat::nhwc);
+
+        auto input = repr::nn::getInputs(osNode).front();
+        nn->dataFlow.replaceNode(output, input);
+
+        nn->dataFlow.deleteNode(osNode);
+        nn->dataFlow.deleteNode(output);
+        return true;
+      } else if (isOpType(osNode, "NHWC2NCHW")) {
+        auto input = repr::nn::getInputs(osNode).front();
+        if (input->getInEdges().size() <= 0) {
+          continue;
+        }
+
+        auto preNode = repr::nn::getProducer(input);
+        if (!isOpType(preNode, "Int8Dequantize")) {
+          continue;
+        }
+
+        auto pre = repr::nn::get<repr::NeuralNetOperator>(preNode);
+        removeArg(*pre, "output_order");
+
+        auto* preOp = getMutableOpDef(*pre);
+        auto* arg = preOp->add_arg();
+        arg->set_name("output_order");
+        arg->set_i(iformat::nchw);
+
+        auto output = repr::nn::getOutputs(osNode).front();
+        nn->dataFlow.replaceNode(input, output);
+
+        nn->dataFlow.deleteNode(osNode);
+        nn->dataFlow.deleteNode(input);
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  while (fuser()) {
+  }
+}
+
+void fusePreConvertOp(repr::NNModule* nn) {
+  auto fuser = [&nn](vector<string> op_list) {
+    auto allNodes = nn->dataFlow.getMutableNodes();
+    for (int i = 0; i < allNodes.size(); ++i) {
+      auto opNode = allNodes[i];
+      if (opNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(opNode)) {
+        continue;
+      }
+
+      if (!isOpType(opNode, "NCHW2NHWC") && !isOpType(opNode, "NHWC2NCHW") &&
+          !isOpType(opNode, "Int8Quantize") &&
+          !isOpType(opNode, "Int8Dequantize")) {
+        continue;
+      }
+
+      auto op = repr::nn::get<repr::NeuralNetOperator>(opNode);
+      if (!isOnIdeepDevice(*op)) {
+        LOG(WARNING) << "Not a IDEEP operator";
+        continue;
+      }
+
+      auto output = repr::nn::getOutputs(opNode).front();
+      auto consumers = repr::nn::getConsumers(output);
+      if (consumers.size() != 1) {
+        continue;
+      }
+
+      bool is_op_found = false;
+      auto seqNode = consumers.front();
+      for (int i = 0; i < op_list.size(); i++) {
+        if (isOpType(seqNode, op_list[i])) {
+          is_op_found = true;
+          break;
+        }
+      }
+      if (!is_op_found) {
+        continue;
+      }
+
+      auto seqOp = repr::nn::get<repr::NeuralNetOperator>(seqNode);
+      if (!isOnIdeepDevice(*seqOp)) {
+        LOG(WARNING) << "Not a IDEEP operator";
+        continue;
+      }
+
+      auto input = repr::nn::getInputs(opNode).front();
+      nn->dataFlow.replaceNode(output, input);
+
+      nn->dataFlow.deleteNode(opNode);
+      nn->dataFlow.deleteNode(output);
+      return true;
+    }
+
+    return false;
+  };
+
+  // 1. Int8Sum has been fallbacked to FP32 in current impl
+  //    It can handle inputs with diff format and data type
+  // 2. FC is able to convert input format and data type by itself
+  // 3. The fallback wrapper can handle the conversion of format and data type
+  static vector<string> op_list = {
+      "FC",
+      "Python",
+      "Softmax",
+      "Sigmoid",
+      "RoIAlign",
+      "UpsampleNearest",
+      "BatchPermutation",
+      "Int8Sum",
+      "Int8SumRelu",
+  };
+
+  while (fuser(op_list)) {
+  }
+}
+
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -658,6 +811,10 @@ void OptimizeForIdeep(
   enforceFusionInplaceForIdeep(nn, ws);
 
   setPoolingInferenceMode(nn);
+
+  fuseOrderSwitchToQuantizeOp(nn);
+
+  fusePreConvertOp(nn);
 }
 
 #endif // CAFFE2_USE_MKLDNN
