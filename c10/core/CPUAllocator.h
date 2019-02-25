@@ -28,6 +28,7 @@ C10_API void NoDelete(void*);
 C10_API void memset_junk(void* data, size_t num);
 
 C10_API void* alloc_cpu(size_t nbytes);
+C10_API void free_cpu(void* data);
 
 // Get the CPU Alloctor.
 C10_API at::Allocator* GetCPUAllocator();

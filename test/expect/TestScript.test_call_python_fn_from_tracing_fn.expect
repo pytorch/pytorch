@@ -1,7 +1,6 @@
-graph(%x : Double(3, 4)) {
+graph(%x : Double(3, 4)):
   %1 : Double(3, 4) = aten::neg(%x)
   %2 : Long() = prim::Constant[value={1}]()
   %3 : int = prim::Constant[value=1]()
   %4 : Double(3, 4) = aten::add(%1, %2, %3)
-  return (%4);
-}
+  return (%4)
