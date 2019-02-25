@@ -247,7 +247,9 @@ class ConvFusionTest(hu.HypothesisTestCase):
         self.assertTrue(len(net.Proto().op) == 2)
         self.assertTrue(net.Proto().op[1].type == "ConvFusion")
         workspace.RunNetOnce(net.Proto())
-        S2 = workspace.FetchBlob('S0')
+        # The output tensor name will be changed by optimization
+        # sometimes when applying conv sum fusion
+        S2 = workspace.FetchBlob(net.Proto().op[-1].output[0])
         if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
             print(S2.flatten())
             print(S0.flatten())
@@ -398,7 +400,9 @@ class ConvFusionTest(hu.HypothesisTestCase):
         self.assertTrue(len(net.Proto().op) == 2)
         self.assertTrue(net.Proto().op[1].type == "ConvFusion")
         workspace.RunNetOnce(net.Proto())
-        S2 = workspace.FetchBlob('S0')
+        # The output tensor name will be changed by optimization
+        # sometimes when applying conv sum fusion
+        S2 = workspace.FetchBlob(net.Proto().op[-1].output[0])
         if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
             print(S2.flatten())
             print(S0.flatten())
@@ -505,7 +509,9 @@ class ConvFusionTest(hu.HypothesisTestCase):
         net.Proto().CopyFrom(old_net)
         optimizeForIDEEP(net)
         workspace.RunNetOnce(net.Proto())
-        S2 = workspace.FetchBlob('S0')
+        # The output tensor name will be changed by optimization
+        # sometimes when applying conv sum fusion
+        S2 = workspace.FetchBlob(net.Proto().op[-1].output[0])
         if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
             print(S2.flatten())
             print(S0.flatten())
