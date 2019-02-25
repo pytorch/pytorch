@@ -18,20 +18,23 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct AdamWOptions {
-  /* implicit */ AdamWOptions(double learning_rate);
+struct AdaBoundOptions {
+  /* implicit */ AdaBoundOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, beta1) = 0.9;
   TORCH_ARG(double, beta2) = 0.999;
+  TORCH_ARG(double, final_lr) = 0.1;
   TORCH_ARG(double, weight_decay) = 0;
+  TORCH_ARG(double, gamma) = 1e-3;
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(bool, amsgrad) = false;
+  TORCH_ARG(bool, decoupled_weight_decay) = false;
 };
 
-class AdamW : public Optimizer {
+class AdaBound : public Optimizer {
  public:
   template <typename ParameterContainer>
-  explicit AdamW(ParameterContainer&& parameters, const AdamWOptions& options)
+  explicit AdaBound(ParameterContainer&& parameters, const AdaBoundOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
         options(options) {}
 
@@ -40,16 +43,16 @@ class AdamW : public Optimizer {
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  AdamWOptions options;
+  AdaBoundOptions options;
 
   std::vector<int64_t> step_buffers;
   std::vector<Tensor> exp_average_buffers;
   std::vector<Tensor> exp_average_sq_buffers;
   std::vector<Tensor> max_exp_average_sq_buffers;
-  long long unsigned time_step_;
+  uint64_t timestep;
 
  private:
-  AdamW() : options(0) {}
+  AdaBound() : options(0) {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
