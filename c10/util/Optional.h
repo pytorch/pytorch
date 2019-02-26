@@ -145,7 +145,7 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) (EXPR)
 #else
 #define TR2_OPTIONAL_ASSERTED_EXPRESSION(CHECK, EXPR) \
-  ((CHECK) ? (EXPR) : ([] { AT_ASSERT(!#CHECK); }(), (EXPR)))
+  ((CHECK) ? (EXPR) : ([] { assert(!#CHECK); }(), (EXPR)))
 #endif
 
 namespace detail_ {
@@ -376,7 +376,7 @@ class optional : private OptionalBase<T> {
   template <class... Args>
   void initialize(Args&&... args) noexcept(
       noexcept(T(std::forward<Args>(args)...))) {
-    AT_ASSERT(!OptionalBase<T>::init_);
+    assert(!OptionalBase<T>::init_);
     ::new (static_cast<void*>(dataptr())) T(std::forward<Args>(args)...);
     OptionalBase<T>::init_ = true;
   }
@@ -384,7 +384,7 @@ class optional : private OptionalBase<T> {
   template <class U, class... Args>
   void initialize(std::initializer_list<U> il, Args&&... args) noexcept(
       noexcept(T(il, std::forward<Args>(args)...))) {
-    AT_ASSERT(!OptionalBase<T>::init_);
+    assert(!OptionalBase<T>::init_);
     ::new (static_cast<void*>(dataptr())) T(il, std::forward<Args>(args)...);
     OptionalBase<T>::init_ = true;
   }

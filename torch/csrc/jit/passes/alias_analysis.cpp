@@ -143,6 +143,14 @@ ValueSet AliasDb::getWrites(Block* b) const {
   return writes;
 }
 
+
+// Does `n` write to an alias of one of the values in `vs`?
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
+    const {
+  const auto writtenTo = getWrites(n, recurseBlocks);
+  return mayAlias(vs, writtenTo);
+}
+
 std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
     const {
   ValueSet writes;
