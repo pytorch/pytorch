@@ -186,6 +186,74 @@ def parse_arguments(args, func_variants, declaration, func_return):
     if is_out_fn:
         declaration['name'] += "_out"
 
+    # Reverse splat of TensorOptions
+    # As we move towards the JIT function schema for native_functions.yaml we need to support
+    # the expanded version of TensorOptions. For this we discover whether there are three
+    # types and names of keyword arguments: "ScalarType dtype", "Layout layout" and "Device device"
+    # Each, if set,  must have default arguments set to long or float, strided and "cpu" respectively.
+    # They must appear in this order and in this order only to be compliant with the JIT schema
+
+    tensor_options_arguments = [
+        # XXX - until we actually have first-class interpreter types for these
+        # concepts, the default values to be encoded in Tensors
+        # If you change this, you also need to update [TensorOptions in script]
+        # in the tracer code.
+        # dtype is specified as an int64_t of at::ScalarType
+        {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
+        # layout is specified as an int64_t of at::Layout
+        {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
+        # device is specified as an IntArrayRef of { at::Device::Type, device_id }
+        {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+    ]
+    tensor_options_defaults = [['float', 'long'], ['strided'], ['\\"cpu\\"']]
+
+    def compare_tensor_option(argument, tensor_option_argument):
+        matches = True
+        matches = matches and argument['name'] == tensor_option_argument['name']
+        matches = matches and argument['type'] == tensor_option_argument['type']
+        return matches
+
+    def is_tensor_option(argument, tensor_options_arguments):
+        is_in_it = False
+        for to_argument in tensor_options_arguments:
+            is_in_it = is_in_it or compare_tensor_option(argument, to_argument)
+        return is_in_it
+
+    new_arguments = []
+    idx = 0
+    while idx < len(arguments):
+        argument = arguments[idx]
+        if is_tensor_option(argument, tensor_options_arguments) and \
+                len(arguments) - idx >= 3:
+            tensor_options_representation = []
+            for i in range(3):
+                argument = arguments[idx]
+                if not is_tensor_option(argument, tensor_options_arguments):
+                    break
+                tensor_options_representation.append(argument)
+                idx += 1
+            if len(tensor_options_representation) == 3:
+                merged_argument = {'type': 'TensorOptions', 'name': 'options',
+                                   'is_nullable': False, 'annotation': None}
+                for t_idx, t_arg in enumerate(tensor_options_representation):
+                    assert compare_tensor_option(tensor_options_arguments[t_idx], t_arg)
+                    if 'default' in t_arg:
+                        assert t_arg['default'] in tensor_options_defaults[t_idx]
+                        if 'default' not in merged_argument:
+                            merged_argument['default'] = '{}'
+                        if t_idx == 0 and t_arg['default'] == 'long':
+                            merged_argument['default'] = 'at::kLong'
+                    if 'kwarg_only' in argument and argument['kwarg_only']:
+                        merged_argument['kwarg_only'] = True
+                new_arguments.append(merged_argument)
+            else:
+                new_arguments += tensor_options_representation
+        else:
+            new_arguments.append(argument)
+            idx += 1
+
+    arguments = new_arguments
+
     # Sanity checks
 
     # TODO: convention is that the ith-argument correspond to the i-th return, but it would

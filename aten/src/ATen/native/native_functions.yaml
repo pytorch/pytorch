@@ -860,7 +860,7 @@
   matches_jit_signature: True
   device_guard: False
 
-- func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
+- func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, TensorOptions options=[]) -> Tensor
@@ -1000,7 +1000,7 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
   matches_jit_signature: True
 
-- func: full_like(Tensor self, Scalar fill_value, *, TensorOptions options) -> Tensor
+- func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -1671,7 +1671,7 @@
 - func: ones_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
+- func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   matches_jit_signature: True
@@ -1722,7 +1722,7 @@
 - func: rand_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: rand_like(Tensor self, *, TensorOptions options) -> Tensor
+- func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: randint(int high, int[] size, *, TensorOptions options=[]) -> Tensor
 
@@ -1750,9 +1750,9 @@
 - func: randint_like(Tensor self, int low, int high) -> Tensor
   matches_jit_signature: True
 
-- func: randint_like(Tensor self, int high, *, TensorOptions options) -> Tensor
+- func: randint_like(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
-- func: randint_like(Tensor self, int low, int high, *, TensorOptions options) -> Tensor
+- func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: randn(int[] size, *, TensorOptions options=[]) -> Tensor
 
@@ -1767,7 +1767,7 @@
 - func: randn_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: randn_like(Tensor self, *, TensorOptions options) -> Tensor
+- func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: randperm(int n, *, TensorOptions options=[]) -> Tensor
 
@@ -2408,7 +2408,7 @@
 - func: zeros_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
+- func: zeros_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   matches_jit_signature: True
@@ -2730,7 +2730,7 @@
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
-- func: sparse_coo_tensor(int[] size, *, TensorOptions options) -> Tensor
+- func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
 - func: sparse_coo_tensor(Tensor indices, Tensor values, *, TensorOptions options=[]) -> Tensor
 
@@ -2738,13 +2738,13 @@
 
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, TensorOptions options=[]) -> Tensor
 
-- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, TensorOptions options) -> Tensor
+- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
   dispatch:
     SparseCPU: new_with_dims_sparse
     SparseCUDA: new_with_dims_sparse
   requires_tensor: True
 
-- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, TensorOptions options) -> Tensor
+- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device) -> Tensor
   dispatch:
     SparseCPU: new_with_dims_and_tensor_sparse
     SparseCUDA: new_with_dims_and_tensor_sparse

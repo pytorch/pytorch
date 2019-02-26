@@ -338,19 +338,31 @@ def gen_jit_dispatch(declarations, out, template_path):
             return [arg]
         assert decl.get('tensor_options_arg_index') != i
         decl['tensor_options_arg_index'] = i
-        return [
+        tensor_options_expansion = [
             # XXX - until we actually have first-class interpreter types for these
             # concepts, the default values to be encoded in Tensors
             # If you change this, you also need to update [TensorOptions in script]
             # in the tracer code.
             # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
+            {'name': 'dtype', 'simple_type': 'ScalarType'},
             # layout is specified as an int64_t of at::Layout
-            {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
+            {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-            {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '\\"cpu\\"'},
+            {'name': 'device', 'simple_type': 'Device'},
         ]
+#        if decl['name'] == 'zeros_like':
+#            import pdb; pdb.set_trace()
+        if 'default' in arg:
+            tensor_options_expansion[0]['default'] = 'float'
+            tensor_options_expansion[1]['default'] = 'strided'
+            tensor_options_expansion[2]['default'] = '\\"cpu\\"'
+        if 'default' in arg and arg['default'] == 'at::kLong':
+            tensor_options_expansion[0]['default'] = 'long'
+        if 'kwarg_only' in arg and arg['kwarg_only']:
+            tensor_options_expansion[0]['kwarg_only'] = True
+            tensor_options_expansion[1]['kwarg_only'] = True
+            tensor_options_expansion[2]['kwarg_only'] = True
+        return tensor_options_expansion
 
     additional_jit_decls = []
 
