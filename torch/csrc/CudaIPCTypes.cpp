@@ -15,6 +15,7 @@
 namespace torch {
 
 namespace {
+
 void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
   if (!warned) {
@@ -144,11 +145,11 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
-          sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+          sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,
           nullptr);
       auto rc = std::make_shared<CudaIPCRefCountersFile>(
           ref_counter_handle,
-          torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+          CUDA_IPC_REF_COUNTER_FILE_SIZE,
           std::move(sptr));
       cuda_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
       cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
