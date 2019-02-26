@@ -442,7 +442,8 @@ class JitTestCase(TestCase):
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
-                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
+                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
+                   _force_outplace=False):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -464,7 +465,8 @@ class JitTestCase(TestCase):
         if isinstance(func, torch._C.Graph):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
-            ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance)
+            ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
+                                 _force_outplace=_force_outplace)
 
         if export_import:
             ge = self.getExportImportCopy(ge)
@@ -526,10 +528,14 @@ class JitTestCase(TestCase):
 
         return ge
 
-    def assertExportImport(self, trace, inputs):
+    def createScriptModuleFromGraph(self, trace):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
         m._create_method_from_graph("forward", graph)
+        return m
+
+    def assertExportImport(self, trace, inputs):
+        m = self.createScriptModuleFromGraph(trace)
         self.assertExportImportModule(m, inputs)
 
     def assertExportImportModule(self, m, inputs):
@@ -839,16 +845,17 @@ class TestJit(JitTestCase):
         self.checkTrace(f, (x, y))
 
     def test_scopes_intermediate_node(self):
-
         class Net(nn.Module):
             def forward(self, x):
                 return F.log_softmax(x, dim=0)
 
         net = Net()
         t = torch.ones(2, requires_grad=True)
-        trace, _ = torch.jit.get_trace_graph(net, (t,))
+        trace, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
+        self.assertEqual(outputs, self.createScriptModuleFromGraph(trace)(*inputs))
         self.assertExportImport(trace, (t,))
-        self.assertExpectedONNXGraph(trace)
+        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(trace))
 
     def test_scopes_identity_node(self):
 
@@ -874,7 +881,8 @@ class TestJit(JitTestCase):
             trace, _ = torch.jit.get_trace_graph(model, (t,))
 
         self.assertExportImport(trace, (t,) + tuple(model.parameters()))
-        self.assertExpectedONNXGraph(trace)
+        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(trace))
 
     def test_canonicalize_tensor_iterator(self):
         x = torch.randn(4, 4)
@@ -980,7 +988,7 @@ class TestJit(JitTestCase):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        self.assertExpectedGraph(graph)
+        FileCheck().check("Double(4, 3, 8, 5)").run(str(graph))
 
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
@@ -1027,6 +1035,7 @@ class TestJit(JitTestCase):
             return y
 
         trace, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.run_pass('dce', trace)
         FileCheck().check_count("aten::clone", 1, exactly=True) \
             .check_count("aten::add_", 2, exactly=True) \
             .check_next("return").run(str(trace))
@@ -1101,10 +1110,6 @@ class TestJit(JitTestCase):
         traced_fn = torch.jit.trace(fn, x)
         self.assertEqual(traced_fn(y), fn(y))
         self.assertEqual(traced_fn(x), fn(x))
-
-        # Check that the trace looks ok
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.assertExpectedGraph(trace)
 
     def test_trace_size(self):
         self.do_trace_size(False)
@@ -1314,25 +1319,32 @@ class TestJit(JitTestCase):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        trace, _ = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x, _force_outplace=True)
-        self.assertExpectedGraph(trace)
+        trace, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
+                                                           _force_outplace=True, return_inputs=True)
+        m = self.createScriptModuleFromGraph(trace)
+        self.assertEqual(outputs, m(*inputs))
 
     def test_dropout(self):
         x = torch.ones(2, 2)
-        trace, _ = torch.jit.get_trace_graph(nn.Dropout(0.6), x)
-        self.assertExpectedGraph(trace)
+        with torch.random.fork_rng(devices=[]):
+            trace, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
+        with torch.random.fork_rng(devices=[]):
+            m = self.createScriptModuleFromGraph(trace)
+            self.assertEqual(outputs, m(*inputs))
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
-        trace, _ = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x)
-        self.assertExpectedGraph(trace)
+        trace, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
+        m = self.createScriptModuleFromGraph(trace)
+        self.assertEqual(outputs, m(*inputs))
 
     def test_repeated_input(self):
         def fn(a, b):
             return a + b
 
         ge = self.checkTrace(fn, [torch.randn(2, 2)] * 2)
-        self.assertExpectedGraph(ge.graph)
+        inputs = set(ge.graph.inputs())
+        self.assertTrue(len(inputs) == 2)
 
     def test_repeated_output(self):
         def fn(a, b):
@@ -1340,20 +1352,21 @@ class TestJit(JitTestCase):
             return z, z
 
         ge = self.checkTrace(fn, [torch.randn(2, 2) for _ in range(2)])
-        self.assertExpectedGraph(ge.graph)
+        tuple_output = list(ge.graph.outputs())[0]
+        tuple_inputs = list(tuple_output.node().inputs())
+        self.assertTrue(tuple_inputs[0] == tuple_inputs[1])
 
     @skipIfNoTorchVision
     def test_alexnet(self):
         x = torch.ones(1, 3, 224, 224)
-        trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
+        model = torchvision.models.AlexNet()
+        with torch.random.fork_rng(devices=[]):
+            trace, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
         self.run_pass('cse', trace)
-        self.assertExpectedGraph(trace)
+        m = self.createScriptModuleFromGraph(trace)
+        with torch.random.fork_rng(devices=[]):
+            self.assertEqual(outputs, m(*inputs))
 
-    # Inplace copies don't work with tracer yet.
-    # This is actually somewhat important to support correctly
-    # as all backwards functions of views are implemented
-    # as a zero filled tensor with a gradient fill on the
-    # viewed portion.
     def test_inplace_copy(self):
         x = torch.randn(4, 4, requires_grad=True)
 
@@ -1362,13 +1375,13 @@ class TestJit(JitTestCase):
             out.copy_(x)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, ))
+        trace, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
         self.run_pass('dce', trace)
-        self.assertExpectedGraph(trace)
+        m = self.createScriptModuleFromGraph(trace)
+        self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(trace, (x,))
 
     def test_shared_param(self):
-
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()
@@ -1379,14 +1392,17 @@ class TestJit(JitTestCase):
 
         m = MyModule()
         trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
+        self.run_pass('dce', trace)
         self.assertEqual(len(list(trace.graph().inputs())), 2)
-        self.assertExpectedGraph(trace)
+        FileCheck().check("mul").check("add").run(str(trace))
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, _ = torch.jit.get_trace_graph(
-            lambda x: F.threshold(x, 0, 0, inplace=True), (x, ))
-        self.assertExpectedGraph(trace)
+        trace, outputs, inputs = torch.jit.get_trace_graph(
+            lambda x: F.threshold(x, 0, 0, inplace=True), (x, ), return_inputs=True)
+        m = self.createScriptModuleFromGraph(trace)
+        self.assertEqual(outputs, m(*inputs))
+        FileCheck().check("threshold_").run(str(trace))
         self.assertExportImport(trace, (x,))
 
     def run_ge_tests(self, optimize, use_cuda):
@@ -1857,7 +1873,7 @@ class TestJit(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
-        self.assertExpectedGraph(traced.graph)
+        FileCheck().check("matmul").check("detach").run(str(traced.graph))
         x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
         traced_result = traced(x, w)
         self.assertEqual(foo(x, w), traced_result)
@@ -1872,7 +1888,7 @@ class TestJit(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
-        self.assertExpectedGraph(traced.graph)
+        FileCheck().check("matmul").check("detach(").run(str(traced.graph))
         x, w = torch.rand(3, 4), torch.rand(4, 5)
         traced_result = traced(x, w)
         self.assertEqual(foo(x, w), traced_result)
