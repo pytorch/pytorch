@@ -41,11 +41,10 @@ class AliasDb {
   // circumstances.
   bool hasUntrackedEffects(Node* n) const;
 
-  // Get all the values that `n` writes to.
-  // NOTE: this only returns values directly written to, not aliases thereof
-  //
-  // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
+  // Does `n` write to an alias of one of the values in `vs`?
+  // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
+  bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
+      const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
@@ -80,6 +79,12 @@ class AliasDb {
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
+
+  // Get all the values that `n` writes to.
+  // NOTE: this only returns values directly written to, not aliases thereof
+  //
+  // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
+  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
   ValueSet getWrites(Block* b) const;
   void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
