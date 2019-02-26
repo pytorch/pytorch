@@ -8,11 +8,9 @@
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
+#include <cstddef>
 
 namespace torch {
-
-constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
-constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
 bool CudaIPCCollect();
 
@@ -73,6 +71,9 @@ struct CudaIPCSentData final {
 at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
 
 namespace {
+
+constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
+constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
 bool CudaIPCHaveRefCounter();
 void CudaIPCCreateRefCounter(
