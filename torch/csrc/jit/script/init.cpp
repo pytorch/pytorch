@@ -311,13 +311,10 @@ struct ModuleValue : public SugaredValue {
     if (NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
     } else if (Method* v = module->find_method(field)) {
-      return std::make_shared<MethodValue>(module, *v);
-    } else if (NamedInput* v = module->find_parameter(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedInput* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    }
-    if (auto value = module->find_attribute(field)) {
+    } else if (auto value = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
           m.get_or_add_attribute(value->type, value->slot()));
     }
