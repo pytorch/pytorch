@@ -189,10 +189,11 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
-    *trace* of an execution, as well as the original return value.
+    *trace* of an execution, as well as the original return value. If return_inputs,
+    also returns the trace inputs as part of the tuple
 
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
@@ -215,7 +216,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -252,13 +253,14 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
         self._force_outplace = force_outplace
+        self._return_inputs = return_inputs
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -266,6 +268,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
@@ -276,7 +279,10 @@ class LegacyTracedModule(Module):
         except Exception:
             torch._C._tracer_abandon()
             raise
-        return trace, out
+        if self._return_inputs:
+            return trace, out, ret_inputs
+        else:
+            return trace, out
 
 
 def _clone_inputs(args):
