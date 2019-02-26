@@ -429,7 +429,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
         auto bias_g = subtensor(bias, 0, params.groups, g);
         auto returned_tuple = at::_convolution_nogroup(
             input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
-        output[g] = std::get<0>(returned_tuple);
+        outputs[g] = std::get<0>(returned_tuple);
         save1s[g] = std::get<1>(returned_tuple);
         save2s[g] = std::get<2>(returned_tuple);
         impl_index = std::get<3>(returned_tuple);

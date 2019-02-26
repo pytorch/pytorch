@@ -128,7 +128,7 @@ RegisterOperators reg({
           pop(stack, n);
           std::vector<int64_t> elems(n);
           for (int i = 0; i < n; i++) {
-            elems.push_back(i);
+            elems[i] = i;
           }
           push(stack, jit::IntList::create(elems));
           return 0;
@@ -1089,7 +1089,7 @@ int listSelect<Shared<BoolList>>(Stack& stack) {
   pop(stack, list, idx);
 
   auto element = getBoolItem(list->elements(), idx);
-  push(stack, std::move(element));
+  push(stack, element);
   return 0;
 }
 
