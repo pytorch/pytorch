@@ -86,23 +86,23 @@ private:
 };
 
 HIPStreamMasqueradingAsCUDA
-getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
+inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
   return HIPStreamMasqueradingAsCUDA(getStreamFromPool(isHighPriority, device));
 }
 
-HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
+inline HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
   return HIPStreamMasqueradingAsCUDA(getDefaultHIPStream(device_index));
 }
 
-HIPStreamMasqueradingAsCUDA getCurrentHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
+inline HIPStreamMasqueradingAsCUDA getCurrentHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
   return HIPStreamMasqueradingAsCUDA(getCurrentHIPStream(device_index));
 }
 
-void setCurrentHIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA stream) {
+inline void setCurrentHIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA stream) {
   setCurrentHIPStream(stream.hip_stream());
 }
 
-std::ostream& operator<<(std::ostream& stream, const HIPStreamMasqueradingAsCUDA& s) {
+inline std::ostream& operator<<(std::ostream& stream, const HIPStreamMasqueradingAsCUDA& s) {
   stream << s.hip_stream() << " (masquerading as CUDA)";
 }
 
