@@ -682,7 +682,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
  public:
   UserObject(Symbol name, size_t numSlots) : typename_(std::move(name)) {
-    attrs_.resize(numSlots);
+    slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<UserObject> create(
@@ -691,12 +691,12 @@ struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
     return c10::make_intrusive<UserObject>(std::move(name), numSlots);
   }
 
-  void setAttr(size_t slot, IValue v) {
-    attrs_[slot] = v;
+  void setSlot(size_t slot, IValue v) {
+    slots_[slot] = v;
   }
 
-  IValue getAttr(size_t slot) const {
-    return attrs_.at(slot);
+  IValue getSlot(size_t slot) const {
+    return slots_.at(slot);
   }
 
   Symbol name() const {
@@ -705,7 +705,7 @@ struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
 
  private:
   const Symbol typename_;
-  std::vector<IValue> attrs_;
+  std::vector<IValue> slots_;
 };
 
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {

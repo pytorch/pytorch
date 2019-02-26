@@ -819,12 +819,12 @@ RegisterOperators reg({
      Operator(
          prim::CreateUserObject,
          [](const Node* node) {
-           auto type = node->output()->type()->cast<UserType>();
-           AT_ASSERT(type);
-           return [=](Stack& stack) {
-             const auto name = Symbol::user(type->name());
+           const auto type = node->output()->type()->expect<UserType>();
+           const auto name = Symbol::user(type->name());
+           const size_t numAttrs = type->numAttributes();
+           return [name, numAttrs](Stack& stack) {
              auto userObj =
-                 c10::ivalue::UserObject::create(name, type->numAttributes());
+                 c10::ivalue::UserObject::create(name, numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -832,20 +832,24 @@ RegisterOperators reg({
      Operator(
          prim::GetAttr,
          [](const Node* node) {
-           return [node](Stack& stack) {
+           const auto type = node->input()->type()->expect<UserType>();
+           const auto field = node->s(attr::name);
+           const auto slot = type->getAttributeSlot(field);
+           return [slot](Stack& stack) {
              auto userObj = pop(stack).toUserObject();
-             const auto slot = node->i(attr::slot);
-             auto value = userObj->getAttr(slot);
+             auto value = userObj->getSlot(slot);
              push(stack, std::move(value));
              return 0;
            };
          }),
      Operator(prim::SetAttr, [](const Node* node) {
-       return [node](Stack& stack) {
+       const auto type = node->inputs().at(0)->type()->expect<UserType>();
+       const auto field = node->s(attr::name);
+       const auto slot = type->getAttributeSlot(field);
+       return [slot](Stack& stack) {
          auto v = pop(stack);
          auto userObj = pop(stack).toUserObject();
-         const auto slot = node->i(attr::slot);
-         userObj->setAttr(slot, std::move(v));
+         userObj->setSlot(slot, std::move(v));
          return 0;
        };
      })});

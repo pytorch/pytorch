@@ -1315,26 +1315,21 @@ Node* Graph::createUserObject(const UserTypePtr& type) {
   return result;
 }
 
-Node* Graph::createSetAttr(Value* obj, const std::string& field, Value* newValue) {
-  const auto userType = obj->type()->cast<UserType>();
-  AT_ASSERT(userType);
+Node* Graph::createSetAttr(
+    Value* obj,
+    const std::string& field,
+    Value* newValue) {
+  const auto userType = obj->type()->expect<UserType>();
 
   auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
-  n->i_(attr::slot, userType->getAttributeSlot(field));
-
-  // Not strictly necessary but makes graphs more readable
   n->s_(attr::name, field);
   return n;
 }
 
 Node* Graph::createGetAttr(Value* obj, const std::string& field) {
-  const auto userType = obj->type()->cast<UserType>();
-  AT_ASSERT(userType);
+  const auto userType = obj->type()->expect<UserType>();
 
   auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
-  n->i_(attr::slot, userType->getAttributeSlot(field));
-
-  // Not strictly necessary but makes graphs more readable
   n->s_(attr::name, field);
 
   const auto outputType = userType->getAttribute(field);
