@@ -22,6 +22,7 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
+#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <stdexcept>
