@@ -330,6 +330,48 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_mat2
             return torch.bmm(self, mat2), backward
 
+        def AD_mat_transpose(mat):
+            dim = mat.dim()
+            if dim == 1:
+                out = mat
+            elif dim == 2:
+                out = mat.t()
+            else:
+                dims = range(dim)
+                dims[-1] = dim - 2
+                dims[-2] = dim - 1
+                out = mat.permute(dims)
+            return out
+
+        def AD_matmul_size(mat1, mat2,
+                           out_size: List[int]):
+            dim1 = mat1.dim()
+            dim2 = mat2.dim()
+            dim_out = len(out_size)
+            if dim1 + dim2 == dim_out:
+                if dim2 == 1:
+                    target_dim2 = 0
+                else:
+                    target_dim2 = -2
+
+                out = torch.matmul(mat1.unsqueeze(dim1), mat2.unsqueeze(target_dim2))
+            elif dim_out == dim1 - dim2:
+                out = torch.matmul(mat1, mat2.unsqueeze(dim2)).squeeze(-1)
+            elif dim_out == dim2 - dim1:
+                out = torch.matmul(mat1.unsqueeze(-2), mat2).squeeze(-2)
+            else:
+                out = torch.matmul(mat1, mat2)
+            return out
+
+        def matmul(self, other):
+            def backward(grad_output):
+                self_size = self.size()
+                other_size = other.size()
+                grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
+                grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
+                return grad_self, grad_other
+
+            return torch.matmul(self, other), backward
     )",
     R"(
         def _dim_arange(like,
