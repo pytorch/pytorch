@@ -87,15 +87,15 @@ bool AliasDb::hasWriters(const Node* n) const {
 }
 
 bool AliasDb::hasWriters(const Value* v) const {
-  if (!elementMap_.count(v)) {
-    return false;
-  }
-
   if (isWildcard(v)) {
     // If `n` has a wildcard, any write in the graph may write to it.
     // So the only way we know there are no writers is if there are no writes
     // at all.
     return numWrites_ == 0;
+  }
+
+  if (!elementMap_.count(v)) {
+    return false;
   }
 
   if (wildcardWriters_.size() > 0) {
