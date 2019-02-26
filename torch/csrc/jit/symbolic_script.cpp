@@ -166,30 +166,30 @@ const std::vector<std::string> functions = {
             # FIXME: torchscript: torch.zeros(sizes, grad.options())
             return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
 
-        def topk(self,
-                 k: int,
-                 dim: int = -1,
-                 largest: bool = True,
-                 sorted: bool = True):
-            result0, result1 = torch.topk(self, k, dim, largest, sorted)
-            self_size = self.size()
-            def backward(grad_output):
-                grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, True)
-                return grad_self, None, None, None, None
+        # def topk(self,
+        #          k: int,
+        #          dim: int = -1,
+        #          largest: bool = True,
+        #          sorted: bool = True):
+        #     result0, result1 = torch.topk(self, k, dim, largest, sorted)
+        #     self_size = self.size()
+        #     def backward(grad_output):
+        #         grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, True)
+        #         return grad_self, None, None, None, None
 
-            return result0, result1, backward
+        #     return result0, result1, backward
 
-        def kthvalue(self,
-                     k: int,
-                     dim: int,
-                     keepdim: bool):
-            result0, result1 = torch.kthvalue(self, k, dim, keepdim)
-            self_size = self.size()
-            def backward(grad_output):
-                grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, keepdim)
-                return grad_self, None, None, None
+        # def kthvalue(self,
+        #              k: int,
+        #              dim: int,
+        #              keepdim: bool):
+        #     result0, result1 = torch.kthvalue(self, k, dim, keepdim)
+        #     self_size = self.size()
+        #     def backward(grad_output):
+        #         grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, keepdim)
+        #         return grad_self, None, None, None
 
-            return result0, result1, backward
+        #     return result0, result1, backward
 
         def AD_mm_backward_self(grad, mat2):
             return grad.mm(mat2.t())
@@ -232,15 +232,16 @@ const std::vector<std::string> functions = {
             grad_input.select(dim, index).copy_(grad)
             return grad_input
 
-        def select(self,
-                   dim: int,
-                   index: int):
-            self_size = self.size()
-            def backward(grad_output):
-                grad_self = AD_select_backward(grad_output, self_size, dim, index)
-                return grad_self, None, None
+        # TODO: fix torch.zeros(sizes, grad.options()) before enabling select, topk, kthvalue
+        # def select(self,
+        #            dim: int,
+        #            index: int):
+        #     self_size = self.size()
+        #     def backward(grad_output):
+        #         grad_self = AD_select_backward(grad_output, self_size, dim, index)
+        #         return grad_self, None, None
 
-            return torch.select(self, dim, index), backward
+        #     return torch.select(self, dim, index), backward
 
         def AD_slice_backward(grad,
                               input_sizes: List[int],
