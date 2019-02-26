@@ -52,7 +52,7 @@ public:
 
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
-    return Device(DeviceType::HIP, stream_.device_index());
+    return Device(DeviceType::CUDA, stream_.device_index());
   }
 
   StreamId id() const        { return stream_.id(); }
