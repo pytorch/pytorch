@@ -279,8 +279,8 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   bool use_cudnn = false;
   use_cudnn = (input.is_cuda()
-               && (input.type().scalarType() != at::kHalf
-                 || weight.type().scalarType() == at::kFloat)
+               && (input.scalar_type() != at::kHalf
+                 || weight.scalar_type() == at::kFloat)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
@@ -301,8 +301,8 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
-               && input.type().scalarType() != at::kDouble
-               && (weight.type().scalarType() != at::kHalf)
+               && input.scalar_type() != at::kDouble
+               && (weight.scalar_type() != at::kHalf)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))

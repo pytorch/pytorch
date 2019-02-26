@@ -222,7 +222,7 @@ Tensor softmax(const Tensor& input_, const int64_t dim_) {
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, ScalarType dtype) {
-  if (input_.is_cuda() && input_.type().scalarType() == ScalarType::Half && dtype == ScalarType::Float){
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
       return at::_softmax(input_, dim_, true);
   } else {
       return at::_softmax(input_.toType(dtype), dim_, false);
@@ -234,7 +234,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, ScalarType dtype) {
-  if (input_.is_cuda() && input_.type().scalarType() == ScalarType::Half && dtype == ScalarType::Float){
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
       return at::_log_softmax(input_, dim_, true);
   } else {
       return at::_log_softmax(input_.toType(dtype), dim_, false);

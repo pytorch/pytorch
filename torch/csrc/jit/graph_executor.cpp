@@ -206,7 +206,7 @@ struct DifferentiableGraphOp {
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.
-        if (at::isFloatingType(output.type().scalarType())) {
+        if (at::isFloatingType(output.scalar_type())) {
           autograd::create_gradient_edge(output, grad_fn);
           output.set_requires_grad(true);
         } else {

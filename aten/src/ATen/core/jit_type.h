@@ -368,7 +368,7 @@ struct CAFFE2_API DimensionedTensorType : public TensorType {
 
 protected:
   DimensionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimensionedTensorType)
-    : DimensionedTensorType(tensor.type().scalarType(),
+    : DimensionedTensorType(tensor.scalar_type(),
                  tensor.device(),
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),

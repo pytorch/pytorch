@@ -91,7 +91,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.type().scalarType() == kByte) {
+    if (index.scalar_type() == kByte) {
       // The sizes of the ByteTensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -475,7 +475,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   }
-  if (index.type().scalarType() != ScalarType::Long) {
+  if (index.scalar_type() != ScalarType::Long) {
     AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
   }
 

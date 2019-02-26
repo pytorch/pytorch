@@ -144,7 +144,7 @@ def _if_scalar_type_as(g, self, tensor):
     if isinstance(self, torch._C.Value):
         return self
     elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
-        ty = tensor.type().scalarType().lower()
+        ty = tensor.scalar_type().lower()
         return getattr(self, ty)()
     else:
         return self
@@ -165,7 +165,7 @@ def _unimplemented(op, msg):
 def _try_get_scalar_type(*args):
     for arg in args:
         try:
-            return arg.type().scalarType()
+            return arg.scalar_type()
         except RuntimeError:
             pass
     return None
@@ -893,12 +893,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
     if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
-            'torch.' + input.type().scalarType() + 'Tensor')
+            'torch.' + input.scalar_type() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
-            'torch.' + input.type().scalarType() + 'Tensor')
+            'torch.' + input.scalar_type() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
@@ -925,12 +925,12 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
     if weight is None or weight.node().mustBeNone():
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
-            'torch.' + input.type().scalarType() + 'Tensor')
+            'torch.' + input.scalar_type() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or bias.node().mustBeNone():
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
-            'torch.' + input.type().scalarType() + 'Tensor')
+            'torch.' + input.scalar_type() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
     return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
@@ -971,11 +971,11 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def type_as(g, self, other):
-    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
+    if self.isTensor() and other.isTensor() and self.scalar_type() == other.scalar_type():
         return self
 
     if other.isTensor():
-        other_type_name = other.type().scalarType()
+        other_type_name = other.scalar_type()
         return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
     else:
         # We don't know the type of other, bail by emitting ATen
@@ -1518,7 +1518,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary beacuse those operators expand to something that
     # only works with int32 types in Caffe2...
-    if lengths.type().scalarType() != 'Int':
+    if lengths.scalar_type() != 'Int':
         lengths = _cast_Int(g, lengths, False)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
