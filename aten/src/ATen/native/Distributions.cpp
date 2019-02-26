@@ -256,8 +256,10 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
     CPU_tensor_apply3<scalar_t, double , double>(ret, gamma, gamma_sum,
       [](scalar_t& ret_val, const double& gamma, const double& gamma_sum){
         ret_val = gamma / gamma_sum;
-        ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t)ret_val);
-        ret_val = std::min(1 - std::numeric_limits<scalar_t>::min(), (scalar_t)ret_val);
+        auto min_val = std::numeric_limits<scalar_t>::min();
+        auto max_val = std::nexttoward((scalar_t)1.0, (scalar_t)0.0);
+        ret_val = std::min(max_val, std::max(min_val, ret_val));
+        ret_val = (scalar_t) ret_val;
       }
     );
   });
