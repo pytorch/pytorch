@@ -487,7 +487,6 @@ class JitTestCase(TestCase):
         if inputs_require_grads:
             grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs,
                                            allow_unused=allow_unused)
-
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
             self.assertEqual(grads, grads_ge)
