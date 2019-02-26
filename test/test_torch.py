@@ -6919,7 +6919,7 @@ class _TestTorchMixin(object):
         self.assertEqual(flat, src)
 
         # out of bounds index
-        with self.assertRaisesRegex(RuntimeError, 'Dimension out of range'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end
@@ -7986,10 +7986,11 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
         # not allow empty list as input
         self.assertRaises(TypeError, lambda: data.flip())
+
         # not allow size of flip dim > total dims
-        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
+        self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))
         # not allow dim > max dim
-        self.assertRaises(RuntimeError, lambda: data.flip(3))
+        self.assertRaises(IndexError, lambda: data.flip(3))
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
@@ -8189,6 +8190,14 @@ class _TestTorchMixin(object):
             y = torch.nonzero(x)
             self.assertEqual(0, y.numel())
             self.assertEqual(torch.Size([0, 5]), y.shape)
+
+            x = torch.tensor(0.5, device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([1, 0]), y.shape)
+
+            x = torch.zeros((), device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([0, 0]), y.shape)
 
     def test_deepcopy(self):
         from copy import deepcopy

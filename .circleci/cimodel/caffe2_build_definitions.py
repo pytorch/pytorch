@@ -12,27 +12,22 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 DOCKER_IMAGE_VERSION = 248
 
 
-# TODO Sort the config.yml upstream so the ubuntu configs are contiguous
 CONFIG_HIERARCHY = [
+    (Ver("ubuntu", "14.04"), [
+        (Ver("gcc", "4.8"), ["py2"]),
+        (Ver("gcc", "4.9"), ["py2"]),
+    ]),
     (Ver("ubuntu", "16.04"), [
+        (Ver("cuda", "8.0"), ["py2"]),
         (Ver("cuda", "9.0"), [
+            # TODO make explicit that this is a "secret TensorRT build"
+            #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)
             "py2",
             "cmake",
         ]),
         (Ver("cuda", "9.1"), ["py2"]),
         (Ver("mkl"), ["py2"]),
-    ]),
-    (Ver("ubuntu", "14.04"), [
-        (Ver("gcc", "4.8"), ["py2"]),
-    ]),
-    (Ver("ubuntu", "16.04"), [
         (Ver("gcc", "5"), ["onnx_py2"]),
-        (Ver("cuda", "8.0"), ["py2"]),
-    ]),
-    (Ver("ubuntu", "14.04"), [
-        (Ver("gcc", "4.9"), ["py2"]),
-    ]),
-    (Ver("ubuntu", "16.04"), [
         (Ver("clang", "3.8"), ["py2"]),
         (Ver("clang", "3.9"), ["py2"]),
         (Ver("clang", "7"), ["py2"]),
@@ -42,6 +37,8 @@ CONFIG_HIERARCHY = [
         (Ver("cuda", "9.0"), ["py2"]),
     ]),
     (Ver("macos", "10.13"), [
+        # TODO ios and system aren't related. system qualifies where the python comes
+        #  from (use the system python instead of homebrew or anaconda)
         (Ver("ios"), ["py2"]),
         (Ver("system"), ["py2"]),
     ]),
@@ -65,6 +62,7 @@ class Conf(object):
             "android",
         ] or self.get_platform() == "macos"
 
+    # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
@@ -128,7 +126,7 @@ class Conf(object):
             tuples.append(("BUILD_IOS", miniutils.quote("1")))
 
         if self.phase == "test":
-            use_cuda_docker = str(self.compiler) not in ["mkl", "gcc4.8", "gcc5"]
+            use_cuda_docker = self.compiler.name == "cuda"
             if use_cuda_docker:
                 tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
 
@@ -139,6 +137,8 @@ class Conf(object):
             if not self.distro.name == "macos":
                 tuples.append(("BUILD_ONLY", miniutils.quote("1")))
 
+        # TODO: not sure we need the distinction between system and homebrew anymore. Our python handling in cmake
+        #  and setuptools is more robust now than when we first had these.
         if self.distro.name == "macos":
             tuples.append(("PYTHON_INSTALLATION", miniutils.quote("system")))
             tuples.append(("PYTHON_VERSION", miniutils.quote("2")))
@@ -150,7 +150,7 @@ class Conf(object):
         ])
 
         if self.phase == "test":
-            is_large = str(self.compiler) in ["mkl", "gcc4.8"] or self.language == "onnx_py2"
+            is_large = self.compiler.name != "cuda"
 
             resource_class = "large" if is_large else "gpu.medium"
             d["resource_class"] = resource_class
@@ -187,6 +187,7 @@ def get_caffe2_workflows():
     configs = gen_build_list()
 
     # TODO Why don't we build this config?
+    # See https://github.com/pytorch/pytorch/pull/17323#discussion_r259450540
     filtered_configs = filter(lambda x: not (str(x.distro) == "ubuntu14.04" and str(x.compiler) == "gcc4.9"), configs)
 
     x = []

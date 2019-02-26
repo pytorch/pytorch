@@ -28,9 +28,9 @@ def check_consistency():
         generate_config_yml.stitch_sources(fh)
 
     try:
-        subprocess.check_call('cmp "%s" "%s"' % (temp_filename, CHECKED_IN_FILE), shell=True)
+        subprocess.check_call(["cmp", temp_filename, CHECKED_IN_FILE])
     except subprocess.CalledProcessError:
-        sys.stderr.write(ERROR_MESSAGE_TEMPLATE % (CHECKED_IN_FILE, REGENERATION_SCRIPT, PARENT_DIR, README_PATH))
+        sys.exit(ERROR_MESSAGE_TEMPLATE % (CHECKED_IN_FILE, REGENERATION_SCRIPT, PARENT_DIR, README_PATH))
     finally:
         os.remove(temp_filename)
 
