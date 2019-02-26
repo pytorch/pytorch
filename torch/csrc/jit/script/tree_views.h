@@ -328,8 +328,12 @@ struct Param : public TreeView {
       const SourceRange& range,
       const Ident& ident,
       const Expr& type,
-      const Maybe<Expr>& def) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
+      const Maybe<Expr>& def,
+      bool kwarg_only) {
+    TreeRef kwarg_only_tree =
+        Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
+    return Param(
+        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -340,8 +344,11 @@ struct Param : public TreeView {
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
   }
+  bool kwarg_only() const {
+    return TK_TRUE == subtree(3)->kind();
+  }
   Param withType(const Expr& typ) const {
-    return Param::create(range(), ident(), typ, defaultValue());
+    return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
 };
 
@@ -875,7 +882,8 @@ struct DictLiteral : public Expr {
       const SourceRange& range,
       const List<Expr>& keys,
       const List<Expr>& values) {
-    return DictLiteral(Compound::create(TK_DICT_LITERAL, range, {keys, values}));
+    return DictLiteral(
+        Compound::create(TK_DICT_LITERAL, range, {keys, values}));
   }
 };
 

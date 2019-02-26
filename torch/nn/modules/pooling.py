@@ -160,7 +160,7 @@ class MaxPool3d(_MaxPoolNd):
     .. math::
         \begin{aligned}
             \text{out}(N_i, C_j, d, h, w) ={} & \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
-                                              & \text{input}(N_i, C_j, \text{stride[0]} \times k + d,
+                                              & \text{input}(N_i, C_j, \text{stride[0]} \times d + k,
                                                              \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
         \end{aligned}
 
@@ -452,7 +452,7 @@ class AvgPool1d(_AvgPoolNd):
 
     .. math::
 
-        \text{out}(N_i, C_j, l) = \frac{1}{k} \sum_{m=0}^{k}
+        \text{out}(N_i, C_j, l) = \frac{1}{k} \sum_{m=0}^{k-1}
                                \text{input}(N_i, C_j, \text{stride} \times l + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -650,13 +650,13 @@ class FractionalMaxPool2d(Module):
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
-    The max-pooling operation is applied in :math:`kHxkW` regions by a stochastic
+    The max-pooling operation is applied in :math:`kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh x kw)`
+                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
                      Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -790,7 +790,7 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = infinity, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
@@ -1037,7 +1037,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H.
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
@@ -1071,7 +1071,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
                      D, H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
