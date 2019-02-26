@@ -1,10 +1,10 @@
-graph(%0 : Float(3, 10)
-      %1 : Float(3, 20)
-      %2 : Float(3, 20)
-      %3 : Float(80, 10)
-      %4 : Float(80, 20)
-      %5 : Float(80)
-      %6 : Float(80)) {
+graph(%0 : Float(3, 10),
+      %1 : Float(3, 20),
+      %2 : Float(3, 20),
+      %3 : Float(80, 10),
+      %4 : Float(80, 20),
+      %5 : Float(80),
+      %6 : Float(80)):
   %7 : Float(10!, 80!) = aten::t(%3)
   %8 : Float(3!, 80) = aten::expand[size=[3, 80], implicit=0](%5)
   %9 : Float(3, 80) = aten::addmm[alpha={1}, beta={1}](%8, %0, %7)
@@ -14,17 +14,16 @@ graph(%0 : Float(3, 10)
   %13 : Float(3!, 20), %14 : Float(3!, 20), %15 : Float(3!, 20), %16 : Float(3!, 20) = aten::chunk[chunks=4, dim=1](%9)
   %17 : Float(3!, 20), %18 : Float(3!, 20), %19 : Float(3!, 20), %20 : Float(3!, 20) = aten::chunk[chunks=4, dim=1](%12)
   %21 : Float(3, 20), %22 : Float(3, 20) = prim::FusionGroup_0[device=-1](%2, %16, %20, %15, %19, %14, %18, %13, %17)
-  return (%21, %22);
-}
-with prim::FusionGroup_0 = graph(%12 : Float(3, 20)
-      %22 : Float(3!, 20)
-      %23 : Float(3!, 20)
-      %25 : Float(3!, 20)
-      %26 : Float(3!, 20)
-      %28 : Float(3!, 20)
-      %29 : Float(3!, 20)
-      %31 : Float(3!, 20)
-      %32 : Float(3!, 20)) {
+  return (%21, %22)
+with prim::FusionGroup_0 = graph(%12 : Float(3, 20),
+      %22 : Float(3!, 20),
+      %23 : Float(3!, 20),
+      %25 : Float(3!, 20),
+      %26 : Float(3!, 20),
+      %28 : Float(3!, 20),
+      %29 : Float(3!, 20),
+      %31 : Float(3!, 20),
+      %32 : Float(3!, 20)):
   %33 : Float(3, 20) = aten::add[alpha={1}](%31, %32)
   %30 : Float(3, 20) = aten::add[alpha={1}](%28, %29)
   %27 : Float(3, 20) = aten::add[alpha={1}](%25, %26)
@@ -38,5 +37,4 @@ with prim::FusionGroup_0 = graph(%12 : Float(3, 20)
   %7 : Float(3, 20) = aten::add[alpha={1}](%13, %10)
   %4 : Float(3, 20) = aten::tanh(%7)
   %2 : Float(3, 20) = aten::mul(%15, %4)
-  return (%2, %7);
-}
+  return (%2, %7)

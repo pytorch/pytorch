@@ -327,7 +327,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
 
