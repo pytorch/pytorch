@@ -6919,7 +6919,7 @@ class _TestTorchMixin(object):
         self.assertEqual(flat, src)
 
         # out of bounds index
-        with self.assertRaisesRegex(RuntimeError, 'Dimension out of range'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end
@@ -7141,6 +7141,48 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
 
+        # test symeig, eig
+        fn = ['symeig', 'eig']
+        for f in fn:
+            ret = getattr(torch, f)(a, eigenvectors=True)
+            self.assertEqual(ret.eigenvalues, ret[0])
+            self.assertEqual(ret.eigenvectors, ret[1])
+            ret1 = getattr(torch, f)(a, out=tuple(ret))
+            self.assertEqual(ret1.eigenvalues, ret[0])
+            self.assertEqual(ret1.eigenvectors, ret[1])
+            self.assertEqual(ret1.eigenvalues, ret1[0])
+            self.assertEqual(ret1.eigenvectors, ret1[1])
+
+        # test pstrf
+        b = torch.mm(a, a.t())
+        # add a small number to the diagonal to make the matrix numerically positive semidefinite
+        for i in range(a.size(0)):
+            b[i][i] = b[i][i] + 1e-7
+        ret = b.pstrf()
+        self.assertEqual(ret.u, ret[0])
+        self.assertEqual(ret.pivot, ret[1])
+        ret1 = torch.pstrf(b, out=tuple(ret))
+        self.assertEqual(ret1.u, ret1[0])
+        self.assertEqual(ret1.pivot, ret1[1])
+        self.assertEqual(ret1.u, ret[0])
+        self.assertEqual(ret1.pivot, ret[1])
+
+        # test qr
+        ret = a.qr()
+        self.assertEqual(ret.Q, ret[0])
+        self.assertEqual(ret.R, ret[1])
+        ret1 = torch.qr(a, out=tuple(ret))
+        self.assertEqual(ret1.Q, ret1[0])
+        self.assertEqual(ret1.R, ret1[1])
+
+        # test geqrf
+        ret = a.geqrf()
+        self.assertEqual(ret.a, ret[0])
+        self.assertEqual(ret.tau, ret[1])
+        ret1 = torch.geqrf(a, out=tuple(ret))
+        self.assertEqual(ret1.a, ret1[0])
+        self.assertEqual(ret1.tau, ret1[1])
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
@@ -7186,7 +7228,7 @@ class _TestTorchMixin(object):
     def _test_view(self, cast):
         tensor = cast(torch.rand(15))
         template = cast(torch.rand(3, 5))
-        empty = cast(torch.Tensor())
+        empty = cast(torch.empty(0))
         target = template.size()
         self.assertEqual(tensor.view_as(template).size(), target)
         self.assertEqual(tensor.view(3, 5).size(), target)
@@ -7197,9 +7239,23 @@ class _TestTorchMixin(object):
         tensor_view.fill_(random.uniform(0, 1))
         self.assertEqual(empty.view_as(empty), empty)
         self.assertEqual(empty.view(0), empty)
+        self.assertEqual(empty.view(0, 3, 0, 1).size(), torch.Size([0, 3, 0, 1]))
+        self.assertEqual(empty.view(0, 3, 0, 1).view(0), empty)
+
+        # test size inference with empty tensors
+        self.assertEqual(empty.view(-1).size(), torch.Size([0]))
+        self.assertEqual(empty.view(10, 3, -1).size(), torch.Size([10, 3, 0]))
+
+        with self.assertRaisesRegex(RuntimeError, r"because the unspecified dimension size -1 can be any value"):
+            empty.view(-1, 0)
+
+        with self.assertRaisesRegex(RuntimeError, r"because the unspecified dimension size -1 can be any value"):
+            empty.view(3, 0, -1, 0)
+
         self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
         self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
+
         # test view when tensor is not contiguous in every dimension, but only
         # contiguous dimensions are touched.
         tensor = cast(torch.rand(4, 2, 5, 1, 6, 2, 9, 3)).transpose(-1, 2).transpose(-2, 3)
@@ -7236,7 +7292,7 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: tensor.view(8, 3, 54, 2, 1, 5))
 
         # view with stride 0 dims
-        tensor = cast(torch.Tensor(1, 1)).expand(3, 4)  # all dims are contiguous
+        tensor = cast(torch.empty(1, 1)).expand(3, 4)  # all dims are contiguous
         contig_tensor = tensor.clone()
         self.assertEqual(tensor.view(-1), contig_tensor.view(-1))
         self.assertEqual(tensor.view(1, -1, 1), contig_tensor.view(1, -1, 1))
@@ -7930,10 +7986,11 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
         # not allow empty list as input
         self.assertRaises(TypeError, lambda: data.flip())
+
         # not allow size of flip dim > total dims
-        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
+        self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))
         # not allow dim > max dim
-        self.assertRaises(RuntimeError, lambda: data.flip(3))
+        self.assertRaises(IndexError, lambda: data.flip(3))
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
@@ -8133,6 +8190,14 @@ class _TestTorchMixin(object):
             y = torch.nonzero(x)
             self.assertEqual(0, y.numel())
             self.assertEqual(torch.Size([0, 5]), y.shape)
+
+            x = torch.tensor(0.5, device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([1, 0]), y.shape)
+
+            x = torch.zeros((), device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([0, 0]), y.shape)
 
     def test_deepcopy(self):
         from copy import deepcopy

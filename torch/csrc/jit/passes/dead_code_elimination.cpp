@@ -130,8 +130,7 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      const auto writes = aliasDb_->getWrites(node);
-      if (aliasDb_->mayAlias(writes, liveValues_)) {
+      if (aliasDb_->writesToAlias(node, liveValues_, /*recurseBlocks=*/false)) {
         return mark(node);
       }
     }
