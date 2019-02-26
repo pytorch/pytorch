@@ -49,6 +49,7 @@ IValue deepCopy(const IValue& self) {
 
 Stack deepCopy(const Stack& stack) {
   Stack ret;
+  ret.reserve(stack.size());
   for (const auto& v : stack) {
     ret.push_back(deepCopy(v));
   }
