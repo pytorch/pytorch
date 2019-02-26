@@ -50,8 +50,9 @@ bool isValidReturnForRunning(Value* v) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph)
-      : aliasDb_(std::move(graph)) {}
+  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
+    collectResizeSet(std::move(graph)->block());
+  }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
     for (Node* node : block->nodes()) {
@@ -70,7 +71,31 @@ class ShapePropagator {
   }
 
  private:
+  ValueSet resized_alias_set;
   const AliasDb aliasDb_;
+
+  bool resizesInput(Node* n) {
+    static std::unordered_set<Symbol> resize_ops{
+        aten::resize_,
+        aten::resize_as_,
+    };
+    return resize_ops.count(n->kind()) != 0;
+  }
+
+  void collectResizeSet(Block* block) {
+    for (Node* n : block->nodes()) {
+      for (Block* b : n->blocks()) {
+        collectResizeSet(b);
+      }
+      if (resizesInput(n)) {
+        for (const auto input : n->inputs()) {
+          if (aliasDb_.writesToAlias(n, {input}, false)) {
+            resized_alias_set.insert(input);
+          }
+        }
+      }
+    }
+  }
 
   void setUnshapedType(Node* node) {
     for (auto o : node->outputs()) {
@@ -348,7 +373,21 @@ class ShapePropagator {
     setUnshapedType(cat_node);
   }
 
+  bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
+    return std::any_of(vs.begin(), vs.end(), [&](Value* v) {
+      return aliasDb_.mayAlias({v}, resized_alias_set);
+    });
+  }
+
   void PropagateShapeOnNode(Node* node, bool insert_expands = true) {
+    // Certain ops like resize_ change the input tensors size. Because our
+    // is flow invariant, we set any Tensor that can alias a resized Tensor
+    // to the base Tensor Type without size information.
+    if (mayAliasResizedSet(node->inputs()) ||
+        mayAliasResizedSet(node->outputs())) {
+      return setUnshapedType(node);
+    }
+
     // These don't require the types, and have complicated schema. Return early
     // after we process them.
     switch (node->kind()) {
@@ -1631,12 +1670,10 @@ void EraseShapeInformation(Block* b) {
     }
   }
 }
-
 } // anonymous namespace
 
 void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
   EraseShapeInformation(graph->block());
 }
-
 } // namespace jit
 } // namespace torch
