@@ -30,8 +30,8 @@ class TestGatherOpCPU(serial.SerializedTestCase):
             device_option=device_opts
             )
         workspace.ResetWorkspace()
-        workspace.FeedBlob("DATA", data.astype(dtype))
-        workspace.FeedBlob("INDICES", inds.astype(np.int32))
+        workspace.FeedBlob("DATA", data.astype(dtype),device_opts)
+        workspace.FeedBlob("INDICES", inds.astype(np.int32),device_opts)
         workspace.RunOperatorOnce(op)
         expected = np.take(data,inds);
         np.testing.assert_array_equal(expected,workspace.FetchBlob("OUTPUT"))
