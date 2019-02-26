@@ -17,7 +17,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
       scalar_t z = fabs(*input_data - *target_data);
-      *output_data = z < beta ? 0.5 * z * z : z - 0.5;
+      *output_data = z < beta ? 0.5 * z * z / beta : z - 0.5*beta;
     );
     return;
   }
@@ -27,7 +27,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   scalar_t sum = 0;
   TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
     scalar_t z = fabs(*input_data - *target_data);
-    sum += z < beta ? 0.5*z*z : z - 0.5;
+    sum += z < beta ? 0.5*z*z / beta : z - 0.5*beta;
   );
 
   if (reduction == Reduction::Mean)
@@ -58,7 +58,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
       } else if (x > beta) {
         *gradInput_data = 1.;
       } else {
-        *gradInput_data = x;
+        *gradInput_data = x / beta;
       }
     );
     TH_TENSOR_APPLY2(scalar_t, gradInput, scalar_t, gradOutput,
@@ -77,7 +77,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     else if (x > beta)
      *gradInput_data = norm;
     else
-     *gradInput_data = norm * x;
+     *gradInput_data = norm * x / beta;
   );
 }
 

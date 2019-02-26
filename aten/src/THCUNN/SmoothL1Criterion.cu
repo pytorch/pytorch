@@ -24,7 +24,7 @@ struct smoothl1_functor
   __host__ __device__ Acctype operator()(const Dtype &x, const Dtype &y) const
   {
     Acctype z = ScalarConvert<Dtype, Acctype>::to(THCNumerics<Dtype>::abs(x-y));
-    return z < Acctype(beta) ? 0.5f*z*z : z - 0.5f;
+    return z < Acctype(beta) ? 0.5f*z*z / beta : z - 0.5f * beta;
   }
 };
 
@@ -40,9 +40,10 @@ struct smoothl1_updateOutput_no_reduce_functor
       const Dtype *y,
       Dtype *out) const
   {
+    Dtype beta = ScalarConvert<double, Dtype>::to(beta);
     Dtype oneHalf = ScalarConvert<float, Dtype>::to(0.5f);
     Dtype z = THCNumerics<Dtype>::abs(*x - *y);
-    *out = z < ScalarConvert<int, Dtype>::to(beta) ? oneHalf * z * z : z - oneHalf;
+    *out = z < beta ? oneHalf * z * z / beta : z - oneHalf * beta;
   }
 };
 
@@ -67,7 +68,7 @@ struct smoothl1_updateGradInput_no_reduce_functor
     } else if (z > beta) {
       *gradInput = one;
     } else {
-      *gradInput = z;
+      *gradInput = z / beta;
     }
   }
 };
@@ -86,12 +87,12 @@ struct smoothl1_updateGradInput_functor
   __host__ __device__ Dtype operator()(const Dtype &x, const Dtype &y) const
   {
     Dtype z = x - y;
-    if (z < ScalarConvert<int, Dtype>::to(-beta))
+    if (z < ScalarConvert<double, Dtype>::to(-beta))
       return -norm * gradOutput;
-    else if (z > ScalarConvert<int, Dtype>::to(beta))
+    else if (z > ScalarConvert<double, Dtype>::to(beta))
       return norm * gradOutput;
     else
-      return norm * z * gradOutput;
+      return norm * z * gradOutput / beta;
   }
 };
 

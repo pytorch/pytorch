@@ -2145,7 +2145,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
 def _smooth_l1_loss(input, target, beta):
     # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < beta, 0.5 * t ** 2, t - 0.5)
+    return torch.where(t < beta, 0.5 * t ** 2 / beta, t - 0.5 * beta)
 
 
 @weak_script
