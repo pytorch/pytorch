@@ -35,6 +35,17 @@ static inline int last_pow2(int n) {
   return std::max(1, n - (n >> 1));
 }
 
+// returns reduced fraction numerator & denominator
+C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominator) {
+  for (size_t i = ::min(numerator, denominator); i > 1; i--) {
+    if (numerator % i == 0 && denominator % i == 0) {
+      numerator = numerator / i;
+      denominator = denominator / i;
+      break;
+    }
+  }
+}
+
 struct ReduceConfig {
   static constexpr int BLOCK_X = 0;
   static constexpr int BLOCK_Y = 1;
@@ -274,7 +285,10 @@ struct ReduceOp {
   OutputCalculator output_calc;
   const void* src;
   void* dst;
+  // buf used for accumulation among sub Tensor Iterator when accumulation on
+  // output is not permissible
   void* buf;
+  // buffer used for accumulation between blocks during global reduction
   void* buffer;
   int* semaphores;
   bool accumulate;
@@ -316,7 +330,10 @@ struct ReduceOp {
     auto out = (out_scalar_t*)((char*)dst + base_offsets[0]);
     arg_t* acc = nullptr;
     if (buf != nullptr) {
-      acc = (arg_t*)((char*)buf + (int)(base_offsets[0] * acc_buffer_multiplier));
+      size_t numerator = sizeof(arg_t);
+      size_t denominator = sizeof(out_scalar_t);
+      reduce_fraction(numerator, denominator);
+      acc = (arg_t*)((char*)buf + (base_offsets[0] * numerator / denominator));
     }
 
     if (config.should_global_reduce()) {
@@ -541,29 +558,35 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
 struct AccumulationBuffer {
   AccumulationBuffer() {}
 
-  AccumulationBuffer(size_t acc_stride, size_t out_stride, char* out_ptr, int64_t size) {
+  AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
-    if (out_stride > acc_stride) {
+    if (out_t_size > acc_t_size) {
+      // reusing output buffer for accumulation.
       acc_ptr_ = (char*)out_ptr;
-      size_factor_ = 1;
+      numerator_ = 1;
+      denominator_ = 1;
     } else {
       auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
       buffer_ = allocator.allocate(size);
       acc_ptr_ = (char*)buffer_.get();
-      size_factor_ = float(out_stride) / acc_stride;
+      numerator_ = acc_t_size;
+      denominator_ = out_t_size;
+      reduce_fraction(numerator_, denominator_);
     }
   }
 
   char* get_acc_slice(char* out_ptr) {
-    if (size_factor_ == -1) {
+    if (numerator_ == -1 || acc_ptr_ == nullptr) {
       return nullptr;
     }
-    return acc_ptr_ + (int)((out_ptr - out_ptr_) * size_factor_);
+    return acc_ptr_ + ((out_ptr - out_ptr_) * numerator_ / denominator_);
   }
 
   char* acc_ptr_ = nullptr;
   char* out_ptr_ = nullptr;
   float size_factor_ = -1;
+  size_t numerator_ = -1;
+  size_t denominator_ = -1;
   at::DataPtr buffer_;
 };
 

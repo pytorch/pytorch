@@ -50,13 +50,15 @@ struct WelfordOps {
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data) const {
     acc_scalar_t delta = data - acc.mean;
+    // using acc.nf(combine_t) here, as acc.n(index_t) would still be converted
+    // accumulation in reduce is done through index_T
     acc_scalar_t new_mean = acc.mean + delta / (acc.nf + 1);
     acc_scalar_t new_delta = data - new_mean;
     return {
       new_mean,
       acc.m2 + delta * new_delta,
       acc.n + 1,
-      combine_t(acc.n + 1),
+      combine_t(acc.n + 1), // accumulate for combine_t uses index_t
     };
   }
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -72,6 +74,8 @@ struct WelfordOps {
     return {
       a.mean + delta * nb_over_n,
       a.m2 + b.m2 + delta * delta * a.nf * nb_over_n,
+      // setting acc.n as -1 since acc.n might not be able to represent the count
+      // correctly within its range, setting it to -1 to avoid confusion
       -1,
       new_count
     };
