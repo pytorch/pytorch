@@ -65,11 +65,13 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         if (cname == nullptr) {
             PyErr_Format(PyExc_SystemError, "In structseq_repr(), member %d name is nullptr"
                          " for type %.500s", i, typ->tp_name);
+            Py_DECREF(tup);
             return nullptr;
         }
 
         val = PyTuple_GetItem(tup, i);
         if (val == nullptr) {
+            Py_DECREF(tup);
             return nullptr;
         }
 
@@ -80,8 +82,8 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         }
 
         crepr = PyUnicode_AsUTF8(repr);
+        Py_DECREF(repr);
         if (crepr == nullptr) {
-            Py_DECREF(repr);
             Py_DECREF(tup);
             return nullptr;
         }
@@ -89,8 +91,6 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         ss << cname << '=' << crepr;
         if (i < num_elements - 1)
             ss << ",\n";
-
-        Py_DECREF(repr);
     }
     ss << ")";
 
