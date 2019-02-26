@@ -6610,11 +6610,11 @@ a")
                 print(c0)
             return 1
 
-    def test_if_list(self):
-        # testing that different length lists don't throw error
+    def test_if_list_cat(self):
+        # testing that different length lists don't throw error on cat in shape prop
         @torch.jit.script
         def test_list(x):
-            if True:
+            if bool(x.sum() < 1):
                 c = [x, x]
             else:
                 c = [x, x, x]
@@ -6622,12 +6622,10 @@ a")
 
         b = torch.zeros(2, 4)
         test_list.graph.propagate_shapes((b,), False)
-        self.assertExpected(canonical(test_list.graph))
 
     def test_if_supertype(self):
         @torch.jit.script
         def tensor_unifying(x, y, z):
-
             # testing dynamic is appropriately set for y and z
             if True:
                 x, y, z = x, y, z
@@ -6641,7 +6639,10 @@ a")
         c = torch.zeros(2, 4, dtype=torch.float)
 
         tensor_unifying.graph.propagate_shapes((a, b, c), False)
-        self.assertExpected(canonical(tensor_unifying.graph))
+        if_outputs = list(tensor_unifying.graph.findNode("prim::If").outputs())
+        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -7557,7 +7558,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        self.assertExpected(canonical(foo.graph))
+        FileCheck().check("Double(2, 4)").run(str(foo.graph))
 
     def test_onnx_export_speculate(self):
 
@@ -8782,7 +8783,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpectedGraph(test_index_put.graph)
+        FileCheck().check("aten::view").check("index_put_").run(str(test_index_put.graph))
 
     def test_index_put_trace_without_view(self):
         @_trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(4))
@@ -8790,7 +8791,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpectedGraph(test_index_put.graph)
+        FileCheck().check_not("aten::view").check("index_put_").run(str(test_index_put.graph))
 
     def test_tuple_indexing(self):
         def tuple_index(a):
@@ -8800,11 +8801,11 @@ a")
                 b = (0, 2)
             return b[-2], b[1]
 
+        self.checkScript(tuple_index, (torch.tensor([0]),))
         self.checkScript(tuple_index, (torch.tensor([1]),))
         self.checkScript(tuple_index, (torch.tensor([1]),), optimize=True)
         tuple_comp = torch.jit.script(tuple_index)
-        self.assertExpectedGraph(tuple_comp.graph)
-        self.assertEqual(tuple_comp(torch.tensor(1)), (1, 2))
+        FileCheck().check_count("TupleIndex", 2, exactly=True).run(str(tuple_comp.graph))
 
         with self.assertRaisesRegex(RuntimeError, "tuple indices must be integer constants"):
             @torch.jit.script
@@ -8860,15 +8861,17 @@ a")
             else:
                 b = (4, 3, 2, 1)
             c = b[-4:4]
-            d = b[0:]
             e = c[1:-1]
             return e
 
         self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
-        tuple_graph = torch.jit.script(tuple_slice)
-        self.assertExpectedGraph(tuple_graph.graph)
-        self.run_pass('lower_all_tuples', tuple_graph.graph)
-        self.assertTrue('Tuple' not in str(tuple_graph.graph))
+        tuple_graph = torch.jit.script(tuple_slice).graph
+        slices = tuple_graph.findAllNodes("prim::TupleSlice")
+        num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
+        # one tuple slice should have an output with 2 elements, other 4
+        self.assertTrue(num_outputs == set([2, 4]))
+        self.run_pass('lower_all_tuples', tuple_graph)
+        self.assertTrue('Tuple' not in str(tuple_graph))
         tuple_comp = torch.jit.script(tuple_slice)
         self.assertEqual(tuple_comp(torch.tensor(1)), (2, 3))
 
@@ -10051,7 +10054,8 @@ a")
             # b should be cleaned up but not a
             return a
 
-        self.assertExpectedGraph(foo.graph)
+        FileCheck().check_count("aten::rand", 2, exactly=True) \
+            .check_count("aten::add", 1, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_block(self):
         @torch.jit.script
@@ -10065,7 +10069,8 @@ a")
             # a should be cleaned up but not b
             return b
 
-        self.assertExpectedGraph(foo.graph)
+        FileCheck().check("prim::If").check_count("aten::rand", 1, exactly=True) \
+            .run(str(foo.graph))
 
     def test_mutable_dce_graph_input(self):
         @torch.jit.script
@@ -10073,7 +10078,7 @@ a")
             a += torch.rand(2, 3)
             # shouldn't clean up `a` even though it's not used in the output
 
-        self.assertExpectedGraph(foo.graph)
+        FileCheck().check("aten::rand").check("aten::add").run(str(foo.graph))
 
     def test_mutable_dce_list(self):
         @torch.jit.script
@@ -10085,7 +10090,8 @@ a")
             c += torch.rand(2, 3)
             return b
 
-        self.assertExpectedGraph(foo.graph)
+        # c does not get cleaned up because there is a wildcard + mutation
+        FileCheck().check_count("aten::rand", 2, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_loop(self):
         @torch.jit.script
@@ -10101,7 +10107,8 @@ a")
                 i += 1
             return b
 
-        self.assertExpectedGraph(foo.graph)
+        FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::select") \
+            .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
 
     def test_mutable_dce_wildcards(self):
         def fn():
