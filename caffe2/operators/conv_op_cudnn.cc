@@ -87,7 +87,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&conv_desc_));
   }
 
-  ~CudnnConvOpBase() {
+  ~CudnnConvOpBase() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bottom_desc_));
     CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(filter_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bias_desc_));
@@ -435,7 +435,7 @@ class CudnnConvOp final : public CudnnConvOpBase {
   CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws) {}
 
-  ~CudnnConvOp() {}
+  ~CudnnConvOp() override {}
 
   template <typename T_X, typename T_W, typename T_B, typename T_Y>
   bool DoRunWithType();
@@ -464,7 +464,7 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
     CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&bwd_filter_conv_desc_));
   }
 
-  ~CudnnConvGradientOp() {
+  ~CudnnConvGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_data_conv_desc_));
     CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_filter_conv_desc_));
   }

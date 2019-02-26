@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/script/compiler.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -9,7 +10,7 @@
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/type_parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -395,10 +396,11 @@ struct Environment {
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
-           std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
+           std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -473,7 +475,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, r);
+  auto new_constant = graph.insertConstant(val, nullptr, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -487,18 +489,8 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
   return v;
 }
 
-std::shared_ptr<SugaredValue> BuiltinFunction::call(
-    const SourceRange& loc,
-    Method& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
-  return type->isSubtypeOf(DynamicType::get()) ||
+  return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
 }
 
@@ -532,6 +524,7 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
+
     runCleanupPasses(graph);
   }
 
@@ -574,6 +567,7 @@ struct to_ir {
       const SugaredValuePtr& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
+    // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
     }
@@ -628,8 +622,9 @@ struct to_ir {
       const SugaredValuePtr& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
-    if (self)
+    if (self) {
       ++params_begin;
+    }
     std::vector<Argument> retval;
 
     std::vector<Expr> default_types;
@@ -670,7 +665,7 @@ struct to_ir {
           type,
           N,
           default_value,
-          /*kwarg_only =*/false);
+          decl_arg.kwarg_only());
       retval.push_back(arg);
     }
     return retval;
@@ -698,7 +693,7 @@ struct to_ir {
   FunctionSchema extractSchemaFromDef(
       const Def& def,
       const SugaredValuePtr& self) {
-    auto name = def.name().name();
+    const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
     return FunctionSchema(
@@ -714,8 +709,10 @@ struct to_ir {
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
-    auto expected_annotation_size =
-        self ? def.decl().params().size() - 1 : def.decl().params().size();
+    auto expected_annotation_size = def.decl().params().size();
+    if (self) {
+      expected_annotation_size--;
+    }
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
@@ -723,9 +720,19 @@ struct to_ir {
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!";
     }
+
     if (self) {
       AT_ASSERT(it != end);
-      environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
+      const auto& name = (*it).ident().name();
+      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
+        const auto type = userType->type_;
+        Value* new_input =
+            block->addInput()->setUniqueName(name)->setType(type);
+        environment_stack->setVar((*it).ident().range(), name, new_input);
+        arguments.emplace_back(name, type);
+      } else {
+        environment_stack->setSugaredVar(def.range(), name, self);
+      }
       ++it;
     }
     size_t arg_annotation_idx = 0;
@@ -836,7 +843,7 @@ struct to_ir {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(result_type->isSubtypeOf(DynamicType::get()) &&
+      if (!(result_type->isSubtypeOf(TensorType::get()) &&
             result->type()->isSubtypeOf(NoneType::get()))) {
         result = tryConvertToType(
             stmt.range(),
@@ -1051,7 +1058,7 @@ struct to_ir {
       ErrorReport error(cond);
       error << "expected a boolean expression for condition but found "
             << v->type()->str();
-      if (v->type()->isSubtypeOf(DynamicType::get())) {
+      if (v->type()->isSubtypeOf(TensorType::get())) {
         error << ", to use a tensor in a boolean"
               << " expression, explicitly cast it with `bool()`";
       }
@@ -1231,14 +1238,28 @@ struct to_ir {
       c10::optional<Expr> max_trip_count,
       c10::optional<Expr> cond,
       const List<Stmt>& body,
-      c10::optional<Ident> itr_ident) {
+      c10::optional<Ident> itr_ident,
+      bool in_list = false) {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = ensureInt(
-            max_trip_count->range(), emitExpr(max_trip_count.value()));
+        if (in_list) {
+          auto listArg = emitExpr(max_trip_count.value());
+
+          max_trip_count_val = emitBuiltinCall(
+              max_trip_count->range(),
+              *graph,
+              aten::len,
+              c10::nullopt,
+              {listArg},
+              {},
+              /*required=*/true);
+        } else {
+          max_trip_count_val = ensureInt(
+              max_trip_count->range(), emitExpr(max_trip_count.value()));
+        }
       } else {
         max_trip_count_val = materializeConstant(
             std::numeric_limits<int64_t>::max(),
@@ -1249,7 +1270,7 @@ struct to_ir {
       if (cond) {
         cond_val = emitCond(cond.value());
       } else {
-        cond_val = graph->insertConstant(true, range);
+        cond_val = graph->insertConstant(true, nullptr, range);
       }
     }
     n->addInput(max_trip_count_val);
@@ -1260,11 +1281,23 @@ struct to_ir {
 
     {
       pushFrame(body_block);
+      WithInsertPoint guard(body_block);
       if (itr_ident) {
+        if (in_list) {
+          // set user's iterator variable to the current element
+          auto listArg = emitExpr(max_trip_count.value());
+          trip_count = emitBuiltinCall(
+              max_trip_count->range(),
+              *graph,
+              aten::select,
+              c10::nullopt,
+              {listArg, trip_count},
+              {},
+              /*required=*/true);
+        }
         environment_stack->setVar(
             itr_ident->range(), itr_ident->name(), trip_count);
       }
-      WithInsertPoint guard(body_block);
       emitStatements(body);
 
       // Also emit the conditional
@@ -1272,7 +1305,7 @@ struct to_ir {
         Value* body_cond_value = emitCond(cond.value());
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = graph->insertConstant(true, range);
+        Value* cond_value_dummy = graph->insertConstant(true, nullptr, range);
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -1352,6 +1385,13 @@ struct to_ir {
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
     // be unrolled
     auto sv = emitSugaredExpr(itrs[0], 1);
+    // check if a value is simple and list-like
+    if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
+      if (siv->getValue()->type()->kind() == TypeKind::ListType) {
+        return emitLoopCommon(
+            stmt.range(), {itrs[0]}, {}, body, {target}, true);
+      }
+    }
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
@@ -1388,7 +1428,7 @@ struct to_ir {
   // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
+    auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
   }
 
@@ -1502,7 +1542,7 @@ struct to_ir {
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
       // for module parameter/buffer assignment, only consider tensor types,
       // emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
@@ -1527,7 +1567,7 @@ struct to_ir {
     const auto lhs = Var(stmt.lhs());
     const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                               ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
       // for tensors, emit the corresponding in-place op
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
       const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
@@ -1559,7 +1599,7 @@ struct to_ir {
     const auto lhs = Subscript(stmt.lhs());
     const auto sliceable = emitExpr(lhs.value());
 
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
@@ -1582,10 +1622,10 @@ struct to_ir {
             /*required=*/true);
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
-        // into `index` and `index_put_` ops
+        // into `index` and `index_put_` ops with tensordices of Tensor?[]
         const auto indices = graph
                                  ->insertNode(graph->createList(
-                                     DynamicType::get(), tensorIndices))
+                                     OptionalType::ofTensor(), tensorIndices))
                                  ->output();
         const auto indexed =
             graph->insert(aten::index, {slicedArg, indices}, {}, stmt.range());
@@ -1611,7 +1651,7 @@ struct to_ir {
       AT_ASSERT(listType != nullptr);
 
       bool isTensorList =
-          listType->getElementType()->isSubtypeOf(DynamicType::get());
+          listType->getElementType()->isSubtypeOf(TensorType::get());
 
       // Get the idx to augment
       const auto subscriptExprs = lhs.subscript_exprs();
@@ -1653,7 +1693,7 @@ struct to_ir {
     auto sliceable = emitExpr(lhs.value());
 
     // If it's a tensor, copy the RHS data into it
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       std::vector<Value*> tensorIndices;
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
@@ -1671,10 +1711,10 @@ struct to_ir {
         graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
-        // Dispatch to `aten::index_put_`.
+        // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
         const auto indices = graph
                                  ->insertNode(graph->createList(
-                                     DynamicType::get(), tensorIndices))
+                                     OptionalType::ofTensor(), tensorIndices))
                                  ->output();
 
         graph->insert(
@@ -1771,6 +1811,9 @@ struct to_ir {
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
         break;
+      case '.':
+        emitSelectAssign(stmt);
+        break;
       case TK_SUBSCRIPT:
         emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
         break;
@@ -1778,6 +1821,18 @@ struct to_ir {
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on left-hand side of assignment.";
     }
+  }
+
+  void emitSelectAssign(const Assign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto basename = Var(lhs.value()).name();
+    const auto rhsValue =
+        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    auto userObject = environment_stack->getSugaredVar(basename);
+    const bool shouldDefine =
+        method.name() == "__init__" && basename.name() == "self";
+    userObject->setAttr(
+        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -1909,7 +1964,17 @@ struct to_ir {
           type,
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
-      if (!expr->type()->isSubtypeOf(type)) {
+
+      // This is to ensure even if user forgets to call annotate None with the
+      // Optional wrapper type, we still generate the correct value with the
+      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
+      // with annotate(Optional[Tensor], None). It also maintains the backward
+      // compatibility of exported model on Optional undefined tensor/None
+      auto opt_type = expr->type()->cast<OptionalType>();
+      bool forget_opt_annotate =
+          opt_type && *opt_type->getElementType() == *type;
+
+      if (!forget_opt_annotate && !expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str();
@@ -1969,7 +2034,7 @@ struct to_ir {
       bool is_instance_val =
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, loc));
+          graph->insertConstant(is_instance_val, nullptr, loc));
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2091,7 +2156,7 @@ struct to_ir {
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], tree->range());
+    return graph->insertConstant(stack[0], nullptr, tree->range());
   }
 
   // This function extract a new graph from its original subgraph
@@ -2177,13 +2242,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, tree->range());
+        return graph->insertConstant(true, nullptr, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, tree->range());
+        return graph->insertConstant(false, nullptr, tree->range());
       } break;
       case TK_NONE: {
-        return graph->insertConstant(IValue(), tree->range());
+        return graph->insertConstant(IValue(), nullptr, tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2202,14 +2267,23 @@ struct to_ir {
         // if we have a type hint of List[T], use T
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
-        TypePtr elem_type = DynamicType::get();
+        TypePtr elem_type = TensorType::get();
         if (type_hint && type_hint->kind() == TypeKind::ListType) {
           elem_type = type_hint->expect<ListType>()->getElementType();
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
         }
+
+        // Tensors are special because they have dymnamic properties. So any
+        // list containing tensors should be typed with the unified typeof all
+        // the elements.
+        if (elem_type->isSubtypeOf(TensorType::get())) {
+          for (const auto& value : values) {
+            elem_type = unifyTypes(elem_type, value->type()).value();
+          }
+        }
         for (auto v : values) {
-          if (*v->type() != *elem_type) {
+          if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
@@ -2230,7 +2304,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
-        for(size_t i = 0; i < keys.size(); ++i) {
+        for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
         }
@@ -2247,11 +2321,13 @@ struct to_ir {
           value_type = values.at(0)->type();
         } else {
           key_type = StringType::get();
-          value_type = DynamicType::get();
+          value_type = TensorType::get();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        return graph->insertNode(graph->createDict(key_type, value_type, keys, values))->output();
+        return graph
+            ->insertNode(graph->createDict(key_type, value_type, keys, values))
+            ->output();
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
@@ -2269,7 +2345,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), c.range());
+    return insertConstant(*graph, c.text(), nullptr, c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2283,7 +2359,7 @@ struct to_ir {
         *graph,
         aten::select,
         c10::nullopt,
-        {input, graph->insertConstant(dim, loc), index},
+        {input, graph->insertConstant(dim, nullptr, loc), index},
         {},
         true);
   }
@@ -2302,10 +2378,11 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      AT_ASSERT(input->type()->isSubtypeOf(DynamicType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), loc));
+      AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
+      args.emplace_back(
+          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
-      AT_ASSERT(!input->type()->isSubtypeOf(DynamicType::get()));
+      AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
 
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
@@ -2320,7 +2397,8 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
+    NamedValue step =
+        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
@@ -2329,8 +2407,11 @@ struct to_ir {
       const SourceRange& loc,
       Value* input,
       at::ArrayRef<Value*> indices) {
+    // NB: the index of aten::index should be a type of List[Optional[Tensor]],
+    // this is to support the case like t[:, :, 1] where : here indicates a
+    // None/undefined tensor(optional tensor)
     auto* index =
-        graph->insertNode(graph->createList(DynamicType::get(), indices))
+        graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
     return emitBuiltinCall(
         loc, *graph, aten::index, c10::nullopt, {input, index}, {}, true);
@@ -2351,7 +2432,7 @@ struct to_ir {
     size_t dim = 0;
 
     auto handle_tensor = [&](Value* tensor) {
-      // NB: tensor_indices can have NULL holes because of how at::index works.
+      // NB: tensor_indices can have None holes because of how at::index works.
       tensor_indices.resize(dim + 1);
       tensor_indices[dim] = tensor;
       dim++;
@@ -2363,11 +2444,12 @@ struct to_ir {
         ++dim;
         continue;
       }
-      auto index = emitExpr(subscript_expr);
+      auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
-      } else if (index->type()->isSubtypeOf(DynamicType::get())) {
+      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+        // NB:index type can either be a Tensor or : (None of Optional Tensor)
         handle_tensor(index);
         continue;
       }
@@ -2376,11 +2458,12 @@ struct to_ir {
           << index->type()->str()
           << "'. Only ints, slices, and tensors are supported";
     }
-    // at::index takes in a TensorList where some tensors can be undefined.
-    // Convert NULL tensorIndices to undefined tensors to pass to at::index.
+    // at::index takes in a List[Optional[Tensor]] where some dims can be None.
+    // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index = graph->insertNode(graph->createUndefined())->output();
+        index =
+            graph->insertNode(graph->createNone(TensorType::get()))->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
@@ -2408,7 +2491,7 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
           << "indexing on a non-tensor type.";
@@ -2436,7 +2519,7 @@ struct to_ir {
     AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     c10::optional<int64_t> maybe_dim;
-    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }
@@ -2546,7 +2629,7 @@ struct to_ir {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitBuiltinCall(
           loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
+    } else if (gatherable->type()->isSubtypeOf(TensorType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript_exprs);
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
@@ -2557,7 +2640,8 @@ struct to_ir {
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples";
+             "tensors, and tuples, but got type '"
+          << gatherable->type()->str() << "'";
     }
   }
 };
@@ -2641,9 +2725,7 @@ void lambdaLiftFork(Node* fork_node) {
   // Separate the subgraph and clean up the orignal one
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
-
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

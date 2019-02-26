@@ -77,7 +77,7 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(at::IntList from, at::IntList to) {
+c10::optional<size_t> fusibleExpandTo(at::IntArrayRef from, at::IntArrayRef to) {
   if (from.size() > to.size()) {
     return c10::nullopt;
   }
@@ -372,7 +372,7 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
 
   Node* gather_indices = graph->create(onnx::Constant, 1);
   gather_indices->insertBefore(n);
-  gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(1)));
+  gather_indices->t_(attr::value, autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -388,20 +388,20 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   hidden_size->insertBefore(n);
   hidden_size->t_(
       attr::value,
-      at::full(
+      autograd::make_variable(at::full(
           {1},
           n->i(attr::hidden_size),
-          at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+          at::kLong))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node* num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);
   num_directions->t_(
       attr::value,
-      scalar_to_tensor(at::Scalar(
+      autograd::make_variable(scalar_to_tensor(at::Scalar(
           n->hasAttribute(attr::direction) &&
                   n->s(attr::direction) == "bidirectional"
               ? 2
-              : 1)));
+              : 1))));
 
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
@@ -587,6 +587,20 @@ static void fuseSplitListUnpack(Block *b) {
   }
 }
 
+void removeMaxPoolUnusedOutput(Block* b) {
+    for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    auto n = *it;
+    for (auto* child_block : n->blocks()) {
+      removeMaxPoolUnusedOutput(child_block);
+    }
+    if (strcmp(n->kind().toQualString(), "onnx::MaxPool") == 0) {
+      if (n->outputs().size() == 2 && n->outputs().at(1)->uses().empty()) {
+        it->eraseOutput(1);
+      }
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -620,6 +634,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   speculateOps(graph->block());
   eraseListConstruct(graph->block());
   fuseSplitListUnpack(graph->block());
+  removeMaxPoolUnusedOutput(graph->block());
 }
 
 } // namespace jit

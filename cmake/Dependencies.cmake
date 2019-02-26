@@ -107,6 +107,10 @@ elseif(BLAS STREQUAL "MKL")
   endif()
   include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
+    message(STATUS "MKL libraries: ${MKL_LIBRARIES}")
+    message(STATUS "MKL include directory: ${MKL_INCLUDE_DIR}")
+    message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
+    message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
@@ -670,12 +674,45 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  find_package(OpenMP)
+  # OpenMP support?
+  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+
+  # macOS + GCC
+  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
+    IF (DARWIN_VERSION GREATER 9)
+      SET(APPLE_OPENMP_SUCKS 1)
+    ENDIF (DARWIN_VERSION GREATER 9)
+    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
+        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
+      add_compile_options(-Wno-unknown-pragmas)
+      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    ENDIF()
+  ENDIF()
+
+  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+    FIND_PACKAGE(OpenMP QUIET)
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+
+    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  ENDIF()
+
   if(OPENMP_FOUND)
-    message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
+    message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    IF("${OpenMP_CXX_LIBRARIES}" STREQUAL "")
+        message(STATUS "No OpenMP library needs to be linked against")
+    ELSE()
+        message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
+    ENDIF()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
@@ -707,7 +744,12 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      IF(CUDNN_STATIC_LINKAGE)
+	LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+	  caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+      ELSE()
+	list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -769,7 +811,9 @@ if(USE_ROCM)
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
+    foreach(hcc_amdgpu_target ${HCC_AMDGPU_TARGET})
+      list(APPEND HIP_HCC_FLAGS -amdgpu-target=${hcc_amdgpu_target})
+    endforeach()
 
     set(Caffe2_HIP_INCLUDE
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
@@ -990,11 +1034,22 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
+  # Set the ONNX_ML flag for ONNX submodule
+  if (DEFINED ENV{ONNX_ML})
+    set(ONNX_ML $ENV{ONNX_ML})
+    if (ONNX_ML)
+      add_definitions(-DONNX_ML=1)
+    endif()
+  else()
+    set(ONNX_ML OFF)
+  endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi)
 
   include_directories(${ONNX_INCLUDE_DIRS})
+  include_directories(${FOXI_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
@@ -1004,7 +1059,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
-  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
+  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -1095,43 +1150,6 @@ if (NOT BUILD_ATEN_MOBILE)
     STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
     STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
-
-  # OpenMP support?
-  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-
-  # macOS + GCC
-  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
-    IF (DARWIN_VERSION GREATER 9)
-      SET(APPLE_OPENMP_SUCKS 1)
-    ENDIF (DARWIN_VERSION GREATER 9)
-    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
-        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
-      add_compile_options(-Wno-unknown-pragmas)
-      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    ENDIF()
-  ENDIF()
-
-  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
-    FIND_PACKAGE(OpenMP)
-    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  ENDIF()
-
-  IF (OPENMP_FOUND)
-    MESSAGE(STATUS "Compiling with OpenMP support")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  ENDIF()
-
 
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
@@ -1303,7 +1321,6 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(AT_CUDA_ENABLED 0)
   else()
     SET(AT_CUDA_ENABLED 1)
-    find_package(CUDA 5.5 REQUIRED)
   endif()
 
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)

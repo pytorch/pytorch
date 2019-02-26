@@ -453,7 +453,6 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
@@ -487,7 +486,6 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
-    @skipIfRocm
     def test_timeout(self):
         if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
             targets = (_test_timeout, _test_timeout_pin_memory)
@@ -639,7 +637,6 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -909,7 +906,6 @@ class TestStringDataLoader(TestCase):
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for batch_ndx, (s, n) in enumerate(loader):
@@ -953,12 +949,77 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class NamedTupleDataset(Dataset):
+    from collections import namedtuple
+    Batch = namedtuple('Batch', ['data', 'label'])
+    Data = namedtuple('Data', ['positive', 'negative'])
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, ndx):
+        return self.Batch(data=self.Data(positive=ndx, negative=-ndx),
+                          label=str(ndx))
+
+
+class TestNamedTupleDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = NamedTupleDataset()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_collate_and_pin_memory_with_namedtuple(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for batch in loader:
+            self.assertIsInstance(batch, NamedTupleDataset.Batch)
+            self.assertIsInstance(batch.data, NamedTupleDataset.Data)
+
+
+class SimpleCustomBatch:
+    def __init__(self, data):
+        transposed_data = list(zip(*data))
+        self.inp = torch.stack(transposed_data[0], 0)
+        self.tgt = torch.stack(transposed_data[1], 0)
+
+    def pin_memory(self):
+        self.inp = self.inp.pin_memory()
+        self.tgt = self.tgt.pin_memory()
+        return self
+
+
+def collate_wrapper(batch):
+    return SimpleCustomBatch(batch)
+
+
+class TestCustomPinFn(TestCase):
+    def setUp(self):
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        self.dataset = TensorDataset(inps, tgts)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin_worker(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, num_workers=1)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
 
 
 class TestWorkerQueueDataset(Dataset):

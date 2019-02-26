@@ -65,9 +65,7 @@ bool isSimpleMap(Node* node) {
       "aten::neg(Tensor self) -> Tensor",
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-      // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
-      // won't make the same mistake before you reenable this.
-      //"aten::rand_like(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -109,7 +107,7 @@ bool isSimpleMap(Node* node) {
   }
   // Check that all non-tensor inputs are constant
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(DynamicType::get())) {
+    if (input->type()->isSubtypeOf(TensorType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -135,10 +133,10 @@ RegisterOperators reg_bn_unsqueeze({Operator(
 
 // Yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(DynamicType::get())) {
+  if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->kind() == prim::None ||
+  if (tensor->node()->mustBeNone() ||
       tensor->node()->kind() == prim::Undefined) {
     return false;
   }
@@ -176,7 +174,7 @@ struct GraphFuser {
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
-      return v->type()->isSubtypeOf(DynamicType::get());
+      return v->type()->isSubtypeOf(TensorType::get());
     });
   }
 
@@ -370,7 +368,7 @@ struct GraphFuser {
     AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
-      if (input->type()->isSubtypeOf(DynamicType::get()))
+      if (input->type()->isSubtypeOf(TensorType::get()))
         tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
@@ -380,7 +378,7 @@ struct GraphFuser {
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        if (input->type()->isSubtypeOf(DynamicType::get())) {
+        if (input->type()->isSubtypeOf(TensorType::get())) {
           auto in_group = subgraph.insertInput(tensor_insert_idx);
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -650,7 +648,7 @@ struct GraphFuser {
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
     for (size_t i = 0; i < node->inputs().size(); ++i) {
-      if (node->inputs()[i]->type()->isSubtypeOf(DynamicType::get())) {
+      if (node->inputs()[i]->type()->isSubtypeOf(TensorType::get())) {
         AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
@@ -799,7 +797,7 @@ struct GraphFuser {
       // XXX: we only work with pointwise ops in here, so we know it is valid to
       // push the concat only through tensor arguments (and all other args can
       // be safely ignored).
-      if (!input->type()->isSubtypeOf(DynamicType::get()))
+      if (!input->type()->isSubtypeOf(TensorType::get()))
         continue;
 
       // if 'input' is already an input to the bchunk, reuse it.
@@ -840,7 +838,7 @@ struct GraphFuser {
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
-        if (original_input->type()->isSubtypeOf(DynamicType::get())) {
+        if (original_input->type()->isSubtypeOf(TensorType::get())) {
           AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
@@ -865,7 +863,7 @@ struct GraphFuser {
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
-          [](Value* v) { return v->type()->isSubtypeOf(DynamicType::get()); });
+          [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
       auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
         return v->owningGraph()->insert(aten::size, {v});
       });
@@ -962,7 +960,7 @@ struct GraphFuser {
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
-      if (inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
+      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
         shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
       }
     }
@@ -1010,7 +1008,7 @@ struct GraphFuser {
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(DynamicType::get());
+        return v->type()->isSubtypeOf(TensorType::get());
       });
       auto shapes =
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
@@ -1272,6 +1270,7 @@ bool trackSingleGradSumToSizeToOutputs(
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
       // add this used to be prim::AutogradAdd
   }};
 

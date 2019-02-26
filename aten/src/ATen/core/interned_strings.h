@@ -17,6 +17,7 @@ namespace c10 {
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
+  _(namespaces, user)              \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
   _(prim, BroadcastingChunk)       \
@@ -78,9 +79,13 @@ namespace c10 {
   _(aten, warn)                    \
   _(aten, floordiv)                \
   _(aten, __round_to_zero_floordiv)\
+  _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(prim, Function)                \
+  _(prim, CreateUserObject)        \
+  _(prim, SetAttr)                 \
+  _(prim, GetAttr)                 \
   _(aten, append)                  \
   _(aten, format)                  \
   _(aten, __not__)                 \
@@ -91,6 +96,7 @@ namespace c10 {
   _(aten, index_put_)              \
   _(aten, device)                  \
   _(aten, len)                     \
+  _(aten, list)                    \
   _(aten, wait)                    \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -149,7 +155,8 @@ namespace c10 {
   _(attr, b)                       \
   _(attr, beg)                     \
   _(attr, idx)                     \
-  _(attr, split)
+  _(attr, split)                   \
+  _(attr, slot)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -157,6 +164,7 @@ namespace c10 {
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
+  _(namespaces, user)              \
   _(namespaces, namespaces)
 #endif
 
@@ -223,6 +231,7 @@ struct CAFFE2_API Symbol {
   static Symbol aten(const std::string & s);
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
+  static Symbol user(const std::string & s);
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -230,6 +239,7 @@ struct CAFFE2_API Symbol {
   bool is_aten() const;
   bool is_prim() const;
   bool is_onnx() const;
+  bool is_user() const;
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -288,10 +298,12 @@ inline Symbol Symbol::aten(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualString("onnx::" + s); }
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
+inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
+inline bool Symbol::is_user() const { return ns() == namespaces::user; }
 
 } // namespace c10
 

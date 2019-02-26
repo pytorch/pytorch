@@ -11,6 +11,7 @@ namespace jit {
 Value* insertConstant(
     Graph& g,
     const IValue& val,
+    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);
@@ -18,10 +19,14 @@ Value* insertConstant(
     at::Tensor ref = val.toTensor();
     if (!ref.defined()) {
       n->destroy();
-      return g.insertNode(g.createUndefined())->output();
+      return g.insertNode(g.createNone(TensorType::get()))->output();
     }
-    if (ref.is_variable()) {
-      ref = autograd::Variable(ref).data();
+    // TODO: fix all cases where we are not passing in a variable,
+    // and then change this to an AT_ASSERT
+    if (!ref.is_variable()) {
+      ref = autograd::make_variable(ref, /*requires_grad=*/false);
+    } else {
+      AT_ASSERT(!ref.requires_grad());
     }
     n->output()->inferTypeFrom(
         ref); // note: before t_ because of std::move(ref)
@@ -47,7 +52,8 @@ Value* insertConstant(
     n->ts_(
         attr::value,
         fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
-          return autograd::Variable(t).data();
+          AT_ASSERT(t.is_variable() && !t.requires_grad());
+          return t;
         }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isString()) {
@@ -59,10 +65,9 @@ Value* insertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
-    n->destroy();
-    n = g.create(prim::None);
     n->output()->setType(NoneType::get());
   } else {
+    n->destroy();
     throw constant_not_supported_error(
         "Unsupported value kind: " + val.tagKind());
   }
@@ -70,6 +75,14 @@ Value* insertConstant(
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
   if (scope)
     n->setScope(*scope);
+  if (result_type) {
+    auto inferred_type = n->output()->type();
+    // Retain more type information in case of tensor constant
+    if (!(inferred_type->isSubtypeOf(TensorType::get()) &&
+          result_type->isSubtypeOf(inferred_type))) {
+      n->output()->setType(result_type);
+    }
+  }
   return g.insertNode(n)->output();
 }
 
@@ -83,8 +96,8 @@ RegisterOperators reg({
             /*is_varret=*/true),
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
-          if (type->isSubtypeOf(DynamicType::get())) {
-            auto t = autograd::make_variable(node->t(attr::value));
+          if (type->isSubtypeOf(TensorType::get())) {
+            auto t = node->t(attr::value);
             return [t](Stack& stack) {
               push(stack, t);
               return 0;
@@ -118,17 +131,13 @@ RegisterOperators reg({
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
-            const auto& int_list = node->is(attr::value);
-            const std::vector<bool> bs(int_list.begin(), int_list.end());
+            const auto bs = fmap<bool>(node->is(attr::value));
             return [bs](Stack& stack) {
               push(stack, bs);
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofTensors())) {
-            const auto& ts = fmap(
-                node->ts(attr::value), [](const at::Tensor& t) -> at::Tensor {
-                  return autograd::make_variable(t);
-                });
+            const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
               push(stack, ts);
               return 0;
@@ -143,6 +152,11 @@ RegisterOperators reg({
             auto d = c10::Device(node->s(attr::value));
             return [d](Stack& stack) {
               push(stack, d);
+              return 0;
+            };
+          } else if (node->mustBeNone()) {
+            return [](Stack& stack) {
+              push(stack, IValue());
               return 0;
             };
           } else {

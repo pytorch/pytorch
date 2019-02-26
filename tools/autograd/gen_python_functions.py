@@ -140,11 +140,13 @@ ${name}(${py_formal_args})""")
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
-    'Tensor', 'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,double,int64_t>',
+    'Tensor',
+    'std::tuple<Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,int64_t>',
+    'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void'
 }
@@ -297,6 +299,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<ScalarType>': 'scalartypeOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
+        'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -304,7 +307,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     }
 
     unpack_with_default_methods = {
-        'IntList': 'setDefaultIntlist',
+        'IntArrayRef': 'setDefaultIntlist',
         'Scalar': 'scalarWithDefault',
         'int64_t': 'toInt64WithDefault',
         'bool': 'setDefaultBool',
@@ -351,8 +354,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
-            if typename.startswith('IntList['):
-                typename = 'IntList'
+            if typename.startswith('IntArrayRef['):
+                typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 

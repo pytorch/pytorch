@@ -1,25 +1,24 @@
-graph(%input_1 : Float(*, *)
-      %input : Float(*, *)
-      %cx : Float(*, *)
-      %weight_1 : Float(*, *)
-      %weight : Float(*, *)
-      %bias_1 : Float(*)
-      %bias : Float(*)) {
-  %7 : Float(*, *) = aten::t(%weight_1)
-  %8 : Float(*, *) = aten::mm(%input_1, %7)
-  %9 : Float(*, *) = aten::t(%weight)
-  %10 : Float(*, *) = aten::mm(%input, %9)
-  %11 : Tensor[] = prim::ListConstruct(%bias_1, %8, %bias, %10)
+graph(%input : Float(*, *),
+      %input0 : Float(*, *),
+      %cx : Float(*, *),
+      %weight : Float(*, *),
+      %weight0 : Float(*, *),
+      %bias : Float(*),
+      %bias0 : Float(*)):
+  %7 : Float(*, *) = aten::t(%weight)
+  %8 : Float(*, *) = aten::mm(%input, %7)
+  %9 : Float(*, *) = aten::t(%weight0)
+  %10 : Float(*, *) = aten::mm(%input0, %9)
+  %11 : Tensor[] = prim::ListConstruct(%bias, %8, %bias0, %10)
   %12 : Tensor[] = aten::broadcast_tensors(%11)
   %13 : Tensor, %14 : Tensor, %15 : Tensor, %16 : Tensor = prim::ListUnpack(%12)
   %17 : Float(*, *) = prim::FusionGroup_0(%cx, %16, %15, %14, %13)
-  return (%17);
-}
-with prim::FusionGroup_0 = graph(%0 : Float(*, *)
-      %1 : Tensor
-      %2 : Tensor
-      %3 : Tensor
-      %4 : Tensor) {
+  return (%17)
+with prim::FusionGroup_0 = graph(%0 : Float(*, *),
+      %1 : Tensor,
+      %2 : Tensor,
+      %3 : Tensor,
+      %4 : Tensor):
   %5 : Float(*, *), %6 : Float(*, *), %7 : Float(*, *), %8 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%4)
   %9 : Float(*, *), %10 : Float(*, *), %11 : Float(*, *), %12 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%3)
   %13 : Float(*, *), %14 : Float(*, *), %15 : Float(*, *), %16 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%2)
@@ -37,15 +36,14 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %31 : Float(*, *) = aten::add(%27, %23, %21)
   %32 : Float(*, *) = aten::add(%28, %24, %21)
   %33 : Float(*, *) = aten::add(%29, %25, %21)
-  %ingate : Float(*, *) = aten::sigmoid(%30)
-  %forgetgate : Float(*, *) = aten::sigmoid(%31)
-  %cellgate : Float(*, *) = aten::tanh(%32)
-  %outgate : Float(*, *) = aten::sigmoid(%33)
-  %38 : Float(*, *) = aten::mul(%forgetgate, %0)
-  %39 : Float(*, *) = aten::mul(%ingate, %cellgate)
+  %ingate0 : Float(*, *) = aten::sigmoid(%30)
+  %forgetgate0 : Float(*, *) = aten::sigmoid(%31)
+  %cellgate0 : Float(*, *) = aten::tanh(%32)
+  %outgate0 : Float(*, *) = aten::sigmoid(%33)
+  %38 : Float(*, *) = aten::mul(%forgetgate0, %0)
+  %39 : Float(*, *) = aten::mul(%ingate0, %cellgate0)
   %cy : Float(*, *) = aten::add(%38, %39, %21)
   %41 : Float(*, *) = aten::tanh(%cy)
-  %hy : Float(*, *) = aten::mul(%outgate, %41)
+  %hy : Float(*, *) = aten::mul(%outgate0, %41)
   %43 : Float(*, *) = prim::FusedConcat[dim=0](%hy, %cy)
-  return (%43);
-}
+  return (%43)

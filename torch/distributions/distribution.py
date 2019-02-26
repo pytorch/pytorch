@@ -34,6 +34,7 @@ class Distribution(object):
                     continue  # skip checking lazily-constructed args
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
+        super(Distribution, self).__init__()
 
     def expand(self, batch_shape, _instance=None):
         """

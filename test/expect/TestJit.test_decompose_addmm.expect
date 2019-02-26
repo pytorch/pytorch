@@ -1,8 +1,8 @@
-graph(%mat : Tensor
-      %mat1 : Tensor
-      %mat2 : Tensor
-      %alpha : Tensor
-      %beta : Tensor) {
+graph(%mat : Tensor,
+      %mat1 : Tensor,
+      %mat2 : Tensor,
+      %alpha : Tensor,
+      %beta : Tensor):
   %5 : int = prim::Constant[value=1]()
   %6 : float = prim::Constant[value=4.2]()
   %7 : float = prim::Constant[value=2]()
@@ -19,5 +19,4 @@ graph(%mat : Tensor
   %18 : Tensor = aten::add(%10, %13, %5)
   %19 : Tensor = aten::add(%18, %c, %5)
   %20 : Tensor = aten::add(%19, %d, %5)
-  return (%20);
-}
+  return (%20)

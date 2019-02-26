@@ -206,6 +206,9 @@ if(NOT BUILD_ATEN_ONLY)
   #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
   #     have the right protobuf version as well as linking to libprotobuf.a.
   target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+  if (NOT BUILD_SHARED_LIBS)
+    INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
 endif()
 
 # Compile exposed libraries.
@@ -222,6 +225,13 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
+endif()
+
+if (USE_OPENMP AND OPENMP_FOUND)
+  message(STATUS "Caffe2 is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
 target_link_libraries(caffe2 PUBLIC c10)

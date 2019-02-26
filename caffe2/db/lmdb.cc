@@ -29,7 +29,7 @@ class LMDBCursor : public Cursor {
     MDB_CHECK(mdb_cursor_open(mdb_txn_, mdb_dbi_, &mdb_cursor_));
     SeekToFirst();
   }
-  virtual ~LMDBCursor() {
+  ~LMDBCursor() override {
     mdb_cursor_close(mdb_cursor_);
     mdb_dbi_close(mdb_env_, mdb_dbi_);
     mdb_txn_abort(mdb_txn_);
@@ -96,7 +96,7 @@ class LMDBTransaction final : public Transaction {
     MDB_CHECK(mdb_txn_begin(mdb_env_, NULL, 0, &mdb_txn_));
     MDB_CHECK(mdb_dbi_open(mdb_txn_, NULL, 0, &mdb_dbi_));
   }
-  ~LMDBTransaction() {
+  ~LMDBTransaction() override {
     MDB_CHECK(mdb_txn_commit(mdb_txn_));
     mdb_dbi_close(mdb_env_, mdb_dbi_);
   }
@@ -120,7 +120,9 @@ class LMDBTransaction final : public Transaction {
 class LMDB : public DB {
  public:
   LMDB(const string& source, Mode mode);
-  virtual ~LMDB() { Close(); }
+  ~LMDB() override {
+    Close();
+  }
   void Close() override {
     if (mdb_env_ != NULL) {
       mdb_env_close(mdb_env_);

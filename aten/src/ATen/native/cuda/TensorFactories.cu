@@ -43,9 +43,10 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntList size, const TensorOptions& options) {
+Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
@@ -65,7 +66,7 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
   return tensor;
 }
 
-Tensor empty_strided_cuda(IntList size, IntList stride, const TensorOptions& options) {
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   auto t = at::native::empty_cuda({0}, options);
   at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
   return t;

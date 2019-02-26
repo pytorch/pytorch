@@ -18,7 +18,7 @@ void specializeUndef(Graph& g) {
     const auto& tp = input->type();
     if (tp->isSubtypeOf(UndefinedTensorType::get())) {
       state[input] = State::Undefined;
-    } else if (tp->isSubtypeOf(DynamicType::get())) {
+    } else if (tp->isSubtypeOf(TensorType::get())) {
       state[input] = State::Defined;
     } else {
       state[input] = State::Unknown;

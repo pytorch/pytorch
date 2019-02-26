@@ -133,9 +133,11 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/caffe2_operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
@@ -169,10 +171,13 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/user_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
@@ -180,7 +185,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
@@ -190,6 +194,11 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
   )
+
+if (BUILD_CAFFE2_OPS)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp)
+endif()
 
 if (WIN32)
   list(APPEND TORCH_SRCS
@@ -204,6 +213,10 @@ else ()
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
     )
+    add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
+    target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif ()
 
@@ -219,6 +232,7 @@ if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/distributed.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
@@ -314,13 +328,13 @@ endif()
 
 target_link_libraries(torch caffe2_library)
 
-find_package(OpenMP)
+find_package(OpenMP QUIET)
 if(OPENMP_FOUND)
-  if (VERBOSE)
-    message(STATUS "Compiling with OpenMP")
-  endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+  message(STATUS "pytorch is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
 
 if (NOT NO_API)
@@ -349,8 +363,9 @@ if(USE_CUDA)
       ${CUDA_LIBRARIES})
     set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   else()
+    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
     set(TORCH_CUDA_LIBRARIES
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
+      ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
 
@@ -618,7 +633,8 @@ if (BUILD_PYTHON)
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so)
+      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
   endif()
 
