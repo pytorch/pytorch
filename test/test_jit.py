@@ -490,7 +490,7 @@ class JitTestCase(TestCase):
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge, prec=check_tolerance)
+            self.assertEqual(grads, grads_ge)
 
         # test the grad grad case
 
@@ -519,7 +519,7 @@ class JitTestCase(TestCase):
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
-            self.assertEqual(grads, grads_ge, prec=check_tolerance)
+            self.assertEqual(grads, grads_ge)
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
@@ -1414,10 +1414,11 @@ class TestJit(JitTestCase):
         # test outputs that do not get used in grad
         self.checkTrace(foo, [rand(1)], drop=1, optimize=optimize)
         # test autograd fallback
+        # XXX: export_import sometimes fails (#17408)
         self.checkTrace(lambda a, b: a * b /
                         (a - 2 * b) + b, [rand(1), rand(1)],
                         optimize=optimize,
-                        check_tolerance=2e-5)
+                        export_import=False)
 
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
