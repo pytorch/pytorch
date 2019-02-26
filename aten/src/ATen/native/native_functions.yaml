@@ -2335,7 +2335,7 @@
 
 - func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: _standard_gamma_grad(Tensor self, Tensor out) -> Tensor
+- func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   matches_jit_signature: True
   variants: function
   dispatch:

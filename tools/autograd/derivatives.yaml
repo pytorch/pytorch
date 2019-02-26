@@ -905,7 +905,7 @@
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)
 
-- name: _standard_gamma_grad(Tensor self, Tensor out)
+- name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
 
 - name: values(Tensor self)
