@@ -608,11 +608,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
     // when accumulation in output is not possible. 
     if (!can_accumulate_in_output && !can_use_32bit_indexing) {
-      // TODO: Allocation should consider non-packed output tensor
+      int64_t output_memory_size = 1;
+      for (int dim = 0; dim < iter.ndim(); dim++) {
+        output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
+      }
       acc_buf_ptr = std::make_shared<AccumulationBuffer>(sizeof(arg_t),
                                                          sizeof(out_scalar_t),
                                                          (char*) iter.data_ptr(0),
-                                                         iter.num_output_elements() * sizeof(arg_t));
+                                                         output_memory_size * sizeof(arg_t));
     } else {
       acc_buf_ptr = std::make_shared<AccumulationBuffer>();
     }
