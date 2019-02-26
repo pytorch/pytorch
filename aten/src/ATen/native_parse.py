@@ -63,6 +63,12 @@ def type_argument_translations(arg):
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
