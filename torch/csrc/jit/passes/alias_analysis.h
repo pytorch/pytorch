@@ -59,6 +59,9 @@ class AliasDb {
   bool mayAlias(
       const T<const Value*, Other1...>& a,
       const U<const Value*, Other2...>& b) const {
+    if (a.empty() || b.empty()) {
+      return false;
+    }
     // Short-circuit for special case: if any value is a wildcard, the two sets
     // may alias
     if (std::any_of(

@@ -709,9 +709,9 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // If `to` is a wildcard, don't insert anything into the graph; wildcards
-  // are tracked separately since they have different aliasing rules.
-  if (isWildcard(to)) {
+  // If either value is a wildcard, don't insert anything into the graph;
+  // wildcards are tracked separately since they have different aliasing rules.
+  if (isWildcard(to) || isWildcard(from)) {
     setWildcard(from);
     return;
   }
@@ -722,8 +722,8 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   if (!isTracked(to)) {
     giveFreshAlias(to);
   }
-  auto fromEl = elementMap_[from];
-  auto toEl = elementMap_[to];
+  auto fromEl = elementMap_.at(from);
+  auto toEl = elementMap_.at(to);
   memoryDAG_->makePointerTo(fromEl, toEl);
 }
 
