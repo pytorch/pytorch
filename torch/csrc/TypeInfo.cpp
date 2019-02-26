@@ -58,7 +58,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   AT_CHECK(r.idx < 2, "Not a type");
   at::ScalarType scalar_type;
   if (r.idx == 1) {
-    scalar_type = torch::tensors::get_default_tensor_type().scalarType();
+    scalar_type = static_cast<at::ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
     // The default tensor type can only be set to a floating point type/
     AT_ASSERT(at::isFloatingType(scalar_type));
   } else {
@@ -119,7 +119,7 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      at::CPU(self->type), "epsilon", [] {
+      self->type, "epsilon", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::epsilon());
@@ -127,33 +127,33 @@ static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_max(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "max", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "max", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
   });
 }
 
 static PyObject* THPFInfo_min(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "min", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::lowest());
   });
 }
 
 static PyObject* THPIInfo_max(THPFInfo* self, void*) {
-  return AT_DISPATCH_INTEGRAL_TYPES(at::CPU(self->type), "max", [] {
+  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
     return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
   });
 }
 
 static PyObject* THPIInfo_min(THPFInfo* self, void*) {
-  return AT_DISPATCH_INTEGRAL_TYPES(at::CPU(self->type), "min", [] {
+  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
     return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
   });
 }
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "min", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });

@@ -89,7 +89,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
 
   AT_CHECK(values.type().toSparse() == legacyTensorType(*this), "values type must match sparse tensor type");
-  AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
+  AT_CHECK(indices.scalar_type() == kLong, "indices must be an int64 tensor");
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
   AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 

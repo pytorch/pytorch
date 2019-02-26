@@ -414,7 +414,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.packed_accessor<scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.type().scalarType() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   if (train) {
@@ -519,7 +519,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto input_options = input_.options();
-  if (input_.type().scalarType() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   Tensor save_mean_ = at::empty({n_channels}, input_options);

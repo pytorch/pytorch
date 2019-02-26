@@ -40,7 +40,7 @@ private:
   at::Backend backend() const;
 
   TypeMeta typeMetaFor(const at::Tensor & t) {
-    return typeMetaFor(t.type().scalarType());
+    return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
     #define DEFINE_CASE(ctype,aten_name,_) \
@@ -129,8 +129,8 @@ private:
     return s.toLong();
   }
 
-  void assignTo(Tensor* dst, at::Type& inferred_type, at::Scalar scalar) {
-    switch(inferred_type.scalarType()) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+    switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name,native) \
         case at::k##aten_name: { \
           auto value = extract_##native(scalar); \
@@ -224,10 +224,6 @@ private:
   }
   at::TypeExtendedInterface & stringToType(const std::string & name) {
     return at::getNonVariableType(backend(), stringToScalarType(name));
-  }
-  at::TypeExtendedInterface * readTypeAttribute(const std::string & name) {
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));
-    return &stringToType(OperatorBase::GetSingleArgument<std::string>(name, ""));
   }
 };
 

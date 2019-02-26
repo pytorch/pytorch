@@ -127,8 +127,8 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto& default_type = torch::tensors::get_default_tensor_type();
-  auto tensor = torch::utils::legacy_tensor_ctor(default_type, args, kwargs);
+  auto default_type = torch::tensors::get_default_tensor_type().aten_type();
+  auto tensor = torch::utils::legacy_tensor_ctor(*default_type, args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS
 }

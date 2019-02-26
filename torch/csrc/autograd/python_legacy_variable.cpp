@@ -46,7 +46,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto var = at::empty({0}, torch::tensors::get_default_tensor_type().options());
+    auto var = at::empty({0}, torch::tensors::get_default_tensor_type().aten_type()->options());
     tensor = static_cast<Variable&>(var).data();
   } else if (THPVariable_Check(data)) {
     tensor = ((THPVariable*)data)->cdata.data();

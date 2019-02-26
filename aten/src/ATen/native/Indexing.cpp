@@ -78,8 +78,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
-      auto& type = tensor.type();
-      auto scalarType = type.scalarType();
+      auto scalarType = tensor.scalar_type();
       if (scalarType != kLong && scalarType != kByte) {
           AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
       }
@@ -91,7 +90,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.type().scalarType() == kByte) {
+    if (index.scalar_type() == kByte) {
       // The sizes of the ByteTensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -409,7 +408,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), &info.src.type());
+  builder.add_output(Tensor(), info.src.type().backend(), info.src.scalar_type());
   builder.add_input(info.src);
   for (auto& index : info.indices) {
     builder.add_input(index);
@@ -426,7 +425,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   builder.dont_compute_common_dtype();
   builder.dont_resize_outputs();
   builder.add_output(info.src);
-  builder.add_input(value, &info.src.type());
+  builder.add_input(value, info.src.type().backend(), info.src.scalar_type());
   for (auto& index : info.indices) {
     builder.add_input(index);
   }
@@ -475,7 +474,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   }
-  if (index.type().scalarType() != ScalarType::Long) {
+  if (index.scalar_type() != ScalarType::Long) {
     AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
   }
 

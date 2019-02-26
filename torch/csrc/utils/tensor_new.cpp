@@ -115,7 +115,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
-    return torch::tensors::get_default_tensor_type().scalarType();
+    return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
   }
   if (THPUtils_checkLong(obj)) {
     return ScalarType::Long;
@@ -126,7 +126,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
-    return var.type().scalarType();
+    return var.scalar_type();
   }
 #ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
@@ -144,7 +144,9 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
-    if (length == 0) return torch::tensors::get_default_tensor_type().scalarType();
+    if (length == 0) {
+      return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
+    }
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
@@ -205,7 +207,7 @@ Tensor internal_new_from_data(
     }
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-    const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
+    const auto& scalar_type = type_inference ? var.scalar_type() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
@@ -215,7 +217,7 @@ Tensor internal_new_from_data(
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    const auto& scalar_type = type_inference ? tensor.type().scalarType() : type.scalarType();
+    const auto& scalar_type = type_inference ? tensor.scalar_type() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);

@@ -5,7 +5,7 @@ namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
   auto & t = tensor.type();
-  AT_CHECK(tensor.dim() == 1 && t.device_type() == at::kCPU && t.scalarType() == at::kLong,
+  AT_CHECK(tensor.dim() == 1 && t.device_type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor");
 }
 

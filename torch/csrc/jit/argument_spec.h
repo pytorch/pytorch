@@ -93,7 +93,7 @@ struct ArgumentSpec {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
         arg.dim_ = t.dim();
         arg.device_ = t.is_cuda() ? t.get_device() : -1;
-        arg.type_ = static_cast<unsigned>(t.type().scalarType());
+        arg.type_ = static_cast<unsigned>(t.scalar_type());
       }
 
       arg.is_tensor_ = true;
@@ -229,7 +229,7 @@ struct CompleteArgumentSpec {
         at::Tensor t = inputs[i].toTensor();
         pod.defined = t.defined();
         if (pod.defined) {
-          pod.type = static_cast<int>(t.type().scalarType());
+          pod.type = static_cast<int>(t.scalar_type());
           pod.device = (!t.is_cuda()) ? -1 : t.get_device();
           pod.requires_grad =
               with_grad && autograd::as_variable_ref(t).requires_grad();

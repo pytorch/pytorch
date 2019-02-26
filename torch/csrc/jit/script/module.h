@@ -163,7 +163,7 @@ struct Method {
     }
     AT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i = 0; i < retval->inputs().size(); ++i) {
-      auto scalar_type = inputs[i].type().scalarType();
+      auto scalar_type = inputs[i].scalar_type();
       auto sizes = inputs[i].sizes();
       auto type =
           torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
@@ -177,7 +177,7 @@ struct Method {
     }
     AT_ASSERT(output_values.size() == outputs.size());
     for (size_t i = 0; i < retval->outputs().size(); ++i) {
-      auto scalar_type = outputs[i].type().scalarType();
+      auto scalar_type = outputs[i].scalar_type();
       auto sizes = outputs[i].sizes();
       auto type =
           torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);

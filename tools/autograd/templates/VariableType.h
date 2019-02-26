@@ -17,6 +17,7 @@
 namespace torch { namespace autograd {
 
 struct Variable;
+using at::Backend;
 using at::Context;
 using at::Device;
 using at::Generator;
@@ -51,8 +52,8 @@ struct TORCH_API VariableType final : public at::TypeDefault {
 
   static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
-  static std::vector<at::Type*> allCUDATypes();
-  static std::vector<at::Type*> allCPUTypes();
+  static std::vector<std::pair<Backend, ScalarType>> allCUDATypes();
+  static std::vector<std::pair<Backend, ScalarType>> allCPUTypes();
 
   void backward(
       Tensor& self,

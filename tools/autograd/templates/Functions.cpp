@@ -1943,10 +1943,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? save_mean.to(input.type().scalarType()) : running_mean, input);
+  auto mu = unsqueeze_dim1(training ? save_mean.to(input.scalar_type()) : running_mean, input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? save_invstd.to(input.type().scalarType())
+      training ? save_invstd.to(input.scalar_type())
                : running_var.add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);

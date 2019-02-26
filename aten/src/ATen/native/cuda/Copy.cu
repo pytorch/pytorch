@@ -176,7 +176,7 @@ void copy_from_cpu(Tensor& dst, const Tensor& src) {
       cudaMemcpyHostToDevice,
       stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.scalar_type(), "copy_from_cpu", [&]() {
     copy_device_to_device<scalar_t, scalar_t>(dst, dst_contig);
   });
 }
@@ -209,7 +209,7 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
   CUDAGuard device_guard(dst.device());
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu_async", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.scalar_type(), "copy_from_cpu_async", [&]() {
     AT_CUDA_CHECK(cudaMemcpyAsync(
         dst.data<scalar_t>(),
         src.data<scalar_t>(),
@@ -232,7 +232,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
   CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu_async", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.scalar_type(), "copy_to_cpu_async", [&]() {
     AT_CUDA_CHECK(cudaMemcpyAsync(
         dst.data<scalar_t>(),
         src.data<scalar_t>(),
@@ -247,7 +247,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
 template <typename dst_T>
 void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
   AT_CHECK(dst.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.scalar_type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);
     } else if (dst.is_cuda()) {
@@ -286,7 +286,7 @@ namespace at {
 namespace native {
 
 Tensor& _s_copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy__cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.scalar_type(), "_copy__cuda", [&]() {
     ::_copy__cuda<scalar_t>(self, src, non_blocking);
   });
   return self;
