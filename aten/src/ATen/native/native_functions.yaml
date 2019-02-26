@@ -3909,7 +3909,7 @@
 
 ## NN wrappers
 
-- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) output) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
 
@@ -3973,7 +3973,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+- func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) output) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
 
@@ -4225,7 +4225,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) output) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
   dispatch:
@@ -4249,7 +4249,7 @@
     CPU: adaptive_avg_pool2d_backward_cpu
     CUDA: adaptive_avg_pool2d_backward_cuda
 
-- func: adaptive_avg_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: adaptive_avg_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) output) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
 

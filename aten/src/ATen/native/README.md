@@ -114,7 +114,9 @@ least). For more details please see the section on `variants`.
 
 As a convention we use 'out' to indicate an output argument. This aligns with the
 Python bindings. Even if a function might not be used in the Python bindings, we
-still advise to follow this convention.
+still advise to follow this convention. Check the generated code when making a change
+to make sure you're not breaking the API when renaming an argument name of an
+existing function.
 
 TODO: Do argument names affect Python keyword arguments?
 
