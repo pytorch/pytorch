@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <c10/util/Exception.h>
 
 using namespace std;
 using namespace dnnlowp;
