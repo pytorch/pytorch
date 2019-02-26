@@ -181,7 +181,7 @@ class AliasDb {
   /**
    * Alias manipulation methods
    */
-  void makeAllAlias(const std::vector<Value*> values);
+  void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);

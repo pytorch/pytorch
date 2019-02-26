@@ -262,7 +262,7 @@ void AliasDb::dump() const {
 // TODO: need to create a dummy "graph input alias" value in MemoryDAG for all
 // inputs of the same type to point to. Currently they all point to the first
 // element, which is technically wrong.
-void AliasDb::makeAllAlias(const std::vector<Value*> values) {
+void AliasDb::makeAllAlias(const std::vector<Value*>& values) {
   if (values.size() > 0) {
     giveFreshAlias(values[0]);
   }

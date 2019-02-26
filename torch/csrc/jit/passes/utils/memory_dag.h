@@ -36,9 +36,7 @@ class MemoryDAG {
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
-  bool mayAlias(Element* a, Element* b) const {
-    return mayAlias(a, b);
-  }
+  bool mayAlias(Element* a, Element* b) const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
@@ -81,6 +79,7 @@ class MemoryDAG {
   }
 
  private:
+   bool mayAliasImpl(const Element* a, const Element* b) const;
   // Structure that owns all the element pointers. It's a map of
   //  raw pointer -> unique_ptr to facilitate easy queries
   std::unordered_map<Element*, std::unique_ptr<Element>> elements_;

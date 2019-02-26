@@ -6,7 +6,15 @@
 namespace torch {
 namespace jit {
 
+bool MemoryDAG::mayAlias(Element* a, Element* b) const {
+  return mayAliasImpl(a, b);
+}
+
 bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
+  return mayAliasImpl(a, b);
+}
+
+bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto aMemLoc = a->getMemoryLocations();
   const auto bMemLoc = b->getMemoryLocations();
 
@@ -39,8 +47,7 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
   return rawPtr;
 }
 
-std::unordered_set<const Element*> Element::
-    getMemoryLocations() const {
+std::unordered_set<const Element*> Element::getMemoryLocations() const {
   if (!cachedMemoryLocations_.empty()) {
     return cachedMemoryLocations_;
   }
