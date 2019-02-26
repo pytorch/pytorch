@@ -833,7 +833,7 @@ RegisterOperators reg({
          prim::GetAttr,
          [](const Node* node) {
            const auto type = node->input()->type()->expect<UserType>();
-           const auto field = node->s(attr::name);
+           const auto& field = node->s(attr::name);
            const auto slot = type->getAttributeSlot(field);
            return [slot](Stack& stack) {
              auto userObj = pop(stack).toUserObject();
@@ -844,7 +844,7 @@ RegisterOperators reg({
          }),
      Operator(prim::SetAttr, [](const Node* node) {
        const auto type = node->inputs().at(0)->type()->expect<UserType>();
-       const auto field = node->s(attr::name);
+       const auto& field = node->s(attr::name);
        const auto slot = type->getAttributeSlot(field);
        return [slot](Stack& stack) {
          auto v = pop(stack);
