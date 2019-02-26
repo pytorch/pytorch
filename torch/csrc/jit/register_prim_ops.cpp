@@ -122,6 +122,18 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::range(int n) -> int[]",
+        [](Stack& stack) {
+          int64_t n;
+          pop(stack, n);
+          std::vector<int64_t> elems(n);
+          for (int i = 0; i < n; i++) {
+            elems.push_back(i);
+          }
+          push(stack, jit::IntList::create(elems));
+          return 0;
+        }),
+    Operator(
         "prim::Bool(Tensor a) -> bool",
         [](Stack& stack) {
           at::Tensor a;
