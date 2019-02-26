@@ -3399,7 +3399,7 @@ class TestKL(TestCase):
                     continue
                 x = dist.sample(sample_shape=(60000,))
                 expected = -dist.log_prob(x).mean(0)
-                ignore = (expected == inf)
+                ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
