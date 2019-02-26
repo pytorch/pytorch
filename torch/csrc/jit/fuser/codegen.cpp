@@ -94,6 +94,10 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
   } else if (t->kind() == TypeKind::DimensionedTensorType) {
     auto const tt = t->cast<DimensionedTensorType>();
     return calcScalarTypeName(tt->scalarType());
+  } else if (t->kind() == TypeKind::NumberType) {
+    return "float";
+  } else if (t->kind() == TypeKind::OptionalType) {
+    return variableType(t->cast<OptionalType>()->getElementType());
   }
   // something went wrong with the type analysis during shape propagation
   throw std::runtime_error(
@@ -120,6 +124,14 @@ static std::string typeCastedValueName(
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
+  } else if (t->kind() == TypeKind::NumberType) {
+    if (!isFloatingType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::OptionalType) {
+    return typeCastedValueName(
+        t->cast<OptionalType>()->getElementType(), outtype, vn);
   }
   // something went wrong with the type analysis during shape propagation
   throw std::runtime_error(
@@ -211,6 +223,12 @@ static std::string encodeRHS(const Node* n) {
   };
 
   if (n->kind() == prim::Constant) {
+    // For A None node in the graph, treat it as NAN in
+    // the code gen in graph fuseer as we don't have the
+    // optional type support in code gen
+    if (n->mustBeNone()) {
+      return scalarValue(NAN);
+    }
     const auto val = toIValue(n->output()).value();
     if (val.isDouble()) {
       return scalarValue(val.toDouble());
@@ -224,8 +242,10 @@ static std::string encodeRHS(const Node* n) {
 
   TemplateEnv env;
   size_t i = 0;
-  auto outtype =
-      n->output()->type()->expect<c10::DimensionedTensorType const>()->scalarType();
+  auto outtype = n->output()
+                     ->type()
+                     ->expect<c10::DimensionedTensorType const>()
+                     ->scalarType();
   for (auto in : n->inputs()) {
     // PyTorch converts (scalar) argument types to result before applying the
     // operator e.g. 1.4-torch.tensor(3) = -2
