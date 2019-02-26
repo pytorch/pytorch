@@ -1035,6 +1035,7 @@ class TestJit(JitTestCase):
             return y
 
         trace, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.run_pass('dce', trace)
         FileCheck().check_count("aten::clone", 1, exactly=True) \
             .check_count("aten::add_", 2, exactly=True) \
             .check_next("return").run(str(trace))
