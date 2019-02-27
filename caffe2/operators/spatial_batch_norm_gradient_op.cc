@@ -68,28 +68,31 @@ void SpatialBNGradientOp<CPUContext>::ComputeScaleBiasGradientsAndFusedParams(
   EigenVectorArrayMap<T> alpha_arr(alpha, C);
   EigenVectorArrayMap<T> beta_arr(beta, C);
   EigenVectorArrayMap<T> gamma_arr(gamma, C);
-  math::Set<T, CPUContext>(C, T(0), dscale, &context_);
-  math::Set<T, CPUContext>(C, T(0), dbias, &context_);
   if (order_ == StorageOrder::NCHW) {
-    ConstEigenArrayMap<T> dY_arr(dY, HxW, N * C);
-    ConstEigenArrayMap<T> X_arr(X, HxW, N * C);
-    for (int i = 0; i < N; ++i) {
+    ConstEigenArrayMap<float> dY_arr(dY, HxW, N * C);
+    ConstEigenArrayMap<float> X_arr(X, HxW, N * C);
+    for (int i = 0; i < C; ++i) {
+      dscale_arr(i) = (dY_arr.col(i) * X_arr.col(i)).sum();
+      dbias_arr(i) = dY_arr.col(i).sum();
+    }
+    for (int i = 1; i < N; ++i) {
       for (int j = 0; j < C; ++j) {
         const int c = i * C + j;
-        dscale_arr(j) +=
-            (dY_arr.col(c) * (X_arr.col(c) - mean_arr(j)) * rstd_arr(j)).sum();
+        dscale_arr(j) += (dY_arr.col(c) * X_arr.col(c)).sum();
         dbias_arr(j) += dY_arr.col(c).sum();
       }
     }
   } else {
-    const int outer_size = N * HxW;
-    ConstEigenArrayMap<T> dY_arr(dY, C, outer_size);
-    ConstEigenArrayMap<T> X_arr(X, C, outer_size);
-    for (int i = 0; i < outer_size; ++i) {
-      dscale_arr += dY_arr.col(i) * (X_arr.col(i) - mean_arr) * rstd_arr;
+    ConstEigenArrayMap<float> dY_arr(dY, C, N * HxW);
+    ConstEigenArrayMap<float> X_arr(X, C, N * HxW);
+    dscale_arr = dY_arr.col(0) * X_arr.col(0);
+    dbias_arr = dY_arr.col(0);
+    for (int i = 1; i < N * HxW; ++i) {
+      dscale_arr += dY_arr.col(i) * X_arr.col(i);
       dbias_arr += dY_arr.col(i);
     }
   }
+  dscale_arr = (dscale_arr - mean_arr * dbias_arr) * rstd_arr;
   const T inv_nhw = T(1) / static_cast<T>(N * HxW);
   alpha_arr = scale_arr * rstd_arr;
   beta_arr = dscale_arr * rstd_arr;
