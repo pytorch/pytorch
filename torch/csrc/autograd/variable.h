@@ -109,7 +109,12 @@ struct TORCH_API Variable : public at::Tensor {
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
   friend Variable make_variable(
-      at::Tensor data,
+      const at::Tensor& data,
+      bool requires_grad,
+      bool allow_tensor_metadata_change);
+
+  friend Variable make_variable(
+      at::Tensor&& data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
@@ -560,7 +565,7 @@ inline Variable make_variable_view(
 }
 
 inline Variable make_variable(
-    at::Tensor data,
+    const at::Tensor& data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   AT_CHECK(
@@ -572,6 +577,21 @@ inline Variable make_variable(
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), requires_grad));
+  }
+  return Variable();
+}
+
+inline Variable make_variable(
+    at::Tensor&& data,
+    bool requires_grad = false,
+    bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
+  if (data.defined()) {
+    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
+    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
   }
   return Variable();
 }
