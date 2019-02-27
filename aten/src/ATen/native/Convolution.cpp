@@ -134,8 +134,6 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
-         && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
-         && (stride.at(0) == stride.at(1)) //Line 549 & 635 (swapping stride and dilation values) leads to assymetric dilation values.
          ;
 }
 

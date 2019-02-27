@@ -627,22 +627,23 @@ static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
     int64_t sparse_dim = self.sparse_dim();
     int64_t dense_dim = self.dense_dim();
-    AT_CHECK(sparse_dim == 2 && dense_dim == 0,
-             fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
+    AT_CHECK((sparse_dim == 2 || sparse_dim == 1) && dense_dim == 0,
+             fn, " expects a tensor with 1 or 2 sparse and 0 dense dimensions, but got ",
              sparse_dim, " sparse and ", dense_dim, " dense dimensions");
-  } else if (self.dim() != 2) {
-    AT_ERROR(fn, " expects a 2D tensor, but self is ", self.dim(), "D");
+  } else {
+    AT_CHECK((self.dim() == 1 || self.dim() == 2),
+             fn, " expects a 1D or 2D tensor, but self is ", self.dim(), "D");
   }
 }
 
 Tensor t(const Tensor & self) {
   check_t(self, "t()");
-  return self.transpose(0, 1);
+  return self.transpose(0, self.dim() == 1 ? 0 : 1);
 }
 
 Tensor & t_(Tensor & self) {
   check_t(self, "t_()");
-  return self.transpose_(0, 1);
+  return self.transpose_(0, self.dim() == 1 ? 0 : 1);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
