@@ -63,12 +63,21 @@ def type_argument_translations(arg):
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
+    elif t == 'double':
+        raise RuntimeError("Please use float and not double. "
+                           "See [temp translations] for details.")
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
