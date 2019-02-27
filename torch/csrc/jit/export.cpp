@@ -118,12 +118,12 @@ class EncoderBase {
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::unordered_map<std::string, at::Tensor>& initializers = {});
+      const std::unordered_map<std::string, at::Tensor>& initializers = { {} });
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::unordered_map<std::string, at::Tensor>& initializers = {});
+      const std::unordered_map<std::string, at::Tensor>& initializers = { {} });
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -303,6 +303,7 @@ void EncoderBase::EncodeBlock(
       EncodeBlock(false_g, node->blocks()[1]);
     }
   }
+  AT_ASSERT(block->inputs().size() >= initializers.size());
   for (auto& name_tensor_pair : initializers) {
     auto p = graph_proto->add_initializer();
     p->set_name(name_tensor_pair.first);
