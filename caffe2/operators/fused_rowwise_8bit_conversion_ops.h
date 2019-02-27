@@ -22,10 +22,7 @@ template <
     class Context>
 class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
  public:
-  static constexpr float kEqualityThreshold = 1e-7f;
   static constexpr float kEpsilon = 1e-8f;
-  static constexpr float kEqualityThreshold16 = 1e-3f;
-  static constexpr float kEpsilon16 = 9e-4f;
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(FloatToFused8BitRowwiseQuantizedOp)
@@ -47,18 +44,14 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     // | number_of_columns |  4B   |  4B  |
     const std::vector<int64_t> output_dimensions = {input_rows,
                                                     input_columns + 8};
-    auto* output = Output(DATA_FUSED_SCALE_BIAS_INT8, output_dimensions, at::dtype<uint8_t>());
+    auto* output = Output(
+        DATA_FUSED_SCALE_BIAS_INT8, output_dimensions, at::dtype<uint8_t>());
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<uint8_t>();
     const auto output_columns = output->size(1);
 
-    float epsilon;
-    if (std::is_same<T, float>::value) {
-      epsilon = kEpsilon;
-    } else if (std::is_same<T, at::Half>::value) {
-      epsilon = kEpsilon16;
-    } else {
+    if (!std::is_same<T, float>::value && !std::is_same<T, at::Half>::value) {
       CAFFE_THROW("Unsupported data type");
     }
 
@@ -79,7 +72,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
       output_row_scale_bias(0) = range / 255.0f;
       output_row_scale_bias(1) = minimum_element;
-      const auto inverse_scale = 255.0f / (range + epsilon);
+      const auto inverse_scale = 255.0f / (range + kEpsilon);
       output_row_values = ((input_row - minimum_element) * inverse_scale)
                               .round()
                               .cast<uint8_t>();

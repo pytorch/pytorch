@@ -129,13 +129,13 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  at::ivalue::DictUnorderedMap<IValue, IValue> elems;
+  at::ivalue::UnorderedMap elems;
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(std::make_pair(
         toIValue(key, key_type), toIValue(obj[key], value_type)));
   }
-  return at::ivalue::Dict<IValue, IValue>::create(std::move(elems));
+  return at::ivalue::GenericDict::create(std::move(elems));
 }
 
 inline IValue toIValue(
@@ -235,6 +235,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::UserType:
       break;
   }
   AT_ERROR(
@@ -316,7 +317,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto& elements = tuple->elements();
@@ -324,7 +325,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else if (ivalue.isGenericDict()) {
@@ -334,7 +335,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (auto pair : elements) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
-    return py_dict;
+    return std::move(py_dict);
 
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
@@ -435,7 +436,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
-  return return_values;
+  return std::move(return_values);
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
