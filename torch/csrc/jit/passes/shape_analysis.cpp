@@ -79,7 +79,19 @@ class ShapePropagator {
         aten::resize_,
         aten::resize_as_,
     };
-    return resize_ops.count(n->kind()) != 0;
+
+    if (resize_ops.count(n->kind()))
+      return true;
+
+    if (!n->maybeSchema())
+      return false;
+
+    // ops which take the result and write to input "out"
+    if (auto out_arg_index = n->schema().argumentIndexWithName("out")) {
+      auto arg = n->schema().arguments().at(*out_arg_index);
+      return arg.kwarg_only() && arg.type()->isSubtypeOf(TensorType::get());
+    }
+    return false;
   }
 
   void collectResizeSet(Block* block) {
@@ -97,9 +109,13 @@ class ShapePropagator {
     }
   }
 
+  void setUnshapedType(Value* o) {
+    o->setType(unshapedType(o->type()));
+  }
+
   void setUnshapedType(Node* node) {
     for (auto o : node->outputs()) {
-      o->setType(unshapedType(o->type()));
+      setUnshapedType(o);
     }
   }
 
@@ -374,17 +390,21 @@ class ShapePropagator {
   }
 
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
-    return std::any_of(vs.begin(), vs.end(), [&](Value* v) {
-      return aliasDb_.mayAlias({v}, resized_alias_set);
-    });
+    bool in_resize = false;
+    for (auto v : vs) {
+      if (aliasDb_.mayAlias({v}, resized_alias_set)) {
+        setUnshapedType(v);
+        in_resize = true;
+      }
+    }
+    return in_resize;
   }
 
   void PropagateShapeOnNode(Node* node, bool insert_expands = true) {
     // Certain ops like resize_ change the input tensors size. Because our
-    // is flow invariant, we set any Tensor that can alias a resized Tensor
-    // to the base Tensor Type without size information.
-    if (mayAliasResizedSet(node->inputs()) ||
-        mayAliasResizedSet(node->outputs())) {
+    // analysis is flow invariant, we set any Tensor that can alias a resized
+    // Tensor to the base Tensor Type without size information.
+    if (mayAliasResizedSet(node->inputs())) {
       return setUnshapedType(node);
     }
 
