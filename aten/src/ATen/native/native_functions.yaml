@@ -3541,12 +3541,14 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: gather(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: gather(Tensor self, int dim, Tensor index) -> Tensor
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   matches_jit_signature: True
   variants: method, function
+
+- func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
