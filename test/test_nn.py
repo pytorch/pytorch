@@ -3283,6 +3283,29 @@ class TestNN(NNTestCase):
             self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_buffers_requiring_grad(self):
+        class TestModule(nn.Module):
+            def __init__(self, t):
+                super(TestModule, self).__init__()
+                self.register_buffer('t_rg', t)
+                self.register_buffer('t_not_rg', t.clone().detach())
+
+            def forward(self, x):
+                return x * self.t_rg + self.t_not_rg
+
+        m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
+        self.assertTrue(m.t_rg.requires_grad)
+
+        dpm = nn.DataParallel(m, [0, 1])
+        inp = torch.randn(2, 100, device='cuda')
+
+        def fn(t):
+            return dpm(inp)
+
+        torch.autograd.gradcheck(fn, (m.t_rg,))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)

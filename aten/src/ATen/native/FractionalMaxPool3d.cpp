@@ -348,71 +348,71 @@ void fractional_max_pool3d_backward_out_cpu_template(
 }// namespace
 
 std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cpu(
- at::Tensor& output,
- at::Tensor& indices,
- const at::Tensor& input,
- IntArrayRef pool_size,
- IntArrayRef output_size,
- const at::Tensor& randomSamples) {
- fractional_max_pool3d_out_cpu_template(
-   output,
-   indices,
-   input,
-   pool_size,
-   output_size,
-   randomSamples);
- return std::tuple<Tensor&, Tensor&>(output, indices);
+  at::Tensor& output,
+  at::Tensor& indices,
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples) {
+  fractional_max_pool3d_out_cpu_template(
+    output,
+    indices,
+    input,
+    pool_size,
+    output_size,
+    randomSamples);
+  return std::tuple<Tensor&, Tensor&>(output, indices);
 }
 
 std::tuple<Tensor, Tensor> fractional_max_pool3d_cpu(
- const at::Tensor& input,
- IntArrayRef pool_size,
- IntArrayRef output_size,
- const at::Tensor& randomSamples) {
- Tensor output = at::empty(output_size, input.options());
- Tensor indices = at::empty(output_size, at::kLong);
- fractional_max_pool3d_out_cpu_template(
-   output,
-   indices,
-   input,
-   pool_size,
-   output_size,
-   randomSamples);
- return std::tuple<Tensor, Tensor>(output, indices);
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples) {
+  Tensor output = at::empty(output_size, input.options());
+  Tensor indices = at::empty(output_size, at::kLong);
+  fractional_max_pool3d_out_cpu_template(
+    output,
+    indices,
+    input,
+    pool_size,
+    output_size,
+    randomSamples);
+  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 Tensor& fractional_max_pool3d_backward_out_cpu(
- at::Tensor& gradInput,
- const at::Tensor& gradOutput_,
- const at::Tensor& input,
- IntArrayRef pool_size,
- IntArrayRef output_size,
- const at::Tensor& indices) {
- fractional_max_pool3d_backward_out_cpu_template(
-   input,
-   gradOutput_,
-   gradInput,
-   output_size,
-   pool_size,
-   indices);
- return gradInput;
+  at::Tensor& gradInput,
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& indices) {
+  fractional_max_pool3d_backward_out_cpu_template(
+    input,
+    gradOutput_,
+    gradInput,
+    output_size,
+    pool_size,
+    indices);
+  return gradInput;
 }
 
 Tensor fractional_max_pool3d_backward_cpu(
- const at::Tensor& gradOutput_,
- const at::Tensor& input,
- IntArrayRef pool_size,
- IntArrayRef output_size,
- const at::Tensor& indices) {
- Tensor gradInput = at::empty({0}, input.options());
- fractional_max_pool3d_backward_out_cpu_template(
-   input,
-   gradOutput_,
-   gradInput,
-   output_size,
-   pool_size,
-   indices);
- return gradInput;
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& indices) {
+  Tensor gradInput = at::empty({0}, input.options());
+  fractional_max_pool3d_backward_out_cpu_template(
+    input,
+    gradOutput_,
+    gradInput,
+    output_size,
+    pool_size,
+    indices);
+  return gradInput;
 }
 
 }// native
