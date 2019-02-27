@@ -151,7 +151,7 @@ struct strided_tensor_iter_fixed {
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
-  operator bool() const { return CanOverflow; };
+  bool Overflow() const { return CanOverflow; };
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
@@ -181,7 +181,7 @@ struct strided_tensor_iter {
   std::vector<int64_t> strides_;
 
   strided_tensor_iter(strided_tensor_iter const&) = delete;
-  operator bool() const { return true; };
+  bool Overflow() const { return true; };
   void operator=(strided_tensor_iter const& x) = delete;
   strided_tensor_iter(strided_tensor_iter&&) = default;
   strided_tensor_iter(Tensor& tensor)
@@ -243,7 +243,7 @@ inline void iterate(int64_t size){};
 
 template <typename Arg, typename... Args>
 inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
-  if (iter) {
+  if (iter.Overflow()) {
     iter.counter_[iter.dim_ - 1] += size;
   }
   iter.data_ = iter.data_ + size * iter.strides_[iter.dim_ - 1];
@@ -256,7 +256,7 @@ inline bool iterate_continue() {
 
 template <typename Arg, typename... Args>
 inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
-  if (iter) {
+  if (iter.Overflow()) {
     return iter.counter_[iter.dim_ - 1] < iter.sizes_[iter.dim_ - 1] &&
         iterate_continue(iter_tail...);
   }
@@ -278,7 +278,7 @@ inline void iterate_overflow(){};
 
 template <typename Arg, typename... Args>
 inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
-  if (iter) {
+  if (iter.Overflow()) {
     if (iter.counter_[iter.dim_ - 1] == iter.sizes_[iter.dim_ - 1]) {
       for (int64_t i = iter.dim_ - 1; i > 0; i--) {
         if (iter.counter_[i] == iter.sizes_[i]) {
@@ -432,9 +432,7 @@ inline void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
   if (!_apply_preamble({tensor1, tensor2}))
     return;
   if (_max_dim_tensors({tensor1, tensor2}) <= 8) {
-    auto iterator1 = strided_tensor_iter_fixed<scalar1, 8>(tensor1);
-    auto iterator2 = strided_tensor_iter_fixed<scalar2, 8>(tensor2);
-    if (iterator1.dim_ == 1 && iterator2.dim_ == 1) {
+    if (tensor1.is_contiguous() && tensor2.is_contiguous()) {
       apply_op(
           tensor1.numel(),
           0,
@@ -558,21 +556,21 @@ inline void CPU_tensor_parallel_apply2(
   if (!_apply_preamble({tensor1, tensor2}))
     return;
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    auto iterator1 = strided_tensor_iter_fixed<scalar1, 8>(tensor1);
-    auto iterator2 = strided_tensor_iter_fixed<scalar2, 8>(tensor2);
-    if (iterator1.dim_ == 1) {
+    if (tensor1.is_contiguous()) {
+      auto call = [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+        apply_op(
+            end - begin,
+            begin,
+            op,
+            strided_tensor_iter_fixed<scalar1, 8, false>(tensor1),
+            strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+      };
+
       parallel_for(
           0,
           tensor1.numel(),
           grain_size,
-          [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-            apply_op(
-                end - begin,
-                begin,
-                op,
-                strided_tensor_iter_fixed<scalar1, 8, false>(tensor1),
-                strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-          });
+          call);
     } else {
       parallel_for(
           0,
