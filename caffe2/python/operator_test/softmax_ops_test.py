@@ -9,7 +9,7 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
-
+import sys
 import unittest
 
 
@@ -84,6 +84,148 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             op=op,
             inputs=[Y, dY],
             reference=label_softmax_grad,
+        )
+
+    @given(
+        n=st.sampled_from([2, 4, 71, 103]),
+        D=st.sampled_from([4, 8, 64, 79, 256, 333]),
+        K=st.sampled_from([1, 2, 3, 4]),
+        engine=st.sampled_from([None, "CUDNN"]),
+        **hu.gcs
+    )
+    def test_random_softmax(self, n, D, K, engine, gc, dc):
+        # Reference implementation of random softmax with cross entropy loss
+        def random_softmax_sampling(T):
+            positive_indices = np.array([np.where(T[i] > 0)[0].tolist() for i in range(n)])
+            num_positive_labels = np.array([len(positive_indices[i]) for i in range(n)]).astype(np.int32)
+
+            input_samples = []
+            for i in range(n):
+                k = num_positive_labels[i]
+                if K <= k:
+                    input_samples.append(positive_indices[i][0:K])
+                else:
+                    negative_indices = [item for item in range(D) if item not in positive_indices[i]]
+                    sample = positive_indices[i] \
+                        + np.random.choice(negative_indices, size=K - k, replace=False).tolist()
+                    input_samples.append(sample)
+
+            input_samples = np.array(input_samples).astype(np.int32)
+            return input_samples, num_positive_labels
+
+        def label_random_softmax(X, T, input_samples):
+            positive_indices = np.array([np.where(T[i] > 0)[0].tolist() for i in range(n)])
+            num_positive_labels = np.array([len(positive_indices[i]) for i in range(n)]).astype(np.int32)
+
+            print("input samples: {}".format(input_samples))
+            print("input T: {}".format(T))
+            sampled_X = np.array([X[i][input_samples[i]] for i in range(n)])
+            sampled_T = np.array([T[i][input_samples[i]] for i in range(n)])
+            print("sampled T: {}".format(sampled_T))
+            sampled_probs = np.zeros((n, K))
+            # probs = np.ones((n, D))
+            for i in range(n):
+                rowmax = max(sampled_X[i, ])
+                # We need to subtract the max to avoid numerical issues
+                sampled_probs[i] = sampled_X[i] - rowmax
+                exps = np.exp(sampled_probs[i, ])
+                norm = sum(exps)
+                sampled_probs[i, ] = exps / norm
+
+            loss = sum(
+                -sampled_T[i][j] * np.log(max(sampled_probs[i][j], sys.float_info.min))
+                for i in range(n)
+                for j in range(K)
+            )
+
+            return [sampled_probs, sampled_T, loss / n, input_samples, num_positive_labels]
+
+        # n = number of examples, D = |labels|
+        # Initialize X and add 1e-2 for numerical stability
+        X = np.random.rand(n, D).astype(np.float32)
+        X = X + 1e-2
+        T = np.random.randint(2, size=(n, D)).astype(np.float32)
+        input_samples, _ = random_softmax_sampling(T)
+
+        op = core.CreateOperator(
+            "RandomSoftmax",
+            ["X", "T", "input_samples"],
+            ["sampled_probs", "sampled_labels", "loss", "samples", "num_positive_labels"],
+            num_sampled=K,
+            engine=engine,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, T, input_samples],
+            reference=label_random_softmax,
+        )
+
+    @given(
+        n=st.sampled_from([0, 2, 4, 71, 103, 555, 751, 1201]),
+        D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]),
+        K=st.sampled_from([1, 2, 3, 4]),
+        engine=st.sampled_from([None, "CUDNN"]),
+        **hu.gcs
+    )
+    def test_random_softmax_grad(self, n, D, K, engine, gc, dc):
+        def random_softmax_sampling(T):
+            positive_indices = np.array([np.where(T[i] > 0)[0].tolist() for i in range(n)])
+            num_positive_labels = np.array([len(positive_indices[i]) for i in range(n)]).astype(np.int32)
+
+            input_samples = []
+            for i in range(n):
+                k = num_positive_labels[i]
+                if K <= k:
+                    input_samples.append(positive_indices[i][0:K])
+                else:
+                    negative_indices = [item for item in range(D) if item not in positive_indices[i]]
+                    sample = positive_indices[i] \
+                        + np.random.choice(negative_indices, size=K - k, replace=False).tolist()
+                    input_samples.append(sample)
+
+            input_samples = np.array(input_samples).astype(np.int32)
+            return input_samples, num_positive_labels
+
+        def label_random_softmax_grad(sampled_P, sampled_T, samples, d_avg_loss, T, num_positive):
+            dX = np.zeros(T.shape).astype(np.float32)
+            sampled_dX = np.zeros(sampled_T.shape).astype(np.float32)
+            for i in range(n):
+                # d = np.sum(sampled_T[i, :])
+                d = num_positive[i]
+                sampled_dX[i, ] = (sampled_P[i, ] * d - sampled_T[i, ])
+                sampled_dX[i, ] *= d_avg_loss[0] / n
+            for i in range(n):
+                for j in range(K):
+                    dX[i][samples[i][j]] = sampled_dX[i][j]
+            print("dX: {}".format(dX))
+            return [dX]
+
+        # n = number of examples, D = |labels|
+        # Initialize X and add 1e-2 for numerical stability
+        # samples = np.array([np.random.choice(D, size=K, replace=False) for i in range(n)]).astype(np.int32)
+        sampled_P = np.random.rand(n, K).astype(np.float32)
+        T = np.random.randint(2, size=(n, D)).astype(np.float32)
+        samples, num_positive_labels = random_softmax_sampling(T)
+
+        sampled_P = sampled_P + 1e-2
+        sampled_T = np.array([T[i][samples[i]] for i in range(n)]).astype(np.float32)
+        d_avg_loss = np.random.rand(1).astype(np.float32)
+        # print("d_avg_loss: {}".format(d_avg_loss))
+
+        op = core.CreateOperator(
+            "RandomSoftmaxGradient",
+            ["sampled_P", "sampled_T", "samples", "d_avg_loss", "T", "num_positive_labels"],
+            ["dX"],
+            engine=engine,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[sampled_P, sampled_T, samples, d_avg_loss, T, num_positive_labels],
+            reference=label_random_softmax_grad,
         )
 
     @given(axis=st.integers(min_value=1, max_value=4),

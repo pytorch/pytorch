@@ -1,7 +1,11 @@
 #include <cfloat>
 #include <cub/block/block_reduce.cuh>
+#include <cub/cub.cuh>
+#include <limits>
+#include <numeric>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/random_softmax_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/softmax_with_loss_op.h"
 #include "caffe2/operators/spatial_softmax_with_loss_op.h"
@@ -226,6 +230,147 @@ __global__ void SoftmaxNormalizeKernel(
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int n = index / D;
     out[index] = probs[index] / scales[n];
+  }
+}
+
+// Input P: rows * cols size, label: rows * cols size
+// Output Y: size rows * 1,
+// where Y[i] = sum_j(-log(P[i][j]) * label[i][j])
+__global__ void CrossEntropyKernel(
+    const int N,
+    const int D,
+    const float* P,
+    const float* label,
+    float* Y) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+
+  for (int i = blockIdx.x; i < N; i += gridDim.x) {
+    float sum = 0.0;
+    for (int j = threadIdx.x; j < D; j += blockDim.x) {
+      int idx = i * D + j;
+      sum += -logf(fmaxf(P[idx], FLT_MIN)) * label[idx];
+    }
+    float tot = BlockReduce(temp_storage).Sum(sum);
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      Y[i] = tot;
+    }
+    __syncthreads();
+  }
+}
+
+// Count number of positive labels per training example
+// Input label_data: rows * cols size,
+// Output num_positive_labels: size rows * 1,
+// which is # of label_data == 1.0f per training example
+__global__ void RowwiseCountPositiveLabelsKernel(
+    const int rows,
+    const int cols,
+    const float* label_data,
+    int* num_positive_labels) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage temp_storage;
+
+  for (int i = blockIdx.x; i < rows; i += gridDim.x) {
+    int count = 0;
+    for (int j = threadIdx.x; j < cols; j += blockDim.x) {
+      int idx = i * cols + j;
+      if (label_data[idx] >= 0.5f) {
+        count += 1;
+      }
+    }
+    count = BlockReduce(temp_storage).Sum(count);
+    if (threadIdx.x == 0) {
+      num_positive_labels[i] = count;
+    }
+    __syncthreads();
+  }
+}
+
+// For each training example, sample K classes:
+//    1. keep all classes where label is positive, and
+//    2. randomly sample K - num_positive_labels
+//      out of D - num_positive_labels negative label classes
+// based on Knuth selection sampling technique
+// (Algorithm S, The Art of Computer Programming 3.4.2)
+// Input:
+//    label_data, size N * D,
+//    rand_data, size N * D,
+//    num_postive_labels, size N * 1,
+//      which stores num positive labels for each training example
+// Output: sample, size N * K, which stores classes that are sampled
+__global__ void RandomSoftmaxSamplingKernel(
+    const int N, // batch size
+    const int D, // num all classes
+    const int K, // num classes to sample
+    const float* rand_data,
+    const float* label_data,
+    const int* num_positive_labels,
+    int* samples) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    int offset = i * D;
+    int t = 0; // total negative labels dealt with
+    int m = 0; // number of negative labels items selected so far
+    int j = 0; // number of labels visited
+    int k = num_positive_labels[i]; // number of positive labels
+    int k0 = 0; // num true labels selected so far
+    while (m < K - k) {
+      // classes which have positive label are always sampled
+      if (label_data[offset + j] >= 0.5f) {
+        samples[i * K + k0] = j;
+        k0++;
+      } else {
+        // pool size: D - k (total num negatives), sample size: K - k
+        float u = rand_data[offset + j];
+        if ((D - k - t) * u < K - k - m) {
+          samples[i * K + k + m] = j;
+          m++;
+        }
+        t++;
+      }
+      j++;
+    }
+
+    // after K - k negative label classes has been sampled,
+    // continue visiting the row to select the rest of positive label classes
+    while (j < D && k0 < k) {
+      if (label_data[offset + j] >= 0.5f) {
+        samples[i * K + k0] = j;
+        k0++;
+      }
+      j++;
+    }
+  }
+}
+
+// Sample the input, of size N * D
+// based on sampled indices int* samples, size N * K
+// Output is of size N * K,
+__global__ void SampleInputKernel(
+    const int N,
+    const int D,
+    const int K,
+    const int* samples,
+    const float* in,
+    float* out) {
+  CUDA_1D_KERNEL_LOOP(i, N * K) {
+    CUDA_KERNEL_ASSERT(samples[i] >= 0 && samples[i] < D);
+    int row = i / K;
+    out[i] = in[row * D + samples[i]];
+  }
+}
+
+__global__ void SampleOutputKernel(
+    const int N,
+    const int D,
+    const int K,
+    const int* samples,
+    const float* in,
+    float* out) {
+  CUDA_1D_KERNEL_LOOP(i, N * K) {
+    int row = i / K;
+    out[row * D + samples[i]] = in[i];
   }
 }
 
@@ -748,6 +893,7 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 #define SOFTMAX_NUM_THREADS 128
+#define RANDOM_SOFTMAX_NUM_THREADS 128
 
 // The softmax gradient kernel. This kernel has to be called with the number of
 // threads per block being no more than SOFTMAX_NUM_THREADS.
@@ -784,6 +930,19 @@ __global__ void softmax_gradient_kernel(
     dX[i] = Y[i] * (dY[i] - tmp);
   }
 }
+
+__global__ void random_softmax_gradient_kernel(
+    const int rows,
+    const int cols,
+    const float* P_data,
+    const float* label_data,
+    const int* num_positive_labels,
+    float* dX) {
+  CUDA_1D_KERNEL_LOOP(idx, rows * cols) {
+    int i = idx / cols;
+    dX[idx] = P_data[idx] * num_positive_labels[i] - label_data[idx];
+  }
+}
 } // namespace
 
 template <>
@@ -807,6 +966,214 @@ bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
+// Implementation for the CUDA context.
+template <>
+bool RandomSoftmaxOp<float, CUDAContext>::RunOnDevice() {
+  auto& X = Input(0); // Logits
+  auto& T = Input(1); // Labels/Targets
+  CAFFE_ENFORCE(T.sizes() == X.sizes());
+
+  const auto canonical_axis = X.canonical_axis_index(axis_);
+  const int N = X.size_to_dim(canonical_axis);
+  const int D = X.size_from_dim(canonical_axis);
+  const int K = num_sampled_;
+
+  auto* sampled_P = Output(
+      0,
+      vector<int64_t>{N, K},
+      at::dtype<float>()); // sampled_softmax, shape (N, K)
+  auto* sampled_T = Output(
+      1,
+      vector<int64_t>{N, K},
+      at::dtype<float>()); // sampled_labels, shape (N, K)
+  auto* avg_loss =
+      Output(2, vector<int64_t>(), at::dtype<float>()); // Average loss, scalar
+  auto* samples = Output(
+      3,
+      vector<int64_t>{N, K},
+      at::dtype<int>()); // shape: (N, K), stored sampled classes. 0 <= elem < D
+  auto* num_positive_labels =
+      Output(4, vector<int64_t>{N}, at::dtype<int>()); // shape: N
+
+  float* sampled_P_data = sampled_P->template mutable_data<float>();
+  float* sampled_label_data = sampled_T->template mutable_data<float>();
+  float* avg_loss_data = avg_loss->template mutable_data<float>();
+  int* samples_data = samples->template mutable_data<int>();
+
+  if (N == 0) {
+    return true;
+  }
+
+  // Count positive labels per row
+  RowwiseCountPositiveLabelsKernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, D, T.data<float>(), num_positive_labels->mutable_data<int>());
+
+  if (InputSize() >= 3) {
+    auto& input_samples = Input(2);
+    context_.CopySameDevice<int>(
+        N * K, input_samples.data<int>(), samples_data);
+  } else {
+    if (!rand_.defined()) {
+      rand_ = caffe2::empty({N * D}, at::dtype<float>().device(CUDA));
+    } else if (rand_.numel() != N * D) {
+      rand_.Resize(N * D);
+    }
+
+    float* rand_data = rand_.mutable_data<float>();
+    CURAND_ENFORCE(
+        curandGenerateUniform(context_.curand_generator(), rand_data, N * D));
+
+    // sample classes:
+    //   positive label classes per training example are always sampled
+    //   sample K - k (k is num_positive_labels) negative label classes
+    RandomSoftmaxSamplingKernel<<<
+        CAFFE_GET_BLOCKS(N),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        N,
+        D,
+        K,
+        rand_data,
+        T.data<float>(),
+        num_positive_labels->data<int>(),
+        samples_data);
+  }
+
+  // sample input
+  SampleInputKernel<<<
+      CAFFE_GET_BLOCKS(N * K),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, D, K, samples_data, X.data<float>(), sampled_P_data);
+  SampleInputKernel<<<
+      CAFFE_GET_BLOCKS(N * K),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, D, K, samples_data, T.data<float>(), sampled_label_data);
+
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({K}, at::dtype<float>().device(CUDA));
+    math::Set<float, CUDAContext>(
+        K, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != K) {
+    sum_multiplier_.Resize(K);
+    math::Set<float, CUDAContext>(
+        K, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  }
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CUDA));
+  } else if (scale_.numel() != N) {
+    scale_.Resize(N);
+  }
+
+  if (!rowmax_.defined()) {
+    rowmax_ = caffe2::empty({N}, at::dtype<float>().device(CUDA));
+  } else if (rowmax_.numel() != N) {
+    rowmax_.Resize(N);
+  }
+
+  Softmax(
+      N,
+      K,
+      sampled_P->data<float>(),
+      sum_multiplier_.data<float>(),
+      scale_.mutable_data<float>(),
+      rowmax_.mutable_data<float>(),
+      sampled_P_data,
+      false,
+      &context_);
+
+  // Then compute cross entropy
+  // Repurpose scale to store cross entropy loss per training example
+  auto* scale = scale_.mutable_data<float>();
+  CrossEntropyKernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, K, sampled_P_data, sampled_label_data, scale);
+
+  // Sum of all losses
+  math::Sum<float, CUDAContext>(N, scale, avg_loss_data, &context_);
+  // Average of input batch size
+  math::Scale<float, float, CUDAContext>(
+      1, 1.0 / N, avg_loss_data, avg_loss_data, &context_);
+
+  return true;
+}
+
+template <>
+bool RandomSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& sampled_P = Input(0); // sampled_labels
+  auto& sampled_T = Input(1); // sampled_softmax
+  auto& samples = Input(2); // samples
+  auto& d_avg_loss = Input(3); // gradient of avg_loss
+  auto& T = Input(4); // labels
+  auto& num_positive_labels = Input(5); // num positive labels per row
+  auto* dX = Output(0, T.sizes(), at::dtype<float>());
+
+  const auto canonical_axis = sampled_P.canonical_axis_index(axis_);
+  const int N = sampled_P.size_to_dim(canonical_axis);
+  const int K = sampled_P.size_from_dim(canonical_axis);
+  const int D = T.size_from_dim(canonical_axis);
+
+  float* dX_data = dX->mutable_data<float>();
+  if (N == 0) {
+    return true;
+  }
+
+  if (!sampled_dX_.defined()) {
+    sampled_dX_ = caffe2::empty({N * K}, at::dtype<float>().device(CUDA));
+  } else if (sampled_dX_.numel() != sampled_P.numel()) {
+    sampled_dX_.Resize(N * K);
+  }
+  float* sampled_dX_data = sampled_dX_.mutable_data<float>();
+
+  random_softmax_gradient_kernel<<<
+      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+      RANDOM_SOFTMAX_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      K,
+      sampled_P.data<float>(),
+      sampled_T.data<float>(),
+      num_positive_labels.data<int>(),
+      sampled_dX_data);
+
+  math::Scale<float, float, CUDAContext>(
+      sampled_dX_.size(),
+      1.0f / N,
+      sampled_dX_.data<float>(),
+      sampled_dX_data,
+      &context_);
+
+  math::Scale<float, float, CUDAContext>(
+      sampled_dX_.size(),
+      d_avg_loss.data<float>(),
+      sampled_dX_.data<float>(),
+      sampled_dX_data,
+      &context_);
+
+  math::Set<float, CUDAContext>(T.size(), 0.0f, dX_data, &context_);
+
+  SampleOutputKernel<<<
+      CAFFE_GET_BLOCKS(N * K),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N, D, K, samples.data<int>(), sampled_dX_data, dX_data);
+
+  return true;
+}
+
 REGISTER_CUDA_OPERATOR(SoftmaxWithLoss,
                        SoftmaxWithLossOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SoftmaxWithLossGradient,
@@ -819,5 +1186,8 @@ REGISTER_CUDA_OPERATOR(
     SpatialSoftmaxWithLossGradientOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(Softmax, SoftmaxOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CUDAContext>);
-
+REGISTER_CUDA_OPERATOR(RandomSoftmax, RandomSoftmaxOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    RandomSoftmaxGradient,
+    RandomSoftmaxGradientOp<float, CUDAContext>);
 } // namespace caffe2
