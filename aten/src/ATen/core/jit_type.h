@@ -14,6 +14,15 @@
 #include <iostream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Module;
+struct Method;
+}
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
 #define C10_FORALL_TYPES(_) \
@@ -35,6 +44,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
+_(UserType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1068,4 +1078,111 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+/**
+ * User Defined Types
+ */
+
+struct UserType;
+using UserTypePtr = std::shared_ptr<UserType>;
+using ::torch::jit::script::Module;
+using ::torch::jit::script::Method;
+
+// This represents a user-defined type in TorchScript.
+struct CAFFE2_API UserType : public Type {
+  // Create a user type and register it globally.
+  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
+  // returns nullptr if there is no type with that name
+  static UserTypePtr get(const std::string& name);
+
+  DEFINE_IS_SUBCLASS(UserType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<UserType>()) {
+      return typename_ == user_rhs->typename_;
+    }
+    return false;
+  }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    // XXX: We do not have inheritance implemented, only types that are the
+    // same can subtype from each other.
+    return *this == *rhs;
+  }
+  std::string str() const override {
+    return std::string("UserType<") + typename_ + ">";
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    const auto it = std::find_if(
+        attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
+          return attr.name == name;
+        });
+    if (it == attributes_.cend()) {
+      return nullptr;
+    }
+
+    return it->type;
+  }
+
+  Method* getMethod(const std::string& name) const;
+
+  std::string name() const {
+    return typename_;
+  }
+
+  size_t numAttributes() const {
+    return attributes_.size();
+  }
+
+  // Attributes are stored in a specific slot at runtime for effiency.
+  // When emitting instructions we specify the slot so that attribute access is
+  // a constant lookup
+  size_t getAttributeSlot(const std::string& name) const {
+    size_t slot = 0;
+    for (const auto& attr : attributes_) {
+      if (name == attr.name) {
+        return slot;
+      }
+      slot++;
+    }
+    throw std::runtime_error("Couldn't find attribute: " + name);
+  }
+
+  bool hasAttribute(const std::string& name) const {
+    return std::find_if(
+               attributes_.cbegin(),
+               attributes_.cend(),
+               [&](const Attribute& attr) { return attr.name == name; }) !=
+        attributes_.cend();
+  }
+
+  void addAttribute(const std::string& name, TypePtr type) {
+    attributes_.emplace_back(name, type);
+  }
+
+  static const TypeKind Kind = TypeKind::UserType;
+
+ private:
+  UserType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::UserType),
+        typename_(std::move(name)),
+        module_(std::move(module)) {}
+
+  // Name of type (note that this has to be globally unique).
+  std::string typename_;
+
+  // Mapping of attribute names -> their type.
+  // NOTE: this does not contain methods, which are stored in the module
+  // TODO: once modules support arbitrary ivalue attributes, we don't need this
+  // anymore.
+  struct Attribute {
+    Attribute(std::string n, TypePtr t)
+        : name(std::move(n)), type(std::move(t)) {}
+    std::string name;
+    TypePtr type;
+  };
+  std::vector<Attribute> attributes_;
+  // Holds method attributes
+  std::shared_ptr<Module> module_;
+
+};
 } // namespace c10

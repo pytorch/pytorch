@@ -6825,6 +6825,15 @@ class _TestTorchMixin(object):
         out.fill_(0.123)
         self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
 
+    def test_t(self):
+        x = torch.arange(4)
+        self.assertEqual(x, x.t())
+        x = torch.rand((2, 2))
+        self.assertEqual(x.t(), x.transpose(0, 1))
+        x = torch.rand((2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, 'expects a 1D or 2D tensor, but self is 3D'):
+            x.t()
+
     def test_take(self):
         def check(src, idx):
             expected = src.contiguous().view(-1).index_select(
