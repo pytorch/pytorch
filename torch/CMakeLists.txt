@@ -1,6 +1,6 @@
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (NOT BUILD_TORCH)
-    return()
+return()
   endif()
 else()
   cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
@@ -29,7 +29,7 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-# Generate files
+#Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
 configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
@@ -177,7 +177,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/user_type.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
@@ -268,7 +268,7 @@ endif()
 
 target_compile_definitions(torch PUBLIC _THP_CORE)
 
-# until they can be unified, keep these lists synced with setup.py
+#until they can be unified, keep these lists synced with setup.py
 if(MSVC)
   if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
     set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
@@ -303,15 +303,15 @@ else()
     -Wno-missing-field-initializers
     -Wno-write-strings
     -Wno-unknown-pragmas
-    # Clang has an unfixed bug leading to spurious missing braces
-    # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+#Clang has an unfixed bug leading to spurious missing braces
+#warnings, see https: // bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
     )
 
   if(NOT APPLE)
     target_compile_options(torch PRIVATE
-      # Considered to be flaky.  See the discussion at
-      # https://github.com/pytorch/pytorch/pull/9608
+#Considered to be flaky.See the discussion at
+#https: // github.com/pytorch/pytorch/pull/9608
       -Wno-maybe-uninitialized)
   endif()
 
@@ -389,7 +389,7 @@ endif()
 
 
 set(TH_CPU_INCLUDE
-  # dense
+#dense
   ${TORCH_ROOT}/aten/src/TH
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/TH
   ${TORCH_ROOT}/aten/src
@@ -416,8 +416,8 @@ if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
   set_property(TARGET torch PROPERTY CXX_STANDARD 11)
 endif()
 
-# Prevent the unused functions being optimized away
-# Otherwise torch.dll will be linked without caffe2_gpu.dll
+#Prevent the unused functions being optimized away
+#Otherwise torch.dll will be linked without caffe2_gpu.dll
 if (MSVC)
   set_target_properties(torch PROPERTIES LINK_FLAGS "/OPT:NOREF")
 endif(MSVC)
@@ -464,7 +464,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 endif()
 
-# CMake config for external projects.
+#CMake config for external projects.
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
@@ -641,11 +641,11 @@ if (BUILD_PYTHON)
   if (USE_CUDNN)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
 
-    # NOTE: these are at the front, in case there's another cuDNN in
-    # CUDA path.
-    # Basically, this is the case where $CUDA_HOME/lib64 has an old or
-    # incompatible libcudnn.so, which we can inadvertently link to if
-    # we're not careful.
+#NOTE : these are at the front, in case there's another cuDNN in
+#CUDA path.
+#Basically, this is the case where $CUDA_HOME / lib64 has an old or
+#incompatible libcudnn.so, which we can inadvertently link to if
+#we're not careful.
     list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
     list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
   endif()
@@ -705,7 +705,7 @@ if (BUILD_PYTHON)
   endif()
 
   add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
-  # For Declarations.yaml dependency
+#For Declarations.yaml dependency
   add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
   add_custom_command(
     OUTPUT
