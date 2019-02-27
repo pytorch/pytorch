@@ -4279,16 +4279,30 @@ a")
         # is flow invariant, we set any Tensor that can alias a resized Tensor
         # to the base Tensor Type, without size information.
 
+        # testing that value which is an input of a graph gets handled
+        def out_op_graph_input():
+            @torch.jit.script
+            def test(x, y, z):
+                torch.mul(x, y, out=z)
+                return z
+
+            torch._C._jit_pass_shape_analysis(
+                test.graph, (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            self.assertTrue(next(test.graph.outputs()).type() == TensorType.get())
+        out_op_graph_input()
+
         def test_resize():
             @torch.jit.script
             def test(x):
-                b = x + 1
-                f = [1]
-                before_resize_alias = b.sub_(1)
-                for i in range(int(int(torch.rand(1) * 10))):
-                    f.append(i)
-                b.resize_(f)
-                after_resize_alias = b.add_(1)
+                after_resize_alias = torch.zeros([2])
+                for _i in range(5):
+                    b = x + 1
+                    f = [1]
+                    before_resize_alias = b.sub_(1)
+                    # for i in range(10):
+                    f.append(1)
+                    b.resize_(f)
+                    after_resize_alias = b.add_(1)
                 return after_resize_alias
 
             g = test.graph
