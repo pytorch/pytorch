@@ -178,28 +178,33 @@ def _try_get_scalar_type(*args):
 # READ ME BEFORE EDITING _default_onnx_opset_version:
 #
 # The variable below controls which ONNX operator set version we are
-# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
-# change occurred in version 8.  As long as this variable < 8, you can
-# export models targeting the old behavior.  However, if you bump
+# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
+# change occurred in version 8. As long as this variable < 8, you can
+# export models targeting the old behavior. However, if you bump
 # this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# you MUST adjust any symbolic affected by breaking changes. The ONNX
 # spec publishes a *comprehensive* list of BC-breaking changes for every
 # operator revision at:
 #
 #   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
 #
 # Please be sure to go through and check all of our implementations here before
-# increasing this number.  This includes symbolic definitions NOT in this
+# increasing this number. This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
+#
+# Besides, opset_version can be specified in the invocation of export()
+# and export_to_pretty_string(), and _export_onnx_opset_version will be set
+# and the symbolic functions should check it to determine the behavior
+# of the exporter.
 
-_default_onnx_opset_version = 9
+_default_onnx_opset_version = 10
 _export_onnx_opset_version = _default_onnx_opset_version
 _onnx_stable_opsets = [9]
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _export_onnx_opset_version:
+    if opset_version == _default_onnx_opset_version:
         return
     if opset_version in _onnx_stable_opsets:
         _export_onnx_opset_version = opset_version
