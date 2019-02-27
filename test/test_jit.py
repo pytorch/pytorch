@@ -4968,7 +4968,7 @@ a")
         @torch.jit.script
         def foo(a):
             return a.t()
-        s = Variable(torch.rand(10))
+        s = Variable(torch.rand(5, 5, 5))
         # XXX: this should stay quiet in stay propagation and only fail in the interpreter
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             foo(s)
@@ -13178,7 +13178,7 @@ class TestAsync(JitTestCase):
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
+        with self.assertRaisesRegex(Exception, 'expects a 1D or 2D tensor'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -13455,17 +13455,17 @@ class TestClassType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
-                def getFoo(self):
+                def getFooTest(self):
                     return self.foo
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
-                return foo.getFoo()
+                foo = FooTest(x)
+                return foo.getFooTest()
 
             input = torch.ones(2, 3)
             self.assertEqual(fn(input), input)
@@ -13474,13 +13474,13 @@ class TestClassType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return foo.foo
 
             input = torch.ones(2, 3)
@@ -13490,20 +13490,20 @@ class TestClassType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     # type: (int)
                     self.foo = x
 
-                def incFoo(self, y):
+                def incFooTest(self, y):
                     # type: (int)
                     self.foo = self.foo + y
 
             @torch.jit.script
             def fn(x):
                 # type: (int)
-                foo = Foo(x)
-                foo.incFoo(2)
+                foo = FooTest(x)
+                foo.incFooTest(2)
                 return foo.foo
 
             self.assertEqual(fn(1), 3)
@@ -13513,7 +13513,7 @@ class TestClassType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
                         self.foo = 10  # should error since int != Tensor
@@ -13523,7 +13523,7 @@ class TestClassType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13535,7 +13535,7 @@ class TestClassType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13547,14 +13547,14 @@ class TestClassType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         # type: (bool)
                         self.foo = x
 
                 @torch.jit.script
                 def fn(x):
-                    Foo(x)
+                    FooTest(x)
 
                 fn(2)
 
@@ -13563,7 +13563,7 @@ class TestClassType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         if True:
                             self.attr = x
@@ -13572,18 +13572,18 @@ class TestClassType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.attr = x
 
             @torch.jit.script
             def fn(foo):
-                # type: (Foo)
+                # type: (FooTest)
                 return foo.attr
 
             @torch.jit.script
             def fn2(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return fn(foo)
 
             input = torch.ones(1)
