@@ -148,7 +148,7 @@ class RNNBase(Module):
         if not self._transposed_weights:
             with torch.no_grad():
                 self._transposed_weights = torch.mkldnn_rnn_transpose_weight(
-                    self._flat_weights, (4 if self.bias else 2), get_mkldnn_mode(self.mode),
+                    self.get_flat_weights(), (4 if self.bias else 2), get_mkldnn_mode(self.mode),
                     self.num_layers, self.bidirectional)
 
     def _apply(self, fn):
@@ -549,9 +549,13 @@ class LSTM(RNNBase):
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
 
+        is_tranposed = self.use_transposed_weights and not self.training
+        self.transpose_paramters(is_tranposed)
+        _weights = self._transposed_weights if is_tranposed else self.get_flat_weights()
+
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, _weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
             result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
