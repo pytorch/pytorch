@@ -303,6 +303,8 @@ def init_process_group(backend,
         world_size (int, optional): Number of processes participating in
                                     the job.
         rank (int, optional): Rank of the current process.
+        store(Store, optional): Rendevous key/value store as an alternative
+                                to other init methods.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -329,6 +331,10 @@ def init_process_group(backend,
     world_size = kwargs.pop('world_size', -1)
     group_name = kwargs.pop('group_name', '')
     rank = kwargs.pop('rank', -1)
+    store = kwargs.pop('store', None)
+    if store is not None:
+        assert world_size > 0, 'world_size needs to be positive'
+        assert rank >= 0, 'rank needs to be non-negative'
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
@@ -351,7 +357,8 @@ def init_process_group(backend,
         elif world_size != -1:
             url += "?world_size={}".format(world_size)
 
-        store, rank, world_size = next(rendezvous(url))
+        if store is None:
+            store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
