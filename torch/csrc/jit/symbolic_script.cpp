@@ -348,12 +348,13 @@ const std::vector<std::string> functions = {
             dim1 = mat1.dim()
             dim2 = mat2.dim()
             dim_out = len(out_size)
-            if dim1 + dim2 == dim_out:
+            if dim1 == 0 or dim2 == 0:
+                out = mat1 * mat2
+            elif dim1 + dim2 == dim_out:
                 if dim2 == 1:
                     target_dim2 = 0
                 else:
                     target_dim2 = -2
-
                 out = torch.matmul(mat1.unsqueeze(dim1), mat2.unsqueeze(target_dim2))
             elif dim_out == dim1 - dim2:
                 out = torch.matmul(mat1, mat2.unsqueeze(dim2)).squeeze(-1)
@@ -669,6 +670,18 @@ const std::vector<std::string> functions = {
                 return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None
 
             return output, backward
+
+        def dropout(input,
+                    p: float,
+                    train: bool):
+            mask = torch.empty_like(input)
+            mask.bernoulli_(1 - p)
+            res = mask * input / (1.0 - p)
+
+            def backward(grad_output):
+                grad_input = grad_output * mask / (1.0 - p)
+                return grad_input, None, None
+            return res, backward
 
         def embedding(weight,
                       indices,
