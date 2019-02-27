@@ -1327,40 +1327,6 @@ class TestJit(JitTestCase):
         trace, _ = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpectedGraph(trace)
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    def test_conv_tracing_grad(self):
-        # conv1d/2d/3d grad are tested in script mode. But they are
-        # recorded as _convolution in tracing mode.
-        for d in [1, 2, 3]:
-            for func_name in ['Conv{}d'.format(d), 'ConvTranspose{}d'.format(d)]:
-                if d == 1:
-                    input_size = (20, 16, 50)
-                    params = (16, 33, 3)
-                elif d == 2:
-                    input_size = (20, 16, 50, 40)
-                    params = (16, 13, 3)
-                else:
-                    input_size = (20, 16, 10, 50, 100)
-                    params = (16, 33, 3)
-
-                x = torch.rand(input_size).requires_grad_()
-                for has_bias in [False, True]:
-                    for dilation in [1, 2]:
-                        func = getattr(nn, func_name)(*params, bias=has_bias, dilation=dilation)
-                        for device in ('cpu', 'cuda:0'):
-                            func = func.to(device)
-                            x = x.to(device)
-
-                            out_ref = func(x)
-                            traced_func = torch.jit.trace(func, x)
-
-                            out = traced_func(x)
-                            self.assertEqual(out, out_ref)
-
-                            grad_ref = torch.autograd.grad(out_ref.sum(), x)
-                            grad = torch.autograd.grad(out.sum(), x)
-                            self.assertEqual(grad, grad_ref)
-
     def test_repeated_input(self):
         def fn(a, b):
             return a + b
