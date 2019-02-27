@@ -78,14 +78,14 @@ class AliasDb {
 
     T<Element*> aElements;
     for (const Value* v : a) {
-      if (shouldAnnotate(v)) {
+      if (elementMap_.count(v)) {
         aElements.insert(elementMap_.at(v));
       }
     }
 
     U<Element*> bElements;
     for (const Value* v : b) {
-      if (shouldAnnotate(v)) {
+      if (elementMap_.count(v)) {
         bElements.insert(elementMap_.at(v));
       }
     }
