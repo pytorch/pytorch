@@ -1006,8 +1006,103 @@ A DifferentiableGraphOp combines an explicit forward Graph `f` with a paired bac
 * inserted by passes
 
 ### Handling Mutability ###
+#### Aliasing and mutation in the PyTorch API
+In PyTorch, tensors are reference types. Operators can return "views" of the input tensor, creating a new tensor object that shares the same underlying storage as the original: 
+```py
+a = torch.rand(2, 3)
+b = a
+# At this point, `a` and `b` share their storage.
+c = b[0]
+# `c` is shares storage with `a` and `b`, but only sees a slice of the allocated memory.
+```
 
-TODO
+Some operators will *mutate* one or more of their operands in-place. These are typically denoted with a trailing underscore, or by taking an `out` argument as input:
+```py
+a = torch.zeros(2, 3)
+b = torch.ones(2, 3)
+a.add_(b)  # in-place add, so `a` is modified.
+torch.add(a, b, out=a) # another way to express the same thing
+```
+
+#### Aliasing and mutation annotations in FunctionSchema
+The JIT's `FunctionSchema`  allows operator writers to add annotations specifying the aliasing and mutation behavior of an operator. Optimization passes will use this information to determine whether transformations are semantics-preserving. This section provides a description of the alias annotation language, assuming that the reader already knows what `FunctionSchema` looks like.
+
+First, here is a pure function which always returns new memory:
+```
+add(Tensor a, Tensor b) -> Tensor
+```
+The type `Tensor` with no annotations is sugar for "fresh, read-only `Tensor`". So since there are no annotations on anything, we know that this operator creates no aliases and mutates no inputs.
+
+Next, a function that returns an alias to one of the inputs.:
+```
+view(Tensor(a) self, int[] size) -> Tensor(a)
+```
+The shared `(a)` annotation on `self` and the output signify that the tensors will share the same storage. Another way to say is that `self` and the output belong to the same "alias set" `a`.
+
+Now a function that writes in-place to one of the inputs (note the trailing underscore):
+```
+add_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+```
+The `!` annotation means that this operator writes to the specified alias set (in this case `a`).
+
+Finally, sometimes we don't have enough information to provide an exact alias annotation. For example, here is the operator to extract an element from a list:
+```
+list_select(Tensor[] list, int idx) -> Tensor(*)
+```
+Note the alias set `*`. This is the **wildcard set**. Optimization passes must assume that values in the wildcard set may alias any other value in the graph. This behavior is conservative and will disallow optimizations, but is guaranteed to be safe. In most cases, people shouldn't be writing operators with wildcard annotations. They are used as temporary workaround for when our alias analysis isn't sophisticated enough to understand something yet but we don't want to block feature development.
+
+This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`. 
+
+#### Alias Analysis in the IR
+An alias analysis pass consumes the per-operator aliasing information to construct a database of aliasing and mutation relationships in a graph, called `AliasDb`. This section focuses on the alias analysis pass; the public interface to `AliasDb` will be described later.
+
+The core data structure in the AliasDb is called `AliasTracker`, which is a DAG where the edges are "may point to" relationships and the  vertices are aliasing `Element`s. The most common kind of `Element` is an IR `Value`, but there are other kinds of things that can alias that aren't first-class `Value`s in the IR, like wildcards or contained types (such as in a list or tuple).
+
+The alias analysis pass walks through the nodes in a graph, examining schema `AliasInfo`  objects and adding edges in the `AliasTracker` DAG accordingly. For example, for the node:
+```
+%output : Tensor = aten::view(%self, %size)
+```
+the analyzer will examine the schema for `view()`:
+```
+view(Tensor(a) self, int[] size) -> Tensor(a)
+```
+and add an edge from `%output` to `%self`. The alias analysis pass is flow-insensitive, as we are only adding "points-to" edges when processing a node. 
+
+As a more involved example, the following TorchScript snippet:
+```py
+@torch.jit.script
+def foo(a : Tensor, b : Tensor):
+	c = 2 * b
+  a += 1
+  if a.max() > 4:
+    r = a[0]
+  else:
+    r = b[0]
+  return c, r
+```
+Will produce a graph like this:
+
+![AliasTracker graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph.png)
+
+A few things to note:
+- "Graph Input Element" is an example of an `Element` that isn't a first-class `Value`. Alias analysis happens on a per-function level, so we don't necessarily know the aliasing relationships of the inputs. The only safe assumption is that `a` and `b` may alias each other, so they point to a special `Element` that describes "the world outside of this function".
+- `r` may point to either `a` or `b`, depending on the runtime value of `a.max()`.  A given `Element` may point to multiple other `Element`s. This can happen if there is branching control flow (like in this example), or with certain ops like `contiguous()`, which either returns an alias to the input or a fresh Tensor, depending on the runtime characteristics of the input.
+- `c` is a fresh tensor (i.e. it doesn't point to anything) since it was created using the pure operation `2 * b`.
+
+The last point demonstrates a key concept: *leaf elements uniquely describe memory locations*. Since a leaf element doesn't point to anything, the memory that backs it must have been freshly allocated by some op. Thus we can use leaf elements to represent disjoint memory locations.
+
+So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` DAG and figure out if `a` and `b` share any leaf nodes. If they do, then we know `a` and `b` might point to the same memory location, i.e. `a` and `b` may alias. This kind of query is common enough that `AliasTracker` does path compression to speed up leaf-finding, so that aliasing queries can be serviced in amortized constant time.
+
+#### Writing optimization passes with `AliasDb`
+`AliasDb` provides a high-level interface to help people write mutability-safe optimization passes. 
+
+In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a give memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards). 
+
+However, reordering of reads across writes *is allowed* if we can prove that the read cannot alias the thing being written. This happens whenever we have tensors that come from functions that produce fresh results (common) inside of the function. It also happens whenever the creation of the mutable tensor is seen in the function (so it gets assigned a fresh variable), and all of its writes occur in that function.
+
+The intention is that if you only mutate the graph through `AliasDb`, you don't have to think about mutability/aliasing at all in your pass. As we write more passes, the interface to `AliasDb` will get richer (one example is transforming an in-place operation to its pure equivalent if we can prove it's safe).
+
+`AliasDb` also provides lower level APIs that users of LLVM's alias analysis pass would be familiar with, such as querying whether any two `Value`s may alias.
 
 TODO: differentiation, symbolic autograd,
 TODO: fusion, operators
