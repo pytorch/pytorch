@@ -424,4 +424,43 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
+namespace {
+class UserTypeRegistry {
+ public:
+  void registerType(std::string name, UserTypePtr type) {
+    std::lock_guard<std::mutex> g(mutex_);
+    // TODO: new type registrations will override the old ones. Is this safe?
+    reg_[name] = type;
+  }
+
+  UserTypePtr getType(const std::string& name) {
+    std::lock_guard<std::mutex> g(mutex_);
+    if (reg_.count(name)) {
+      return reg_.at(name);
+    }
+    return nullptr;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<std::string, UserTypePtr> reg_;
+};
+
+UserTypeRegistry& getRegistry() {
+  static UserTypeRegistry r;
+  return r;
+}
+} // namespace
+
+UserTypePtr UserType::create(
+    const std::string& name,
+    std::shared_ptr<Module> module) {
+  auto ptr = UserTypePtr(new UserType(name, std::move(module)));
+  getRegistry().registerType(name, ptr);
+  return ptr;
+}
+
+UserTypePtr UserType::get(const std::string& name) {
+  return getRegistry().getType(name);
+}
 } // namespace c10

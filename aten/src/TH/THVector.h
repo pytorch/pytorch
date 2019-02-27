@@ -11,4 +11,7 @@
 #include <TH/generic/THVector.h>
 #include <TH/THGenerateAllTypes.h>
 
+#include <TH/generic/THVector.h>
+#include <TH/THGenerateHalfType.h>
+
 #endif // TH_VECTOR_INC
