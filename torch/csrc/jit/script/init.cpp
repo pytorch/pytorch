@@ -311,7 +311,7 @@ struct ModuleValue : public SugaredValue {
     if (NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
     } else if (Method* v = module->find_method(field)) {
-      return std::make_shared<MethodValue>(module, *v);
+      return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedParameter* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
@@ -523,6 +523,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       throw ErrorReport()
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
+    }
+    const auto script_class_type =
+        py::module::import("torch.jit").attr("ScriptClass");
+    const bool is_user_type = py::isinstance(obj, script_class_type);
+    if (is_user_type) {
+      const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
+      auto userType = UserType::get(classname);
+      AT_ASSERT(userType);
+      return std::make_shared<UserTypeValue>(std::move(userType));
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
@@ -956,6 +965,26 @@ void initJitScriptBindings(PyObject* module) {
             def.range(), method.getSchema(), def.name().name(), defaults));
         didFinishEmitModule(mod);
         return mod;
+      });
+
+  m.def(
+      "_jit_script_class_compile",
+      [](std::shared_ptr<Module> module,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
+        auto userType = UserType::create(classDef.name().name(), module);
+        std::vector<Resolver> rcbs;
+        std::vector<Def> methodDefs;
+        for (const auto& def : classDef.defs()) {
+          methodDefs.push_back(def);
+          rcbs.push_back(pythonResolver(rcb));
+        }
+        defineMethodsInModule(
+            module,
+            methodDefs,
+            rcbs,
+            std::make_shared<UserTypeValue>(userType));
+        return module;
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

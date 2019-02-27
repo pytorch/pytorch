@@ -116,7 +116,7 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -132,10 +132,10 @@ class TestAdadelta(serial.SerializedTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-                self.assertReferenceChecks(gc, op, [
-                    param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
-                    ref_using_fp16
-                ], ref_sparse)
+            self.assertReferenceChecks(gc, op, [
+                param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
+                ref_using_fp16
+            ], ref_sparse)
 
     @serial.given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
@@ -172,7 +172,7 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -188,9 +188,9 @@ class TestAdadelta(serial.SerializedTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-        self.assertReferenceChecks(
-            gc,
-            op,
-            [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
-            ref_sparse_empty
-        )
+            self.assertReferenceChecks(
+                gc,
+                op,
+                [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
+                ref_sparse_empty
+            )
