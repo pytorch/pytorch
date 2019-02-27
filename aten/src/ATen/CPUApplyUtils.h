@@ -557,20 +557,18 @@ inline void CPU_tensor_parallel_apply2(
     return;
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
     if (tensor1.is_contiguous()) {
-      auto call = [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-        apply_op(
-            end - begin,
-            begin,
-            op,
-            strided_tensor_iter_fixed<scalar1, 8, false>(tensor1),
-            strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-      };
-
       parallel_for(
           0,
           tensor1.numel(),
           grain_size,
-          call);
+          [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+            apply_op(
+                end - begin,
+                begin,
+                op,
+                strided_tensor_iter_fixed<scalar1, 8, false>(tensor1),
+                strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+          });
     } else {
       parallel_for(
           0,
