@@ -149,8 +149,8 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
 PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  auto& data_type = THPVariable_Unpack(obj).type();
-  if (!THPVariable_Check(obj) || at::globalContext().getNonVariableType(data_type.backend(), data_type.scalarType()).ID() != at::TypeID::CPUByte) {
+  if (!THPVariable_Check(obj) ||
+      at::globalContext().getNonVariableType(THPVariable_Unpack(obj).type().backend(), THPVariable_Unpack(obj).type().scalarType()).ID() != at::TypeID::CPUByte) {
     throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
         Py_TYPE(obj)->tp_name);
   }
