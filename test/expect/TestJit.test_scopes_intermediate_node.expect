@@ -1,3 +1,0 @@
-graph(%x : Double(2)):
-  %1 : Double(2) = onnx::LogSoftmax[axis=0](%x), scope: Net
-  return (%1)
