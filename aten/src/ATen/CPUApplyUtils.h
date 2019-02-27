@@ -151,7 +151,7 @@ struct strided_tensor_iter_fixed {
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
-  bool Overflow() const { return CanOverflow; };
+  bool overflow() const { return CanOverflow; };
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
@@ -181,7 +181,7 @@ struct strided_tensor_iter {
   std::vector<int64_t> strides_;
 
   strided_tensor_iter(strided_tensor_iter const&) = delete;
-  bool Overflow() const { return true; };
+  bool overflow() const { return true; };
   void operator=(strided_tensor_iter const& x) = delete;
   strided_tensor_iter(strided_tensor_iter&&) = default;
   strided_tensor_iter(Tensor& tensor)
@@ -243,7 +243,7 @@ inline void iterate(int64_t size){};
 
 template <typename Arg, typename... Args>
 inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
-  if (iter.Overflow()) {
+  if (iter.overflow()) {
     iter.counter_[iter.dim_ - 1] += size;
   }
   iter.data_ = iter.data_ + size * iter.strides_[iter.dim_ - 1];
@@ -256,7 +256,7 @@ inline bool iterate_continue() {
 
 template <typename Arg, typename... Args>
 inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
-  if (iter.Overflow()) {
+  if (iter.overflow()) {
     return iter.counter_[iter.dim_ - 1] < iter.sizes_[iter.dim_ - 1] &&
         iterate_continue(iter_tail...);
   }
@@ -278,7 +278,7 @@ inline void iterate_overflow(){};
 
 template <typename Arg, typename... Args>
 inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
-  if (iter.Overflow()) {
+  if (iter.overflow()) {
     if (iter.counter_[iter.dim_ - 1] == iter.sizes_[iter.dim_ - 1]) {
       for (int64_t i = iter.dim_ - 1; i > 0; i--) {
         if (iter.counter_[i] == iter.sizes_[i]) {
