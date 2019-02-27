@@ -390,42 +390,40 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x.item(), y, prec, message, allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
-        elif isinstance(x, torch.BoolTensor) and isinstance(y, torch.BoolTensor):
-            self.assertEqual(x.storage(), y.storage())
-        elif ((isinstance(x, torch.BoolTensor) and isinstance(y, Number)) or
-             (isinstance(y, torch.BoolTensor) and isinstance(x, Number))):
-            self.fail("Expected two boolean tensors - x={}, y={}".format(x, y))
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size(), message)
-                if a.numel() > 0:
-                    if a.device.type == 'cpu' and a.dtype == torch.float16:
-                        # CPU half tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-                    if TEST_WITH_ROCM:
-                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
-                        # TODO: remove after the bug is resolved.
-                        b = b.to(a.dtype).to(a.device)
-                    else:
-                        b = b.to(a)
+                if isinstance(x, torch.BoolTensor) and isinstance(y, torch.BoolTensor):
+                    self.assertEqual(x.tolist(), y.tolist())
+                else:
+                    super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                    if a.numel() > 0:
+                        if a.device.type == 'cpu' and a.dtype == torch.float16:
+                            # CPU half tensors don't have the methods we need below
+                            a = a.to(torch.float32)
+                        if TEST_WITH_ROCM:
+                            # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
+                            # TODO: remove after the bug is resolved.
+                            b = b.to(a.dtype).to(a.device)
+                        else:
+                            b = b.to(a)
 
-                    diff = a - b
-                    if a.is_floating_point():
-                        # check that NaNs are in the same locations
-                        nan_mask = torch.isnan(a)
-                        self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                        diff[nan_mask] = 0
-                        # inf check if allow_inf=True
-                        if allow_inf:
-                            inf_mask = torch.isinf(a)
-                            inf_sign = inf_mask.sign()
-                            self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                            diff[inf_mask] = 0
-                    # TODO: implement abs on CharTensor (int8)
-                    if diff.is_signed() and diff.dtype != torch.int8:
-                        diff = diff.abs()
-                    max_err = diff.max()
-                    self.assertLessEqual(max_err, prec, message)
+                        diff = a - b
+                        if a.is_floating_point():
+                            # check that NaNs are in the same locations
+                            nan_mask = torch.isnan(a)
+                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
+                            diff[nan_mask] = 0
+                            # inf check if allow_inf=True
+                            if allow_inf:
+                                inf_mask = torch.isinf(a)
+                                inf_sign = inf_mask.sign()
+                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
+                                diff[inf_mask] = 0
+                        # TODO: implement abs on CharTensor (int8)
+                        if diff.is_signed() and diff.dtype != torch.int8:
+                            diff = diff.abs()
+                        max_err = diff.max()
+                        self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
