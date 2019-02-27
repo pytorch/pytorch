@@ -196,12 +196,6 @@ static std::string encodeRHS(const Node* n) {
       {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
       {aten::rand_like, "uniform(rnd())"},
 
-      // min, max
-      // It may seem unusual to have the bounds as the first case below,
-      // this is so that if min or max is NaN, they are "ignored"
-      // and when the input is NaN, the output is, too
-      {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
-
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
 
@@ -224,8 +218,33 @@ static std::string encodeRHS(const Node* n) {
 
   TemplateEnv env;
   size_t i = 0;
-  auto outtype =
-      n->output()->type()->expect<c10::DimensionedTensorType const>()->scalarType();
+  auto outtype = n->output()
+                     ->type()
+                     ->expect<c10::DimensionedTensorType const>()
+                     ->scalarType();
+
+  // special case for clamp fusion on missing min/max inputs
+  if (n->kind() == aten::clamp) {
+    const auto min = n->input(1);
+    const auto max = n->input(2);
+    env.s(std::to_string(i++), valueName(n->input(0)));
+
+    if (!min->node()->mustBeNone() && !max->node()->mustBeNone()) {
+      env.s(std::to_string(i++), valueName(min));
+      env.s(std::to_string(i++), valueName(max));
+      return format("(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))", env);
+    } else if (min->node()->mustBeNone()) {
+      env.s(std::to_string(i++), valueName(max));
+      return format("(${0}<${1}?${0}:${1})", env);
+    } else if (max->node()->mustBeNone()) {
+      env.s(std::to_string(i++), valueName(min));
+      return format("(${0}>${1}?${0}:${1})", env);
+    } else {
+      throw std::runtime_error(
+          "At least one of 'min' or 'max' must not be None");
+    }
+  }
+
   for (auto in : n->inputs()) {
     // PyTorch converts (scalar) argument types to result before applying the
     // operator e.g. 1.4-torch.tensor(3) = -2
@@ -355,6 +374,10 @@ std::string generateKernel(
     if (n->kind() == aten::rand_like) {
       AT_ASSERT(use_cuda);
       has_random = true;
+    }
+
+    if (n->mustBeNone()) {
+      continue;
     }
     env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));

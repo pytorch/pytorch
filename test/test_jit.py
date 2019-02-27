@@ -11587,10 +11587,16 @@ class TestFuser(JitTestCase):
         def funcInf(a, b):
             return torch.clamp(a + b, min=0, max=float('inf'))
 
+        def funcOptMin(a, b):
+            return torch.clamp(a + b, max=2)
+
+        def funcOptMax(a, b):
+            return torch.clamp(a + b, min=0)
+
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        funcs = (func2, funcInf)
+        funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f in funcs:
             s = self.checkScript(f, (a, b))
             self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
