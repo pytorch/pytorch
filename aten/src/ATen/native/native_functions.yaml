@@ -1895,8 +1895,6 @@
   variants: function, method
   device_guard: False
 
-- func: slice_backward(Tensor grad, int[] input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) -> Tensor
-
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   matches_jit_signature: True
   variants: function, method
