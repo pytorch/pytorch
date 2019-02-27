@@ -308,7 +308,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if export_params:
         proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph._export_onnx([], opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
