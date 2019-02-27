@@ -816,7 +816,43 @@ RegisterOperators reg({
           }
           return 0;
         }),
-});
+     Operator(
+         prim::CreateUserObject,
+         [](const Node* node) {
+           const auto type = node->output()->type()->expect<UserType>();
+           const auto name = Symbol::user(type->name());
+           const size_t numAttrs = type->numAttributes();
+           return [name, numAttrs](Stack& stack) {
+             auto userObj =
+                 c10::ivalue::UserObject::create(name, numAttrs);
+             push(stack, std::move(userObj));
+             return 0;
+           };
+         }),
+     Operator(
+         prim::GetAttr,
+         [](const Node* node) {
+           const auto type = node->input()->type()->expect<UserType>();
+           const auto& field = node->s(attr::name);
+           const auto slot = type->getAttributeSlot(field);
+           return [slot](Stack& stack) {
+             auto userObj = pop(stack).toUserObject();
+             auto value = userObj->getSlot(slot);
+             push(stack, std::move(value));
+             return 0;
+           };
+         }),
+     Operator(prim::SetAttr, [](const Node* node) {
+       const auto type = node->inputs().at(0)->type()->expect<UserType>();
+       const auto& field = node->s(attr::name);
+       const auto slot = type->getAttributeSlot(field);
+       return [slot](Stack& stack) {
+         auto v = pop(stack);
+         auto userObj = pop(stack).toUserObject();
+         userObj->setSlot(slot, std::move(v));
+         return 0;
+       };
+     })});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \

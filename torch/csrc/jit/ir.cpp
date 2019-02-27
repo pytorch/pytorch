@@ -836,6 +836,7 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
+    case prim::SetAttr:
     case aten::warn:
       return true;
   }
@@ -1306,6 +1307,34 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   auto* result = create(prim::ImplicitTensorToNum, {value});
   result->output()->setType(type);
   return result;
+}
+
+Node* Graph::createUserObject(const UserTypePtr& type) {
+  auto result = create(prim::CreateUserObject);
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createSetAttr(
+    Value* obj,
+    const std::string& field,
+    Value* newValue) {
+  const auto userType = obj->type()->expect<UserType>();
+
+  auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
+  n->s_(attr::name, field);
+  return n;
+}
+
+Node* Graph::createGetAttr(Value* obj, const std::string& field) {
+  const auto userType = obj->type()->expect<UserType>();
+
+  auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
+  n->s_(attr::name, field);
+
+  const auto outputType = userType->getAttribute(field);
+  n->output()->setType(outputType);
+  return n;
 }
 
 Node* Graph::createClone(

@@ -178,6 +178,9 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
     if (itr != ident_to_type_lut().end()) {
       return itr->second;
     }
+    if (auto typePtr = UserType::get(*name)) {
+      return typePtr;
+    }
     throw ErrorReport(expr) << "Unknown type name " << *name;
   }
   throw ErrorReport(expr.range())
