@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 #include <cub/block/block_reduce.cuh>
@@ -2894,6 +2895,20 @@ CAFFE2_CUDA_EXPORT void Maximum(
 
 namespace {
 
+template <typename T>
+__device__
+    typename std::enable_if<std::is_same<T, at::Half>::value, at::Half>::type
+    ScalarScale(const T& alpha, const T& X) {
+  return convert::To<float, at::Half>(
+      convert::To<at::Half, float>(alpha) * convert::To<at::Half, float>(X));
+}
+
+template <typename T>
+__device__ typename std::enable_if<!std::is_same<T, at::Half>::value, T>::type
+ScalarScale(const T& alpha, const T& X) {
+  return alpha * X;
+}
+
 template <typename T, int D>
 __global__ void BroadcastCUDAKernel(
     const int Y_size,
@@ -2911,11 +2926,7 @@ __global__ void BroadcastCUDAKernel(
       FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    Y[Y_index] = __ldg(X + X_index) * alpha;
-#else
-    Y[Y_index] = X[X_index] * alpha;
-#endif
+    Y[Y_index] = ScalarScale<T>(alpha, X[X_index]);
   }
 }
 
@@ -2984,6 +2995,7 @@ CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(std::int64_t)
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(float)
 CAFFE2_SPECIALIZED_CUDA_BROADCAST(double)
+CAFFE2_SPECIALIZED_CUDA_BROADCAST(at::Half)
 #undef CAFFE2_SPECIALIZED_CUDA_BROADCAST
 
 namespace {

@@ -4,7 +4,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <vector>
+#include <type_traits>
 
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
@@ -14,6 +14,7 @@
 #include <thrust/transform.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/reduce.cuh"
 #include "caffe2/utils/math/utils.h"
@@ -23,6 +24,60 @@ namespace math {
 
 namespace {
 
+template <typename IN, typename OUT>
+using halfScenarioType =
+    typename std::enable_if<std::is_same<IN, at::Half>::value, OUT>::type;
+
+template <typename IN, typename OUT>
+using nonHalfScenarioType =
+    typename std::enable_if<!std::is_same<IN, at::Half>::value, OUT>::type;
+
+template <typename T>
+using halfScenarioVoid = halfScenarioType<T, void>;
+
+template <typename T>
+using nonHalfScenarioVoid = nonHalfScenarioType<T, void>;
+
+template <typename T, class Reducer>
+__device__ nonHalfScenarioVoid<T> RowwiseReduceCUDAKernelDevice(
+    const int& cols,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce<T>::TempStorage temp_storage;
+  const int r = blockIdx.x;
+  T val = init;
+  for (int c = threadIdx.x; c < cols; c += blockDim.x) {
+    val = reducer(val, X[r * cols + c]);
+  }
+  val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
+  if (threadIdx.x == 0) {
+    Y[r] = val * alpha;
+  }
+}
+
+template <typename T, class Reducer>
+__device__ halfScenarioVoid<T> RowwiseReduceCUDAKernelDevice(
+    const int& cols,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce<float>::TempStorage temp_storage;
+  const int r = blockIdx.x;
+  float val = convert::To<T, float>(init);
+  for (int c = threadIdx.x; c < cols; c += blockDim.x) {
+    val = reducer(val, convert::To<T, float>(X[r * cols + c]));
+  }
+  val = BlockReduce<float>(temp_storage).Reduce(val, reducer);
+  if (threadIdx.x == 0) {
+    Y[r] = convert::To<float, T>(val * convert::To<T, float>(alpha));
+  }
+}
+
 template <typename T, class Reducer>
 __global__ void RowwiseReduceCUDAKernel(
     const int cols,
@@ -31,19 +86,48 @@ __global__ void RowwiseReduceCUDAKernel(
     const T alpha,
     const T* X,
     T* Y) {
+  RowwiseReduceCUDAKernelDevice<T, Reducer>(cols, reducer, init, alpha, X, Y);
+}
+
+template <typename T, class Reducer>
+__device__ nonHalfScenarioVoid<T> ColwiseReduceCUDAKernelDevice(
+    const int& rows,
+    const int& cols,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
   __shared__ typename BlockReduce<T>::TempStorage temp_storage;
-  const int r = blockIdx.x;
+  const int c = blockIdx.x;
   T val = init;
-  for (int c = threadIdx.x; c < cols; c += blockDim.x) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    val = reducer(val, __ldg(X + r * cols + c));
-#else
+  for (int r = threadIdx.x; r < rows; r += blockDim.x) {
     val = reducer(val, X[r * cols + c]);
-#endif
   }
   val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
   if (threadIdx.x == 0) {
-    Y[r] = val * alpha;
+    Y[c] = val * alpha;
+  }
+}
+
+template <typename T, class Reducer>
+__device__ halfScenarioVoid<T> ColwiseReduceCUDAKernelDevice(
+    const int& rows,
+    const int& cols,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce<float>::TempStorage temp_storage;
+  const int c = blockIdx.x;
+  float val = convert::To<T, float>(init);
+  for (int r = threadIdx.x; r < rows; r += blockDim.x) {
+    val = reducer(val, convert::To<T, float>(X[r * cols + c]));
+  }
+  val = BlockReduce<float>(temp_storage).Reduce(val, reducer);
+  if (threadIdx.x == 0) {
+    Y[c] = convert::To<float, T>(val * convert::To<T, float>(alpha));
   }
 }
 
@@ -56,19 +140,59 @@ __global__ void ColwiseReduceCUDAKernel(
     const T alpha,
     const T* X,
     T* Y) {
-  __shared__ typename BlockReduce<T>::TempStorage temp_storage;
-  const int c = blockIdx.x;
+  ColwiseReduceCUDAKernelDevice<T, Reducer>(
+      rows, cols, reducer, init, alpha, X, Y);
+}
+
+template <typename T, class Reducer, int kBlockDimX, int kBlockDimY>
+__device__ nonHalfScenarioVoid<T> BothEndsReduceCUDAKernelDevice(
+    const int& M,
+    const int& N,
+    const int& K,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce2D<T, kBlockDimX, kBlockDimY>::TempStorage
+      temp_storage;
+  const int n = blockIdx.x;
   T val = init;
-  for (int r = threadIdx.x; r < rows; r += blockDim.x) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    val = reducer(val, __ldg(X + r * cols + c));
-#else
-    val = reducer(val, X[r * cols + c]);
-#endif
+  for (int m = threadIdx.x; m < M; m += blockDim.x) {
+    for (int k = threadIdx.y; k < K; k += blockDim.y) {
+      val = reducer(val, X[(m * N + n) * K + k]);
+    }
   }
-  val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
-  if (threadIdx.x == 0) {
-    Y[c] = val * alpha;
+  val = BlockReduce2D<T, kBlockDimX, kBlockDimY>(temp_storage)
+            .Reduce(val, reducer);
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    Y[n] = val * alpha;
+  }
+}
+
+template <typename T, class Reducer, int kBlockDimX, int kBlockDimY>
+__device__ halfScenarioVoid<T> BothEndsReduceCUDAKernelDevice(
+    const int& M,
+    const int& N,
+    const int& K,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce2D<float, kBlockDimX, kBlockDimY>::TempStorage
+      temp_storage;
+  const int n = blockIdx.x;
+  float val = convert::To<T, float>(init);
+  for (int m = threadIdx.x; m < M; m += blockDim.x) {
+    for (int k = threadIdx.y; k < K; k += blockDim.y) {
+      val = reducer(val, convert::To<T, float>(X[(m * N + n) * K + k]));
+    }
+  }
+  val = BlockReduce2D<float, kBlockDimX, kBlockDimY>(temp_storage)
+            .Reduce(val, reducer);
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    Y[n] = convert::To<float, T>(val * convert::To<T, float>(alpha));
   }
 }
 
@@ -82,34 +206,18 @@ __global__ void BothEndsReduceCUDAKernel(
     const T alpha,
     const T* X,
     T* Y) {
-  __shared__ typename BlockReduce2D<T, kBlockDimX, kBlockDimY>::TempStorage
-      temp_storage;
-  const int n = blockIdx.x;
-  T val = init;
-  for (int m = threadIdx.x; m < M; m += blockDim.x) {
-    for (int k = threadIdx.y; k < K; k += blockDim.y) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-      val = reducer(val, __ldg(X + (m * N + n) * K + k));
-#else
-      val = reducer(val, X[(m * N + n) * K + k]);
-#endif
-    }
-  }
-  val = BlockReduce2D<T, kBlockDimX, kBlockDimY>(temp_storage)
-            .Reduce(val, reducer);
-  if (threadIdx.x == 0 && threadIdx.y == 0) {
-    Y[n] = val * alpha;
-  }
+  BothEndsReduceCUDAKernelDevice<T, Reducer, kBlockDimX, kBlockDimY>(
+      M, N, K, reducer, init, alpha, X, Y);
 }
 
 template <typename T, class Reducer, int D>
-__global__ void ReduceTensorCUDAKernel(
-    const int inner_size,
-    const SimpleArray<int, D> X_strides,
-    const SimpleArray<int, D> Y_dims,
-    const Reducer reducer,
-    const T init,
-    const T alpha,
+__device__ nonHalfScenarioVoid<T> ReduceTensorCUDAKernelDevice(
+    const int& inner_size,
+    const SimpleArray<int, D>& X_strides,
+    const SimpleArray<int, D>& Y_dims,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
     const T* X,
     T* Y) {
   __shared__ typename BlockReduce<T>::TempStorage temp_storage;
@@ -123,16 +231,55 @@ __global__ void ReduceTensorCUDAKernel(
       X_index += Y_index % Y_dims.data[d] * X_strides.data[d];
       Y_index /= Y_dims.data[d];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    val = reducer(val, __ldg(X + X_index));
-#else
     val = reducer(val, X[X_index]);
-#endif
   }
   val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
   if (threadIdx.x == 0) {
     Y[x] = val * alpha;
   }
+}
+
+template <typename T, class Reducer, int D>
+__device__ halfScenarioVoid<T> ReduceTensorCUDAKernelDevice(
+    const int& inner_size,
+    const SimpleArray<int, D>& X_strides,
+    const SimpleArray<int, D>& Y_dims,
+    const Reducer& reducer,
+    const T& init,
+    const T& alpha,
+    const T* X,
+    T* Y) {
+  __shared__ typename BlockReduce<float>::TempStorage temp_storage;
+  const int x = blockIdx.x;
+  float val = convert::To<T, float>(init);
+  for (int y = threadIdx.x; y < inner_size; y += blockDim.x) {
+    int X_index = 0;
+    int Y_index = x * inner_size + y;
+#pragma unroll
+    for (int d = D - 1; d >= 0; --d) {
+      X_index += Y_index % Y_dims.data[d] * X_strides.data[d];
+      Y_index /= Y_dims.data[d];
+    }
+    val = reducer(val, convert::To<T, float>(X[X_index]));
+  }
+  val = BlockReduce<float>(temp_storage).Reduce(val, reducer);
+  if (threadIdx.x == 0) {
+    Y[x] = convert::To<float, T>(val * convert::To<T, float>(alpha));
+  }
+}
+
+template <typename T, class Reducer, int D>
+__global__ void ReduceTensorCUDAKernel(
+    const int inner_size,
+    const SimpleArray<int, D> X_strides,
+    const SimpleArray<int, D> Y_dims,
+    const Reducer reducer,
+    const T init,
+    const T alpha,
+    const T* X,
+    T* Y) {
+  ReduceTensorCUDAKernelDevice<T, Reducer, D>(
+      inner_size, X_strides, Y_dims, reducer, init, alpha, X, Y);
 }
 
 template <typename T, class Reducer, int D>
@@ -533,6 +680,7 @@ DELEGATE_CUDA_REDUCE_FUNCTION(std::int32_t, ReduceSum, cub::Sum, 0)
 DELEGATE_CUDA_REDUCE_FUNCTION(std::int64_t, ReduceSum, cub::Sum, 0LL)
 DELEGATE_CUDA_REDUCE_FUNCTION(float, ReduceSum, cub::Sum, 0.0f)
 DELEGATE_CUDA_REDUCE_FUNCTION(double, ReduceSum, cub::Sum, 0.0)
+DELEGATE_CUDA_REDUCE_FUNCTION(at::Half, ReduceSum, cub::Sum, at::Half(0.0))
 #undef DELEGATE_CUDA_REDUCE_FUNCTION
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(T)        \

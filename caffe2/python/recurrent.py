@@ -213,6 +213,7 @@ def recurrent_net(
             operators.append(op)
         for op in operators[::-1]:
             proto.op.extend([op])
+            sum_ops_tmp = []
             for j, output_blob in enumerate(op.output):
                 if output_blob in proto.external_input:
                     # In place operation won't cause issues because it takes
@@ -226,6 +227,10 @@ def recurrent_net(
                         [output_blob, accum_blob],
                         [output_blob],
                     )
+                    # The Sum introduced above will append an additional SumOp
+                    # to the list of proto.op
+                    sum_ops_tmp.append(proto.op.pop())
+            proto.op.extend(sum_ops_tmp)
 
     def map_to_dual_list(m):
         return [str(x) for x in list(m.keys())] + \

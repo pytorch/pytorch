@@ -86,6 +86,139 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
     def test_broadcast_Sub(self, gc, dc):
         self.__test_binary_op(gc, dc, "Sub", operator.sub)
 
+    @given(**hu.gcs)
+    def test_broadcast_Sum(self, gc, dc):
+        # One Input
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X"], "out")
+        workspace.FeedBlob("X", X)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+        # One Input in-place
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X"], "X")
+        workspace.FeedBlob("X", X)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("X")
+        np.testing.assert_array_almost_equal(out, X)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+        # Two inputs
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out")
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # More than two inputs
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(5).astype(np.float32)
+        Z = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "out")
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.FeedBlob("Z", Z)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y + Z)
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 1, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 2, [0])
+
+        # More than two inputs, in-place
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(5).astype(np.float32)
+        Z = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "X")
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.FeedBlob("Z", Z)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("X")
+        np.testing.assert_array_almost_equal(out, X + Y + Z)
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 1, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 2, [0])
+
+        # More broadcasting test ...
+        X = np.random.rand(1, 5).astype(np.float32)
+        Y = np.random.rand(2, 3, 1, 1).astype(np.float32)
+        Z = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "out")
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.FeedBlob("Z", Z)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y + Z)
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 1, [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 2, [0])
+
+    @given(**hu.gcs)
+    def test_broadcast_sum_invalid(self, gc, dc):
+        # unable to broadcast, two input
+        X = np.random.rand(1, 3).astype(np.float32)
+        Y = np.random.rand(2, 3, 4).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out")
+        self.assertRunOpRaises(
+            gc,
+            op,
+            inputs=[X, Y],
+            exception=RuntimeError
+        )
+
+        # unable to broadcast, three input
+        X = np.random.rand(3, 4).astype(np.float32)
+        Y = np.random.rand(2, 3, 2).astype(np.float32)
+        Z = np.random.rand(1, 1, 4).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "out")
+        self.assertRunOpRaises(
+            gc,
+            op,
+            inputs=[X, Y, Z],
+            exception=RuntimeError,
+        )
+
+        # unable to broadcast, two input, inplace
+        X = np.random.rand(1, 4).astype(np.float32)
+        Y = np.random.rand(2, 3, 4).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "X")
+        self.assertRunOpRaises(
+            gc,
+            op,
+            inputs=[X, Y],
+            exception=RuntimeError,
+            regexp="Cannot broadcast output to the dimensions of first input"
+        )
+
+        # unable to broadcast, three input, inplace
+        X = np.random.rand(1, 4).astype(np.float32)
+        Y = np.random.rand(2, 3, 4).astype(np.float32)
+        Z = np.random.rand(1, 3, 1).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "X")
+        self.assertRunOpRaises(
+            gc,
+            op,
+            inputs=[X, Y, Z],
+            exception=RuntimeError,
+            regexp="Unable to broadcast output to the dimension of first input in in-place mode"
+        )
+
     @serial.given(**hu.gcs)
     def test_broadcast_powt(self, gc, dc):
         np.random.seed(101)

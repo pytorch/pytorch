@@ -1941,7 +1941,7 @@ class TestOperators(hu.HypothesisTestCase):
         backward_step_net = core.Net("ElmanBackward")
         del backward_step_net.Proto().op[:]
         backward_step_net.Proto().op.extend(backward_ops)
-        assert backward_mapping["input_t"] == "gates_t_grad"
+        assert backward_mapping["input_t"] == "input_t_grad"
         links = [
             ("hidden_t_prev", "hidden", 0),
             ("hidden_t", "hidden", 1),
