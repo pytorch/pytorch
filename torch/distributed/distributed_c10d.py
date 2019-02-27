@@ -473,7 +473,7 @@ def destroy_process_group(group=group.WORLD):
 
 def get_rank(group=group.WORLD):
     """
-    Returns the rank of currrent process group
+    Returns the rank of current process group
 
     Rank is a unique identifier assigned to each process within a distributed
     process group. They are always consecutive integers ranging from 0 to
