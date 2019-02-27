@@ -17,6 +17,7 @@
 #include <ATen/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -815,7 +816,43 @@ RegisterOperators reg({
           }
           return 0;
         }),
-});
+     Operator(
+         prim::CreateUserObject,
+         [](const Node* node) {
+           const auto type = node->output()->type()->expect<UserType>();
+           const auto name = Symbol::user(type->name());
+           const size_t numAttrs = type->numAttributes();
+           return [name, numAttrs](Stack& stack) {
+             auto userObj =
+                 c10::ivalue::UserObject::create(name, numAttrs);
+             push(stack, std::move(userObj));
+             return 0;
+           };
+         }),
+     Operator(
+         prim::GetAttr,
+         [](const Node* node) {
+           const auto type = node->input()->type()->expect<UserType>();
+           const auto& field = node->s(attr::name);
+           const auto slot = type->getAttributeSlot(field);
+           return [slot](Stack& stack) {
+             auto userObj = pop(stack).toUserObject();
+             auto value = userObj->getSlot(slot);
+             push(stack, std::move(value));
+             return 0;
+           };
+         }),
+     Operator(prim::SetAttr, [](const Node* node) {
+       const auto type = node->inputs().at(0)->type()->expect<UserType>();
+       const auto& field = node->s(attr::name);
+       const auto slot = type->getAttributeSlot(field);
+       return [slot](Stack& stack) {
+         auto v = pop(stack);
+         auto userObj = pop(stack).toUserObject();
+         userObj->setSlot(slot, std::move(v));
+         return 0;
+       };
+     })});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -967,6 +1004,69 @@ int listClear(Stack& stack) {
   return 0;
 }
 
+template <typename TList, typename TElement>
+int listInsert(Stack& stack) {
+  TList list;
+  int64_t idx;
+  TElement elem;
+  pop(stack, list, idx, elem);
+
+  auto& elements = list->elements();
+  const int64_t list_size = elements.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    if (normalized_idx < 0) {
+      elements.insert(elements.begin(), elem);
+    } else {
+      elements.push_back(elem);
+    }
+  } else {
+    elements.insert(elements.begin() + normalized_idx, elem);
+  }
+
+  return 0;
+}
+
+template <typename TList, typename TElement>
+int listRemove(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
+
+  if (pos != elements.end()) {
+    elements.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
 template <typename TList>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
@@ -1113,6 +1213,46 @@ int listAdd(Stack& stack) {
   return 0;
 }
 
+template <class TList, class TElement>
+int listMulIntLeft(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, list, n);
+
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
+
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
+    }
+  }
+
+  push(stack, ret);
+  return 0;
+}
+
+template <class TList, class TElement>
+int listMulIntRight(Stack& stack) {
+  TList list;
+  int64_t n;
+  pop(stack, n, list);
+
+  std::vector<TElement> ret;
+  const auto size = list->elements().size() * n;
+  ret.reserve(size);
+
+  for (auto i = 0; i < n; i++) {
+    for (const auto& e : list->elements()) {
+      ret.push_back(e);
+    }
+  }
+
+  push(stack, ret);
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSlice(Stack& stack) {
   TList list;
@@ -1176,6 +1316,15 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
   list->elements()[normalized_idx] = value;
 
   push(stack, list);
+  return 0;
+}
+
+int dictSetItem(Stack& stack) {
+  auto value = pop(stack);
+  auto idx = pop(stack);
+  auto& dict = pop(stack).toGenericDict()->elements();
+  dict[idx] = value;
+  push(stack, dict);
   return 0;
 }
 
@@ -1271,12 +1420,18 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
           listClear<Shared<c_type>>),                                       \
       Operator(                                                             \
-          "aten::pop(" decl_type                                            \
-          "[](a!) self, int idx=-1)                    \
-        -> " decl_type "(*)",                                               \
-          listPop<Shared<c_type>>)
+          "aten::insert( " decl_type "[](a!) self, int idx,                 \
+          " decl_type " el) -> ()",                                         \
+          listInsert<Shared<c_type>, c_type::ElemType>),                    \
+      Operator(                                                             \
+        "aten::pop(" decl_type "[](a!) self, int idx=-1)                    \
+        -> " decl_type  "(*)",                                              \
+        listPop<Shared<c_type>>)
 
     CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
+
+    Operator("aten::remove(Tensor[](a!) self, Tensor el) -> ()",
+        listRemove<Shared<TensorList>, at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
@@ -1304,10 +1459,16 @@ RegisterOperators reg2({
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
           listClear<Shared<c_type>>),                                  \
       Operator(                                                        \
-          "aten::pop(" decl_type                                       \
-          "[](a!) self, int idx=-1)             \
-          -> " decl_type,                                              \
-          listPop<Shared<c_type>>)
+          "aten::insert( " decl_type "[](a!) self, int idx,            \
+          " decl_type " el) -> ()",                                    \
+          listInsert<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::remove(" decl_type "[](a!) self,                      \
+          " decl_type " el) -> ()",                                    \
+          listRemove<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
+          -> " decl_type, listPop<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
@@ -1316,6 +1477,8 @@ RegisterOperators reg2({
     // NOTE: this must be after the other list specializations so that operator
     // resolution doesn't pick this up first
     CREATE_MUTABLE_LIST_OPS("t", GenericList),
+#undef CREATE_IMMUTABLE_LIST_OPS
+#undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
   Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
@@ -1328,10 +1491,17 @@ RegisterOperators reg2({
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
           listSlice<Shared<c_type>, c_type::ElemType>),                             \
-      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList)
+      Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
+      Operator(                                                                     \
+          "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
+          listMulIntLeft<Shared<c_type>, c_type::ElemType>),                        \
+      Operator(                                                                     \
+          "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
+          listMulIntRight<Shared<c_type>, c_type::ElemType>)
 
     CREATE_LIST_OPS("int", IntList),
     CREATE_LIST_OPS("float", DoubleList),
+    CREATE_LIST_OPS("bool", BoolList),
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
@@ -1506,13 +1676,17 @@ RegisterOperators reg2({
 #define CREATE_DICT_OPS(key_type)                                              \
   Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),           \
       Operator(                                                                \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[]",          \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",       \
           dictKeys),                                                           \
-      Operator("aten::values(Dict(" key_type ", t) self) -> t[]", dictValues), \
+      Operator("aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),\
       Operator(                                                                \
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type              \
-          " key) -> t",                                                        \
-          dictIndex)
+          " key) -> t(*)",                                                     \
+          dictIndex),                                                          \
+      Operator(                                                                \
+          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type             \
+          " idx, t v) -> ()",                                                  \
+          dictSetItem)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),

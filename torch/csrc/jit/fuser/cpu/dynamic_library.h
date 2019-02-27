@@ -17,6 +17,8 @@ struct DynamicLibrary {
 
   ~DynamicLibrary();
 
+  static std::string directoryOf(void* addr);
+
  private:
   void* handle = nullptr;
 };
