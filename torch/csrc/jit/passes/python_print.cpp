@@ -839,6 +839,10 @@ struct PythonPrintPass {
             [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
+      case prim::CreateUserObject:
+      case prim::SetAttr:
+      case prim::GetAttr:
+        throw std::runtime_error("NYI");
       default: {
         Symbol kind = node->kind();
         if (kind.is_aten()) {
@@ -1082,6 +1086,9 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
+      prim::CreateUserObject,
+      prim::GetAttr,
+      prim::SetAttr,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
