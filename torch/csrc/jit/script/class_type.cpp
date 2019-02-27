@@ -5,7 +5,7 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
-Method* UserType::getMethod(const std::string& name) const {
+Method* ClassType::getMethod(const std::string& name) const {
   return module_->find_method(name);
 }
 

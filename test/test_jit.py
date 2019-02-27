@@ -13450,7 +13450,7 @@ class TestDataParallel(JitTestCase):
         self.assertEqual(first_forward, r1_forward)
 
 
-class TestUserType(JitTestCase):
+class TestClassType(JitTestCase):
     def test_get_with_method(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
@@ -13568,7 +13568,7 @@ class TestUserType(JitTestCase):
                         if True:
                             self.attr = x
 
-    def test_user_type_as_param(self):
+    def test_class_type_as_param(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script

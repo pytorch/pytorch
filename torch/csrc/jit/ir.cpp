@@ -1309,8 +1309,8 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createUserObject(const UserTypePtr& type) {
-  auto result = create(prim::CreateUserObject);
+Node* Graph::createObject(const ClassTypePtr& type) {
+  auto result = create(prim::CreateObject);
   result->output()->setType(type);
   return result;
 }
@@ -1319,20 +1319,18 @@ Node* Graph::createSetAttr(
     Value* obj,
     const std::string& field,
     Value* newValue) {
-  const auto userType = obj->type()->expect<UserType>();
-
   auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
   n->s_(attr::name, field);
   return n;
 }
 
 Node* Graph::createGetAttr(Value* obj, const std::string& field) {
-  const auto userType = obj->type()->expect<UserType>();
+  const auto classType = obj->type()->expect<ClassType>();
 
   auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
   n->s_(attr::name, field);
 
-  const auto outputType = userType->getAttribute(field);
+  const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
   return n;
 }
