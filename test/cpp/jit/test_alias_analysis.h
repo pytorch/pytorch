@@ -1,6 +1,7 @@
 #pragma once
 
 #include "test/cpp/jit/test_base.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
@@ -284,84 +285,84 @@ Node* insertIf(
 } // namespace
 
 void testAliasAnalysis() {
-  // {
-  //   auto graph = std::make_shared<Graph>();
-  //   auto a = graph->addInput();
-  //   auto b = graph->addInput();
-  //
-  //   // addsB = b + b
-  //   // c = a + b
-  //   // a += b
-  //   // d = c + c
-  //   auto addsB = graph->insert(aten::add, {b, b});
-  //   auto c = graph->insert(aten::add, {a, b});
-  //   auto aMut = graph->insert(aten::add_, {a, b});
-  //   auto d = graph->insert(aten::add, {c, c});
-  //
-  //   graph->lint();
-  //
-  //   AliasDb aliasDb(graph);
-  //   // Can't move past a mutation of a used value
-  //   AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
-  //   AT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
-  //
-  //   // b should alias to a (since they are both inputs)
-  //   AT_ASSERT(
-  //       !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
-  //   AT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
-  //
-  //   graph->lint();
-  // }
-  // {
-  //   auto graph = std::make_shared<Graph>();
-  //   auto a = graph->addInput();
-  //   auto b = graph->addInput();
-  //
-  //   auto constant = graph->insertConstant(1);
-  //   auto fresh = graph->insert(aten::rand, {constant});
-  //   auto usesB = graph->insert(aten::add, {b, fresh});
-  //   auto aliasesB = graph->insert(aten::select, {a, constant, constant});
-  //   auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
-  //   graph->insert(aten::add, {fresh, aliasesB});
-  //   graph->lint();
-  //
-  //   AliasDb aliasDb(graph);
-  //   AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
-  //       aliasesB->node(), mutatesAliasOfB->node()));
-  //   AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
-  //       usesB->node(), mutatesAliasOfB->node()));
-  // }
-  // {
-  //   // Test moves across inner blocks
-  //
-  //   // a = rand(1)
-  //   // b = rand(1)
-  //   // if True:
-  //   //   a.add_(b)
-  //   // c = a + b
-  //   auto graph = std::make_shared<Graph>();
-  //   auto constant = graph->insertConstant(1);
-  //   auto a = graph->insert(aten::rand, {constant});
-  //   auto b = graph->insert(aten::rand, {constant});
-  //
-  //   auto if_ = insertIf(
-  //       *graph,
-  //       constant,
-  //       [&]() -> std::vector<Value*> {
-  //         auto aMut = graph->insert(aten::add_, {a, b});
-  //         return {aMut};
-  //       },
-  //       [&]() -> std::vector<Value*> { return {a}; });
-  //
-  //   auto c = graph->insert(aten::add, {a, b});
-  //
-  //   graph->lint();
-  //
-  //   // we should not be able to move `c` before the if statement, since it
-  //   // may write to `a`.
-  //   AliasDb aliasDb(graph);
-  //   ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
-  // }
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // addsB = b + b
+    // c = a + b
+    // a += b
+    // d = c + c
+    auto addsB = graph->insert(aten::add, {b, b});
+    auto c = graph->insert(aten::add, {a, b});
+    auto aMut = graph->insert(aten::add_, {a, b});
+    auto d = graph->insert(aten::add, {c, c});
+
+    graph->lint();
+
+    AliasDb aliasDb(graph);
+    // Can't move past a mutation of a used value
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(c->node(), aMut->node()));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(d->node(), c->node()));
+
+    // b should alias to a (since they are both inputs)
+    AT_ASSERT(
+        !aliasDb.moveAfterTopologicallyValid(addsB->node(), aMut->node()));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(addsB->node(), c->node()));
+
+    graph->lint();
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    auto constant = graph->insertConstant(1);
+    auto fresh = graph->insert(aten::rand, {constant});
+    auto usesB = graph->insert(aten::add, {b, fresh});
+    auto aliasesB = graph->insert(aten::select, {a, constant, constant});
+    auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
+    graph->insert(aten::add, {fresh, aliasesB});
+    graph->lint();
+
+    AliasDb aliasDb(graph);
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        aliasesB->node(), mutatesAliasOfB->node()));
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
+        usesB->node(), mutatesAliasOfB->node()));
+  }
+  {
+    // Test moves across inner blocks
+
+    // a = rand(1)
+    // b = rand(1)
+    // if True:
+    //   a.add_(b)
+    // c = a + b
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto b = graph->insert(aten::rand, {constant});
+
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto aMut = graph->insert(aten::add_, {a, b});
+          return {aMut};
+        },
+        [&]() -> std::vector<Value*> { return {a}; });
+
+    auto c = graph->insert(aten::add, {a, b});
+
+    graph->lint();
+
+    // we should not be able to move `c` before the if statement, since it
+    // may write to `a`.
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
+  }
   {
     // test fork/wait
 
@@ -397,60 +398,135 @@ void testAliasAnalysis() {
     aliasDb.dump();
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
-  // {
-  //   // test fork/wait in an if statement
-  //
-  //   // a = rand(1)
-  //   // if 1:
-  //   //   fut = fork(a)
-  //   //     Subgraph is: return a.add_(1)
-  //   // else:
-  //   //   fut = fork(a)
-  //   //     Subgraph is: return a.sub_(1)
-  //   // c = wait(b)
-  //   // d = a + a
-  //
-  //   auto graph = std::make_shared<Graph>();
-  //   auto constant = graph->insertConstant(1);
-  //   auto a = graph->insert(aten::rand, {constant});
-  //   auto if_ = insertIf(
-  //       *graph,
-  //       constant,
-  //       [&]() -> std::vector<Value*> {
-  //         auto forkNode = graph->insertNode(graph->create(prim::fork));
-  //         auto forkBlock = forkNode->addBlock();
-  //         {
-  //           WithInsertPoint g(forkBlock);
-  //           auto aMut = graph->insert(aten::add_, {a, constant});
-  //           forkBlock->registerOutput(aMut);
-  //           forkNode->output()->setType(FutureType::create(aMut->type()));
-  //         }
-  //         script::lambdaLiftFork(forkNode);
-  //         return {forkNode->output()};
-  //       },
-  //       [&]() -> std::vector<Value*> {
-  //         auto forkNode = graph->insertNode(graph->create(prim::fork));
-  //         auto forkBlock = forkNode->addBlock();
-  //         {
-  //           WithInsertPoint g(forkBlock);
-  //           auto aMut = graph->insert(aten::sub_, {a, constant});
-  //           forkBlock->registerOutput(aMut);
-  //           forkNode->output()->setType(FutureType::create(aMut->type()));
-  //         }
-  //         script::lambdaLiftFork(forkNode);
-  //         return {forkNode->output()};
-  //       });
-  //
-  //   auto fut = if_->output();
-  //   auto wait = graph->insert(aten::wait, {fut})->node();
-  //   auto d = graph->insert(aten::add, {a, a});
-  //
-  //   graph->lint();
-  //
-  //   // Should not be able to move `d` before the wait call
-  //   AliasDb aliasDb(graph);
-  //   ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
-  // }
+  {
+    // test fork/wait in an if statement
+
+    // a = rand(1)
+    // if 1:
+    //   fut = fork(a)
+    //     Subgraph is: return a.add_(1)
+    // else:
+    //   fut = fork(a)
+    //     Subgraph is: return a.sub_(1)
+    // c = wait(b)
+    // d = a + a
+
+    auto graph = std::make_shared<Graph>();
+    auto constant = graph->insertConstant(1);
+    auto a = graph->insert(aten::rand, {constant});
+    auto if_ = insertIf(
+        *graph,
+        constant,
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::add_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        },
+        [&]() -> std::vector<Value*> {
+          auto forkNode = graph->insertNode(graph->create(prim::fork));
+          auto forkBlock = forkNode->addBlock();
+          {
+            WithInsertPoint g(forkBlock);
+            auto aMut = graph->insert(aten::sub_, {a, constant});
+            forkBlock->registerOutput(aMut);
+            forkNode->output()->setType(FutureType::create(aMut->type()));
+          }
+          script::lambdaLiftFork(forkNode);
+          return {forkNode->output()};
+        });
+
+    auto fut = if_->output();
+    auto wait = graph->insert(aten::wait, {fut})->node();
+    auto d = graph->insert(aten::add, {a, a});
+
+    graph->lint();
+
+    // Should not be able to move `d` before the wait call
+    AliasDb aliasDb(graph);
+    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
+  }
+}
+
+void testWriteTracking() {
+  RegisterOperators reg({createOperator(
+      "foo::creates_alias(Tensor(a) x) -> Tensor(a)",
+      [](at::Tensor a) { return a; })});
+  const auto creates_alias = Symbol::fromQualString("foo::creates_alias");
+  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // aten::add(%b, %b)
+    // aten::add_(%a, %b)
+    // foo::creates_alias(%a)
+    auto pureNode = graph->insert(aten::add, {b, b})->node();
+    auto writingNode = graph->insert(aten::add_, {a, b})->node();
+    auto node3 = graph->insert(creates_alias, {a})->node();
+    auto aAlias = node3->output();
+
+    graph->lint();
+
+    AliasDb aliasDb(graph);
+    ASSERT_TRUE(aliasDb.mayAlias(aAlias, a));
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{a}));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a, b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{aAlias}));
+  }
+}
+
+void testWildcards() {
+  RegisterOperators reg({createOperator(
+                             "foo::returns_wildcard(Tensor a) -> Tensor(*)",
+                             [](at::Tensor a) { return a; }),
+                         createOperator(
+                             "foo::writes(Tensor(z!) a) -> Tensor(a)",
+                             [](at::Tensor a) { return a; })});
+  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
+  const auto writes = Symbol::fromQualString("foo::writes");
+
+  auto graph = std::make_shared<Graph>();
+  const auto a = graph->addInput();
+
+  const auto constant = graph->insertConstant(1);
+  const auto fresh = graph->insert(aten::rand, {constant});
+  const auto fresh2 = graph->insert(aten::rand, {constant});
+  const auto wildcard = graph->insert(returns_wildcard, {fresh});
+  const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
+
+  graph->lint();
+  AliasDb aliasDb(graph);
+
+  ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
+  ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+  ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
+  ASSERT_FALSE(aliasDb.mayAlias(
+      std::unordered_set<const Value*>({wildcard}),
+      std::unordered_set<const Value*>()));
+
+  // Test writes to wildcards
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{fresh}));
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{fresh2}));
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{a}));
 }
 
 void testMemoryDAG() {
@@ -462,7 +538,6 @@ void testMemoryDAG() {
   const Value* eValue = graph->addInput();
   const Value* fValue = graph->addInput();
   const Value* gValue = graph->addInput();
-  const Value* wcValue = graph->addInput();
 
   {
     // a <- b <- c
@@ -470,7 +545,6 @@ void testMemoryDAG() {
     // a <- e
     // f <- e
     // g is by itself
-    // wc is a wildcard value
     MemoryDAG t;
     auto a = t.makeFreshValue(aValue);
     auto b = t.makeFreshValue(bValue);
@@ -484,7 +558,6 @@ void testMemoryDAG() {
     t.makePointerTo(d, b);
     t.makePointerTo(e, a);
     t.makePointerTo(e, f);
-    // t.setWildcard(wc);
 
     /**
      * Test mayAlias()
@@ -504,12 +577,6 @@ void testMemoryDAG() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
 
-    // Wildcards should alias everything
-    // ASSERT_TRUE(t.mayAlias(wc, a));
-    // ASSERT_TRUE(t.mayAlias(wc, b));
-    // ASSERT_TRUE(t.mayAlias(wc, f));
-    // ASSERT_TRUE(t.mayAlias(wc, g));
-
     /**
      * Test mayAlias() set interface
      */
@@ -519,44 +586,6 @@ void testMemoryDAG() {
     ASSERT_TRUE(t.mayAlias(foo, bar));
     ASSERT_TRUE(t.mayAlias(bar, baz));
     ASSERT_FALSE(t.mayAlias(foo, baz));
-    // wildcard stuff aliases everything
-    // std::set<const Value*> containsWildcard{wc};
-    // ASSERT_TRUE(t.mayAlias(containsWildcard, foo));
-    // ASSERT_TRUE(t.mayAlias(containsWildcard, bar));
-    // ASSERT_TRUE(t.mayAlias(containsWildcard, baz));
-
-    /**
-     * Test writer tracking
-     */
-    // auto n1 = graph->appendNode(graph->create(prim::Undefined));
-    // auto n2 = graph->appendNode(graph->create(prim::Undefined));
-    // auto n3 = graph->appendNode(graph->create(prim::Undefined));
-    // t.registerWrite(a, n1);
-    // t.registerWrite(f, n2);
-    // // We should report those writes accurately
-    // ASSERT_TRUE(t.writesTo(n1, a));
-    // ASSERT_TRUE(t.writesTo(n2, f));
-    // ASSERT_FALSE(t.writesTo(n1, f));
-    // ASSERT_FALSE(t.writesTo(n2, a));
-    // // We should correctly report writes to aliases as well
-    // ASSERT_TRUE(t.writesTo(n1, c));
-    //
-    // // Check hasWriters()
-    // ASSERT_TRUE(t.hasWriters(a));
-    // // Aliases of written-to values should have writers
-    // ASSERT_TRUE(t.hasWriters(b));
-    // ASSERT_TRUE(t.hasWriters(d));
-    // ASSERT_TRUE(t.hasWriters(e));
-    // // Unique values not registered should be unaffected
-    // ASSERT_FALSE(t.hasWriters(g));
-    //
-    // // create a write to the wildcard set
-    // t.registerWrite(wc, n3);
-    // // Now everything may be written to
-    // ASSERT_TRUE(t.hasWriters(g));
-    // const auto& wildcardWriters = t.getWildcardWriters();
-    // ASSERT_EQ(wildcardWriters.size(), 1);
-    // ASSERT_EQ(*wildcardWriters.begin(), n3);
   }
 }
 } // namespace jit

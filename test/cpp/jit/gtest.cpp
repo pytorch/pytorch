@@ -34,6 +34,8 @@ JIT_TEST(TopologicalIndex)
 JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
 JIT_TEST(AliasAnalysis)
+JIT_TEST(WriteTracking)
+JIT_TEST(Wildcards)
 JIT_TEST(MemoryDAG)
 JIT_TEST(IRParser)
 

@@ -45,8 +45,10 @@ class AliasDb {
   bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
       const;
 
+  // Do `a` and `b` potentially share a memory location?
+  bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
-  // value in group `b`?
+  // value in group `b`? i.e. may they overlap?
   //
   // NOTE: Bit of ugly templating, but this is just to make sure we can
   // transform an arbitrary container of `Values` to the same container of
@@ -188,7 +190,6 @@ class AliasDb {
   void makePointerTo(const Value* value, const Value* to);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
-  bool mayAlias(const Value* a, const Value* b) const;
 
   static bool shouldAnnotate(const Value* v);
   static bool shouldAnnotate(const TypePtr& type);
