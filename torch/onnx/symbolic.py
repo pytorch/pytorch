@@ -175,24 +175,41 @@ def _try_get_scalar_type(*args):
 # ONNX operator version
 # ---------------------------------------------------------------------
 
-# READ ME BEFORE EDITING _onnx_opset_version:
+# READ ME BEFORE EDITING _default_onnx_opset_version:
 #
 # The variable below controls which ONNX operator set version we are
-# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
-# change occurred in version 8.  As long as this variable < 8, you can
-# export models targeting the old behavior.  However, if you bump
+# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
+# change occurred in version 8. As long as this variable < 8, you can
+# export models targeting the old behavior. However, if you bump
 # this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# you MUST adjust any symbolic affected by breaking changes. The ONNX
 # spec publishes a *comprehensive* list of BC-breaking changes for every
 # operator revision at:
 #
 #   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
 #
 # Please be sure to go through and check all of our implementations here before
-# increasing this number.  This includes symbolic definitions NOT in this
+# increasing this number. This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
+#
+# Besides, opset_version can be specified in the invocation of export()
+# and export_to_pretty_string(), and _export_onnx_opset_version will be set
+# and the symbolic functions should check it to determine the behavior
+# of the exporter.
 
-_onnx_opset_version = 9
+_default_onnx_opset_version = 10
+_export_onnx_opset_version = _default_onnx_opset_version
+_onnx_stable_opsets = [9]
+
+
+def _set_opset_version(opset_version):
+    global _export_onnx_opset_version
+    if opset_version == _default_onnx_opset_version:
+        return
+    if opset_version in _onnx_stable_opsets:
+        _export_onnx_opset_version = opset_version
+        return
+    raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
 
 # ---------------------------------------------------------------------
@@ -231,7 +248,7 @@ _onnx_opset_version = 9
 # used to represent "missing" optional inputs
 def unused(g):
     n = g.op("prim::Constant")
-    n.output().setType(OptionalType.ofTensor())
+    n.setType(OptionalType.ofTensor())
     return n
 
 
@@ -591,11 +608,30 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_single(kernel_size),
-             pads_i=_single(padding) * 2,
-             strides_i=_single(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_single(kernel_size),
+                      pads_i=_single(padding) * 2,
+                      strides_i=_single(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened.
+    # In ONNX the indices are computed as a flatten 1-D tensor,
+    # so the values in indices are in [0, N x C x D1 x ... x Dn).
+    # To convert the indices to the same format used by Pytorch,
+    # we first execute a maxpool with a kernel and stride of 1 on the same input.
+    # This will result in a tensor of indices in which each index will have it's own value.
+    # Using this tensor as a reference, we extract the first index of each axis and substract
+    # it from each index of this axis in the indices to convert.
+    # This step will result in a tensor were each dimension has values of indices within
+    # the dimension it is in.
+    # For more information :
+    # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1],
+                                strides_i=[1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -606,11 +642,20 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding) * 2,
-             strides_i=_pair(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_pair(kernel_size),
+                      pads_i=_pair(padding) * 2,
+                      strides_i=_pair(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened
+    # See comment in max_pool1d_with_indices for details.
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1, 1],
+                                strides_i=[1, 1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -621,11 +666,20 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
-             kernel_shape_i=_triple(kernel_size),
-             pads_i=_triple(padding) * 2,
-             strides_i=_triple(stride))
-    return r, None
+    r, indices = g.op("MaxPool", input, outputs=2,
+                      kernel_shape_i=_triple(kernel_size),
+                      pads_i=_triple(padding) * 2,
+                      strides_i=_triple(stride))
+    # easy but hacky way to get flattened indices values
+    # to be used to convert the indices values to non-flattened
+    # See comment in max_pool1d_with_indices for details.
+    _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                kernel_shape_i=[1, 1, 1],
+                                strides_i=[1, 1, 1])
+    # convert indices to have non-flattened indices values
+    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
+    indices = sub(g, indices, s)
+    return r, indices
 
 
 def _avg_pool(name, tuple_fn):

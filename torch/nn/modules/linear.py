@@ -15,7 +15,7 @@ class Linear(Module):
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
+        bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
 
     Shape:
@@ -94,10 +94,10 @@ class Bilinear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features} x \text{in1\_features} x \text{in2\_features})`.
+            :math:`(\text{out\_features}, \text{in1\_features}, \text{in2\_features})`.
             The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
             :math:`k = \frac{1}{\text{in1\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
                 :math:`k = \frac{1}{\text{in1\_features}}`

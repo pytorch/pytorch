@@ -36,6 +36,8 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
       return std::make_pair("complex64", "");
     case at::ScalarType::ComplexDouble:
       return std::make_pair("complex128", "");
+    case at::ScalarType::Bool:
+      return std::make_pair("bool", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }

@@ -1317,14 +1317,14 @@ In-place version of :meth:`~Tensor.le`
 
 add_docstr_all('lerp',
                r"""
-lerp(start, end, weight) -> Tensor
+lerp(end, weight) -> Tensor
 
 See :func:`torch.lerp`
 """)
 
 add_docstr_all('lerp_',
                r"""
-lerp_(start, end, weight) -> Tensor
+lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
 """)
@@ -2030,7 +2030,10 @@ Args:
     index (LongTensor): the indices of elements to scatter,
       can be either empty or the same size of src.
       When empty, the operation returns identity
-    src (Tensor or float): the source element(s) to scatter
+    src (Tensor): the source element(s) to scatter,
+      incase `value` is not specified
+    value (float): the source element(s) to scatter,
+      incase `src` is not specified
 
 Example::
 
@@ -2206,9 +2209,16 @@ Example::
 
 add_docstr_all('sort',
                r"""
-sort(dim=None, descending=False) -> (Tensor, LongTensor)
+sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
+""")
+
+add_docstr_all('argsort',
+               r"""
+argsort(dim=-1, descending=False) -> LongTensor
+
+See :func: `torch.argsort`
 """)
 
 add_docstr_all('sparse_dim',
