@@ -1077,6 +1077,7 @@ class TestCuda(TestCase):
             self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    # Note: fails sometimes on the CI, passes on dual gfx906
     @skipIfRocm
     def test_broadcast_coalesced(self):
         numel = 5
@@ -1147,7 +1148,6 @@ class TestCuda(TestCase):
             self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @skipIfRocm
     def test_reduce_add_coalesced(self):
         numel = 5
         num_bytes = numel * 8
@@ -1211,6 +1211,7 @@ class TestCuda(TestCase):
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=0)
 
+    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
     @skipIfRocm
     def test_scatter_gpu_dim(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=1)
@@ -1553,6 +1554,7 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    # Note: fails sometimes on the CI, passes on dual gfx906
     @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
@@ -1636,7 +1638,6 @@ class TestCuda(TestCase):
             self.assertTrue(s1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_streams_multi_gpu_eq(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
@@ -2577,7 +2578,6 @@ class TestCuda(TestCase):
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
-    @skipIfRocm
     def test_histc_cuda(self):
         _TestTorchMixin._test_histc(self, device='cuda')
 
@@ -2591,6 +2591,7 @@ class TestCuda(TestCase):
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
     @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
