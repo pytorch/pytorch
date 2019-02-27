@@ -22,6 +22,7 @@ namespace script {
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
+// ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -397,6 +398,28 @@ struct Def : public TreeView {
       const Decl& decl,
       const List<Stmt>& stmts) {
     return Def(Compound::create(TK_DEF, range, {name, decl, stmts}));
+  }
+};
+
+struct ClassDef : public TreeView {
+  explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_CLASS_DEF);
+  }
+  ClassDef withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), std::move(new_name));
+    return create(range(), new_ident, defs());
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Def> defs() const {
+    return List<Def>(subtree(1));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Def>& defs) {
+    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
   }
 };
 
