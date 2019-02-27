@@ -108,7 +108,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
 //number of times random will be generated per thread, to offset philox counter in thc random state
   int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
   if (cuda::detail::canUse32BitIndexMath(self)){
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
@@ -126,7 +126,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       }
    });
   } else {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
@@ -151,7 +151,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(self);
    AT_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "masked_scale", [&] {
+   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(scale);
     masked_scale_kernel<scalar_t>(ret, self, mask, pa);

@@ -791,7 +791,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
   auto output = at::empty({N, input.size(1), H, W}, input.options());
   int count = static_cast<int>(N * H * W);
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
       grid_sampler_2d_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,
@@ -815,7 +815,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
   auto output = at::empty({N, input.size(1), D, H, W}, input.options());
   int count = static_cast<int>(N * D * H * W);
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
       grid_sampler_3d_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,
@@ -840,7 +840,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * H * W);
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_2d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
       grid_sampler_2d_backward_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,
@@ -868,7 +868,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
   auto grad_grid = at::empty_like(grid);
   int count = static_cast<int>(N * D * H * W);
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "grid_sampler_3d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
       grid_sampler_3d_backward_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,

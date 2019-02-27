@@ -260,7 +260,7 @@ std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
@@ -327,7 +327,7 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse", [&]{
     apply_inverse<scalar_t>(
       self_working_copy, self_inv_working_copy, infos);
   });
@@ -386,7 +386,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
   AT_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
@@ -446,7 +446,7 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
     self_working_copy = cloneBatchedColumnMajor(self);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky", [&]{
     apply_cholesky<scalar_t>(self_working_copy, false, infos);
   });
   if (self.dim() > 2) {
@@ -493,7 +493,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
           self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.scalar_type(), name, [&]{
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
