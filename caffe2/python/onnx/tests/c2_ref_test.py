@@ -68,6 +68,38 @@ class TestCaffe2Basic(DownloadingTestCase):
         output = c2_rep.run(X)
         np.testing.assert_almost_equal(output.Y, Y_ref)
 
+    def test_elementwiselinear(self):
+        X = np.random.randn(4, 2, 5, 7, 3).astype(np.float32)
+        W = np.random.randn(21).astype(np.float32)
+        B = np.random.randn(21).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-elementwiselinear-net'
+        predict_net.external_input[:] = ['X', 'W', 'B']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'ElementwiseLinear',
+                inputs=['X', 'W', 'B'],
+                outputs=['Y'],
+                axis=3,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X, W, B])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+                'W': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[W.dtype], W.shape),
+                'B': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[B.dtype], B.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_initializer(self):
         X = np.array([[1, 2], [3, 4]]).astype(np.float32)
         Y = np.array([[1, 2], [3, 4]]).astype(np.float32)

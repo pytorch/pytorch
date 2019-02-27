@@ -12,6 +12,7 @@ bool shouldAnnotate(const TypePtr& type) {
       type->kind() == TypeKind::TupleType ||
       type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
       type->kind() == TypeKind::FutureType ||
+      type->kind() == TypeKind::UserType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -143,6 +144,14 @@ ValueSet AliasDb::getWrites(Block* b) const {
   return writes;
 }
 
+
+// Does `n` write to an alias of one of the values in `vs`?
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
+    const {
+  const auto writtenTo = getWrites(n, recurseBlocks);
+  return mayAlias(vs, writtenTo);
+}
+
 std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
     const {
   ValueSet writes;
@@ -202,6 +211,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   std::map<TypeKind, std::vector<Value*>> listTypes;
   std::unordered_map<TupleTypePtr, std::vector<Value*>> tupleTypes;
   std::unordered_map<DictTypePtr, std::vector<Value*>> dictTypes;
+  std::unordered_map<UserTypePtr, std::vector<Value*>> userTypes;
   std::vector<Value*> tensors;
 
   for (auto input : graph->inputs()) {
@@ -227,6 +237,9 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     } else if (inputType->kind() == TypeKind::DictType) {
       auto dictType = inputType->cast<DictType>();
       dictTypes[dictType].push_back(input);
+    } else if (inputType->kind() == TypeKind::UserType) {
+      auto userType = inputType->cast<UserType>();
+      userTypes[userType].push_back(input);
     } else {
       AT_ASSERT(!shouldAnnotate(input));
     }
@@ -240,6 +253,9 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     makeAllAlias(pr.second, *aliasTracker_);
   }
   for (const auto& pr : dictTypes) {
+    makeAllAlias(pr.second, *aliasTracker_);
+  }
+  for (const auto& pr : userTypes) {
     makeAllAlias(pr.second, *aliasTracker_);
   }
   makeAllAlias(tensors, *aliasTracker_);
@@ -292,6 +308,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
     case prim::Function:
+    case prim::CreateUserObject:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -299,11 +316,14 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TupleSlice:
     case prim::ListUnpack:
     case prim::PythonOp:
+    case prim::GetAttr:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
       return analyzeBroadcastingChunk(node);
+    case prim::SetAttr:
+      return analyzeSetAttr(node);
     case aten::add:
     case aten::sub:
     case aten::mul:
@@ -496,7 +516,9 @@ void AliasDb::analyzeCreator(Node* node) {
 // gives up and creates wildcards for everything.
 void AliasDb::analyzeExtractor(Node* node) {
   for (const auto output : node->outputs()) {
-    aliasTracker_->setWildcard(output);
+    if (shouldAnnotate(output)) {
+      aliasTracker_->setWildcard(output);
+    }
   }
 }
 
@@ -571,6 +593,13 @@ void AliasDb::analyzeWait(Node* node) {
       aliasTracker_->registerWrite(write, node);
     }
   }
+}
+
+// SetAttr: writes to the `self` field
+void AliasDb::analyzeSetAttr(Node* node) {
+  const auto self = node->inputs().at(0);
+  AT_ASSERT(self->type()->kind() == TypeKind::UserType);
+  aliasTracker_->registerWrite(self, node);
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
@@ -1000,6 +1029,9 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::ConstantChunk,
       prim::BroadcastingChunk,
       prim::fork,
+      prim::CreateUserObject,
+      prim::GetAttr,
+      prim::SetAttr,
       aten::wait,
       aten::add,
       aten::sub,
