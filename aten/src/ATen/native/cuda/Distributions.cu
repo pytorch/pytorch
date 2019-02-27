@@ -210,7 +210,7 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
       [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
         ret_val = gamma / gamma_sum;
         auto min_value = std::numeric_limits<scalar_t>::min();
-        auto max_value = std::nexttoward((scalar_t)1.0, (scalar_t)0.0);
+        auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
         ret_val = (min_value > ret_val) ? min_value : ret_val;
         ret_val = (max_value < ret_val) ? max_value : ret_val;
       }

@@ -2216,6 +2216,8 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         num_samples = 10000
         beta_samples = Beta(1e-2, 1e-2).sample([num_samples])
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
         # assert support is concentrated around 0 and 1
         frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
@@ -2228,6 +2230,8 @@ class TestDistributions(TestCase):
         num_samples = 10000
         conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
         beta_samples = Beta(conc, conc).sample([num_samples])
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
         # assert support is concentrated around 0 and 1
         frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
