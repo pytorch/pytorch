@@ -1459,19 +1459,19 @@
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
 
-- func: rnn_tanh_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int64_t num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+- func: rnn_tanh_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
 
-- func: rnn_relu_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int64_t num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+- func: rnn_relu_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
 
-- func: gru_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int64_t num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+- func: gru_mkldnn_stub(Tensor self, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
 
-- func: lstm_mkldnn_stub(Tensor self, Tensor[] hx, Tensor[] params, bool has_biases, int64_t num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
+- func: lstm_mkldnn_stub(Tensor self, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
 
-- func: mkldnn_rnn_transpose_weight(Tensor[] weight, int64_t weight_stride0, int64_t fn_mode, int64_t fn_num_layers, bool fn_bidirectional) -> Tensor[]
+- func: mkldnn_rnn_transpose_weight(Tensor[] weight, int weight_stride0, int fn_mode, int fn_num_layers, bool fn_bidirectional) -> Tensor[]
 
-- func: mkldnn_rnn(Tensor input, Tensor[] weight, int64_t weight_stride0, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor[])
+- func: mkldnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor[])
 
-- func: mkldnn_rnn_backward(Tensor input, Tensor[] weight, int64_t weight_stride0, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state, Tensor[] reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+- func: mkldnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state, Tensor[] reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
