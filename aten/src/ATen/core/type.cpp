@@ -425,15 +425,15 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 }
 
 namespace {
-class ClassTypeRegistry {
+class UserTypeRegistry {
  public:
-  void registerType(std::string name, ClassTypePtr type) {
+  void registerType(std::string name, UserTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
     // TODO: new type registrations will override the old ones. Is this safe?
     reg_[name] = type;
   }
 
-  ClassTypePtr getType(const std::string& name) {
+  UserTypePtr getType(const std::string& name) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
       return reg_.at(name);
@@ -443,24 +443,24 @@ class ClassTypeRegistry {
 
  private:
   std::mutex mutex_;
-  std::unordered_map<std::string, ClassTypePtr> reg_;
+  std::unordered_map<std::string, UserTypePtr> reg_;
 };
 
-ClassTypeRegistry& getRegistry() {
-  static ClassTypeRegistry r;
+UserTypeRegistry& getRegistry() {
+  static UserTypeRegistry r;
   return r;
 }
 } // namespace
 
-ClassTypePtr ClassType::create(
+UserTypePtr UserType::create(
     const std::string& name,
     std::shared_ptr<Module> module) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
+  auto ptr = UserTypePtr(new UserType(name, std::move(module)));
   getRegistry().registerType(name, ptr);
   return ptr;
 }
 
-ClassTypePtr ClassType::get(const std::string& name) {
+UserTypePtr UserType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
 } // namespace c10

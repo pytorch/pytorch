@@ -44,7 +44,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
-_(ClassType) \
+_(UserType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1082,23 +1082,21 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
  * User Defined Types
  */
 
-struct ClassType;
-using ClassTypePtr = std::shared_ptr<ClassType>;
+struct UserType;
+using UserTypePtr = std::shared_ptr<UserType>;
 using ::torch::jit::script::Module;
 using ::torch::jit::script::Method;
 
 // This represents a user-defined type in TorchScript.
-struct CAFFE2_API ClassType : public Type {
+struct CAFFE2_API UserType : public Type {
   // Create a user type and register it globally.
-  static ClassTypePtr create(
-      const std::string& name,
-      std::shared_ptr<Module> module);
+  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
   // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const std::string& name);
+  static UserTypePtr get(const std::string& name);
 
-  DEFINE_IS_SUBCLASS(ClassType);
+  DEFINE_IS_SUBCLASS(UserType);
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<ClassType>()) {
+    if (auto user_rhs = rhs.cast<UserType>()) {
       return typename_ == user_rhs->typename_;
     }
     return false;
@@ -1110,7 +1108,7 @@ struct CAFFE2_API ClassType : public Type {
     return *this == *rhs;
   }
   std::string str() const override {
-    return std::string("ClassType<") + typename_ + ">";
+    return std::string("UserType<") + typename_ + ">";
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1161,11 +1159,11 @@ struct CAFFE2_API ClassType : public Type {
     attributes_.emplace_back(name, type);
   }
 
-  static const TypeKind Kind = TypeKind::ClassType;
+  static const TypeKind Kind = TypeKind::UserType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<Module> module)
-      : Type(TypeKind::ClassType),
+  UserType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::UserType),
         typename_(std::move(name)),
         module_(std::move(module)) {}
 

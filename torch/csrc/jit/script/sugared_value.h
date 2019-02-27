@@ -177,8 +177,8 @@ struct TORCH_API BuiltinModule : public SugaredValue {
 };
 
 // Represents a user type, analagous to `int` or `dict`
-struct TORCH_API ClassValue : public SugaredValue {
-  ClassValue(ClassTypePtr type) : type_(std::move(type)) {}
+struct TORCH_API UserTypeValue : public SugaredValue {
+  UserTypeValue(UserTypePtr type) : type_(std::move(type)) {}
 
   // Call the type's constructor, as in:
   //    n = Foo(constructor_arg)
@@ -193,7 +193,7 @@ struct TORCH_API ClassValue : public SugaredValue {
     return type_->str();
   }
 
-  ClassTypePtr type_;
+  UserTypePtr type_;
 };
 
 // defines how a method obtained from a module behaves in script

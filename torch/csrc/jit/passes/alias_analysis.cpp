@@ -12,7 +12,7 @@ bool shouldAnnotate(const TypePtr& type) {
       type->kind() == TypeKind::TupleType ||
       type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
       type->kind() == TypeKind::FutureType ||
-      type->kind() == TypeKind::ClassType ||
+      type->kind() == TypeKind::UserType ||
       (type->kind() == TypeKind::OptionalType &&
        shouldAnnotate(type->cast<OptionalType>()->getElementType()));
 }
@@ -144,6 +144,7 @@ ValueSet AliasDb::getWrites(Block* b) const {
   return writes;
 }
 
+
 // Does `n` write to an alias of one of the values in `vs`?
 bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
     const {
@@ -210,7 +211,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   std::map<TypeKind, std::vector<Value*>> listTypes;
   std::unordered_map<TupleTypePtr, std::vector<Value*>> tupleTypes;
   std::unordered_map<DictTypePtr, std::vector<Value*>> dictTypes;
-  std::unordered_map<ClassTypePtr, std::vector<Value*>> userTypes;
+  std::unordered_map<UserTypePtr, std::vector<Value*>> userTypes;
   std::vector<Value*> tensors;
 
   for (auto input : graph->inputs()) {
@@ -236,8 +237,8 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
     } else if (inputType->kind() == TypeKind::DictType) {
       auto dictType = inputType->cast<DictType>();
       dictTypes[dictType].push_back(input);
-    } else if (inputType->kind() == TypeKind::ClassType) {
-      auto userType = inputType->cast<ClassType>();
+    } else if (inputType->kind() == TypeKind::UserType) {
+      auto userType = inputType->cast<UserType>();
       userTypes[userType].push_back(input);
     } else {
       AT_ASSERT(!shouldAnnotate(input));
@@ -307,7 +308,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
     case prim::Function:
-    case prim::CreateObject:
+    case prim::CreateUserObject:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -597,7 +598,7 @@ void AliasDb::analyzeWait(Node* node) {
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
-  AT_ASSERT(self->type()->kind() == TypeKind::ClassType);
+  AT_ASSERT(self->type()->kind() == TypeKind::UserType);
   aliasTracker_->registerWrite(self, node);
 }
 
@@ -1028,7 +1029,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::ConstantChunk,
       prim::BroadcastingChunk,
       prim::fork,
-      prim::CreateObject,
+      prim::CreateUserObject,
       prim::GetAttr,
       prim::SetAttr,
       aten::wait,

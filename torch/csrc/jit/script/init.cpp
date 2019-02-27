@@ -526,12 +526,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
     const auto script_class_type =
         py::module::import("torch.jit").attr("ScriptClass");
-    const bool is_class_type = py::isinstance(obj, script_class_type);
-    if (is_class_type) {
+    const bool is_user_type = py::isinstance(obj, script_class_type);
+    if (is_user_type) {
       const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
-      auto userType = ClassType::get(classname);
+      auto userType = UserType::get(classname);
       AT_ASSERT(userType);
-      return std::make_shared<ClassValue>(std::move(userType));
+      return std::make_shared<UserTypeValue>(std::move(userType));
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
@@ -972,7 +972,7 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<Module> module,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
-        auto userType = ClassType::create(classDef.name().name(), module);
+        auto userType = UserType::create(classDef.name().name(), module);
         std::vector<Resolver> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
@@ -980,7 +980,10 @@ void initJitScriptBindings(PyObject* module) {
           rcbs.push_back(pythonResolver(rcb));
         }
         defineMethodsInModule(
-            module, methodDefs, rcbs, std::make_shared<ClassValue>(userType));
+            module,
+            methodDefs,
+            rcbs,
+            std::make_shared<UserTypeValue>(userType));
         return module;
       });
 

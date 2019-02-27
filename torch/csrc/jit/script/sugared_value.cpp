@@ -113,7 +113,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     throw ErrorReport(loc) << "Unknown attribute to named tuple";
   }
 
-  if (auto userType = value_->type()->cast<ClassType>()) {
+  if (auto userType = value_->type()->cast<UserType>()) {
     // This is a user-defined type, emit the proper attribute lookup
     if (auto method = userType->getMethod(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *method);
@@ -164,7 +164,7 @@ void SimpleValue::setAttr(
     const std::string& field,
     Value* newValue,
     bool shouldDefine) {
-  const auto userType = value_->type()->cast<ClassType>();
+  const auto userType = value_->type()->cast<UserType>();
   if (!userType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
                            << " on a non-user-defined type: "
@@ -204,7 +204,7 @@ void SimpleValue::setAttr(
   g.insertNode(g.createSetAttr(value_, field, newValue));
 }
 
-std::shared_ptr<SugaredValue> ClassValue::call(
+std::shared_ptr<SugaredValue> UserTypeValue::call(
     const SourceRange& loc,
     Method& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
@@ -215,7 +215,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
-  auto createNode = g.insertNode(g.createObject(type_));
+  auto createNode = g.insertNode(g.createUserObject(type_));
   auto self = std::make_shared<SimpleValue>(createNode->output());
 
   auto initMethod = type_->getMethod("__init__");
