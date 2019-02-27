@@ -78,8 +78,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
-      auto& type = tensor.type();
-      auto scalarType = type.scalarType();
+      auto scalarType = tensor.scalar_type();
       if (scalarType != kLong && scalarType != kByte) {
           AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
       }
