@@ -672,10 +672,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
   if (at::mkldnn_is_acceptable(_input)
       && (!train || (train && _input.size(2) == hx[0].size(2) && !bidirectional))) {
-    // Disable MKLDNN RNN for training when input_size != hidden_size and bidirectional
-    // since workspace offset is miss calculated on such cases
-    // This issue has been fixed on https://github.com/intel/mkl-dnn since commit d5c4eb5e
-    // TODO: remove these limitations once mkl-dnn is upgraded
     return at::lstm_mkldnn_stub(_input, hx, _params, has_biases, num_layers,
         dropout_p, train, bidirectional, batch_first);
   }

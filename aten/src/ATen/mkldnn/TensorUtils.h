@@ -38,6 +38,17 @@ inline void _set_memory_handle(const T& self, const T& other, const Ts& ... rest
   _set_memory_handle(rest ...);
 }
 
+template <typename T>
+inline void _set_memory_handle(const T& self, const Tensor& other) {
+  self.set_data_handle(other.defined() ? other.data_ptr() : nullptr);
+}
+
+template <typename T, typename ... Ts>
+inline void _set_memory_handle(const T& self, const Tensor& other, const Ts& ... rest) {
+  self.set_data_handle(other.defined() ? other.data_ptr() : nullptr);
+  _set_memory_handle(rest ...);
+}
+
 /* mkldnn memory create/reorder method */
 inline memory _new_mkldnn_memory(const memory::primitive_desc& pd, const Tensor& tensor) {
   return memory(pd, tensor.data_ptr());
@@ -80,6 +91,15 @@ struct PrimitiveCache {
 
   void insert(const key_t& params, const prim_handle_t& results) {
     map.insert(std::pair<key_t, prim_handle_t>(params, results));
+  }
+
+  template <typename F>
+  prim_t& get(const key_t& params, const F& fn_new) {
+    if (!find(params, prim_)) {
+      fn_new(prim_);
+      insert(params, prim_);
+    }
+    return *prim_;
   }
 
   template <typename F1, typename F2>

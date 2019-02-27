@@ -277,20 +277,28 @@ struct RNNDescriptor {
   }
 
   rnn_forward::primitive_desc rnn_forward_pd() const {
-    auto _engine = MKLDNNEngine::Instance().get_engine();
-    auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
-    auto rnn_desc = rnn_forward::desc(rnn_prop, rnn_cell_, rnn_dir,
-        input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
-    return rnn_forward::primitive_desc(rnn_desc, _engine);
+    using pd_handle_t = std::shared_ptr<rnn_forward::primitive_desc>;
+    static thread_local PrimitiveCache<RNNLayerParams, rnn_forward::primitive_desc> cache;
+    return cache.get(key, [&](pd_handle_t& _pd) {
+        auto _engine = MKLDNNEngine::Instance().get_engine();
+        auto rnn_prop = train ? prop_kind::forward_training : prop_kind::forward_inference;
+        auto rnn_desc = rnn_forward::desc(rnn_prop, rnn_cell_, rnn_dir,
+            input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
+        _pd.reset(new rnn_forward::primitive_desc(rnn_desc, _engine));
+    });
   }
 
   rnn_backward::primitive_desc rnn_backward_pd() const {
-    auto _engine = MKLDNNEngine::Instance().get_engine();
-    auto rnn_prop = prop_kind::backward;
-    auto rnn_desc = rnn_backward::desc(rnn_prop, rnn_cell_, rnn_dir,
-        input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md,
-        input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
-    return rnn_backward::primitive_desc(rnn_desc, _engine, rnn_forward_pd());
+    using pd_handle_t = std::shared_ptr<rnn_backward::primitive_desc>;
+    static thread_local PrimitiveCache<RNNLayerParams, rnn_backward::primitive_desc> cache;
+    return cache.get(key, [&](pd_handle_t& _pd) {
+        auto _engine = MKLDNNEngine::Instance().get_engine();
+        auto rnn_prop = prop_kind::backward;
+        auto rnn_desc = rnn_backward::desc(rnn_prop, rnn_cell_, rnn_dir,
+            input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md,
+            input_md, hidden_md, weight_ih_md, weight_hh_md, bias_md, output_md, hidden_md);
+        _pd.reset(new rnn_backward::primitive_desc(rnn_desc, _engine, rnn_forward_pd()));
+    });
   }
 
   using pdesc_t = memory::primitive_desc;
@@ -312,8 +320,9 @@ struct RNNForwardPrimitive : MKLDNNPrimitive<rnn_forward> {
     prim_.reset(new rnn_forward(pd, src_layer, src_iter, weights_layer, weights_iter, bias, dst_layer, dst_iter, workspace));
   }
 
-  void set(const memory& input, const memory& hidden_x, const memory& weight_ih, const memory& weight_hh,
-      const memory& bias, const memory& output, const memory& hidden_y, const memory& workspace) {
+  template <typename T>
+  void set(const T& input, const T& hidden_x, const T& weight_ih, const T& weight_hh,
+      const T& bias, const T& output, const T& hidden_y, const T& workspace) {
     _set_memory_handle(src_layer, input, src_iter, hidden_x, weights_layer, weight_ih, weights_iter, weight_hh,
         this->bias, bias, dst_layer, output, dst_iter, hidden_y, this->workspace, workspace);
   }
@@ -332,10 +341,11 @@ struct RNNBackwardPrimitive : MKLDNNPrimitive<rnn_backward> {
         diff_src_iter, diff_weights_layer, diff_weights_iter, diff_bias, diff_dst_layer, diff_dst_iter, workspace));
   }
 
-  void set(const memory& input, const memory& hidden_x, const memory& weight_ih, const memory& weight_hh,
-      const memory& bias, const memory& output, const memory& hidden_y, const memory& grad_input,
-      const memory& grad_hidden_x, const memory& grad_weight_ih, const memory& grad_weight_hh,
-      const memory& grad_bias, const memory& grad_output, const memory& grad_hidden_y, const memory workspace) {
+  template <typename T>
+  void set(const T& input, const T& hidden_x, const T& weight_ih, const T& weight_hh,
+      const T& bias, const T& output, const T& hidden_y, const T& grad_input, const T& grad_hidden_x,
+      const T& grad_weight_ih, const T& grad_weight_hh, const T& grad_bias, const T& grad_output,
+      const T& grad_hidden_y, const T& workspace) {
     _set_memory_handle(src_layer, input, src_iter, hidden_x, weights_layer, weight_ih, weights_iter, weight_hh,
         this->bias, bias, dst_layer, output, dst_iter, hidden_y, diff_src_layer, grad_input, diff_src_iter, grad_hidden_x,
         diff_weights_layer, grad_weight_ih, diff_weights_iter, grad_weight_hh, diff_bias, grad_bias,
@@ -380,6 +390,31 @@ Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   return weight_t.contiguous();
 };
 
+// MKLDNN GRU bias has 4 gates instead of 3
+// (let rt,zt,nt be reset,input,new)
+//
+//  (PyTorch GRU bias)     (MKLDNN GRU bias)
+//
+//  bias_ih    bias_hh          bias
+//  +-----+    +-----+       +---------+
+//  | rt1 |    | rt2 |       | zt1+zt2 |
+//  |-----|    |-----|       |---------|
+//  | zt1 |    | zt2 |       | rt1+rt2 |
+//  |-----|    |-----|       |---------|
+//  | nt1 |    | nt2 |       |   nt1   |
+//  +-----+    +-----+       |---------|
+//                           |   nt2   |
+//                           +---------+
+//
+Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
+  if (static_cast<mkldnnRNNMode_t>(fn_mode) == MKLDNN_GRU) {
+    std::vector<Tensor> b1 = bias_ih.chunk(3, ldgo_shuffle_dim);
+    std::vector<Tensor> b2 = bias_hh.chunk(3, ldgo_shuffle_dim);
+    return at::cat({b1[1] + b2[1], b1[0] + b2[0], b1[2], b2[2]}, ldgo_shuffle_dim);
+  }
+  return bias_ih + bias_hh;
+};
+
 std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
     const RNNParams& fn, const Tensor& input, TensorList weights,
     const Tensor& hx, const Tensor& cx, Tensor& hy, Tensor& cy, bool reverse) {
@@ -398,52 +433,11 @@ std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
   auto mode = fn.rnn.mode;
   auto weight_ih = train ? _shuffle_weight(weights[0], mode) : weights[0];
   auto weight_hh = train ? _shuffle_weight(weights[1], mode) : weights[1];
-
-  // MKLDNN GRU bias has 4 gates instead of 3
-  // (let rt,zt,nt be reset,input,new)
-  //
-  //  (PyTorch GRU bias)     (MKLDNN GRU bias)
-  //
-  //  bias_ih    bias_hh          bias
-  //  +-----+    +-----+       +---------+
-  //  | rt1 |    | rt2 |       | zt1+zt2 |
-  //  |-----|    |-----|       |---------|
-  //  | zt1 |    | zt2 |       | rt1+rt2 |
-  //  |-----|    |-----|       |---------|
-  //  | nt1 |    | nt2 |       |   nt1   |
-  //  +-----+    +-----+       |---------|
-  //                           |   nt2   |
-  //                           +---------+
-  //
-  auto shuffle_bias = [&](const Tensor& bias_ih, const Tensor& bias_hh) {
-    if (weights.size() == 2) {
-      return at::zeros({fn.rnn.num_biases * fn.rnn.hidden_size});
-    }
-    if (fn.rnn.mode == MKLDNN_GRU) {
-      std::vector<Tensor> b1 = bias_ih.chunk(3, ldgo_shuffle_dim);
-      std::vector<Tensor> b2 = bias_hh.chunk(3, ldgo_shuffle_dim);
-      return at::cat({b1[1] + b2[1], b1[0] + b2[0], b1[2], b2[2]}, ldgo_shuffle_dim);
-    }
-    return bias_ih + bias_hh;
-  };
-  auto bias = shuffle_bias(weights[2], weights[3]);
+  auto bias = weights.size() == 2 ? at::zeros({fn.rnn.num_biases * fn.rnn.hidden_size}) :
+      train ? _shuffle_bias(weights[2], weights[3], mode) : weights[2];
 
   RNNDescriptor rnn_desc(fn, input.size(2), reverse);
   auto rnn_pd = rnn_desc.rnn_forward_pd();
-
-  // user layout
-  auto input_usr = _new_mkldnn_memory(rnn_desc.input_pd(), input);
-  auto hidden_x_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), hidden_x);
-  auto hidden_y_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), hidden_y);
-  auto weight_ih_usr = _new_mkldnn_memory(rnn_desc.weight_ih_pd(), weight_ih);
-  auto weight_hh_usr = _new_mkldnn_memory(rnn_desc.weight_hh_pd(), weight_hh);
-  auto bias_usr = _new_mkldnn_memory(rnn_desc.bias_pd(), bias);
-  auto output_usr = _new_mkldnn_memory(rnn_desc.output_pd(), output);
-  // primitive layout
-  auto hidden_x_prv = _reorder(hidden_x_usr, rnn_pd.src_iter_primitive_desc());
-  auto hidden_y_prv = _reorder(hidden_y_usr, rnn_pd.dst_iter_primitive_desc());
-  auto weight_ih_prv = _reorder(weight_ih_usr, rnn_pd.weights_layer_primitive_desc());
-  auto weight_hh_prv = _reorder(weight_hh_usr, rnn_pd.weights_iter_primitive_desc());
 
   Tensor workspace;
   auto workspace_prv = null_memory();
@@ -458,12 +452,10 @@ std::tuple<Tensor, std::vector<Tensor>> mkldnn_rnn_layer(
   static thread_local PrimitiveCache<RNNLayerParams, RNNForwardPrimitive> cache;
   auto rnn = cache.get(rnn_desc.key,
     [&](prim_handle_t& _prim) { _prim.reset(new RNNForwardPrimitive(rnn_pd, fn.dropout.train)); },
-    [&](prim_handle_t& _prim) { _prim->set(input_usr, hidden_x_prv, weight_ih_prv,
-        weight_hh_prv, bias_usr, output_usr, hidden_y_prv, workspace_prv); });
+    [&](prim_handle_t& _prim) { _prim->set(input, hidden_x, weight_ih,
+        weight_hh, bias, output, hidden_y, workspace); });
 
   MKLDNN_EXEC(rnn.get_primitive());
-
-  _reorder(hidden_y_prv, hidden_y_usr);
 
   std::vector<Tensor> hidden_arr = hidden_y.chunk(fn.rnn.num_states, 0);
   hy.copy_(hidden_arr[0]);
@@ -513,45 +505,31 @@ Tensor mkldnn_rnn_layer_backward(
   RNNDescriptor rnn_desc(fn, input.size(2), reverse);
   auto rnn_pd = rnn_desc.rnn_backward_pd();
 
-  // user layout
-  auto input_usr = _new_mkldnn_memory(rnn_desc.input_pd(), input);
-  auto hidden_x_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), hidden_x);
-  auto hidden_y_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), hidden_y);
-  auto weight_ih_usr = _new_mkldnn_memory(rnn_desc.weight_ih_pd(), weight_ih);
-  auto weight_hh_usr = _new_mkldnn_memory(rnn_desc.weight_hh_pd(), weight_hh);
-  auto bias_usr = _new_mkldnn_memory(rnn_desc.bias_pd(), bias);
-  auto output_usr = _new_mkldnn_memory(rnn_desc.output_pd(), output);
-  auto grad_input_usr = _new_mkldnn_memory(rnn_desc.input_pd(), grad_input);
-  auto grad_hidden_x_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), grad_hidden_x);
-  auto grad_hidden_y_usr = _new_mkldnn_memory(rnn_desc.hidden_pd(), grad_hidden_y);
-  auto grad_weight_ih_usr = _new_mkldnn_memory(rnn_desc.weight_ih_pd(), grad_weight_ih);
-  auto grad_weight_hh_usr = _new_mkldnn_memory(rnn_desc.weight_hh_pd(), grad_weight_hh);
-  auto grad_bias_usr = _new_mkldnn_memory(rnn_desc.bias_pd(), grad_bias);
-  auto grad_output_usr = _new_mkldnn_memory(rnn_desc.output_pd(), grad_output);
-  // primitive layout
-  auto workspace_prv = _new_mkldnn_memory(rnn_pd.workspace_primitive_desc(), workspace);
-  auto hidden_x_prv = _reorder(hidden_x_usr, rnn_pd.src_iter_primitive_desc());
-  auto hidden_y_prv = _reorder(hidden_y_usr, rnn_pd.dst_iter_primitive_desc());
-  auto weight_ih_prv = _reorder(weight_ih_usr, rnn_pd.weights_layer_primitive_desc());
-  auto weight_hh_prv = _reorder(weight_hh_usr, rnn_pd.weights_iter_primitive_desc());
-  auto grad_hidden_x_prv = _reorder(grad_hidden_x_usr, rnn_pd.diff_src_iter_primitive_desc());
-  auto grad_hidden_y_prv = _reorder(grad_hidden_y_usr, rnn_pd.diff_dst_iter_primitive_desc());
-  auto grad_weight_ih_prv = _reorder(grad_weight_ih_usr, rnn_pd.diff_weights_layer_primitive_desc());
-  auto grad_weight_hh_prv = _reorder(grad_weight_hh_usr, rnn_pd.diff_weights_iter_primitive_desc());
+  // MKLDNN expects:
+  // 1) weight to be in ldigo format in forward
+  // 2) weight to be in ldgoi format in backward
+  // 3) grad_weight to be in ldigo format in backward
+  using pdesc_t = memory::primitive_desc;
+  auto reorder_weight = [&](const Tensor& weight, const pdesc_t& usr_pd, const pdesc_t& prv_pd) {
+    auto weight_usr_memory = _new_mkldnn_memory(usr_pd, weight);
+    int64_t size = prv_pd.get_size() / sizeof(float);
+    auto weight_prv = at::empty({size}, weight.options());
+    auto weight_prv_memory = _new_mkldnn_memory(prv_pd, weight_prv);
+    _reorder(weight_usr_memory, weight_prv_memory);
+    return weight_prv;
+  };
+  auto weight_ih_ = reorder_weight(weight_ih, rnn_desc.weight_ih_pd(), rnn_pd.weights_layer_primitive_desc());
+  auto weight_hh_ = reorder_weight(weight_hh, rnn_desc.weight_hh_pd(), rnn_pd.weights_iter_primitive_desc());
 
   using prim_handle_t = std::shared_ptr<RNNBackwardPrimitive>;
   static thread_local PrimitiveCache<RNNLayerParams, RNNBackwardPrimitive> cache;
   auto rnn = cache.get(rnn_desc.key,
     [&](prim_handle_t& _prim) { _prim.reset(new RNNBackwardPrimitive(rnn_pd)); },
-    [&](prim_handle_t& _prim) { _prim->set(input_usr, hidden_x_prv, weight_ih_prv, weight_hh_prv,
-        bias_usr, output_usr, hidden_y_prv,grad_input_usr, grad_hidden_x_prv, grad_weight_ih_prv,
-        grad_weight_hh_prv, grad_bias_usr, grad_output_usr, grad_hidden_y_prv, workspace_prv); });
+    [&](prim_handle_t& _prim) { _prim->set(input, hidden_x, weight_ih_, weight_hh_,
+        bias, output, hidden_y, grad_input, grad_hidden_x, grad_weight_ih,
+        grad_weight_hh, grad_bias, grad_output, grad_hidden_y, workspace); });
 
   MKLDNN_EXEC(rnn.get_primitive());
-
-  _reorder(grad_hidden_x_prv, grad_hidden_x_usr);
-  _reorder(grad_weight_ih_prv, grad_weight_ih_usr);
-  _reorder(grad_weight_hh_prv, grad_weight_hh_usr);
 
   auto grad_w1 = grad_weights[0];
   auto grad_w2 = grad_weights[1];
@@ -615,8 +593,8 @@ std::vector<Tensor> mkldnn_rnn_transpose_weight(
       transposed_weight_arr.emplace_back(_shuffle_weight(layer_weights[0], fn_mode));
       transposed_weight_arr.emplace_back(_shuffle_weight(layer_weights[1], fn_mode));
       if (has_bias) {
-        transposed_weight_arr.emplace_back(layer_weights[2]);
-        transposed_weight_arr.emplace_back(layer_weights[3]);
+        transposed_weight_arr.emplace_back(_shuffle_bias(layer_weights[2], layer_weights[3], fn_mode));
+        transposed_weight_arr.emplace_back(_shuffle_bias(layer_weights[2], layer_weights[3], fn_mode));
       }
     }
   }
