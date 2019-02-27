@@ -6,6 +6,7 @@ from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
+from ._functions import Broadcast
 from torch.cuda._utils import _get_device_index
 
 
@@ -135,6 +136,19 @@ class DataParallel(Module):
         if len(self.device_ids) == 1:
             self.module.cuda(device_ids[0])
 
+        if len(self.device_ids) > 1:
+            self.module_copies = replicate(module, self.device_ids, detach=True)
+            self.module_copies[0] = module
+        else:
+            self.module_copies = [module]
+
+        self.modules_params_data = [[] for _ in range(len(self.device_ids))]
+        self.modules_buffers_data = [[] for _ in range(len(self.device_ids))]
+
+        for dev_idx, module in enumerate(self.module_copies):
+            self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
+            self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
+
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
@@ -148,9 +162,31 @@ class DataParallel(Module):
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
-        replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
-        outputs = self.parallel_apply(replicas, inputs, kwargs)
+        self._sync_params()
+        outputs = self.parallel_apply(self.module_copies, inputs, kwargs)
         return self.gather(outputs, self.output_device)
+
+    def _sync_params(self):
+        params = self.modules_params_data[0]
+        if len(self.device_ids) > 1:
+            param_copies = Broadcast.apply(self.device_ids, *params)
+
+        if len(params) > 0:
+            param_copies = [param_copies[i:i + len(params)]
+                            for i in range(0, len(param_copies), len(params))]
+
+            for tensors, module_params_data in zip(param_copies[1:], self.modules_params_data[1:]):
+                for tensor, param_data in zip(tensors, module_params_data):
+                    param_data.set_(tensor)
+
+            # module buffer sync
+            if len(self.modules_buffers_data[0]) > 0 and len(self.device_ids) > 1:
+                result = broadcast_coalesced(self.modules_buffers_data[0],
+                                             self.device_ids)
+                for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
+                    for tensor, buffer_data in zip(tensors, module_buffers_data):
+                        buffer_data.set_(tensor)
+
 
     def replicate(self, module, device_ids):
         return replicate(module, device_ids)
