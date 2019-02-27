@@ -1,6 +1,6 @@
 #include "c10/util/numa.h"
 
-C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
+C10_DEFINE_bool(caffe2_cpu_numa_enabled, true, "Use NUMA whenever possible.");
 
 #if defined(__linux__) && !defined(C10_DISABLE_NUMA) && C10_MOBILE == 0
 #include <numa.h>
