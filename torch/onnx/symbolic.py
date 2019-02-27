@@ -1587,6 +1587,6 @@ def nonzero(g, input):
     return g.op('NonZero', input)
 
 
-@parse_args('v','i','i','i')
+@parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
     return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
