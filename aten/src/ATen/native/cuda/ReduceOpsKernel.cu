@@ -79,7 +79,7 @@ void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
-  } else if (iter.dtype() == kHalf && iter.dtype() == kFloat) {
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return sum_kernel_impl<at::Half, float, float>(iter);
   }
@@ -100,7 +100,7 @@ static void prod_kernel_cuda(TensorIterator& iter) {
 static void mean_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
     return mean_kernel_impl<at::Half, float>(iter);
-  } else if (iter.dtype() == kHalf && iter.dtype() == kFloat) {
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return mean_kernel_impl<at::Half, float, float>(iter);
   }
@@ -112,7 +112,7 @@ static void mean_kernel_cuda(TensorIterator& iter) {
 static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
   if (iter.dtype() == kHalf) {
     return norm_kernel_cuda_impl<at::Half, float>(iter, p);
-  } else if (iter.dtype() == kHalf && iter.dtype() == kFloat) {
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
   }
