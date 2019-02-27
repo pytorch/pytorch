@@ -517,11 +517,11 @@
 - func: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
   matches_jit_signature: True
 
-- func: _convolution_impl_index(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, int64_t)
+- func: _convolution_impl_index(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, int)
 
 - func: _convolution_impl_index_backward(int impl_idx, Tensor input, Tensor grad, Tensor weight, int[] stride, int[] padding, int[] dilation, int[] output_padding, bool transposed_, int groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask, Tensor save1, Tensor save2) -> (Tensor, Tensor, Tensor)
 
-- func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> (Tensor, Tensor, Tensor, int64_t)
+- func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> (Tensor, Tensor, Tensor, int)
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
