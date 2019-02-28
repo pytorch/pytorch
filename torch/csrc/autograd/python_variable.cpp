@@ -404,7 +404,7 @@ static PyObject * THPVariable_layout(THPVariable* self) {
 
 static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(torch::tensors::getDevice(self->cdata));
+  return THPDevice_New(self->cdata.device());
   END_HANDLE_TH_ERRORS
 }
 
