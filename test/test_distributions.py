@@ -2214,20 +2214,22 @@ class TestDistributions(TestCase):
         # torch._sample_dirichlet works with double precision for intermediate
         # calculations.
         set_rng_seed(1)
-        num_samples = 10000
-        beta_samples = Beta(1e-2, 1e-2).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
-        # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
-        self.assertEqual(frac_zeros, 0.5, 0.05)
-        self.assertEqual(frac_ones, 0.5, 0.05)
+        num_samples = 50000
+        for dtype in [torch.float, torch.double]:
+            conc = torch.tensor(1e-2, dtype=dtype)
+            beta_samples = Beta(conc, conc).sample([num_samples])
+            self.assertEqual((beta_samples == 0).sum(), 0)
+            self.assertEqual((beta_samples == 1).sum(), 0)
+            # assert support is concentrated around 0 and 1
+            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+            self.assertEqual(frac_zeros, 0.5, 0.05)
+            self.assertEqual(frac_ones, 0.5, 0.05)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_beta_underflow_gpu(self):
         set_rng_seed(1)
-        num_samples = 10000
+        num_samples = 50000
         conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
         beta_samples = Beta(conc, conc).sample([num_samples])
         self.assertEqual((beta_samples == 0).sum(), 0)

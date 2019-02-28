@@ -181,6 +181,21 @@ void bernoulli_scalar_cuda_kernel(
     );
 }
 
+template<typename scalar_t>
+void dirichlet_scalar_cuda_kernel(
+    at::Tensor& ret,
+    const at::Tensor& gamma) {
+  auto gamma_sum = gamma.sum(-1, true).expand(ret.sizes());
+  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, gamma, gamma_sum,
+  [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
+    ret_val = gamma / gamma_sum;
+    auto min_value = std::numeric_limits<scalar_t>::min();
+    auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
+    ret_val = (min_value > ret_val) ? min_value : ret_val;
+    ret_val = (max_value < ret_val) ? max_value : ret_val;
+  });
+}
+
 } // namespace
 
 namespace at { namespace native {
@@ -205,16 +220,7 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
     gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
-    Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
-    at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, gamma, gamma_sum,
-      [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
-        ret_val = gamma / gamma_sum;
-        auto min_value = std::numeric_limits<scalar_t>::min();
-        auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
-        ret_val = (min_value > ret_val) ? min_value : ret_val;
-        ret_val = (max_value < ret_val) ? max_value : ret_val;
-      }
-    );
+    dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
   });
   return ret;
 }
