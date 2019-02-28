@@ -1474,7 +1474,7 @@ void testSchemaParser() {
     // The list itself is annotated with `a`
     const auto& aliasInfo = *s.arguments().at(0).alias_info();
     ASSERT_TRUE(
-        aliasInfo.sets() ==
+        aliasInfo.beforeSets() ==
         std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
     ASSERT_TRUE(aliasInfo.isWrite());
 
@@ -1485,7 +1485,38 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
         Symbol::fromQualString("alias::c"),
     };
-    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expected);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_EQ(
+        aliasInfo.beforeSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_EQ(
+        aliasInfo.afterSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+    ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expectedBefore = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+    };
+    const auto expectedAfter = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c")
+    };
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
   }
 }
