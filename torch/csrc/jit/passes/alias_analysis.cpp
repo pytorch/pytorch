@@ -210,7 +210,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   std::map<TypeKind, std::vector<Value*>> listTypes;
   std::unordered_map<TupleTypePtr, std::vector<Value*>> tupleTypes;
   std::unordered_map<DictTypePtr, std::vector<Value*>> dictTypes;
-  std::unordered_map<ClassTypePtr, std::vector<Value*>> userTypes;
+  std::unordered_map<ClassTypePtr, std::vector<Value*>> classTypes;
   std::vector<Value*> tensors;
 
   for (auto input : graph->inputs()) {
@@ -237,8 +237,8 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
       auto dictType = inputType->cast<DictType>();
       dictTypes[dictType].push_back(input);
     } else if (inputType->kind() == TypeKind::ClassType) {
-      auto userType = inputType->cast<ClassType>();
-      userTypes[userType].push_back(input);
+      auto classType = inputType->cast<ClassType>();
+      classTypes[classType].push_back(input);
     } else {
       AT_ASSERT(!shouldAnnotate(input));
     }
@@ -254,7 +254,7 @@ void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (const auto& pr : dictTypes) {
     makeAllAlias(pr.second, *aliasTracker_);
   }
-  for (const auto& pr : userTypes) {
+  for (const auto& pr : classTypes) {
     makeAllAlias(pr.second, *aliasTracker_);
   }
   makeAllAlias(tensors, *aliasTracker_);

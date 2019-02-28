@@ -1087,7 +1087,7 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::Module;
 using ::torch::jit::script::Method;
 
-// This represents a user-defined type in TorchScript.
+// This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
