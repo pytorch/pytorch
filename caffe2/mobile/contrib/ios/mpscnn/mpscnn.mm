@@ -1,7 +1,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 
-#if defined(CAFFE2_USE_MPSCNN) && C10_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && defined(C10_MOBILE)
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"

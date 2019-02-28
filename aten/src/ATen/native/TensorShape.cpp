@@ -384,16 +384,6 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
-Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
-  // invert the permutation
-  auto ndims = fwd_dims.size();
-  std::vector<int64_t> dims(ndims);
-  for (size_t i = 0; i < ndims; i++) {
-    dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
-  }
-  return grad.permute(dims);
-}
-
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   AT_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
@@ -461,12 +451,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return self.as_strided(sizes, strides, storage_offset);
 }
 
-Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.select(dim, index).copy_(grad);
-  return grad_input;
-}
-
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -498,12 +482,6 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
-}
-
-Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.slice(dim, start, end, step).copy_(grad);
-  return grad_input;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -649,22 +627,23 @@ static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
     int64_t sparse_dim = self.sparse_dim();
     int64_t dense_dim = self.dense_dim();
-    AT_CHECK(sparse_dim == 2 && dense_dim == 0,
-             fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
+    AT_CHECK((sparse_dim == 2 || sparse_dim == 1) && dense_dim == 0,
+             fn, " expects a tensor with 1 or 2 sparse and 0 dense dimensions, but got ",
              sparse_dim, " sparse and ", dense_dim, " dense dimensions");
-  } else if (self.dim() != 2) {
-    AT_ERROR(fn, " expects a 2D tensor, but self is ", self.dim(), "D");
+  } else {
+    AT_CHECK((self.dim() == 1 || self.dim() == 2),
+             fn, " expects a 1D or 2D tensor, but self is ", self.dim(), "D");
   }
 }
 
 Tensor t(const Tensor & self) {
   check_t(self, "t()");
-  return self.transpose(0, 1);
+  return self.transpose(0, self.dim() == 1 ? 0 : 1);
 }
 
 Tensor & t_(Tensor & self) {
   check_t(self, "t_()");
-  return self.transpose_(0, 1);
+  return self.transpose_(0, self.dim() == 1 ? 0 : 1);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
@@ -710,28 +689,6 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
-}
-
-Tensor unsqueeze_to(const Tensor & self, IntArrayRef sizes) {
-  auto result = self;
-
-  int64_t nDims = sizes.size();
-  for (int64_t dim = 0; dim < nDims; dim++) {
-    if (sizes[dim] == 1) {
-      result = result.unsqueeze(dim);
-    }
-  }
-  return result;
-}
-
-Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
-  // unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
-    return self.unsqueeze(dim);
-  }
-  return self;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
