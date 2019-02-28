@@ -256,11 +256,11 @@ Tensor diag(const Tensor & self, int64_t diagonal) {
   return at::legacy::th::_th_diag(self, diagonal);
 }
 
-Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
+Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, at::optional<int64_t> dim) {
   return at::legacy::th::_th_cross_out(result, self, other, dim);
 }
 
-Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
+Tensor cross(const Tensor & self, const Tensor & other, at::optional<int64_t> dim) {
   return at::legacy::th::_th_cross(self, other, dim);
 }
 

@@ -467,7 +467,7 @@ accreal THTensor_(trace)(THTensor *t)
   return sum;
 }
 
-void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
+void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, c10::optional<int64_t> dim)
 {
   int i;
 
@@ -484,7 +484,8 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
     }
   }
 
-  if(dimension < 0)
+  int64_t dimension = -1;
+  if(!dim.has_value())
   {
     for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
     {
@@ -497,6 +498,14 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
     if(dimension < 0) {
       THDescBuff ba = THTensor_(sizeDesc)(a);
       THError("no dimension of size 3 in a: %s", ba.str);
+    }
+  }
+  else
+  {
+    dimension = dim.value();
+    if(dimension < 0)
+    {
+      dimension += THTensor_(nDimensionLegacyNoScalars)(a);
     }
   }
 

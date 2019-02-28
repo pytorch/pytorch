@@ -1935,8 +1935,8 @@
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: long dim
-      default: -1
+    - arg: c10::optional<int64_t> dim
+      default: c10::nullopt
 ]]
 [[
   name: _th_diag
