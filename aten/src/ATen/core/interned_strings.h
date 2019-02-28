@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -74,6 +74,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, range)                   \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \

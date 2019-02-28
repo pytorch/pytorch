@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, __and__) \
 _(aten, __iand__) \
@@ -561,7 +561,9 @@ _(aten, replication_pad3d_forward) \
 _(aten, reshape) \
 _(aten, reshape_as) \
 _(aten, resize) \
+_(aten, resize_) \
 _(aten, resize_as) \
+_(aten, resize_as_) \
 _(aten, rfft) \
 _(aten, rnn_relu) \
 _(aten, rnn_relu_cell) \
