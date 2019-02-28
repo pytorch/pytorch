@@ -47,7 +47,7 @@ import random
 from typing import List, Dict, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-from torch._C import DynamicType, ListType, OptionalType, NumberType, TensorType, \
+from torch._C import DynamicType, ListType, OptionalType, NumberType, \
     StringType
 
 # For testing truediv in python 2
