@@ -45,8 +45,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
       const SourceRange& loc,
       Method& m,
       const std::string& field,
-      Value* newValue,
-      bool shouldDefine) {
+      Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
                            << kind();
   }
@@ -122,12 +121,19 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const SourceRange& loc,
       Method& m,
       const std::string& field,
-      Value* newValue,
-      bool shouldDefine) override;
+      Value* newValue) override;
 
   Value* getValue() const {
     return value_;
   }
+
+ protected:
+  virtual TypePtr getExpectedTypeForAttr(
+      const SourceRange& loc,
+      const Method& m,
+      const ClassTypePtr& type,
+      const std::string& field,
+      const Value* newValue);
 
  private:
   Value* value_;
@@ -176,9 +182,10 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   c10::optional<int64_t> version;
 };
 
-// Represents a user type, analagous to `int` or `dict`
+// Represents a class, analagous to `int` or `dict`. Instances of classes,
+// like `1` or `{"foo": 5}`, are represented as SimpleValues
 struct TORCH_API ClassValue : public SugaredValue {
-  ClassValue(ClassTypePtr type) : type_(std::move(type)) {}
+  explicit ClassValue(ClassTypePtr type) : type_(std::move(type)) {}
 
   // Call the type's constructor, as in:
   //    n = Foo(constructor_arg)
@@ -194,6 +201,24 @@ struct TORCH_API ClassValue : public SugaredValue {
   }
 
   ClassTypePtr type_;
+};
+
+// Represents an object during the definition of it's "__init__" function.
+// In __init__, assigning to a non-existent attribute will define is an
+// attribute of the class
+struct TORCH_API InitializingClassValue : public SimpleValue {
+  explicit InitializingClassValue(Value* v, ClassTypePtr type)
+      : SimpleValue(v), type_(std::move(type)) {}
+
+  ClassTypePtr type_;
+
+ private:
+  TypePtr getExpectedTypeForAttr(
+      const SourceRange& loc,
+      const Method& m,
+      const ClassTypePtr& type,
+      const std::string& field,
+      const Value* newValue) override;
 };
 
 // defines how a method obtained from a module behaves in script

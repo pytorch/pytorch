@@ -147,7 +147,8 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
       throw ErrorReport(loc)
-          << "cannot statically infer the expected size of a list in this context";
+          << "cannot statically infer the expected size of a "
+          << "list in this context";
     }
     auto graph = value_->owningGraph();
     Node* unpack =
@@ -158,38 +159,41 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
                          << " cannot be used as a tuple";
 }
 
+TypePtr InitializingClassValue::getExpectedTypeForAttr(
+    const SourceRange& loc,
+    const Method& m,
+    const ClassTypePtr& type,
+    const std::string& field,
+    const Value* newValue) {
+  auto expectedType = type->getAttribute(field);
+  if (!expectedType) {
+    type->addAttribute(field, newValue->type());
+    expectedType = newValue->type();
+    const auto insertPoint = m.graph()->insertPoint();
+    const auto topLevelBlock = m.graph()->block();
+    if (insertPoint->owningBlock() != topLevelBlock) {
+      throw ErrorReport(loc)
+          << "First assignment cannot be in a control-flow block. "
+          << "Initialize the field at the top level first.";
+    }
+  }
+  return expectedType;
+}
+
 void SimpleValue::setAttr(
     const SourceRange& loc,
     Method& m,
     const std::string& field,
-    Value* newValue,
-    bool shouldDefine) {
+    Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
                            << " on a non-class: " << value_->type()->str();
   }
 
-  auto expectedType = classType->getAttribute(field);
-  if (!expectedType) {
-    // We don't have an attribute with this name, either add it to the type
-    // definition or throw an error
-    if (shouldDefine) {
-      classType->addAttribute(field, newValue->type());
-      expectedType = newValue->type();
-      const auto insertPoint = m.graph()->insertPoint();
-      const auto topLevelBlock = m.graph()->block();
-      if (insertPoint->owningBlock() != topLevelBlock) {
-        throw ErrorReport(loc)
-            << "First assignment cannot be in a control-flow block. "
-            << "Initialize the field at the top level first.";
-      }
-    } else {
-      throw ErrorReport(loc)
-          << "Tried to set nonexistent attribute: " << field
-          << ". Did you forget to initialize it in __init__()?";
-    }
-  }
+  const auto expectedType =
+      getExpectedTypeForAttr(loc, m, classType, field, newValue);
+  AT_ASSERT(expectedType);
 
   // Check type correctness
   const auto newType = newValue->type();
@@ -201,6 +205,21 @@ void SimpleValue::setAttr(
 
   auto& g = *m.graph();
   g.insertNode(g.createSetAttr(value_, field, newValue));
+}
+
+TypePtr SimpleValue::getExpectedTypeForAttr(
+    const SourceRange& loc,
+    const Method& m,
+    const ClassTypePtr& type,
+    const std::string& field,
+    const Value* newValue) {
+  auto expectedType = type->getAttribute(field);
+  if (!expectedType) {
+    throw ErrorReport(loc)
+        << "Tried to set nonexistent attribute: " << field
+        << ". Did you forget to initialize it in __init__()?";
+  }
+  return expectedType;
 }
 
 std::shared_ptr<SugaredValue> ClassValue::call(

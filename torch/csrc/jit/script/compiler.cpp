@@ -729,7 +729,17 @@ struct to_ir {
         const auto type = classType->type_;
         Value* new_input =
             block->addInput()->setUniqueName(name)->setType(type);
-        environment_stack->setVar((*it).ident().range(), name, new_input);
+
+        // If this is an __init__ method, assigning to `self` has special
+        // behavior, since it defines class attributes.
+        std::shared_ptr<SimpleValue> selfVar;
+        if (method.name() == "__init__") {
+          selfVar = std::make_shared<InitializingClassValue>(new_input, type);
+        } else {
+          selfVar = std::make_shared<SimpleValue>(new_input);
+        }
+
+        environment_stack->setSugaredVar((*it).ident().range(), name, selfVar);
         arguments.emplace_back(name, type);
       } else {
         environment_stack->setSugaredVar(def.range(), name, self);
@@ -1830,10 +1840,7 @@ struct to_ir {
     const auto rhsValue =
         emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
-    const bool shouldDefine =
-        method.name() == "__init__" && basename.name() == "self";
-    userObject->setAttr(
-        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
+    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
