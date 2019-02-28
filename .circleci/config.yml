@@ -523,6 +523,7 @@ binary_populate_env: &binary_populate_env
   name: Set up env
   command: |
     set -ex
+    export TZ=UTC
 
     # We need to write an envfile to persist these variables to following
     # steps, but the location of the envfile depends on the circleci executor
@@ -559,18 +560,22 @@ binary_populate_env: &binary_populate_env
     fi
 
     # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
-    export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
+    export DATE="$(date -u +%Y%m%d)"
+    export PYTORCH_BUILD_VERSION="1.0.0.dev$DATE"
     export PYTORCH_BUILD_NUMBER=1
 
     cat >>"$envfile" <<EOL
     # =================== The following code will be executed inside Docker container ===================
+    export TZ=UTC
+    echo "Running on $(uname -a) at $(date)"
+
     export PACKAGE_TYPE="$PACKAGE_TYPE"
     export DESIRED_PYTHON="$DESIRED_PYTHON"
     export DESIRED_CUDA="$DESIRED_CUDA"
     export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
     export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
 
-    export DATE=today
+    export DATE="$DATE"
     export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
     export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
     export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
@@ -634,7 +639,7 @@ binary_checkout: &binary_checkout
       git checkout -q -B master
     else
       # nightly binary builds. These run at 05:05 UTC every day. 
-      last_commit="$(git rev-list --before "$(date +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+      last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
       git checkout "$last_commit"
     fi
     git submodule update --init --recursive --quiet
@@ -679,7 +684,8 @@ binary_install_miniconda: &binary_install_miniconda
     export PATH="$MINICONDA_ROOT/bin:$PATH"
     source "$MINICONDA_ROOT/bin/activate"
     # We can't actually add miniconda to the PATH in the envfile, because that
-    # breaks 'unbuffer' in Mac jobs
+    # breaks 'unbuffer' in Mac jobs. This is probably because conda comes with
+    # a tclsh, which then gets inserted before the tclsh needed in /usr/bin
 
 
 # This section is used in the binary_test and smoke_test jobs. It expects
@@ -723,6 +729,14 @@ binary_linux_build: &binary_linux_build
       <<: *binary_populate_env
   - run:
       <<: *binary_checkout
+  - run:
+      name: Install unbuffer and ts
+      command: |
+        set -ex
+        source /env
+        retry yum -q -y install epel-release
+        retry yum -q -y install expect moreutils
+
 
   - run:
       name: Build
@@ -744,8 +758,18 @@ binary_linux_build: &binary_linux_build
           build_script='manywheel/build.sh'
         fi
 
+        # We want to call unbuffer, which calls tclsh which finds the expect
+        # package. The expect was installed by yum into /usr/bin so we want to
+        # find /usr/bin/tclsh, but this is shadowed by /opt/conda/bin/tclsh in
+        # the conda docker images.
+        if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+          mkdir /just_tclsh_bin
+          ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh
+          export PATH=/just_tclsh_bin:$PATH
+        fi
+
         # Build the package
-        SKIP_ALL_TESTS=1 "/builder/$build_script"
+        SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
   - persist_to_workspace:
       root: /
       paths: final_pkgs
