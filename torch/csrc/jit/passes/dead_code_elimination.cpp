@@ -130,8 +130,7 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      const auto writes = aliasDb_->getWrites(node);
-      if (aliasDb_->mayAlias(writes, liveValues_)) {
+      if (aliasDb_->writesToAlias(node, liveValues_, /*recurseBlocks=*/false)) {
         return mark(node);
       }
     }
@@ -194,7 +193,7 @@ class DeadCodeEliminator {
     if (!aliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
-      if (!node->kind().is_aten()) {
+      if (!node->kind().is_aten() && !node->kind().is_prim()) {
         return false;
       }
       // onnx export calls EliminateDeadCode but sometimes passes invalid

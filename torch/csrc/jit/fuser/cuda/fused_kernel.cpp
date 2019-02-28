@@ -4,7 +4,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/cuda/cuda_check.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/jit/fuser/cuda/thnvrtc.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 // Note: unclear why this forward declaration is necessary
@@ -12,9 +13,7 @@
 #include <THC/THCTensorRandom.h>
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
-#include <cuda.h>
 #include <cuda_runtime.h>
-#include <nvrtc.h>
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +27,18 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// [USE OF NVRTC AND DRIVER API]
+// libtorch does not directly link to either libnvrtc or libcuda because
+// they require libcuda to be installed. Normal CUDA code in torch uses the cuda
+// runtime libraries which can be installed even if the driver is not installed,
+// but here we specifically need to use the driver API to load JIT compiled
+// code. To accomplish this, we lazily link libthnvrtc which provides a struct
+// THNVRTC that contains function pointers to all of the apis we need.
+//
+// IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
+// INSTEAD USE, e.g. nvrtc().cuLoadModule(...)
+// If a function is missing add it to the list in thnvrtc.
+
 void checkCUDAVersion(const cudaDeviceProp& prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
       (prop.major >= 7 && CUDA_VERSION < 9000)) {
@@ -40,12 +51,58 @@ void checkCUDAVersion(const cudaDeviceProp& prop) {
   }
 }
 
+#ifdef USE_DIRECT_NVRTC
+std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
+  return std::make_pair(nullptr, torch_load_nvrtc());
+}
+#else
+std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
+  std::string path = cpu::DynamicLibrary::directoryOf((void*)checkCUDAVersion);
+#ifdef __APPLE__
+  std::string libthnvrtc = path + "/libthnvrtc.dylib";
+#else
+  std::string libthnvrtc = path + "/libthnvrtc.so";
+#endif
+  std::unique_ptr<cpu::DynamicLibrary> libnvrtc_stub(
+      new cpu::DynamicLibrary(libthnvrtc.c_str()));
+  auto fn = (THNVRTC * (*)()) libnvrtc_stub->sym("torch_load_nvrtc");
+  return std::make_pair(std::move(libnvrtc_stub), fn());
+}
+#endif
+
+const THNVRTC& nvrtc() {
+  // must hold onto DynamicLibrary otherwise it will unload
+  static auto handle = loadNVRTC();
+  return *handle.second;
+}
+
+// We're using three CUDA APIs, so define a few helpers for error handling
+static inline void nvrtcCheck(nvrtcResult result, const char* file, int line) {
+  if (result != NVRTC_SUCCESS) {
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << nvrtc().nvrtcGetErrorString(result);
+    throw std::runtime_error(ss.str());
+  }
+}
+#define TORCH_NVRTC_CHECK(result) nvrtcCheck(result, __FILE__, __LINE__);
+
+static inline void cuCheck(CUresult result, const char* file, int line) {
+  if (result != CUDA_SUCCESS) {
+    const char* str;
+    nvrtc().cuGetErrorString(result, &str);
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << str;
+    throw std::runtime_error(ss.str());
+  }
+}
+#define TORCH_CU_CHECK(result) cuCheck(result, __FILE__, __LINE__);
+
 static void getMajorMinor(
     const cudaDeviceProp* const prop,
     int& major,
     int& minor) {
   int nvrtc_major, nvrtc_minor;
-  TORCH_NVRTC_CHECK(nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
   AT_ASSERT(nvrtc_major >= 6);
@@ -97,7 +154,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       device_(device) {
   // Initializes driver's API context (if necessary)
   CUcontext pctx = 0;
-  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+  TORCH_CU_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
@@ -117,14 +174,15 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Creates the NVRTC program
   nvrtcProgram program;
-  TORCH_NVRTC_CHECK(nvrtcCreateProgram(
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
       "--std=c++11", compute.c_str(), "-default-device"};
-  const auto result = nvrtcCompileProgram(program, args.size(), args.data());
+  const auto result =
+      nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result == NVRTC_ERROR_COMPILATION) {
     size_t logsize;
     nvrtcGetProgramLogSize(program, &logsize);
@@ -135,18 +193,19 @@ FusedKernelCUDA::FusedKernelCUDA(
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram(
-      [&] { TORCH_NVRTC_CHECK(nvrtcDestroyProgram(&program)); });
+      [&] { TORCH_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   TORCH_NVRTC_CHECK(result);
   size_t ptx_size;
-  TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
   ptx_.resize(ptx_size);
-  TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx_.data()));
+  TORCH_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx_.data()));
 
-  TORCH_CU_CHECK(cuModuleLoadData(&module_, ptx_.data()));
-  TORCH_CU_CHECK(cuModuleGetFunction(&function_, module_, name_.c_str()));
+  TORCH_CU_CHECK(nvrtc().cuModuleLoadData(&module_, ptx_.data()));
+  TORCH_CU_CHECK(
+      nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-  TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  TORCH_CU_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
   maxBlocks_ *= prop_->multiProcessorCount;
 
@@ -182,7 +241,7 @@ void FusedKernelCUDA::launch_raw(
 
   // Launches kernel on current stream (device was set by executor)
   auto stream = at::cuda::getCurrentCUDAStream();
-  TORCH_CU_CHECK(cuLaunchKernel(
+  TORCH_CU_CHECK(nvrtc().cuLaunchKernel(
       function_,
       nBlocks,
       1,
@@ -197,6 +256,10 @@ void FusedKernelCUDA::launch_raw(
 
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
+}
+
+FusedKernelCUDA::~FusedKernelCUDA() {
+  nvrtc().cuModuleUnload(module_);
 }
 
 static std::shared_ptr<FusedKernel> createFusionKernel(

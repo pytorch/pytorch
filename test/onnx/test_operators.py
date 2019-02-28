@@ -260,6 +260,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_indices(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
+
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -529,6 +533,12 @@ class TestOperators(TestCase):
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
+
+    def test_stable_opset(self):
+        x = torch.randn(2, 3).float()
+        y = torch.randn(2, 3).float()
+        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=9)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
