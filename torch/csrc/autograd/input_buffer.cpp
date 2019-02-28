@@ -22,10 +22,20 @@ void InputBuffer::add(size_t pos, Variable var) {
   } else {
     at::OptionalDeviceGuard device_guard(device_of(var));
     // ATen doesn't route sparse additions correctly...
+    // do dense + sparse in-place if possible
     if (old_var.is_sparse()) {
-      buffer[pos] = var + old_var;
+//storage use_count is a big hammer, but for anything lighter there's an adversarial example with unexpected inplace modification
+      if (!var.is_sparse() && var.is_contiguous() && var.storage().use_count() == 1) {
+          buffer[pos] = var.add_(old_var);
+      } else {
+          buffer[pos] = var + old_var;
+      }
     } else {
-      buffer[pos] = old_var + var;
+      if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() && old_var.storage().use_count() == 1) {
+          buffer[pos] = old_var.add_(var);
+      } else {
+          buffer[pos] = old_var + var;
+      }
     }
   }
 }

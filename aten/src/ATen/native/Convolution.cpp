@@ -156,7 +156,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
          input.ndimension() == 4 // must be in NCHW format
-#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
