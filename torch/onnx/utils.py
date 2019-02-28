@@ -246,7 +246,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                     inp.setUniqueName(param_names[i - user_input_num])
 
     input_and_param_names = [val.uniqueName() for val in graph.inputs()]
-    param_names = input_and_param_names[len(input_and_param_names)-len(params):]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
     graph = _optimize_graph(graph, operator_export_type)
