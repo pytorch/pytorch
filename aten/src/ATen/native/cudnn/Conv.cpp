@@ -476,9 +476,11 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
   }
 
   // See Note [blacklist fft algorithms for strided dgrad]
-  if (std::is_same<perf_t, cudnnConvolutionBwdDataAlgoPerf_t>::value) {
+  if (std::is_same<decltype(perfResults[best_algo_idx].algo), cudnnConvolutionBwdDataAlgo_t>::value) {
     int stride_dim = args.input.dim() - 2;
-    bool blacklist = std::equal(args.params.stride, args.params.stride + stride_dim, 1);
+    bool blacklist = std::equal(std::begin(args.params.stride),
+                                std::begin(args.params.stride) + stride_dim,
+                                [=](int n){return n == 1;});
     if (blacklist && (perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
                   || perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
       perfResults[best_algo_idx].algo = search::DEFAULT_ALGO;
