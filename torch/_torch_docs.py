@@ -1555,20 +1555,20 @@ Args:
     out (tuple, optional): the output tensors
 
 Returns:
-    (Tensor, Tensor): A tuple containing
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
+        - **eigenvalues** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
           where the first element is the real part and the second element is the imaginary part.
           The eigenvalues are not necessarily ordered.
-        - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
+        - **eigenvectors** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
-          eigenvectors of corresponding eigenvalues ``e`` as follows.
-          If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
-          eigenvalue e[j].
-          If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
-          can be computed as
-          :math:`\text{eigenvector}[j] = v[:, j] + i \times v[:, j + 1]`,
-          :math:`\text{eigenvector}[j + 1] = v[:, j] - i \times v[:, j + 1]`.
+          eigenvectors of corresponding eigenvalues as follows.
+          If the corresponding `eigenvalues[j]` is a real number, column `eigenvectors[:, j]` is the eigenvector
+          corresponding to `eigenvalues[j]`.
+          If the corresponding `eigenvalues[j]` and `eigenvalues[j + 1]` form a complex conjugate pair, then the
+          true eigenvectors can be computed as
+          :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
+          :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
 """)
 
 add_docstr(torch.eq,
@@ -1844,7 +1844,7 @@ Example::
 
 add_docstr(torch.gather,
            r"""
-gather(input, dim, index, out=None) -> Tensor
+gather(input, dim, index, out=None, sparse_grad=False) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -1865,6 +1865,7 @@ Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
     out (Tensor, optional): the destination tensor
+    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
 
 Example::
 
@@ -1969,7 +1970,8 @@ add_docstr(torch.geqrf,
            r"""
 geqrf(input, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly.
+This is a low-level function for calling LAPACK directly. This function
+returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
 You'll generally want to use :func:`torch.qr` instead.
 
@@ -2242,13 +2244,11 @@ add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the :attr:`k` th smallest element of the given :attr:`input` tensor
-along a given dimension.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
+smallest element of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each element found.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
-
-A tuple of `(values, indices)` is returned, where the `indices` is the indices
-of the kth-smallest element in the original `input` tensor in dimension `dim`.
 
 If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where
@@ -2270,14 +2270,14 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.kthvalue(x, 4)
-    (tensor(4.), tensor(3))
+    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
 
     >>> x=torch.arange(1.,7.).resize_(2,3)
     >>> x
     tensor([[ 1.,  2.,  3.],
             [ 4.,  5.,  6.]])
-    >>> torch.kthvalue(x,2,0,True)
-    (tensor([[ 4.,  5.,  6.]]), tensor([[ 1,  1,  1]]))
+    >>> torch.kthvalue(x, 2, 0, True)
+    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """)
 
 add_docstr(torch.le,
@@ -2793,9 +2793,9 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the median value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the median value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the median
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each median value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -2820,7 +2820,7 @@ Example::
             [-0.2751,  0.7303,  0.2192,  0.3321,  0.2488],
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
-    (tensor([-0.3982,  0.2270,  0.2488,  0.4742]), tensor([ 1,  4,  4,  3]))
+    torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
 """)
 
 add_docstr(torch.min,
@@ -2842,9 +2842,10 @@ Example::
 
 .. function:: min(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the minimum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-minimum value found (argmin).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each minimum value found
+(argmin).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2866,7 +2867,7 @@ Example::
             [ 0.2457,  0.0384,  1.0128,  0.7015],
             [-0.1153,  2.9849,  2.1458,  0.5788]])
     >>> torch.min(a, 1)
-    (tensor([-1.1899, -1.4644,  0.0384, -0.1153]), tensor([ 2,  0,  1,  0]))
+    torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
 .. function:: min(input, other, out=None) -> Tensor
 
@@ -2994,9 +2995,10 @@ add_docstr(torch.mode,
            r"""
 mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the mode value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the mode value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`, i.e. a value which appears most often
+in that row, and ``indices`` is the index location of each mode value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -3016,14 +3018,12 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 5)
+    >>> a = torch.randint(10, (5,))
     >>> a
-    tensor([[-1.2808, -1.0966, -1.5946, -0.1148,  0.3631],
-            [ 1.1395,  1.1452, -0.6383,  0.3667,  0.4545],
-            [-0.4061, -0.3074,  0.4579, -1.3514,  1.2729],
-            [-1.0130,  0.3546, -1.4689, -0.1254,  0.0473]])
-    >>> torch.mode(a, 1)
-    (tensor([-1.5946, -0.6383, -1.3514, -1.4689]), tensor([ 2,  2,  3,  2]))
+    tensor([6, 5, 1, 0, 2])
+    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> torch.mode(b, 0)
+    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
 """)
 
 add_docstr(torch.mul,
@@ -3112,8 +3112,10 @@ If replacement is ``True``, samples are drawn with replacement.
 If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
 
-This implies the constraint that :attr:`num_samples` must be lower than
-:attr:`input` length (or number of columns of :attr:`input` if it is a matrix).
+.. note::
+    When drawn without replacement, :attr:`num_samples` must be lower than
+    number of non-zero elements in :attr:`input` (or the min number of non-zero
+    elements in each row of :attr:`input` if it is a matrix).
 
 Args:
     input (Tensor): the input tensor containing probabilities
@@ -3124,8 +3126,11 @@ Args:
 Example::
 
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
-    >>> torch.multinomial(weights, 4)
-    tensor([ 1,  2,  0,  0])
+    >>> torch.multinomial(weights, 2)
+    tensor([1, 2])
+    >>> torch.multinomial(weights, 4) # ERROR!
+    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
+    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """)
@@ -3159,12 +3164,12 @@ add_docstr(torch.mvlgamma,
            r"""
 mvlgamma(input, p) -> Tensor
 
-Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
+Computes the multivariate log-gamma function (`[reference]`_) with dimension :math:`p` element-wise, given by
 
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(\cdot)` is the Gamma function.
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
 If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
 is thrown.
@@ -3182,6 +3187,8 @@ Example::
     >>> torch.mvlgamma(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
+
+.. _`[reference]`: https://en.wikipedia.org/wiki/Multivariate_gamma_function
 """)
 
 add_docstr(torch.narrow,
@@ -3622,10 +3629,10 @@ add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`. returns matrices `u` and `piv`.
+matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
 
 If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`a = p^T u^T u p`, with `p` the permutation given by `piv`.
+such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
 
 If :attr:`upper` is ``False``, `u` is lower triangular such that
 :math:`a = p^T u u^T p`.
@@ -3633,7 +3640,7 @@ If :attr:`upper` is ``False``, `u` is lower triangular such that
 Args:
     a (Tensor): the input 2-D tensor
     upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (tuple, optional): tuple of `u` and `piv` tensors
+    out (tuple, optional): namedtuple of `u` and `pivot` tensors
 
 Example::
 
@@ -3661,8 +3668,8 @@ add_docstr(torch.qr,
            r"""
 qr(input, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`, and returns matrices
-`Q` and `R` such that :math:`\text{input} = Q R`, with :math:`Q` being an
+Computes the QR decomposition of a matrix :attr:`input`, and returns a namedtuple
+(Q, R) of matrices such that :math:`\text{input} = Q R`, with :math:`Q` being an
 orthogonal matrix and :math:`R` being an upper triangular matrix.
 
 This returns the thin (reduced) QR factorization.
@@ -4263,7 +4270,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=None, descending=False, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -4305,6 +4312,38 @@ Example::
     tensor([[ 2,  0,  0,  1],
             [ 0,  1,  1,  2],
             [ 1,  2,  2,  0]])
+""")
+
+add_docstr(torch.argsort,
+           r"""
+argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+
+Returns the indices that sort a tensor along a given dimension in ascending
+order by value.
+
+This is the second value returned by :meth:`torch.sort`.  See its documentation
+for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int, optional): the dimension to sort along
+    descending (bool, optional): controls the sorting order (ascending or descending)
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+            [ 0.1598,  0.0788, -0.0745, -1.2700],
+            [ 1.2208,  1.0722, -0.7064,  1.2564],
+            [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+    >>> torch.argsort(a, dim=1)
+    tensor([[2, 0, 3, 1],
+            [3, 2, 1, 0],
+            [2, 1, 0, 3],
+            [3, 2, 1, 0]])
 """)
 
 add_docstr(torch.sparse_coo_tensor,
@@ -4600,6 +4639,8 @@ Example::
                           [5.45, -0.27,  4.85,  0.74, 10.00, -6.02],
                           [3.16,  7.98,  3.01,  5.80,  4.27, -5.31]]).t()
 
+    >>> torch.svd(a).__class__
+    <class 'torch.return_types.svd'>
     >>> u, s, v = torch.svd(a)
     >>> u
     tensor([[-0.5911,  0.2632,  0.3554,  0.3143,  0.2299],
@@ -4626,7 +4667,8 @@ add_docstr(torch.symeig,
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input`, represented by a tuple :math:`(e, V)`.
+of a real symmetric matrix :attr:`input`, represented by a namedtuple
+(eigenvalues, eigenvectors).
 
 :attr:`input` and :math:`V` are :math:`(m \times m)` matrices and :math:`e` is a
 :math:`m` dimensional vector.
@@ -4659,11 +4701,11 @@ Args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
 Returns:
-    (Tensor, Tensor): A tuple containing
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
+        - **eigenvalues** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
           The eigenvalues are in ascending order.
-        - **V** (*Tensor*): Shape :math:`(m \times m)`.
+        - **eigenvectors** (*Tensor*): Shape :math:`(m \times m)`.
           If ``eigenvectors=False``, it's a tensor filled with zeros.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 

@@ -3,10 +3,11 @@
 #include <condition_variable>
 #include <type_traits>
 
+#include <ATen/core/blob.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <ATen/core/Tensor.h>
@@ -73,37 +74,10 @@ struct DictEqualTo {
   bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
-template <typename Key, typename Value>
-using DictUnorderedMap = std::unordered_map<Key, Value, DictHash, DictEqualTo>;
-
-template <typename Key, typename Value>
-struct CAFFE2_API Dict : c10::intrusive_ptr_target {
- private:
-  DictUnorderedMap<Key, Value> elements_;
-
- public:
-  Dict(DictUnorderedMap<Key, Value> elements_)
-      : elements_(std::move(elements_)) {}
-  static c10::intrusive_ptr<Dict> create(
-      DictUnorderedMap<Key, Value> elements_) {
-    return c10::make_intrusive<Dict>(std::move(elements_));
-  }
-  const DictUnorderedMap<Key, Value>& elements() const {
-    return elements_;
-  }
-  operator const DictUnorderedMap<Key, Value>&() const {
-    return elements();
-  }
-
-  DictUnorderedMap<Key, Value>& elements() {
-    return elements_;
-  }
-  operator DictUnorderedMap<Key, Value>&() {
-    return elements();
-  }
-};
+using UnorderedMap = std::unordered_map<IValue, IValue, DictHash, DictEqualTo>;
 
 struct Future;
+struct GenericDict;
 
 struct CAFFE2_API Tuple : public List<IValue> {
   using List<IValue>::List;
@@ -116,9 +90,8 @@ using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
-using GenericDict = Dict<IValue, IValue>;
 
-
+struct UserObject;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -144,7 +117,8 @@ using GenericDict = Dict<IValue, IValue>;
   _(GenericList) \
   _(GenericDict) \
   _(Future) \
-  _(Device)
+  _(Device) \
+  _(UserObject)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -339,7 +313,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
-  const ivalue::DictUnorderedMap<IValue, IValue>& toGenericDictRef() const;
+  const ivalue::UnorderedMap& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -409,7 +383,7 @@ struct CAFFE2_API IValue final {
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
-  IValue(ivalue::DictUnorderedMap<IValue, IValue> v);
+  IValue(ivalue::UnorderedMap v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
     AT_ASSERT(isGenericDict());
@@ -418,6 +392,18 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const & {
     AT_ASSERT(isGenericDict());
     return toIntrusivePtr<ivalue::GenericDict>();
+  }
+
+  // UserType
+  IValue(c10::intrusive_ptr<ivalue::UserObject> v);
+  bool isUserObject() const { return tag == Tag::UserObject; }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() && {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
+  }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() const & {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
   }
 
   // None
@@ -692,6 +678,62 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   FutureError error;
 };
 
+// User-defined object.
+struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
+ public:
+  UserObject(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+    slots_.resize(numSlots);
+  }
+
+  static c10::intrusive_ptr<UserObject> create(
+      Symbol name,
+      size_t numSlots) {
+    return c10::make_intrusive<UserObject>(std::move(name), numSlots);
+  }
+
+  void setSlot(size_t slot, IValue v) {
+    slots_[slot] = v;
+  }
+
+  IValue getSlot(size_t slot) const {
+    return slots_.at(slot);
+  }
+
+  Symbol name() const {
+    return typename_;
+  }
+
+ private:
+  const Symbol typename_;
+  std::vector<IValue> slots_;
+};
+
+struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
+ private:
+  UnorderedMap elements_;
+
+ public:
+  GenericDict(UnorderedMap elements_)
+      : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<GenericDict> create(
+      UnorderedMap elements_) {
+    return c10::make_intrusive<GenericDict>(std::move(elements_));
+  }
+  const UnorderedMap& elements() const {
+    return elements_;
+  }
+  operator const UnorderedMap&() const {
+    return elements();
+  }
+
+  UnorderedMap& elements() {
+    return elements_;
+  }
+  operator UnorderedMap&() {
+    return elements();
+  }
+};
+
 #undef TORCH_FORALL_TAGS
 
 namespace detail {
@@ -738,6 +780,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
+DEFINE_TO(c10::intrusive_ptr<ivalue::UserObject>, toUserObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
@@ -806,9 +849,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(ivalue::DictUnorderedMap<IValue, IValue> v)
+inline IValue::IValue(ivalue::UnorderedMap v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::UserObject> v)
+: tag(Tag::UserObject), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -834,7 +881,7 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-inline const c10::ivalue::DictUnorderedMap<IValue, IValue>& IValue::
+inline const c10::ivalue::UnorderedMap& IValue::
     toGenericDictRef() const {
   return toGenericDict()->elements();
 }

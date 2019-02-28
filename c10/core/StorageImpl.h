@@ -45,17 +45,6 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
             allocator,
             resizable) {}
 
-  explicit StorageImpl(at::Device device)
-      : StorageImpl(device, caffe2::TypeMeta()) {}
-
-  StorageImpl(at::Device device, caffe2::TypeMeta data_type)
-      : StorageImpl(
-            data_type,
-            0,
-            at::DataPtr(nullptr, device),
-            GetAllocator(device.type()),
-            true) {}
-
   StorageImpl& operator=(StorageImpl&& other) = default;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
