@@ -308,22 +308,19 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
+at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
+
   auto input = input_r.contiguous();
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
   int64_t dim = k - 2;
-  int64_t impl_index = 0;
 
   AT_CHECK(dim > 0, "weight should have at least three dimensions");
-
-  Tensor save1 = at::zeros({}, input.type());
-  Tensor save2 = at::zeros({}, input.type());
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
@@ -351,7 +348,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
 
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
-      impl_index = 0;
+
       auto kernel_size = weight.sizes().slice(2);
       auto stride = params.stride;
       auto padding = params.padding;
@@ -367,12 +364,10 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
              ") should be the same");
 
     if (params.transposed) {
-      impl_index = 1;
       output = at::cudnn_convolution_transpose(
           input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
-      impl_index = 2;
       output = at::cudnn_convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
@@ -386,19 +381,16 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
              ") should be the same");
 
     if (params.transposed) {
-      impl_index = 3;
       output = at::miopen_convolution_transpose(
           input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
-      impl_index = 4;
       output = at::miopen_convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
-    impl_index = 5;
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -410,31 +402,18 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
 #endif
   } else {
     if (params.groups == 1) {
-      // impl_index 6 - 12 are in _convolution_nogroup
-      auto returned_tuple = at::_convolution_nogroup(
+      output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
-      output = std::get<0>(returned_tuple);
-      save1 = std::get<1>(returned_tuple);
-      save2 = std::get<2>(returned_tuple);
-      impl_index = std::get<3>(returned_tuple);
     } else {
       std::vector<Tensor> outputs(params.groups);
-      std::vector<Tensor> save1s(params.groups);
-      std::vector<Tensor> save2s(params.groups);
       for (int g = 0; g < params.groups; ++g) {
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
         auto bias_g = subtensor(bias, 0, params.groups, g);
-        auto returned_tuple = at::_convolution_nogroup(
+        outputs[g] = at::_convolution_nogroup(
             input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
-        outputs[g] = std::get<0>(returned_tuple);
-        save1s[g] = std::get<1>(returned_tuple);
-        save2s[g] = std::get<2>(returned_tuple);
-        impl_index = std::get<3>(returned_tuple);
       }
       output = at::cat(outputs, 1);
-      save1 = at::cat(save1s, 1);
-      save2 = at::cat(save2s, 1);
     }
   }
 
@@ -442,18 +421,15 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_impl_index(
     output = view3d(output);
   }
 
-  return std::make_tuple(output, save1, save2, impl_index);
+  return output;
 }
 
 // A generic function for convolution implementations which don't
 // natively implement groups (e.g., not CuDNN).
-std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_nogroup(
+at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding) {
-
-  Tensor save1 = at::zeros({}, input.type());
-  Tensor save2 = at::zeros({}, input.type());
 
   ConvParams params;
   params.stride = stride.vec();
@@ -470,209 +446,50 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _convolution_nogroup(
   auto dilated = params.is_dilated();
   auto kernel_size = weight.sizes().slice(2);
 
-  int64_t impl_index = 6;
   if (params.transposed) {
     if (dim == 4) {
-      return std::tuple_cat(at::thnn_conv_transpose2d_forward(
+      return at::thnn_conv_transpose2d(
           input, weight, kernel_size, bias,
-          stride, padding, output_padding, dilation), std::make_tuple(6));
+          stride, padding, output_padding, dilation);
     } else if (dim == 5) {
-      return std::tuple_cat(at::thnn_conv_transpose3d_forward(
+      return at::thnn_conv_transpose3d(
         input, weight, kernel_size, bias,
-        stride, padding, output_padding, dilation), std::make_tuple(7));
+        stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */
     if (dim == 4) {
       if (dilated) {
-        return std::tuple_cat(at::thnn_conv_dilated2d_forward(
+        return at::thnn_conv_dilated2d(
             input, weight, kernel_size, bias,
-            stride, padding, dilation), std::make_tuple(8));
+            stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
         if (params.use_nnpack(input)) {
 #if AT_NNPACK_ENABLED()
-          return std::make_tuple(at::_nnpack_spatial_convolution(
-              input, weight, bias, padding), save1, save2, 9);
+          return at::_nnpack_spatial_convolution(
+              input, weight, bias, padding);
 #endif
         } else {
           /* CPU implementation has specialized MM kernels
              for non-dilated case here */
-          return std::tuple_cat(at::thnn_conv2d_forward(
+          return at::thnn_conv2d(
               input, weight, kernel_size, bias,
-              stride, padding), std::make_tuple(10));
+              stride, padding);
         }
       }
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
-      return std::tuple_cat(at::thnn_conv_dilated3d_forward(
+      return at::thnn_conv_dilated3d(
           input, weight, kernel_size, bias,
-          stride, padding, dilation), std::make_tuple(11));
+          stride, padding, dilation);
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      return std::tuple_cat(at::thnn_conv3d_forward(
+      return at::thnn_conv3d(
           input, weight, kernel_size, bias,
-          stride, padding), std::make_tuple(12));
+          stride, padding);
     }
   }
 
   AT_ERROR("unsupported ConvNd parameters");
-}
-
-at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
-    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled) {
-  return std::get<0>(at::_convolution_impl_index(input_r, weight_r, bias_r, stride_,
-              padding_, dilation_, transposed_, output_padding_, groups_, benchmark,
-              deterministic, cudnn_enabled));
-}
-
-std::tuple<Tensor, Tensor, Tensor> _convolution_nogroup_impl_index_backward(
-    int64_t impl_index, const Tensor& self, const Tensor& grad,
-    const Tensor& weight, IntArrayRef kernel_size,
-    IntArrayRef stride, IntArrayRef padding,
-    IntArrayRef output_padding, IntArrayRef dilation,
-    std::array<bool, 3> output_mask, const Tensor& save1, const Tensor& save2) {
-  Tensor grad_input, grad_weight, grad_bias;
-  if (impl_index == 6) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv_transpose2d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        output_padding, dilation, /*columns=*/save1, /*ones=*/save2,
-        output_mask);
-  } else if (impl_index == 7) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv_transpose3d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        output_padding, dilation, /*finput=*/save1, /*fgrad_input=*/save2,
-        output_mask);
-  } else if (impl_index == 8) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv_dilated2d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        dilation, /*columns=*/save1, /*ones=*/save2,
-        output_mask);
-  } else if (impl_index == 9) {
-    grad_input = at::_nnpack_spatial_convolution_backward_input(
-        self, grad, weight, padding);
-    grad_weight = at::_nnpack_spatial_convolution_backward_weight(
-        self, weight.sizes(), grad, padding);
-  } else if (impl_index == 10) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        /*finput=*/save1, /*fgrad_input=*/save2,
-        output_mask);
-  } else if (impl_index == 11) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv_dilated3d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        dilation, /*columns=*/save1, /*ones=*/save2,
-        output_mask);
-  } else if (impl_index == 12) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv3d_backward(
-        grad, self, weight, kernel_size, stride, padding,
-        /*finput=*/save1, /*fgrad_input=*/save2,
-        output_mask);
-  } else {
-    // NEVER REACH HERE
-    AT_ERROR("unsupported backward impl index");
-  }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
-}
-
-std::tuple<Tensor, Tensor, Tensor> _convolution_impl_index_backward(
-    int64_t impl_index, const Tensor& self, const Tensor& grad_r,
-    const Tensor& weight_r,
-    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    IntArrayRef output_padding_, bool transposed_, int64_t groups_,
-    bool benchmark, bool deterministic, std::array<bool, 3> output_mask,
-    const Tensor& save1, const Tensor& save2) {
-
-  auto grad = grad_r;
-  auto input = self.contiguous();
-  auto weight = weight_r;
-  auto k = weight_r.ndimension();
-  int64_t dim = k - 2;
-
-  ConvParams params;
-  params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
-  params.padding = convolution_expand_param_if_needed(padding_, "padding", dim);
-  params.dilation = convolution_expand_param_if_needed(dilation_, "dilation", dim);
-  params.transposed = transposed_;
-  params.output_padding = convolution_expand_param_if_needed(output_padding_, "output_padding", dim);
-  params.groups = groups_;
-  params.benchmark = benchmark;
-  params.deterministic = deterministic;
-
-  if (k == 3) {
-    params.view1d_as_2d();
-    grad = view4d(grad);
-    input = view4d(input);
-    weight = view4d(weight);
-  }
-
-  Tensor grad_input, grad_weight, grad_bias;
-
-  if (impl_index == 0) {
-    auto kernel_size = weight.sizes().slice(2);
-    auto stride = params.stride;
-    auto padding = params.padding;
-    auto dilation = params.dilation;
-    std::array<bool, 2> out_mask{ output_mask.at(0), output_mask.at(1)};
-    std::tie(grad_input, grad_weight) = at::thnn_conv_depthwise2d_backward(
-        grad.contiguous(), input, weight, kernel_size, stride, padding, dilation,
-        out_mask);
-    grad_bias = grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1);
-  } else if (impl_index == 1) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::cudnn_convolution_transpose_backward(
-        input, grad, weight, params.padding, params.output_padding, params.stride, params.dilation,
-        params.groups, params.benchmark, params.deterministic, output_mask);
-  } else if (impl_index == 2) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::cudnn_convolution_backward(
-        input, grad, weight, params.padding, params.stride, params.dilation, params.groups,
-        params.benchmark, params.deterministic, output_mask);
-  } else if (impl_index == 3) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::miopen_convolution_transpose_backward(
-        input, grad, weight, params.padding, params.output_padding, params.stride, params.dilation,
-        params.groups, params.benchmark, params.deterministic, output_mask);
-  } else if (impl_index == 4) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::miopen_convolution_backward(
-        input, grad, weight, params.padding, params.stride, params.dilation, params.groups,
-        params.benchmark, params.deterministic, output_mask);
-  } else if (impl_index == 5) {
-    std::tie(grad_input, grad_weight, grad_bias) = at::mkldnn_convolution_backward(
-        input, grad, weight, params.padding, params.stride, params.dilation, params.groups,
-        output_mask);
-  } else {
-    auto kernel_size = weight.sizes().slice(2);
-    if (params.groups == 1) {
-        std::tie(grad_input, grad_weight, grad_bias) = _convolution_nogroup_impl_index_backward(
-            impl_index, input, grad, weight, kernel_size, params.stride, params.padding, params.output_padding,
-            params.dilation, output_mask, save1, save2);
-    } else {
-      // multi groups
-      std::vector<Tensor> grad_inputs(params.groups);
-      std::vector<Tensor> grad_weights(params.groups);
-      std::vector<Tensor> grad_biases(params.groups);
-      for (int g = 0; g < params.groups; ++g) {
-        auto grad_g = subtensor(grad, 1, params.groups, g);
-        auto weight_g = subtensor(weight, 0, params.groups, g);
-        auto grads = _convolution_nogroup_impl_index_backward(
-            impl_index, input, grad_g, weight_g, kernel_size, params.stride, params.padding, params.output_padding,
-            params.dilation, output_mask, save1, save2);
-        grad_inputs[g] = std::get<0>(grads);
-        grad_weights[g] = std::get<1>(grads);
-        grad_biases[g] = std::get<2>(grads);
-      }
-
-      grad_input = at::cat(grad_inputs, 1);
-      grad_weight = at::cat(grad_weights, 0);
-      grad_bias = at::cat(grad_biases, 0);
-    }
-  }
-
-  if (k == 3) {
-    grad_input = view3d(grad_input);
-    grad_weight = view3d(grad_weight);
-  }
-
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
