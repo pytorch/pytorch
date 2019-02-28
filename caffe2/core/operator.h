@@ -326,10 +326,25 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline int InputSize() const {
-    return inputs_.size();
+    if (isLegacyOperator()) {
+      return inputs_.size();
+    }
+    if (0 == ivalue_inputs_.size()) {
+      return 0;
+    }
+    if (ivalue_inputs_[0].isTensorList()) {
+      // if the first input is a tensor list, we get input tensors by indexing into that list.
+      // currently, this means that only tensors from that list are accessible as inputs.
+      // any hypothetical input tensors that come after the list are not accessible.
+      return ivalue_inputs_[0].toTensorListRef().size();
+    }
+    return ivalue_inputs_.size();
   }
   inline int OutputSize() const {
-    return outputs_.size();
+    if (isLegacyOperator()) {
+      return outputs_.size();
+    }
+    return ivalue_outputs_.size();
   }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
