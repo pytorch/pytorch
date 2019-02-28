@@ -133,6 +133,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if
  * you don't want to expose the operator for CUDA operations.
  */
+#if !C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName) \
   namespace caffe2 {                              \
   namespace _c10_ops {                            \
@@ -208,3 +209,11 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
           at::DeviceType::HIP>>()                                              \
       .dispatchKey(CUDATensorId());                                            \
   }
+
+#else
+// Don't use c10 dispatcher on mobile because of binary size
+#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, Inputs, Outputs, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)
+#endif
