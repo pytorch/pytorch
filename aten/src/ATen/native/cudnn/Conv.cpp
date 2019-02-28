@@ -476,7 +476,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
   }
 
   // See Note [blacklist fft algorithms for strided dgrad]
-#if CUDNN_VERSION >= 7500
+#if CUDNN_VERSION < 7500
   if (std::is_same<decltype(perfResults[best_algo_idx].algo), cudnnConvolutionBwdDataAlgo_t>::value) {
     int stride_dim = args.input.dim() - 2;
     bool blacklist = std::any_of(std::begin(args.params.stride),
