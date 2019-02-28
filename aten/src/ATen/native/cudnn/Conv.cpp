@@ -459,6 +459,7 @@ size_t getMaxWorkspaceSize(
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
   int best_algo_idx;
+  bool is_deterministic = false;
   if (args.params.deterministic) {
     // iterate over perf results of all algorithms and find the best deterministic algo
     for (int i = 0; i < n_algo; i++) {
@@ -467,10 +468,13 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
       if (perfResults[i].status == CUDNN_STATUS_SUCCESS &&
           perfResults[i].determinism == CUDNN_DETERMINISTIC) {
         best_algo_idx = i;
+        is_deterministic = true;
         break;
       }
     }
-    AT_ERROR("no deterministic convolution algorithms available in CuDNN");
+    if (!is_deterministic) {
+      AT_ERROR("no deterministic convolution algorithms available in CuDNN");
+    }
   } else {
     best_algo_idx = 0;
   }
