@@ -37,13 +37,21 @@ static inline int last_pow2(int n) {
 
 // returns reduced fraction numerator & denominator
 C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominator) {
-  for (size_t i = ::min(numerator, denominator); i > 1; i--) {
-    if (numerator % i == 0 && denominator % i == 0) {
-      numerator = numerator / i;
-      denominator = denominator / i;
-      break;
-    }
+  // get GCD of num and denom using Euclid's algorithm.
+  // Can replace this with std::gcd if we ever support c++17.
+  size_t a = denominator;
+  size_t b = numerator;
+  while (b != 0) {
+      a %= b;
+      // swap(a,b)
+      a ^= b;
+      b ^= a;
+      a ^= b;
   }
+  
+  // a is now the GCD
+  numerator /= a;
+  denominator /= a;
 }
 
 struct ReduceConfig {
@@ -285,25 +293,25 @@ struct ReduceOp {
   OutputCalculator output_calc;
   const void* src;
   void* dst;
-  // buf used for accumulation among sub Tensor Iterator when accumulation on
+  // acc_buf used for accumulation among sub Tensor Iterator when accumulation on
   // output is not permissible
-  void* buf;
-  // buffer used for accumulation between blocks during global reduction
-  void* buffer;
+  void* acc_buf;
+  // cta_buf used for accumulation between blocks during global reduction
+  void* cta_buf;
   int* semaphores;
   bool accumulate;
   bool final_output;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, void* dst, void* buf, void* buffer, int* semaphores, arg_t ident)
+           const void* src, void* dst, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
     , output_calc(output_calc)
     , src(src)
     , dst(dst)
-    , buf(buf)
-    , buffer(buffer)
+    , acc_buf(acc_buf)
+    , cta_buf(cta_buf)
     , semaphores(semaphores)
     , ident(ident) {
   }
@@ -329,11 +337,11 @@ struct ReduceOp {
 
     auto out = (out_scalar_t*)((char*)dst + base_offsets[0]);
     arg_t* acc = nullptr;
-    if (buf != nullptr) {
+    if (acc_buf != nullptr) {
       size_t numerator = sizeof(arg_t);
       size_t denominator = sizeof(out_scalar_t);
       reduce_fraction(numerator, denominator);
-      acc = (arg_t*)((char*)buf + (base_offsets[0] * numerator / denominator));
+      acc = (arg_t*)((char*)acc_buf + (base_offsets[0] * numerator / denominator));
     }
 
     if (config.should_global_reduce()) {
@@ -486,7 +494,7 @@ struct ReduceOp {
   }
 
   C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out, arg_t* acc, char* shared_memory) const {
-    arg_t* reduce_buffer = (arg_t*)buffer;
+    arg_t* reduce_buffer = (arg_t*)cta_buf;
 
     bool should_store = config.should_store(config.output_idx());
     if (should_store) {
@@ -592,7 +600,7 @@ struct AccumulationBuffer {
 
 template <typename scalar_t, typename out_scalar_t, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
-                              std::shared_ptr<AccumulationBuffer> acc_buf_ptr={}) {
+                              AccumulationBuffer* acc_buf_ptr=nullptr) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
 
   using traits = binary_function_traits<decltype(&ops_t::reduce)>;
@@ -601,10 +609,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     std::is_convertible<arg_t, out_scalar_t>::value;
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
+  std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
 
   // The acc_buf_ptr is a shared pointer. It is create at the first entrance and
   // reused by all recursive function calls.
-  if (acc_buf_ptr.get() == NULL) {
+  if (acc_buf_ptr == NULL) {
     // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
     // when accumulation in output is not possible. 
     if (!can_accumulate_in_output && !can_use_32bit_indexing) {
@@ -612,16 +621,16 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       for (int dim = 0; dim < iter.ndim(); dim++) {
         output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
       }
-      acc_buf_ptr = std::make_shared<AccumulationBuffer>(sizeof(arg_t),
-                                                         sizeof(out_scalar_t),
-                                                         (char*) iter.data_ptr(0),
-                                                         output_memory_size * sizeof(arg_t));
+      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
+                                                 sizeof(out_scalar_t),
+                                                 (char*) iter.data_ptr(0),
+                                                 output_memory_size * sizeof(arg_t)));
     } else {
-      acc_buf_ptr = std::make_shared<AccumulationBuffer>();
+      owned_buf_ptr.reset(new AccumulationBuffer());
     }
+    acc_buf_ptr = owned_buf_ptr.get();
   }
 
-  // if (can_accumulate_in_output && !can_use_32bit_indexing) {
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, ops, ident, acc_buf_ptr);
