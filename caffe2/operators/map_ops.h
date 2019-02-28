@@ -48,9 +48,8 @@ template <class Context>
 class CreateMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit CreateMapOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  CreateMapOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
   ~CreateMapOp() {}
 
   bool RunOnDevice() override {
@@ -100,9 +99,8 @@ template <class Context>
 class KeyValueToMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit KeyValueToMapOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  KeyValueToMapOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
   ~KeyValueToMapOp() {}
 
   bool RunOnDevice() override {
@@ -153,9 +151,8 @@ template <class Context>
 class MapToKeyValueOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit MapToKeyValueOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  MapToKeyValueOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
   ~MapToKeyValueOp() {}
 
   bool RunOnDevice() override {

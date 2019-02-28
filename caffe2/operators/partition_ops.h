@@ -18,9 +18,8 @@ class GatherByKeyOp : public Operator<CPUContext> {
  public:
   USE_DISPATCH_HELPER;
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  template <class... Args>
-  explicit GatherByKeyOp(Args&&... args)
-      : Operator<CPUContext>(std::forward<Args>(args)...) {}
+  GatherByKeyOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
 
  private:
   bool RunOnDevice() override {
@@ -106,9 +105,8 @@ class PartitionOpBase : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
 
-  template <class... Args>
-  explicit PartitionOpBase(Args&&... args)
-      : Operator<CPUContext>(std::forward<Args>(args)...),
+  PartitionOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
         OP_SINGLE_ARG(int, "pack_first_input", pack_first_input_, 0) {}
 
  protected:
@@ -209,9 +207,8 @@ class PartitionOp : public PartitionOpBase {
  public:
   USE_DISPATCH_HELPER;
 
-  template <class... Args>
-  explicit PartitionOp(Args&&... args)
-      : PartitionOpBase(std::forward<Args>(args)...) {}
+  PartitionOp(const OperatorDef& operator_def, Workspace* ws)
+      : PartitionOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -231,9 +228,8 @@ class LengthsPartitionOp : public PartitionOpBase {
  public:
   USE_DISPATCH_HELPER;
 
-  template <class... Args>
-  explicit LengthsPartitionOp(Args&&... args)
-      : PartitionOpBase(std::forward<Args>(args)...) {}
+  LengthsPartitionOp(const OperatorDef& operator_def, Workspace* ws)
+      : PartitionOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(1));
