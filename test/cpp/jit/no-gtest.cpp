@@ -39,9 +39,7 @@ std::string runJITCPPTests() {
   testATenNativeBatchNorm();
   testRegisterFusionCachesKernel();
   testAliasAnalysis();
-  testWriteTracking();
-  testWildcards();
-  testMemoryDAG();
+  testAliasTracker();
   testNetDefConverter(out);
   testIRParser(out);
   return out.str();
