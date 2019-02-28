@@ -726,7 +726,7 @@ class TestJit(JitTestCase):
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
-        self.assertExpectedGraph(trace.graph, subname="same_device")
+        self.assertTrue(len(trace.graph.nodes()) == 0)
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
