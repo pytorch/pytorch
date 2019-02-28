@@ -250,46 +250,41 @@ inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i]) return std::vector<at::Tensor>();
-  PyObject* arg = args[i];
-  auto tuple = six::isTuple(arg);
-  if (tuple) arg = six::toTuple(arg);
+  PyObject* arg_ = args[i];
+  auto tuple = six::isTuple(arg_);
+  THPObjectPtr arg = six::maybeAsTuple(arg_);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      if (tuple) Py_DECREF(arg);
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
-  if (tuple) Py_DECREF(arg);
   return res;
 }
 
 template<int N>
 inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   auto res = std::array<at::Tensor, N>();
-  PyObject* arg = args[i];
+  PyObject* arg_ = args[i];
   if (!arg) return res;
-  auto tuple = six::isTuple(arg);
-  if (tuple) arg = six::toTuple(arg);
+  auto tuple = six::isTuple(arg_);
+  THPObjectPtr arg = six::maybeAsTuple(arg_);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   if (size != N) {
-    if (tuple) Py_DECREF(arg);
     throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
   }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      if (tuple) Py_DECREF(arg);
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
                  idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
-  if (tuple) Py_DECREF(arg);
   return res;
 }
 

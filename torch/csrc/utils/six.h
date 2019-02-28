@@ -33,46 +33,25 @@ inline bool isTuple(PyObject* obj) {
   return isTuple(pybind11::handle(obj));
 }
 
-// toTuple: enable PyTuple API for PyStructSequence
-//
-// The input of this function is assumed to be either a tuple or a structseq. The caller
-// is responsible for this check.
+// maybeAsTuple: if the input is a structseq, then convert it to a tuple
 //
 // On Python 3, structseq is a subtype of tuple, so these APIs could be used directly.
-//
 // But on Python 2, structseq is not a subtype of tuple, so we need to manually create a
-// new tuple object from structseq. The new object has ref count 1, so when finish using
-// the returned object, we need to manually decrease ref count of the returned object.
-//
-// Instead of making the caller writing codes like:
-//
-// tuple = six::toTuple(obj);
-// use_tuple(tuple);
-// #if PY_MAJOR_VERSION == 2
-// Py_DECREF(tup);
-// #endif
-//
-// We decide to increase the ref count of the input object on python 3, so that the caller
-// could write cleaner code like below:
-//
-// tuple = six::toTuple(obj);
-// use_tuple(tuple);
-// Py_DECREF(tup);
-
-inline PyObject *toTuple(PyStructSequence *obj) {
+// new tuple object from structseq.
+inline THPObjectPtr maybeAsTuple(PyStructSequence *obj) {
 #if PY_MAJOR_VERSION == 2
-  return torch::utils::structseq_slice(obj, 0, Py_SIZE(obj));
+  return THPObjectPtr(torch::utils::structseq_slice(obj, 0, Py_SIZE(obj)));
 #else
   Py_INCREF(obj);
-  return (PyObject *)obj;
+  return THPObjectPtr(obj);
 #endif
 }
 
-inline PyObject *toTuple(PyObject *obj) {
+inline THPObjectPtr maybeAsTuple(PyObject *obj) {
   if (isStructSeq(obj))
-    return toTuple((PyStructSequence *)obj);
+    return maybeAsTuple((PyStructSequence *)obj);
   Py_INCREF(obj);
-  return obj;
+  return THPObjectPtr(obj);
 }
 
 }  // namespace six
