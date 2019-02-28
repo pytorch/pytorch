@@ -35,6 +35,7 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
+#ifndef THC_GENERIC_FILE
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
   static std::random_device rd;
@@ -49,7 +50,6 @@ static std::string THPStorage_(__newHandle)() {
   return handle;
 }
 
-#ifndef THC_GENERIC_FILE
 static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
