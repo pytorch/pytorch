@@ -458,7 +458,6 @@ size_t getMaxWorkspaceSize(
 
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
-  using search = algorithm_search<perf_t>;
   int best_algo_idx;
   if (args.params.deterministic) {
     // iterate over perf results of all algorithms and find the best deterministic algo
@@ -484,7 +483,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
                                 [=](int n){return n != 1;});
     if (blacklist && (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
                   || static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
-      perfResults[best_algo_idx].algo = search::DEFAULT_ALGO;
+      perfResults[best_algo_idx].algo = algorithm_search<perf_t>::DEFAULT_ALGO;
       if (args.params.dataType == CUDNN_DATA_HALF) {
         perfResults[best_algo_idx].mathType = CUDNN_TENSOR_OP_MATH;
       } else {
