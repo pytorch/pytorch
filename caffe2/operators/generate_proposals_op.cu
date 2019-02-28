@@ -23,7 +23,6 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     const float* d_img_info_vec,
     const int num_images,
     const float bbox_xform_clip,
-    const bool correct_transform,
     float4* d_out_boxes,
     const int prenms_nboxes, // leading dimension of out_boxes
     float* d_inout_scores,
@@ -87,19 +86,14 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     const float pred_ctr_x = ctr_x + width * dx; // TODO fuse madd
     const float pred_w = width * expf(dw);
     x1 = pred_ctr_x - 0.5f * pred_w;
-    x2 = pred_ctr_x + 0.5f * pred_w;
+    x2 = pred_ctr_x + 0.5f * pred_w - 1.0f;
 
     float height = y2 - y1 + 1.0f;
     const float ctr_y = y1 + 0.5f * height;
     const float pred_ctr_y = ctr_y + height * dy;
     const float pred_h = height * expf(dh);
     y1 = pred_ctr_y - 0.5f * pred_h;
-    y2 = pred_ctr_y + 0.5f * pred_h;
-
-    if (correct_transform) {
-      x2 -= 1.0f;
-      y2 -= 1.0f;
-    }
+    y2 = pred_ctr_y + 0.5f * pred_h - 1.0f;
 
     // Clipping box to image
     const float img_height = d_img_info_vec[3 * image_index + 0];
@@ -491,7 +485,6 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         d_im_info_vec,
         num_images,
         utils::BBOX_XFORM_CLIP_DEFAULT,
-        correct_transform_coords_,
         reinterpret_cast<float4*>(d_boxes),
         nboxes_to_generate,
         d_sorted_scores,

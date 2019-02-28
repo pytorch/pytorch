@@ -140,11 +140,13 @@ ${name}(${py_formal_args})""")
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
-    'Tensor', 'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,double,int64_t>',
+    'Tensor',
+    'std::tuple<Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,int64_t>',
+    'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void'
 }
@@ -889,7 +891,14 @@ def get_python_signature(declaration, include_out):
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        py_formal_args.append(typename + ' out=None')
+        if len(output_args) == 1:
+            # The nn module bindings are often not exposed to the user directly
+            # but via torch.nn modules and functionals.
+            py_formal_args.append(typename + ' ' + output_args[0]['name'] + '=None')
+        else:
+            # NB: For more than 1 output args the type name is a TensorList
+            # and as such we don't (yet) need to consider the naming.
+            py_formal_args.append(typename + ' out=None')
 
     # we could put this in the loop above but we want to ensure both type dispatched args
     # and python binding arguments are after the out argument; this matches the case

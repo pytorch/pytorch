@@ -110,6 +110,45 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
 }
 
+TEST(BoundShapeInference, LengthsRangeFill) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+    "LengthsRangeFill",
+    "",
+    {"X"},
+    {"Y"},
+    {}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+    "Copy",
+    "",
+    {"Y"},
+    {"Z"},
+    {}));
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "X",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Y",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_seq_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Z",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_seq_size},
+      TensorProto_DataType_INT32);
+}
+
 TEST(BoundShapeInference, Reshape) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};

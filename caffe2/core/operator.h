@@ -945,8 +945,8 @@ class Operator : public OperatorBase {
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<Context>(operator_def, ws) {}                                 \
+  template<class... Args> explicit name(Args&&... args)                        \
+      : Operator<Context>(std::forward<Args>(args)...) {}                      \
   virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
