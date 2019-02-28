@@ -35,10 +35,18 @@ typedef ObserverBase<OperatorBase> OperatorObserver;
 class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
+
+  /*
+   * Notes: All outputs ivalues must be tensors. Input ivalue list must start
+   * with all tensors ("inputs" in caffe2 terminology),
+   * followed by non-tensors ("arguments" in caffe2 terminology).
+   * Alternatively, inputs can be one tensor list ivalue followed by non-tensors
+   * to represent operators with a variable number of inputs.
+   */
   explicit OperatorBase(
-      const c10::FunctionSchema&,
-      std::vector<c10::IValue>,
-      std::vector<c10::IValue*>);
+      const c10::FunctionSchema& schema,
+      std::vector<c10::IValue> inputs,
+      std::vector<c10::IValue*> outputs);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -338,7 +346,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // any hypothetical input tensors that come after the list are not accessible.
       return ivalue_inputs_[0].toTensorListRef().size();
     }
-    return ivalue_inputs_.size();
+    // it's not a tensor list. Count the number of tensor inputs and return them.
+    size_t num_tensor_inputs = 0;
+    bool found_nontensor = false;
+    for (const auto& input : ivalue_inputs_) {
+      if (input.isTensor()) {
+        AT_ASSERTM(!found_nontensor, "All tensor arguments must come before non-tensor arguments");
+        ++num_tensor_inputs;
+      } else {
+        found_nontensor = true;
+      }
+    }
+    return num_tensor_inputs;
   }
   inline int OutputSize() const {
     if (isLegacyOperator()) {

@@ -63,7 +63,7 @@ OperatorBase::OperatorBase(
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       ivalue_inputs_(std::move(inputs)),
       ivalue_outputs_(std::move(outputs)) {
-  input_tensors_.resize(ivalue_inputs_.size());
+  input_tensors_.resize(InputSize());
   output_tensors_.resize(ivalue_outputs_.size());
 }
 
