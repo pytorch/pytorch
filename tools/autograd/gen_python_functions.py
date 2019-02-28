@@ -127,6 +127,7 @@ static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
   PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
+  type${namedtuple_type_index}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
   namedtuple_type_initialized${namedtuple_type_index} = true;
 }
 """)
