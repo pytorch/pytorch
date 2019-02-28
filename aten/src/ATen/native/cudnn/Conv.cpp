@@ -115,7 +115,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 
 // Note [blacklist fft algorithms for strided dgrad]
 // This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution 
-// gradient setups. Check Issue #16610 for bug details.
+// gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
 namespace at { namespace native {
 
