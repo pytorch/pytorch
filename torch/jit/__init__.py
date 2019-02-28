@@ -629,10 +629,11 @@ def trace(func,
         check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a seet of input arguments that would
-                                                 be specified in ``args``. For best results, pass in a
-                                                 set of checking inputs representative of the space of
-                                                 shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original ``args`` is used for checking
+                                                 be specified in :attr:`example_inputs`. For best results,
+                                                 pass in a set of checking inputs representative of the space
+                                                 of shapes and types of inputs you expect the network to see.
+                                                 If not specified, the original :attr:`example_inputs` is used
+                                                 for checking.
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
@@ -663,11 +664,10 @@ def trace(func,
                                      var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
-    if check_trace:
-        if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
-        else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
+    if check_inputs is not None:
+        _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
+    else:
+        _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
 
     return module
 
