@@ -146,10 +146,6 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
-Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
-The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
-
 #### Install Dependencies
 
 Common
@@ -183,18 +179,37 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
 On Windows
+
+At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+
+If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 2017 version 15.4 v14.11 toolset" is strongly recommended.
+<br/> If the version of Visual Studio 2017 is lesser than 15.3.3, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
+<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
+<br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+
+For building against CUDA 8.0 Visual Studio 2015 Update 3 (version 14.0), and the [patch](https://download.microsoft.com/download/8/1/d/81dbe6bb-ed92-411a-bef5-3a75ff972c6a/vc14-kb4020481.exe) are needed to be installed too.
+The details of the patch can be found [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
+
+NVTX is a part of CUDA distributive, where it is called "Nsight Compute". For installing it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
+Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
+
 ```cmd
-set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
-set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
-set DISTUTILS_USE_SDK=1
-REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
+cmd
+REM [Optional] The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
 set FORCE_PY27_BUILD=1
-REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following line.
-set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 
-call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
+REM [Optional] As for CUDA 8, VS2015 Update 3 is required; use the following line.
+set "CUDAHOSTCXX=%VS140COMNTOOLS%..\..\VC\bin\amd64\cl.exe"
+
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
+set DISTUTILS_USE_SDK=1
+
+REM Run "Visual Studio 2017 Developer Command Prompt"
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=14.11
+
 python setup.py install
+
 ```
 
 ### Docker Image
