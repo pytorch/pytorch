@@ -210,8 +210,6 @@ struct TORCH_API InitializingClassValue : public SimpleValue {
   explicit InitializingClassValue(Value* v, ClassTypePtr type)
       : SimpleValue(v), type_(std::move(type)) {}
 
-  ClassTypePtr type_;
-
  private:
   TypePtr getExpectedTypeForAttr(
       const SourceRange& loc,
@@ -219,6 +217,7 @@ struct TORCH_API InitializingClassValue : public SimpleValue {
       const ClassTypePtr& type,
       const std::string& field,
       const Value* newValue) override;
+  ClassTypePtr type_;
 };
 
 // defines how a method obtained from a module behaves in script
