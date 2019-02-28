@@ -476,13 +476,14 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
   }
 
   // See Note [blacklist fft algorithms for strided dgrad]
+#if CUDNN_VERSION >= 7500
   if (std::is_same<decltype(perfResults[best_algo_idx].algo), cudnnConvolutionBwdDataAlgo_t>::value) {
     int stride_dim = args.input.dim() - 2;
-    bool blacklist = std::equal(std::begin(args.params.stride),
+    bool blacklist = std::any_of(std::begin(args.params.stride),
                                 std::begin(args.params.stride) + stride_dim,
-                                [=](int n){return n == 1;});
-    if (blacklist && (perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
-                  || perfResults[best_algo_idx].algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
+                                [=](int n){return n != 1;});
+    if (blacklist && (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
+                  || static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
       perfResults[best_algo_idx].algo = search::DEFAULT_ALGO;
       if (args.params.dataType == CUDNN_DATA_HALF) {
         perfResults[best_algo_idx].mathType = CUDNN_TENSOR_OP_MATH;
@@ -491,6 +492,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
       }
     }
   }
+#endif
 
   return perfResults[best_algo_idx];
 }
