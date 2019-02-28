@@ -156,9 +156,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // if the first input is a tensor list, we get input tensors by indexing into that list.
       // currently, this means that only tensors from that list are accessible as inputs.
       // any hypothetical input tensors that come after the list are not accessible.
-      auto tensorList = ivalue_inputs_[0].toTensorList();
-      DCHECK_LT(idx, tensorList->elements().size());
-      ival = tensorList->elements()[idx];
+      const auto& tensorList = ivalue_inputs_[0].toTensorListRef();
+      DCHECK_LT(idx, tensorList.size());
+      ival = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
       DCHECK_LT(idx, ivalue_inputs_.size());
