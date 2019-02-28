@@ -561,7 +561,9 @@ _(aten, replication_pad3d_forward) \
 _(aten, reshape) \
 _(aten, reshape_as) \
 _(aten, resize) \
+_(aten, resize_) \
 _(aten, resize_as) \
+_(aten, resize_as_) \
 _(aten, rfft) \
 _(aten, rnn_relu) \
 _(aten, rnn_relu_cell) \
