@@ -1126,8 +1126,8 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return type().nonzero(*this);
 }
-inline Tensor Tensor::gather(int64_t dim, const Tensor & index) const {
-    return type().gather(*this, dim, index);
+inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
+    return type().gather(*this, dim, index, sparse_grad);
 }
 inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
     return type().addcmul(*this, tensor1, tensor2, value);
