@@ -10270,6 +10270,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU")
+    @skipIfROCm
     def test_c10_layer_norm_cuda(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float).cuda()
