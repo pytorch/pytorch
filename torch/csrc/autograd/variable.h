@@ -113,6 +113,11 @@ struct TORCH_API Variable : public at::Tensor {
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
+  /// Creates a `Variable` from the given `Tensor`, consuming it.
+  /// This is intended to be used from functions that immediately create a `Tensor`,
+  /// convert it to a `Variable`, and then free it; it has been found to
+  /// decrease the overhead of those operations, in some situations.
+  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
   friend Variable make_variable(
       at::Tensor&& data,
       bool requires_grad,
@@ -581,8 +586,6 @@ inline Variable make_variable(
   return Variable();
 }
 
-// Moves out of the tensor instead of copying it.
-// Can save ~10μs of overhead.
 inline Variable make_variable(
     at::Tensor&& data,
     bool requires_grad = false,
