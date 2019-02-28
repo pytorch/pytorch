@@ -467,6 +467,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
       if (perfResults[i].status == CUDNN_STATUS_SUCCESS &&
           perfResults[i].determinism == CUDNN_DETERMINISTIC) {
         best_algo_idx = i;
+        break;
       }
     }
     AT_ERROR("no deterministic convolution algorithms available in CuDNN");
