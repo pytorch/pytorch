@@ -1844,7 +1844,7 @@ Example::
 
 add_docstr(torch.gather,
            r"""
-gather(input, dim, index, out=None) -> Tensor
+gather(input, dim, index, out=None, sparse_grad=False) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -1865,6 +1865,7 @@ Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
     out (Tensor, optional): the destination tensor
+    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
 
 Example::
 
