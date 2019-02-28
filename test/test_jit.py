@@ -11610,7 +11610,7 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
         graph = ge.graph_for(x, y)
-        FileCheck().check("broadcast_tensors").check('FusionGroup_0') \
+        FileCheck().check("broadcast_tensors").check('with prim::FusionGroup_0') \
             .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
@@ -11750,7 +11750,7 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(foo, (hx, cx))
         graph = ge.graph_for(hx, cx)
         self.assertAllFused(graph)
-        FileCheck().check("FusedConcat").run(str(graph))
+        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -11978,15 +11978,16 @@ class TestFuser(JitTestCase):
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
         self.assertTrue(len(forward_graph.nodes()) == 2)
+        # Everything is differentiable but TupleConstruct return
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
 
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
         backward = backward_graph(module)
-        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1").run(str(backward))
+        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
+            .check_not("FusionGroup_2").run(str(backward))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -12029,7 +12030,8 @@ class TestFuser(JitTestCase):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
         graph = ge.graph_for(*inputs)
-        FileCheck().check("FusionGroup").run(str(graph))
+        FileCheck().check_not("Chunk").check("FusionGroup").check_next("TupleConstruct") \
+            .check_next("return").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
@@ -12039,7 +12041,7 @@ class TestFuser(JitTestCase):
         try:
             ge = self.checkTrace(LSTMCellF, inputs)
             graph = ge.graph_for(*inputs)
-            FileCheck().check("FusionGroup_0[device=-1]").run(str(graph))
+            FileCheck.check("FusionGroup").run(str(graph))
         except RuntimeError as e:
             if 'Failed to compile' in e.args[0]:
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
@@ -12058,7 +12060,6 @@ class TestFuser(JitTestCase):
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").check("FusionGroup").run(str(forward_graph))
         hy, cy = module(*inputs)
