@@ -95,10 +95,11 @@ pthreadpool_t nnpack_threadpool() {
 // NNPACK Ops
 ////////////////////////////////////////////////////////////////////////////////
 
-class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
+class NNPACKConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws),
+  template<class... Args>
+  explicit NNPACKConvOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...),
         algo_(get_nnp_convolution_algorithm(
             OperatorBase::GetSingleArgument<std::string>("algo", "AUTO"))),
         kts_(get_nnp_convolution_transform_strategy(
@@ -133,7 +134,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
     CAFFE_ENFORCE(bias.numel() == M, "");
 
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
     const int oH = Y->dim32(2), oW = Y->dim32(3);
 
     if (N > 1) {
@@ -215,10 +216,11 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
   const nnp_convolution_transform_strategy kts_;
 };
 
-class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
+class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  NNPACKMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit NNPACKMaxPoolOp(std::forward<Args>(args)...)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
         "NNPack only supports NCHW order. Please consider add "
@@ -253,7 +255,7 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     auto* Y = Output(0);
     CAFFE_ENFORCE(X.dim() == 4, "");
     const int H = X.dim32(2), W = X.dim32(3);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, X.dim32(1));
     std::vector<int> pads(
         {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
     std::vector<int> stride({this->stride_h(), this->stride_w()});

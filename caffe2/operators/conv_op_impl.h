@@ -44,7 +44,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_size *= kernel_[i];
   }
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+  ConvPoolOpBase<Context, true>::SetOutputSize(X, Y, M);
 
   if (N == 0) {
     Y->template mutable_data<T>();
@@ -78,7 +78,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, true>::template SetBiasMultiplier<T>(
         Y_HxW, &bias_multiplier_);
   }
   T* Y_data = Y->template mutable_data<T>();
@@ -218,7 +218,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
     kernel_size *= kernel_[i];
   }
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+  ConvPoolOpBase<Context, true>::SetOutputSize(X, Y, M);
 
   if (N == 0) {
     Y->template mutable_data<T>();
@@ -262,7 +262,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     if (bias_data != nullptr) {
       // For this specialized path, we need a bigger bias_multiplier_ because
       // we're doing just 1 big GEMM.
-      ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+      ConvPoolOpBase<Context, true>::template SetBiasMultiplier<T>(
           N * X_HxW, &bias_multiplier_);
     }
     return Run1x1ConvOnDeviceWithOrderNHWC(
@@ -270,7 +270,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
 
   if (bias_data != nullptr) {
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, true>::template SetBiasMultiplier<T>(
         Y_HxW, &bias_multiplier_);
   }
   auto f = [&](Tensor* col_buffer) {
@@ -504,7 +504,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // The output image size is the spatial size of the output.
   const int output_image_size = this->GetDimsSize(dY);
 
-  ConvPoolOpBase<Context>::ComputePads(input_dims);
+  ConvPoolOpBase<Context, true>::ComputePads(input_dims);
   CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(C, filter.dim32(1) * group_);
@@ -732,7 +732,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // The output image size is the spatial size of the output.
   const int output_image_size = this->GetDimsSize(dY);
 
-  ConvPoolOpBase<Context>::ComputePads(input_dims);
+  ConvPoolOpBase<Context, true>::ComputePads(input_dims);
   CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(C, filter.dim32(filter.dim() - 1) * group_);

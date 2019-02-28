@@ -251,7 +251,7 @@ LaunchParams spatialPointwiseKernelLaunchParams(
 };
 
 void computeOutputHW(
-    ConvPoolOpBase<CPUContext>* op,
+    ConvPoolOpBase<CPUContext, true>* op,
     int H,
     int W,
     int* OH,
@@ -731,10 +731,11 @@ INIT_NEURON_OP(Tanh);
 #undef INIT_NEURON_OP
 
 template <typename Neuron>
-class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
+class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  MPSCNNConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MPSCNNConvOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
     OPERATOR_NEEDS_FEATURE(
@@ -763,7 +764,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
     const auto kH = kernel_h();
     const auto kW = kernel_w();
 
-    // ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+    // ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
     // Reformat weights from [M][C][kH][kW] to [M][kH][kW][C].
     if (!conv_) {
       caffe2::Timer consT;
@@ -905,10 +906,11 @@ INIT_CONV_NEURON_OP(MPSCNNConvSigmoid, SigmoidNeuronInit);
 
 #undef INIT_CONV_NEURON_OP
 
-class MPSCNNPadImageOp final : public ConvPoolOpBase<CPUContext> {
+class MPSCNNPadImageOp final : public ConvPoolOpBase<CPUContext, false> {
  public:
-  MPSCNNPadImageOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  MPSCNNPadImageOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, false>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
 
@@ -1155,10 +1157,11 @@ REGISTER_CPU_OPERATOR(MPSCNNAdd, MPSCNNAddOp);
 // compatibility.
 OPERATOR_SCHEMA(MPSCNNAdd).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
 
-class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
+class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  MPSCNNAveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MPSCNNAveragePoolOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
     OPERATOR_NEEDS_FEATURE(
@@ -1225,10 +1228,11 @@ class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
 REGISTER_CPU_OPERATOR(MPSCNNAveragePool, MPSCNNAveragePoolOp);
 OPERATOR_SCHEMA(MPSCNNAveragePool).NumInputs(1).NumOutputs(1);
 
-class MPSCNNMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
+class MPSCNNMaxPoolOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  MPSCNNMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MPSCNNMaxPoolOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
     OPERATOR_NEEDS_FEATURE(
@@ -2556,10 +2560,11 @@ class MPSCNNResizeNearestOp final : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(MPSCNNResizeNearest, MPSCNNResizeNearestOp);
 OPERATOR_SCHEMA(MPSCNNResizeNearest).NumInputs(1).NumOutputs(1);
 
-class MPSCNNChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
+class MPSCNNChannelShuffleOp final : public ConvPoolOpBase<CPUContext, false> {
  public:
-  MPSCNNChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MPSCNNChannelShuffleOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, false>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
     kernel_[0] = kernel_[1] = 1;

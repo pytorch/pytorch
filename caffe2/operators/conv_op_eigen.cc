@@ -12,11 +12,12 @@
 namespace caffe2 {
 
 template <typename T>
-class EigenConvOp final : public ConvPoolOpBase<CPUContext> {
+class EigenConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  EigenConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
+  template<class... Args>
+  explicit EigenConvOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(group_ == 1, "Group convolution not supported yet.");
   }
   ~EigenConvOp() override {}
@@ -41,7 +42,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(1) == C);
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
   Eigen::array<int64_t, 4> kernel_shuffles
       { {int64_t(2), int64_t(3), int64_t(1), int64_t(0)} };
   Eigen::array<int64_t, 4> input_shuffles
@@ -135,7 +136,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE(filter.dim32(1) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(2) == kernel_w());
   CAFFE_ENFORCE(filter.dim32(3) == C);
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
   // Eigen expects filter to be of shape (kernel_h, kernel_w, C, M) for
   // optimization purposes, so we will create a temp one.
   Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic> temp_filter(

@@ -140,7 +140,7 @@ int ConvDNNLowPOp<T, ReluFused>::KernelDim_() {
 
   int C;
   int filter_offset;
-  if (ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NCHW) {
+  if (ConvPoolOpBase<CPUContext, true>::order_ == StorageOrder::NCHW) {
     C = X.dim32(1);
     filter_offset = 2;
   } else {
@@ -204,7 +204,7 @@ void ConvDNNLowPOp<T, ReluFused>::PreComputeRowColumnOffsets_() {
 
   // Pre-compute row_offset / column_offset
   vector<int>& offsets =
-      StorageOrder::NCHW == ConvPoolOpBase<CPUContext>::order_
+      StorageOrder::NCHW == ConvPoolOpBase<CPUContext, true>::order_
       ? row_offsets_
       : *column_offsets_;
 
@@ -289,7 +289,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
   const auto& filter = InputTensorCPU_(FILTER);
   int M = filter.dim32(0);
 
-  bool packW = ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
+  bool packW = ConvPoolOpBase<CPUContext, true>::order_ == StorageOrder::NHWC &&
       !Acc16() && is_same<T, uint8_t>::value && GetCpuId().avx2() &&
       !FLAGS_caffe2_dnnlowp_force_slow_path;
 
@@ -312,7 +312,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       (!packW && W_quantized_.empty())) {
     if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
       CAFFE_ENFORCE_EQ(
-          ConvPoolOpBase<CPUContext>::order_,
+          ConvPoolOpBase<CPUContext, true>::order_,
           StorageOrder::NHWC,
           "Pre-packed weight only works with NHWC layout");
 
@@ -408,7 +408,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       }
     } else {
       string reason;
-      if (ConvPoolOpBase<CPUContext>::order_ != StorageOrder::NHWC) {
+      if (ConvPoolOpBase<CPUContext, true>::order_ != StorageOrder::NHWC) {
         reason = "fbgemm only supports NHWC layout";
       } else if (!is_same<T, uint8_t>::value) {
         reason = "fbgemm only supports 8-bit integers";
@@ -578,7 +578,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHW() {
       0,
       "The number of output channels is not divisible by group.");
 
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
 
   const vector<int> input_dims = GetDims(X);
   const vector<int> output_dims = GetDims(*Y);
@@ -1435,7 +1435,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(
       M % G, 0, "The number of output channels is not divisible by group.");
 
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
 
   // The col buffer is stored in HWC order as well - kernel_dim, and the height
   // and width.
@@ -1535,7 +1535,7 @@ template class ConvDNNLowPOp<uint16_t, false>;
 template class ConvDNNLowPOp<uint16_t, true>;
 
 OPERATOR_SCHEMA(ConvRelu).NumInputs(2, 3).NumOutputs(1).TensorInferenceFunction(
-    ConvPoolOpBase<CPUContext>::TensorInferenceForConv);
+    ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(

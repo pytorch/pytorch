@@ -7,7 +7,7 @@ namespace caffe2 {
 OPERATOR_SCHEMA(DeformConv)
     .NumInputs(3, 4)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .SetDoc(R"DOC(
 Deformable convolution operator consumes an input vector, the kernel offsets
 blob, the filter blob and the bias blob and computes the output. Other

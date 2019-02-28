@@ -59,7 +59,7 @@ REGISTER_CPU_OPERATOR(LC, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, false>::TensorInferenceForLC)
     .FillUsing(LCDocGenerator(""));
 
 REGISTER_CPU_OPERATOR(LC1D, LocallyConnectedOp<float, CPUContext>);
@@ -67,7 +67,7 @@ REGISTER_CPU_OPERATOR(LC1D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC1D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, false>::TensorInferenceForLC)
     .FillUsing(LCDocGenerator("1D "));
 
 REGISTER_CPU_OPERATOR(LC2D, LocallyConnectedOp<float, CPUContext>);
@@ -75,7 +75,7 @@ REGISTER_CPU_OPERATOR(LC2D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC2D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, false>::TensorInferenceForLC)
     .FillUsing(LCDocGenerator("2D "));
 
 REGISTER_CPU_OPERATOR(LC3D, LocallyConnectedOp<float, CPUContext>);
@@ -83,7 +83,7 @@ REGISTER_CPU_OPERATOR(LC3D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC3D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, false>::TensorInferenceForLC)
     .FillUsing(LCDocGenerator("3D "));
 
 REGISTER_CPU_OPERATOR(

@@ -424,11 +424,12 @@ void runDepthwise3x3Conv(
 
 #endif
 
-class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
+class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  Depthwise3x3ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
+  template<class... Args>
+  explicit Depthwise3x3ConvOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
         "Depthwise3x3ConvOp only supports NCHW order");
@@ -452,7 +453,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE_EQ(C, this->group_);
     CAFFE_ENFORCE_EQ(M, this->group_);
 
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
     Y->mutable_data<float>();
 
     DepthwiseArgs args;

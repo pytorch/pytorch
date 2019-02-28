@@ -128,7 +128,7 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
   CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
   int height = X.dim32(2);
   int width = X.dim32(3);
-  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
+  ConvPoolOpBase<CPUContext, true>::ComputePads({height, width});
   int pooled_height = dY.dim32(2);
   int pooled_width = dY.dim32(3);
   // The main loop
@@ -183,7 +183,7 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
   // The main loop
   int height = X.dim32(1);
   int width = X.dim32(2);
-  ConvPoolOpBase<CPUContext>::ComputePads({height, width});
+  ConvPoolOpBase<CPUContext, true>::ComputePads({height, width});
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 

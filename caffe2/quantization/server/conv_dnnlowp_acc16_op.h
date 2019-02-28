@@ -12,7 +12,7 @@ namespace caffe2 {
 template <bool ReluFused = false>
 class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
   ConvDNNLowPAcc16Op(const OperatorDef& operator_def, Workspace* ws);
 
   using BaseType = ConvDNNLowPOp<std::uint8_t, ReluFused>;

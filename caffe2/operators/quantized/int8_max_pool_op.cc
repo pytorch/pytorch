@@ -49,7 +49,7 @@ OPERATOR_SCHEMA(Int8MaxPool)
     .NumOutputs(1)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator(""));
 
 OPERATOR_SCHEMA(Int8MaxPoolRelu)
@@ -57,7 +57,7 @@ OPERATOR_SCHEMA(Int8MaxPoolRelu)
     .NumOutputs(1)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator("", true));
 
 } // namespace caffe2

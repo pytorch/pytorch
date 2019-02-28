@@ -11,11 +11,12 @@ C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 namespace caffe2 {
 
 template <typename T, class Context>
-class DeformConvOpBase : public ConvPoolOpBase<Context> {
+class DeformConvOpBase : public ConvPoolOpBase<Context, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
+  template<class... Args>
+  explicit DeformConvOpBase(Args&&... args)
+      : ConvPoolOpBase<Context, true>(std::forward<Args>(args)...),
         deformable_group_(
             this->template GetSingleArgument<int>("deformable_group", 1)) {}
   ~DeformConvOpBase() {}
@@ -45,7 +46,7 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   int deformable_group_;
 
 #define USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context)   \
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);                 \
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);           \
   using DeformConvOpBase<T, Context>::deformable_group_; \
   using DeformConvOpBase<T, Context>::DeformableIm2col;  \
   using DeformConvOpBase<T, Context>::DeformableCol2im;  \
@@ -58,7 +59,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
   DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : DeformConvOpBase<T, Context>(operator_def, ws) {
+      : DeformConvOpBase<T, Context>(operator_def, ws), ws_(ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
     if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -70,6 +71,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
   bool RunOnDeviceWithOrderNCHW() override;
 
  private:
+  Workspace* ws_;
   Tensor col_buffer_{Context::GetDeviceType()};
   Tensor bias_multiplier_;
   Tensor img_shape_device_{Context::GetDeviceType()};

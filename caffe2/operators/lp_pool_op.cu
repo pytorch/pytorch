@@ -216,7 +216,7 @@ template <>
 bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
+  ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, X.dim32(1));
   int output_size = Y->numel();
   LpPoolForwardNCHW<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -246,7 +246,7 @@ template <>
 bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
+  ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, X.dim32(3));
   int output_size = Y->numel();
   LpPoolForwardNHWC<float>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -281,7 +281,7 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
   CAFFE_ENFORCE_EQ(dY.dim(), 4);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
-  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
+  ConvPoolOpBase<CUDAContext, true>::ComputePads({X.dim32(2), X.dim32(3)});
   LpPoolBackwardNCHW<float>
       <<<CAFFE_GET_BLOCKS(X.numel()),
          CAFFE_CUDA_NUM_THREADS,
@@ -317,7 +317,7 @@ bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
   CAFFE_ENFORCE_EQ(dY.dim(), 4);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
-  ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
+  ConvPoolOpBase<CUDAContext, true>::ComputePads({X.dim32(1), X.dim32(2)});
   LpPoolBackwardNHWC<float>
       <<<CAFFE_GET_BLOCKS(X.numel()),
          CAFFE_CUDA_NUM_THREADS,

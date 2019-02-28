@@ -11,11 +11,12 @@
 
 namespace caffe2 {
 
-class MaxPoolWithIndexOp final : public ConvPoolOpBase<CUDAContext> {
+class MaxPoolWithIndexOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  MaxPoolWithIndexOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws) {}
+  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext, true);
+  template<class... Args>
+  explicit MaxPoolWithIndexOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...) {}
   ~MaxPoolWithIndexOp() {}
 
   template <typename T>
@@ -27,11 +28,12 @@ class MaxPoolWithIndexOp final : public ConvPoolOpBase<CUDAContext> {
   // Output: Y, mask
 };
 
-class MaxPoolWithIndexGradientOp final : public ConvPoolOpBase<CUDAContext> {
+class MaxPoolWithIndexGradientOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  MaxPoolWithIndexGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws) {}
+  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext, true);
+  template<class... Args>
+  explicit MaxPoolWithIndexGradientOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...) {}
   ~MaxPoolWithIndexGradientOp() {}
 
   template <typename T>

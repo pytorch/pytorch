@@ -267,11 +267,12 @@ __global__ void DepthwiseConv2dBackpropInputGPUKernelNCHW(
   }
 }
 
-class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
+class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  Depthwise3x3ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext, true);
+  template<class... Args>
+  explicit Depthwise3x3ConvOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
@@ -300,7 +301,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE_EQ(this->kernel_w(), 3);
     CAFFE_ENFORCE_EQ(this->kernel_h(), 3);
     CAFFE_ENFORCE_EQ(this->stride_h(), this->stride_w());
-    ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, filter.dim32(0));
+    ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, filter.dim32(0));
     DepthwiseArgs args;
     args.batch = X.dim32(0);
     args.in_rows = X.dim32(2);
@@ -363,12 +364,13 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_for_bias_;
 };
 
-class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
+class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  Depthwise3x3ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext, true);
+  template<class... Args>
+  explicit Depthwise3x3ConvGradientOp(Args&&... args)
       : cudnn_wrapper_(&context_),
-        ConvPoolOpBase<CUDAContext>(operator_def, ws),
+        ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
@@ -393,7 +395,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const int N = X.dim32(0), C = X.dim32(1);
 
     const vector<int> input_dims = this->GetDims(X);
-    ConvPoolOpBase<CUDAContext>::ComputePads(input_dims);
+    ConvPoolOpBase<CUDAContext, true>::ComputePads(input_dims);
     CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
     CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
@@ -458,7 +460,7 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
           M,
           dY.dim32(2),
           dY.dim32(3)));
-      
+
       auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<float>());
       CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
           cudnn_wrapper_.inline_cudnn_handle(),

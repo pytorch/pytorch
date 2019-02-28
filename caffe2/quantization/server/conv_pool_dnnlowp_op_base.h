@@ -20,13 +20,14 @@ namespace caffe2 {
 
 // TODO: code duplication with dnnlowp_op.h
 template <typename T, typename FP32_OP>
-class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
+class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext, true> {
   static_assert(std::is_integral<T>::value, "Integral required.");
 
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  ConvPoolDNNLowPOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
+  template<class... Args>
+  explicit ConvPoolDNNLowPOpBase(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...),
         in_qparams_(InputSize()),
         qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
 #ifdef _OPENMP

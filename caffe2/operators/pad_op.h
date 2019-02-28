@@ -19,11 +19,12 @@ enum class PadMode {
 CAFFE2_API PadMode StringToPadMode(const string&);
 
 template <typename T, class Context>
-class PadImageOp final : public ConvPoolOpBase<Context> {
+class PadImageOp final : public ConvPoolOpBase<Context, false> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PadImageOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, false);
+  template<class... Args>
+  explicit PadImageOp(Args&&... args)
+      : ConvPoolOpBase<Context, false>(std::forward<Args>(args)...),
         mode_(StringToPadMode(
             this->template GetSingleArgument<string>("mode", "constant"))),
         value_(static_cast<T>(
@@ -59,11 +60,12 @@ class PadImageOp final : public ConvPoolOpBase<Context> {
 };
 
 template <typename T, class Context>
-class PadImageGradientOp final : public ConvPoolOpBase<Context> {
+class PadImageGradientOp final : public ConvPoolOpBase<Context, false> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PadImageGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, false);
+  template<class... Args>
+  explicit PadImageGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context, false>(std::forward<Args>(args)...),
         mode_(StringToPadMode(
             this->template GetSingleArgument<string>("mode", "constant"))) {
     CAFFE_ENFORCE(

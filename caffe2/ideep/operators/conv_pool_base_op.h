@@ -8,10 +8,11 @@
 
 namespace caffe2 {
 
-class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
+class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext, true> {
  public:
-  IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {
+  template<class... Args>
+  explicit IDEEPConvPoolOpBase(Args&&... args)
+      : ConvPoolOpBase<IDEEPContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Unsupported storage order.");
   }

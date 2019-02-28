@@ -12,12 +12,13 @@
 namespace caffe2 {
 
 template <typename T, class Context, class Functor>
-class PoolOp final : public ConvPoolOpBase<Context> {
+class PoolOp final : public ConvPoolOpBase<Context, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
 
-  PoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {
+  template<class... Args>
+  explicit PoolOp(Args&&... args)
+      : ConvPoolOpBase<Context, true>(std::forward<Args>(args)...), functor_(*this) {
     const int kernel_size = kernel_.size();
     for (int i = 0; i < kernel_size; ++i) {
       CAFFE_ENFORCE_EQ(
@@ -39,7 +40,7 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     auto* Y = Output(0);
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
+    ConvPoolOpBase<Context, true>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (N == 0) {
@@ -72,7 +73,7 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
+    ConvPoolOpBase<Context, true>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (N == 0) {
@@ -104,11 +105,12 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 };
 
 template <typename T, class Context, class Functor>
-class PoolGradientOp final : public ConvPoolOpBase<Context> {
+class PoolGradientOp final : public ConvPoolOpBase<Context, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {}
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
+  template<class... Args>
+  explicit PoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context, true>(std::forward<Args>(args)...), functor_(*this) {}
 
   ~PoolGradientOp() = default;
 
@@ -121,7 +123,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
-    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    ConvPoolOpBase<Context, true>::ComputePads(X_HW_dims);
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
@@ -160,7 +162,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
-    ConvPoolOpBase<Context>::ComputePads(X_HW_dims);
+    ConvPoolOpBase<Context, true>::ComputePads(X_HW_dims);
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();

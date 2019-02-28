@@ -6,10 +6,10 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class ConvReluOp final : public ConvPoolOpBase<Context> {
+class ConvReluOp final : public ConvPoolOpBase<Context, true> {
  public:
   ConvReluOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {
+      : ConvPoolOpBase<Context, true>(operator_def, ws) {
     for (auto name : operator_def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());

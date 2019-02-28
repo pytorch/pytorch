@@ -346,10 +346,10 @@ void run2b1bUnification(QConvState* state,
   }
 }
 
-class QConvOp final : public ConvPoolOpBase<CPUContext> {
+class QConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  QConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws), ws_(ws) {
+  explicit QConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext, true>(operator_def, ws), ws_(ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NHWC, "QConvOp only supports NHWC order");
     OPERATOR_NEEDS_FEATURE(this->dilation_h() == 1, "");
     OPERATOR_NEEDS_FEATURE(this->dilation_w() == 1, "");

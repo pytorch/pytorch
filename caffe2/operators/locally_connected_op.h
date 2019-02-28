@@ -12,12 +12,13 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
+class LocallyConnectedOp final : public ConvPoolOpBase<Context, false> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, false);
 
-  LocallyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {
+  template<class... Args>
+  explicit LocallyConnectedOp(Args&&... args)
+      : ConvPoolOpBase<Context, false>(std::forward<Args>(args)...) {
     // Since this is the default locally connected implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
     CAFFE_ENFORCE(
@@ -64,12 +65,13 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
 };
 
 template <typename T, class Context>
-class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
+class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context, false> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, false);
 
-  LocallyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  template<class... Args>
+  explicit LocallyConnectedGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context, false>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "no_bias", no_bias_, false) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),

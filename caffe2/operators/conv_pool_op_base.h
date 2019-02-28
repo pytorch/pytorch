@@ -25,12 +25,15 @@ const bool CAFFE2_PAD_HEAD_MORE = false;
 
 namespace caffe2 {
 
-template <class Context>
+// IsConvOrPool is true iff this is a Conv op or a Pool op. The reason is that a
+// few other ops, like PadImage, are also using this base class.
+template <class Context, bool IsConvOrPool>
 class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template<class... Args>
+  explicit ConvPoolOpBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
                 "legacy_pad",
@@ -47,8 +50,7 @@ class ConvPoolOpBase : public Operator<Context> {
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
-            this->template GetSingleArgument<int>("shared_buffer", 0)),
-        ws_(ws) {
+            this->template GetSingleArgument<int>("shared_buffer", 0)) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
     if (legacy_pad_ == LegacyPadding::VALID ||
@@ -147,10 +149,8 @@ class ConvPoolOpBase : public Operator<Context> {
     }
 
     // Check kernel only if we are doing conv or pooling. The reason is that a
-    // few other ops, like PadImage, are also using this base class. We really
-    // need to clean this up.
-    if (operator_def.name().find("Conv") == 0 ||
-        operator_def.name().find("Pool") != std::string::npos) {
+    // few other ops, like PadImage, are also using this base class.
+    if (IsConvOrPool) {
       for (int dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
@@ -520,7 +520,7 @@ class ConvPoolOpBase : public Operator<Context> {
     check_and_set_default_value(dilations, kernel.size(), 1);
 
     std::vector<int> output_dims;
-    ConvPoolOpBase<CPUContext>::InferOutputSize(
+    ConvPoolOpBase<CPUContext, IsConvOrPool>::InferOutputSize(
         GetDimsVector(in[0]),
         output_channel,
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW")),
@@ -589,7 +589,6 @@ class ConvPoolOpBase : public Operator<Context> {
   int group_;
   StorageOrder order_;
   bool shared_buffer_;
-  Workspace* ws_;
 
   static inline void ComputeSizeAndPad(
       const int in_size,
@@ -719,33 +718,32 @@ class ConvPoolOpBase : public Operator<Context> {
         vec.size(), vec.data(), tensor.template mutable_data<int>());
   }
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
-  USE_OPERATOR_FUNCTIONS(Context);                \
-  using ConvPoolOpBase<Context>::pads_;           \
-  using ConvPoolOpBase<Context>::pad_t;           \
-  using ConvPoolOpBase<Context>::pad_l;           \
-  using ConvPoolOpBase<Context>::pad_b;           \
-  using ConvPoolOpBase<Context>::pad_r;           \
-  using ConvPoolOpBase<Context>::legacy_pad_;     \
-  using ConvPoolOpBase<Context>::global_pooling_; \
-  using ConvPoolOpBase<Context>::kernel_;         \
-  using ConvPoolOpBase<Context>::kernel_h;        \
-  using ConvPoolOpBase<Context>::kernel_w;        \
-  using ConvPoolOpBase<Context>::dilation_;       \
-  using ConvPoolOpBase<Context>::dilation_h;      \
-  using ConvPoolOpBase<Context>::dilation_w;      \
-  using ConvPoolOpBase<Context>::stride_;         \
-  using ConvPoolOpBase<Context>::stride_h;        \
-  using ConvPoolOpBase<Context>::stride_w;        \
-  using ConvPoolOpBase<Context>::group_;          \
-  using ConvPoolOpBase<Context>::order_;          \
-  using ConvPoolOpBase<Context>::shared_buffer_;  \
-  using ConvPoolOpBase<Context>::GetDims;         \
-  using ConvPoolOpBase<Context>::GetDimsSize;     \
-  using ConvPoolOpBase<Context>::SetDeviceTensor; \
-  using ConvPoolOpBase<Context>::HasPad;          \
-  using ConvPoolOpBase<Context>::HasStride;       \
-  using ConvPoolOpBase<Context>::ws_
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context, IsConvOrPool)     \
+  USE_OPERATOR_FUNCTIONS(Context);                              \
+  using ConvPoolOpBase<Context, IsConvOrPool>::pads_;           \
+  using ConvPoolOpBase<Context, IsConvOrPool>::pad_t;           \
+  using ConvPoolOpBase<Context, IsConvOrPool>::pad_l;           \
+  using ConvPoolOpBase<Context, IsConvOrPool>::pad_b;           \
+  using ConvPoolOpBase<Context, IsConvOrPool>::pad_r;           \
+  using ConvPoolOpBase<Context, IsConvOrPool>::legacy_pad_;     \
+  using ConvPoolOpBase<Context, IsConvOrPool>::global_pooling_; \
+  using ConvPoolOpBase<Context, IsConvOrPool>::kernel_;         \
+  using ConvPoolOpBase<Context, IsConvOrPool>::kernel_h;        \
+  using ConvPoolOpBase<Context, IsConvOrPool>::kernel_w;        \
+  using ConvPoolOpBase<Context, IsConvOrPool>::dilation_;       \
+  using ConvPoolOpBase<Context, IsConvOrPool>::dilation_h;      \
+  using ConvPoolOpBase<Context, IsConvOrPool>::dilation_w;      \
+  using ConvPoolOpBase<Context, IsConvOrPool>::stride_;         \
+  using ConvPoolOpBase<Context, IsConvOrPool>::stride_h;        \
+  using ConvPoolOpBase<Context, IsConvOrPool>::stride_w;        \
+  using ConvPoolOpBase<Context, IsConvOrPool>::group_;          \
+  using ConvPoolOpBase<Context, IsConvOrPool>::order_;          \
+  using ConvPoolOpBase<Context, IsConvOrPool>::shared_buffer_;  \
+  using ConvPoolOpBase<Context, IsConvOrPool>::GetDims;         \
+  using ConvPoolOpBase<Context, IsConvOrPool>::GetDimsSize;     \
+  using ConvPoolOpBase<Context, IsConvOrPool>::SetDeviceTensor; \
+  using ConvPoolOpBase<Context, IsConvOrPool>::HasPad;          \
+  using ConvPoolOpBase<Context, IsConvOrPool>::HasStride
 };
 
 } // namespace caffe2

@@ -10,10 +10,11 @@
 
 namespace caffe2 {
 
-class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
+class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template<class... Args>
+  explicit CudnnConvOpBase(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         cudnn_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
             "ws_nbytes_limit",
@@ -520,7 +521,7 @@ bool CudnnConvOp::DoRunWithType() {
   CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
   const int M = filter.dim32(0);
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, M);
+  ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, M);
 
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
   int group_offset_X = 0, group_offset_Y = 0;
@@ -940,11 +941,11 @@ bool CudnnConvGradientOp::DoRunWithType() {
 
   int group_offset_filter = filter.numel() / group_;
   if (kernel_.size() == 1) {
-    ConvPoolOpBase<CUDAContext>::ComputePads({H});
+    ConvPoolOpBase<CUDAContext, true>::ComputePads({H});
   } else if (kernel_.size() == 2) {
-    ConvPoolOpBase<CUDAContext>::ComputePads({H, W});
+    ConvPoolOpBase<CUDAContext, true>::ComputePads({H, W});
   } else if (kernel_.size() == 3) {
-    ConvPoolOpBase<CUDAContext>::ComputePads({H, W, D});
+    ConvPoolOpBase<CUDAContext, true>::ComputePads({H, W, D});
   } else {
     CAFFE_THROW("Unsupported kernel size:", kernel_.size());
   }

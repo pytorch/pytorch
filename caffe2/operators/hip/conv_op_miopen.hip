@@ -28,10 +28,11 @@ namespace caffe2 {
 // something very beneficial to more recent CNN models.
 static constexpr size_t kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES = 64 * 1024 * 1024;
 
-class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
+class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext, true> {
  public:
-  MIOPENConvOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<HIPContext>(operator_def, ws),
+  template<class... Args>
+  explicit MIOPENConvOpBase(Args&&... args)
+      : ConvPoolOpBase<HIPContext, true>(std::forward<Args>(args)...),
         miopen_wrapper_(&context_),
         miopen_state_(
             OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
@@ -216,7 +217,7 @@ bool MIOPENConvOp::DoRunWithType() {
       "Conv op with MIOpen engine is supported only for 2D convolutions");
 
   const int M = Weight.dim32(0);
-  ConvPoolOpBase<HIPContext>::SetOutputSize(X, Y, M);
+  ConvPoolOpBase<HIPContext, true>::SetOutputSize(X, Y, M);
 
   int N = X.dim32(0);
   int C = X.dim32(1);

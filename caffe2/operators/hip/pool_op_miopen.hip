@@ -19,10 +19,11 @@
 #include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
-class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
+class MIOPENPoolOp : public ConvPoolOpBase<HIPContext, true> {
  public:
-  MIOPENPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<HIPContext>(operator_def, ws),
+  template<class... Args>
+  explicit MIOPENPoolOp(Args&&... args)
+      : ConvPoolOpBase<HIPContext, true>(std::forward<Args>(args)...),
         poolWsSize_(0),
         poolWs_(nullptr),
         miopen_wrapper_(&context_),
@@ -137,10 +138,11 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   const float beta_;
 };
 
-class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
+class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext, true> {
  public:
-  MIOPENPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<HIPContext>(operator_def, ws),
+  template<class... Args>
+  explicit MIOPENPoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<HIPContext, true>(std::forward<Args>(args)...),
         poolWsSize_(0),
         poolWs_(nullptr),
         miopen_wrapper_(&context_),
@@ -204,13 +206,13 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     switch (kernel_.size())
     {
       case 1:
-        ConvPoolOpBase<HIPContext>::ComputePads({H});
+        ConvPoolOpBase<HIPContext, true>::ComputePads({H});
         break;
       case 2:
-        ConvPoolOpBase<HIPContext>::ComputePads({H, W});
+        ConvPoolOpBase<HIPContext, true>::ComputePads({H, W});
         break;
       case 3:
-        ConvPoolOpBase<HIPContext>::ComputePads({H, W, D});
+        ConvPoolOpBase<HIPContext, true>::ComputePads({H, W, D});
         break;
       default:
         CAFFE_THROW("Unsupported kernel size :", kernel_.size());

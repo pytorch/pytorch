@@ -15,15 +15,15 @@ namespace caffe2 {
 namespace int8 {
 
 template <Activation Ac>
-class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
+class Int8ConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  Int8ConvOp(const OperatorDef& def, Workspace* ws)
-      : ConvPoolOpBase(def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
+  explicit Int8ConvOp(const OperatorDef& def, Workspace* ws)
+      : ConvPoolOpBase(def, ws), ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8Conv only supports NHWC order");
-    createSharedBuffer<CPUContext>(ws_);
+    createSharedBuffer<CPUContext>(ws);
   }
 
   ~Int8ConvOp() {
@@ -43,7 +43,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     double Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
 
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), W.t.dim32(0));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X.t, &(Y->t), W.t.dim32(0));
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
@@ -155,6 +155,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
+  Workspace* ws_;
   // QNNPACK convolution object
   qnnp_operator_t qnnpackObject_{nullptr};
   // batch size in the previous call to RunOnDeviceWithOrderNHWC

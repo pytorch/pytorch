@@ -5,11 +5,12 @@
 namespace caffe2 {
 
 template <typename T>
-class GLAveragePoolOp final : public ConvPoolOpBase<GLContext> {
+class GLAveragePoolOp final : public ConvPoolOpBase<GLContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(GLContext);
-  GLAveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<GLContext>(operator_def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(GLContext, true);
+  template<class... Args>
+  explicit GLAveragePoolOp(Args&&... args)
+      : ConvPoolOpBase<GLContext, true>(std::forward<Args>(args)...) {
   }
   ~GLAveragePoolOp() {}
 
@@ -22,11 +23,12 @@ private:
 };
 
 template<typename T>
-class GLMaxPoolOp final : public ConvPoolOpBase<GLContext> {
+class GLMaxPoolOp final : public ConvPoolOpBase<GLContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(GLContext);
-  GLMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<GLContext>(operator_def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(GLContext, true);
+  template<class... Args>
+  explicit GLMaxPoolOp(Args&&... args)
+      : ConvPoolOpBase<GLContext, true>(std::forward<Args>(args)...) {
   }
   ~GLMaxPoolOp() {}
 

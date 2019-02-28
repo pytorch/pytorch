@@ -41,7 +41,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       0,
       "The number of output channels is not divisible by group.");
 
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
+  ConvPoolOpBase<Context, false>::SetOutputSize(X, Y, shape.M);
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
@@ -87,7 +87,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     }
     CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
     bias_data = bias.template data<T>();
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, false>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
   }
   T* Y_data = Y->template mutable_data<T>();
@@ -124,7 +124,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 1), kernel_h());
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 2), kernel_w());
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 3), shape.C);
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, shape.M);
+  ConvPoolOpBase<Context, false>::SetOutputSize(X, Y, shape.M);
 
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
@@ -164,7 +164,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     }
     CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
     bias_data = bias.template data<T>();
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, false>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
   }
   T* Y_data = Y->template mutable_data<T>();
@@ -390,7 +390,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   for (int i = 0; i < image_ndim; ++i) {
     CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
-  ConvPoolOpBase<Context>::ComputePads(input_image_dims);
+  ConvPoolOpBase<Context, false>::ComputePads(input_image_dims);
 
   int kernel_dims_size = 1;
   for (std::size_t i = 0; i < kernel_.size(); ++i) {
@@ -439,7 +439,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, false>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
   }
@@ -479,7 +479,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 2), kernel_w());
   CAFFE_ENFORCE_EQ(filter.dim32(image_ndim + 3), shape.C);
   const std::vector<int> input_image_dims = {X.dim32(1), X.dim32(2)};
-  ConvPoolOpBase<Context>::ComputePads(input_image_dims);
+  ConvPoolOpBase<Context, false>::ComputePads(input_image_dims);
 
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(dY);
@@ -528,7 +528,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
-    ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
+    ConvPoolOpBase<Context, false>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
   }

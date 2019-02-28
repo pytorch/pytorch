@@ -110,7 +110,7 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
   auto& X = Input(0);
   auto* Y = Output(0);
 
-  ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
+  ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, X.dim32(1));
   int output_size = Y->numel();
   auto* mask = Output(1, {output_size}, at::dtype<int>());
 
@@ -161,7 +161,7 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
   CAFFE_ENFORCE(X.dim() == 4, "Operator only supports 4D tensors");
 
   auto* dX = Output(0, X.sizes(), at::dtype<T>());
-  ConvPoolOpBase<CUDAContext>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
+  ConvPoolOpBase<CUDAContext, true>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
 
   MaxPoolBackward<T><<<
       CAFFE_GET_BLOCKS(X.numel()),
@@ -222,7 +222,7 @@ OPERATOR_SCHEMA(MaxPoolWithIndexGradient);
 OPERATOR_SCHEMA(MaxPoolWithIndex)
     .NumInputs(1)
     .NumOutputs(2)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForPool)
     .SetDoc(R"DOC(
     MaxPoolWithIndex consumes an input blob X and applies max pooling across the
     blob according to kernel sizes, stride sizes and pad lengths defined by the

@@ -48,10 +48,11 @@ void SetTensorDescriptor(
 }
 
 template <class Functor>
-class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
+class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template<class... Args>
+  explicit CuDNNPoolOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -103,7 +104,7 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, C);
+    ConvPoolOpBase<CUDAContext, true>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
 
@@ -188,10 +189,11 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
 };
 
 template <class Functor>
-class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
+class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template<class... Args>
+  explicit CuDNNPoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -247,7 +249,7 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
-    ConvPoolOpBase<CUDAContext>::ComputePads(X_HW_dims);
+    ConvPoolOpBase<CUDAContext, true>::ComputePads(X_HW_dims);
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();

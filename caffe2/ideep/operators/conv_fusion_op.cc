@@ -209,9 +209,9 @@ operator. {conv_fusion_doc})DOC";
 OPERATOR_SCHEMA(ConvFusion)
     .NumInputs(2, 4)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
     .Arg("fusion_type", "Which fusion type is used")
     .AllowInplace({{2, 0}, {3, 0}})
     .FillUsing(ConvFusionDocGenerator(""));

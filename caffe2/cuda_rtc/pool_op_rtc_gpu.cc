@@ -185,10 +185,11 @@ string MaxPoolGradientRTCFunction::GetSource(
 }  // namespace
 
 
-class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
+class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  MaxPoolRTCOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MaxPoolRTCOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Currently only NCHW is supported.");
   }
@@ -243,10 +244,11 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
   vector<int64_t> input_dims_;
 };
 
-class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
+class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext, true> {
  public:
-  MaxPoolGradientRTCOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws) {
+  template<class... Args>
+  explicit MaxPoolGradientRTCOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext, true>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Currently only NCHW is supported.");
   }
@@ -259,7 +261,7 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE_EQ(dY.dim(), 4);
 
     auto* dX = Output(0, X.sizes(), at::dtype<float>());
-    ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
+    ConvPoolOpBase<CUDAContext, true>::ComputePads({X.dim32(2), X.dim32(3)});
     if (input_dims_ != X.sizes()) {
       VLOG(1) << "MaxPoolGradient RTC recompiling";
       CAFFE_ENFORCE_LT(X.numel(), std::numeric_limits<int>::max());

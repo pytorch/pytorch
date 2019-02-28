@@ -29,10 +29,10 @@ void initNNPACK() {
 // Definitions
 ////////////////////////////////////////////////////////////////////////////////
 
-class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
+class NNPACKConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws),
+  explicit NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext, true>(operator_def, ws),
         algorithm_(getConvolutionAlgorithm()),
         activation_(getActivationType()),
         transformStrategy_(getConvolutionTransformStrategy()),
@@ -160,7 +160,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
-  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
+  ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
 
   const float* biasData = NULL;

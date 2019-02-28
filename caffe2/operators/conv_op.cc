@@ -169,9 +169,9 @@ REGISTER_CPU_OPERATOR(Conv, ConvOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""))
     .InheritOnnxSchema();
 
@@ -180,7 +180,7 @@ REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv1D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator("1D "))
     .InheritOnnxSchema("Conv");
 
@@ -190,8 +190,8 @@ OPERATOR_SCHEMA(Conv2D)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator("2D "))
     .InheritOnnxSchema("Conv");
 
@@ -201,8 +201,8 @@ OPERATOR_SCHEMA(Conv3D)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator("3D "))
     .InheritOnnxSchema("Conv");
 

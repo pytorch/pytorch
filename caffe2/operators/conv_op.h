@@ -11,11 +11,11 @@ C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 namespace caffe2 {
 
 template <typename T, class Context>
-class ConvOp final : public ConvPoolOpBase<Context> {
+class ConvOp final : public ConvPoolOpBase<Context, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
   ConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {
+      : ConvPoolOpBase<Context, true>(operator_def, ws), ws_(ws) {
     // Since this is the default convolution implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
     CAFFE_ENFORCE(
@@ -26,7 +26,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
     if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
-      createSharedBuffer<Context>(ws_);
+      createSharedBuffer<Context>(ws);
     }
   }
   ~ConvOp() {}
@@ -55,6 +55,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
       const T* bias,
       T* Y);
 
+  Workspace* ws_;
   Tensor col_buffer_{Context::GetDeviceType()};
   Tensor bias_multiplier_{Context::GetDeviceType()};
   Tensor img_shape_device_{Context::GetDeviceType()};
@@ -65,11 +66,12 @@ class ConvOp final : public ConvPoolOpBase<Context> {
 };
 
 template <typename T, class Context>
-class ConvGradientOp final : public ConvPoolOpBase<Context> {
+class ConvGradientOp final : public ConvPoolOpBase<Context, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
+  template<class... Args>
+  explicit ConvGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context, true>(std::forward<Args>(args)...),
         no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),

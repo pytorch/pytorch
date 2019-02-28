@@ -67,7 +67,7 @@ template <typename T>
 class AveragePoolDnnLowPOp final
     : public ConvPoolDNNLowPOpBase<T, AveragePoolFp32Op> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, AveragePoolFp32Op);
 
   AveragePoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
@@ -102,7 +102,7 @@ class AveragePoolDnnLowPOp final
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, X.dim32(1));
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -241,7 +241,7 @@ class AveragePoolDnnLowPOp final
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, channels);
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -362,7 +362,7 @@ using MaxPoolFp32Op = PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>;
 template <typename T>
 class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, MaxPoolFp32Op);
 
   MaxPoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
@@ -399,7 +399,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, X.dim32(1));
 
     T* Ydata = GetQuantizedOutputData_();
 
@@ -546,7 +546,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
     int channels = X.dim32(X.ndim() - 1);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, channels);
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X, Y, channels);
 
     T* Ydata = GetQuantizedOutputData_();
 

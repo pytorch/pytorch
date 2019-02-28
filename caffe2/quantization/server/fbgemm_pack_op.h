@@ -45,7 +45,7 @@ using ConvFp32Op = ConvOp<float, CPUContext>;
 class ConvDNNLowPPackWeightOp final
     : public ConvPoolDNNLowPOpBase<std::uint8_t, ConvFp32Op> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
+  USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(std::uint8_t, ConvFp32Op);
   ConvDNNLowPPackWeightOp(const OperatorDef& operator_def, Workspace* ws);
 

@@ -14,10 +14,11 @@ namespace caffe2 {
 namespace int8 {
 
 template <Activation Ac>
-class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
+class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  Int8AveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+  template<class... Args>
+  explicit Int8AveragePoolOp(Args&&... args)
+      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC, "Int8 only supports NHWC order.");
   }
@@ -44,7 +45,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
 
     CHECK_EQ(X.t.dim(), 4);
     const int channels = X.t.dim32(3);
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), channels);
+    ConvPoolOpBase<CPUContext, true>::SetOutputSize(X.t, &(Y->t), channels);
 
     initQNNPACK();
 

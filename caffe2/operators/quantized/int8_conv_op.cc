@@ -62,9 +62,9 @@ OPERATOR_SCHEMA(Int8Conv)
     .NumOutputs(1)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""));
 
 OPERATOR_SCHEMA(Int8ConvRelu)
@@ -72,9 +72,9 @@ OPERATOR_SCHEMA(Int8ConvRelu)
     .NumOutputs(1)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext, true>::TensorInferenceForConv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
-        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
+        ConvPoolOpBase<CPUContext, true>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator("", true));
 
 } // namespace caffe2

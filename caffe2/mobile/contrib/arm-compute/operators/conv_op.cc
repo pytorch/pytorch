@@ -6,11 +6,12 @@
 namespace caffe2 {
 
 template <typename T>
-class GLConvOp final : public ConvPoolOpBase<GLContext> {
+class GLConvOp final : public ConvPoolOpBase<GLContext, true> {
  public:
-  USE_CONV_POOL_BASE_FUNCTIONS(GLContext);
-  GLConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<GLContext>(operator_def, ws) {
+  USE_CONV_POOL_BASE_FUNCTIONS(GLContext, true);
+  template<class... Args>
+  explicit GLConvOp(Args&&... args)
+      : ConvPoolOpBase<GLContext, true>(std::forward<Args>(args)...) {
     // Since this is the default convolution implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
     CAFFE_ENFORCE(
@@ -58,7 +59,7 @@ bool GLConvOp<T>::RunOnDevice() {
     TensorCPU fakeX;
     fakeX.Resize(X_->dims());
     TensorCPU fakeY;
-    ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
+    ConvPoolOpBase<GLContext, true>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
     Y->ResizeLike(fakeY);
     LOG(INFO) << "[C2DEBUG] dims of X " << X_->dims();
     LOG(INFO) << "[C2DEBUG] dims of X(gctensor) "
@@ -93,7 +94,7 @@ bool GLConvOp<T>::RunOnDevice() {
     TensorCPU fakeX;
     fakeX.Resize(X_->dims());
     TensorCPU fakeY;
-    ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
+    ConvPoolOpBase<GLContext, true>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
     bool need_allocation = Y->ResizeLike(fakeY, true);
     if (need_allocation) {
       Y->allocate();
