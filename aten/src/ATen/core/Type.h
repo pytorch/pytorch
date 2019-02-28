@@ -44,6 +44,7 @@ struct Generator;
 static inline void noop_deleter(void*) {}
 
 enum class TypeID {
+  CPUBool,
   CPUByte,
   CPUChar,
   CPUDouble,
@@ -52,6 +53,7 @@ enum class TypeID {
   CPULong,
   CPUShort,
   CPUHalf,
+  SparseCPUBool,
   SparseCPUByte,
   SparseCPUChar,
   SparseCPUDouble,
@@ -59,6 +61,7 @@ enum class TypeID {
   SparseCPUInt,
   SparseCPULong,
   SparseCPUShort,
+  CUDABool,
   CUDAByte,
   CUDAChar,
   CUDADouble,
@@ -67,6 +70,7 @@ enum class TypeID {
   CUDALong,
   CUDAShort,
   CUDAHalf,
+  SparseCUDABool,
   SparseCUDAByte,
   SparseCUDAChar,
   SparseCUDADouble,
@@ -74,8 +78,24 @@ enum class TypeID {
   SparseCUDAInt,
   SparseCUDALong,
   SparseCUDAShort,
-  MSNPU,
-  XLA,
+  MSNPUBool,
+  MSNPUByte,
+  MSNPUChar,
+  MSNPUDouble,
+  MSNPUFloat,
+  MSNPUInt,
+  MSNPULong,
+  MSNPUShort,
+  MSNPUHalf,
+  XLABool,
+  XLAByte,
+  XLAChar,
+  XLADouble,
+  XLAFloat,
+  XLAInt,
+  XLALong,
+  XLAShort,
+  XLAHalf,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,
@@ -544,7 +564,7 @@ struct CAFFE2_API Type {
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
-  virtual Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
+  virtual Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) const = 0;
   virtual Tensor addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor addcdiv(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) const = 0;
@@ -586,6 +606,7 @@ struct CAFFE2_API Type {
   virtual Tensor max(const Tensor & self) const = 0;
   virtual Tensor median(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) const = 0;
+  virtual Tensor argsort(const Tensor & self, int64_t dim, bool descending) const = 0;
   virtual std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) const = 0;
   virtual Tensor all(const Tensor & self) const = 0;
   virtual Tensor any(const Tensor & self) const = 0;

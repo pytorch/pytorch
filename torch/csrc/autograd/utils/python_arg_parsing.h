@@ -31,7 +31,7 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
     return std::make_tuple(
-      torch::tensors::getDevice(tensor),
+      tensor.device(),
       tensor.type().scalarType(),
       r.toBool(1),
       r.toBool(2)

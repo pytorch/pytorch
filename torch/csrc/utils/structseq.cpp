@@ -8,7 +8,7 @@
  * of repr of structseq to provide better printting for returned
  * structseq objects from operators, aka torch.return_types.*
  *
- * For more information on copyright of CPython, see also:
+ * For more information on copyright of CPython, see:
  * https://github.com/python/cpython#copyright-and-license-information
  */
 
@@ -26,15 +26,19 @@ PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high
     PyTupleObject *np;
     Py_ssize_t i;
 
-    if (low < 0)
+    if (low < 0) {
         low = 0;
-    if (high > Py_SIZE(obj))
+    }
+    if (high > Py_SIZE(obj)) {
         high = Py_SIZE(obj);
-    if (high < low)
+    }
+    if (high < low) {
         high = low;
+    }
     np = (PyTupleObject *)PyTuple_New(high-low);
-    if (np == nullptr)
+    if (np == nullptr) {
         return nullptr;
+    }
     for(i = low; i < high; ++i) {
         PyObject *v = obj->ob_item[i];
         Py_INCREF(v);
@@ -65,11 +69,13 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         if (cname == nullptr) {
             PyErr_Format(PyExc_SystemError, "In structseq_repr(), member %d name is nullptr"
                          " for type %.500s", i, typ->tp_name);
+            Py_DECREF(tup);
             return nullptr;
         }
 
         val = PyTuple_GetItem(tup, i);
         if (val == nullptr) {
+            Py_DECREF(tup);
             return nullptr;
         }
 
@@ -80,17 +86,16 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         }
 
         crepr = PyUnicode_AsUTF8(repr);
+        Py_DECREF(repr);
         if (crepr == nullptr) {
-            Py_DECREF(repr);
             Py_DECREF(tup);
             return nullptr;
         }
 
         ss << cname << '=' << crepr;
-        if (i < num_elements - 1)
+        if (i < num_elements - 1) {
             ss << ",\n";
-
-        Py_DECREF(repr);
+        }
     }
     ss << ")";
 

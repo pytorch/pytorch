@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/utils/structseq.h>
+#include "torch/csrc/utils/structseq.h"
 
 namespace six {
 

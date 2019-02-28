@@ -57,6 +57,7 @@ libtorch_sources = [
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
     "torch/csrc/jit/caffe2_operator.cpp",
     "torch/csrc/jit/register_caffe2_ops.cpp",
@@ -93,10 +94,13 @@ libtorch_sources = [
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
-    "torch/csrc/jit/script/type_parser.cpp",
+    "torch/csrc/jit/script/schema_type_parser.cpp",
+    "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
+    "torch/csrc/jit/script/user_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
+    "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_method.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
@@ -119,6 +123,7 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -210,6 +215,7 @@ def add_torch_libs():
         link_whole=True,
         propagated_pp_flags=[
             "-DUSE_CUDA",
+            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",
