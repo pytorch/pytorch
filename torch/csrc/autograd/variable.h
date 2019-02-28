@@ -581,6 +581,8 @@ inline Variable make_variable(
   return Variable();
 }
 
+// Moves out of the tensor instead of copying it.
+// Can save ~10μs of overhead.
 inline Variable make_variable(
     at::Tensor&& data,
     bool requires_grad = false,

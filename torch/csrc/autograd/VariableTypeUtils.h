@@ -148,7 +148,7 @@ inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
 }
 
 inline Tensor as_variable(Tensor tensor) {
-  return make_variable(tensor, /*requires_grad=*/false);
+  return make_variable(std::move(tensor), /*requires_grad=*/false);
 }
 
 inline std::vector<Tensor> as_variable(TensorList tl) {
