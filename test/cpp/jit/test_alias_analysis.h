@@ -395,7 +395,6 @@ void testAliasAnalysis() {
 
     // Should not be able to move `d` before the wait call
     AliasDb aliasDb(graph);
-    aliasDb.dump();
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
   {
