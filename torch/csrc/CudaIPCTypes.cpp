@@ -38,7 +38,7 @@ struct CudaIPCGlobalEntities {
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
     }
-  };
+  }
   void safe_clean_current_file() {
     std::lock_guard<std::mutex> lock(ref_counters_mutex_);
     if (next_available_ref_counters_file_ &&
@@ -98,7 +98,7 @@ void CudaIPCSentDataDelete(void* ptr) {
   cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
 }
 
-void ReturnRefCounter(const std::string handle, uint64_t offset /* unused */) {
+void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
   std::lock_guard<std::mutex> lock(
       cuda_ipc_global_entities.ref_counters_mutex_);
   cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);

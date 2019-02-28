@@ -217,7 +217,7 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaIPCCollect(PyObject *_unused)
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
 {
   HANDLE_TH_ERRORS
   torch::CudaIPCCollect();

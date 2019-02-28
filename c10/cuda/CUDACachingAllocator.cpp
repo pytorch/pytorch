@@ -202,11 +202,11 @@ struct THCCachingAllocator
         free_blocks.erase(it);
         return block;
       }
-      return NULL;
+      return nullptr;
     };
 
     Block* block = find_free_block();
-    if (block == NULL) {
+    if (block == nullptr) {
       bool freed_memory = false;
       for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
         freed_memory |=
@@ -216,7 +216,7 @@ struct THCCachingAllocator
         block = find_free_block();
       }
     }
-    if (block == NULL) {
+    if (block == nullptr) {
       void* ptr;
       size_t alloc_size = small ? kSmallAlloc : size;
       cudaError_t err = cuda_malloc_retry(device, &ptr, alloc_size);
@@ -261,7 +261,7 @@ struct THCCachingAllocator
       block = new Block(device, stream, alloc_size, (char*)ptr);
     }
 
-    Block* remaining = NULL;
+    Block* remaining = nullptr;
 
     if (block->size - size >= (small ? kRoundSmall : kSmallAlloc + 1)) {
       remaining = block;

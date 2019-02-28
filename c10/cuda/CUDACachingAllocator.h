@@ -4,7 +4,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAMacros.h>
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
 
 #include <mutex>
 
@@ -14,7 +14,6 @@ namespace c10 {
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
  public:
-  FreeMemoryCallback() = default;
   virtual bool Execute() = 0;
 };
 

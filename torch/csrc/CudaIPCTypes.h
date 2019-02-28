@@ -7,7 +7,6 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
-#include <iostream>
 #include <cstddef>
 
 namespace torch {
@@ -16,7 +15,7 @@ bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
-      : shared_ptr_(std::move(shared_ptr)){};
+      : shared_ptr_(std::move(shared_ptr)){}
   std::shared_ptr<void> shared_ptr_;
 };
 
@@ -75,22 +74,14 @@ namespace {
 constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
 constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 
-bool CudaIPCHaveRefCounter();
-void CudaIPCCreateRefCounter(
-    std::string handle,
-    uint64_t size,
-    at::DataPtr data_ptr);
-void ReturnRefCounter(std::string handle, uint64_t offset);
-
 // All to be deleted data blocks with non zero reference counter goes there
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
-
   bool collect();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
   uint64_t size() {
     return shared_blocks_.size();
-  };
+  }
 
  private:
   // TODO: Can be changed to FIFO in order to avoid full traverse on every
@@ -158,7 +149,7 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
-  bool Execute() {
+  bool Execute() override {
     return torch::CudaIPCCollect();
   }
 };
