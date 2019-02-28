@@ -1214,7 +1214,7 @@ class ShapePropagator {
       }
     } else if (
         node->matches(
-            "aten::gather(Tensor self, int dim, Tensor index) -> Tensor")) {
+            "aten::gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor")) {
       auto type = input_type(0);
       auto index_type = input_type(1);
       // Gather has this annoying edge case where index always needs to match
