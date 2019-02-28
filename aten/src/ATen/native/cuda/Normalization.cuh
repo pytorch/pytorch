@@ -200,16 +200,33 @@ __global__ void batch_norm_transform_input_kernel(
   }
 }
 
+template<typename T>
+struct InvStd {
+  __device__ __forceinline__ T operator()(T var, double epsilon) const {
+    T invstd = 0;
+    if (var != static_cast<T>(0) || epsilon != static_cast<T>(0)) {
+      invstd = static_cast<T>(1) / device_sqrt(var + epsilon);
+    }
+    return invstd;
+  }
+};
 
-template <typename scalar_t, typename accscalar_t, typename index_t>
+template<typename T>
+struct Var {
+  __device__ __forceinline__ T operator()(T var, double epsilon) const {
+    return var;
+  }
+};
+
+template <template<typename T> class VarTransform, typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
 __global__ void batch_norm_collect_statistics_kernel(
-    const PackedTensorAccessor<scalar_t, 3, RestrictPtrTraits, index_t> input,
-    const accscalar_t epsilon,
-    const accscalar_t momentum,
-    PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> running_mean,
-    PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits, index_t> running_var,
-    PackedTensorAccessor<accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
-    PackedTensorAccessor<accscalar_t, 1, RestrictPtrTraits, index_t> save_invstd) {
+    const PackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
+    const stat_accscalar_t epsilon,
+    const stat_accscalar_t momentum,
+    PackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> running_mean,
+    PackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> running_var,
+    PackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
+    PackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
   __shared__ int shared_n[2 * 2 * WARP_SIZE + WARP_SIZE];
 
@@ -223,16 +240,16 @@ __global__ void batch_norm_collect_statistics_kernel(
   // and the parallel algorithm on the same page.
   // We use two shuffles to reduce across the entire block.
   // https://devblogs.nvidia.com/faster-parallel-reductions-kepler/ has a description.
-  accscalar_t* shared_avg_var = (accscalar_t*) &shared_n[WARP_SIZE];
+  stat_accscalar_t* shared_avg_var = (stat_accscalar_t*) &shared_n[WARP_SIZE];
 
   // first the reductions each thread does separately
-  accscalar_t avg = 0;
-  accscalar_t var_n = 0;
+  stat_accscalar_t avg = 0;
+  stat_accscalar_t var_n = 0;
   int n = 0;
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
-      accscalar_t v = input[batch][plane][x];
-      accscalar_t d1 = v - avg;
+      stat_accscalar_t v = input[batch][plane][x];
+      stat_accscalar_t d1 = v - avg;
       n++;
       avg += d1 / n;
       var_n += d1 * (v - avg);
@@ -242,9 +259,9 @@ __global__ void batch_norm_collect_statistics_kernel(
   // first warpSum to get one value per thread to
   // one value per warp
   for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
-    accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, WARP_SIZE);
-    accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
     var_n += WARP_SHFL_XOR(var_n, 1 << i, WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
@@ -252,7 +269,7 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   // this writes each warps  item into shared memory
   // there are at most WARP_SIZE items left because
-  // there are at most WARP_SIZE**2 threads at the beginning  
+  // there are at most WARP_SIZE**2 threads at the beginning
   __syncthreads();
   if (tid % WARP_SIZE == 0) {
     shared_n[tid / WARP_SIZE] = n;
@@ -270,9 +287,9 @@ __global__ void batch_norm_collect_statistics_kernel(
     var_n = (tid < blockDim.x * blockDim.y  / WARP_SIZE ? shared_avg_var[2 * tid + 1] : 0);
   }
   for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
-    accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, WARP_SIZE);
-    accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
     var_n += WARP_SHFL_XOR(var_n, 1 << i, WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
@@ -280,18 +297,14 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   // Save the mean, variance, and moving averages
   if (tid == 0) {
-    accscalar_t invstd = 0;
-    if (var_n != static_cast<accscalar_t>(0) || epsilon != static_cast<accscalar_t>(0)) {
-      invstd = static_cast<accscalar_t>(1) / device_sqrt(var_n / N + epsilon);
-    }
     save_mean[plane] = avg;
-    save_invstd[plane] = invstd;
+    save_transformed_var[plane] = VarTransform<stat_accscalar_t>{}(var_n / N, epsilon);
     if (running_mean.data() != NULL) {
-      running_mean[plane] = static_cast<scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
+      running_mean[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
     }
     if (running_var.data() != NULL) {
-      accscalar_t unbiasedVar = var_n / (N - 1);
-      running_var[plane] = static_cast<scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
+      stat_accscalar_t unbiasedVar = var_n / (N - 1);
+      running_var[plane] = static_cast<stat_scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
     }
   }
 
@@ -382,6 +395,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
                                                             const Tensor& running_mean_, const Tensor& running_var_,
                                                             bool train, double momentum, double epsilon) {
 
+  TensorArg input_arg{ input_, "input", 1 },
+            weight_arg{ weight_, "weight", 2 },
+            bias_arg{ bias_, "bias", 3 },
+            run_mean_arg{ running_mean_, "running_mean", 4 },
+            run_var_arg{ running_var_, "running_var", 5 };
+  CheckedFrom c = "batch_norm_cuda";
+  checkAllSameGPU(c, {input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
+
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor save_mean_;
@@ -421,6 +442,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   int tb = std::max<int>(64/tf, 1);
   dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
                                                                   (input.size(0)+tb-1)/tb)));
+  blocks_trans.y = std::min<int>(blocks_trans.y, 65535);
   dim3 threads_trans(tf, tb);
   if (!train) {
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, false, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
@@ -431,7 +453,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     dim3 blocks(input.size(1));
     tf = getNumThreads(input.size(2));
     dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
-    batch_norm_collect_statistics_kernel<scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
+    batch_norm_collect_statistics_kernel<InvStd, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
       (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
@@ -486,6 +508,41 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   THCudaCheck(cudaGetLastError());
 
   return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
+}
+
+template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
+        const Tensor& input_, const Tensor& running_mean_, const Tensor& running_var_, double momentum) {
+
+  using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
+  int64_t n_channels = input_.size(1);
+  auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
+
+  auto input_options = input_.options();
+  if (input_.type().scalarType() == at::ScalarType::Half) {
+    input_options = input_options.dtype(ScalarType::Float);
+  }
+  Tensor save_mean_ = at::empty({n_channels}, input_options);
+  Tensor save_var_ = at::empty({n_channels}, input_options);
+
+  auto input = input_reshaped.packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
+  auto running_mean = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_mean_);
+  auto running_var = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(running_var_);
+  auto save_mean = save_mean_.packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
+  auto save_var = save_var_.packed_accessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t>();
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // for the reduction, we cannot use blocks for the batch dim, but if we have few threads in
+  // the feature dimension, we'll use some threads for blocks
+  dim3 blocks(input.size(1));
+  int tf = getNumThreads(input.size(2));
+  dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
+  // NB: epsilon is unused by the Var transform, so we set it to 0
+  batch_norm_collect_statistics_kernel<Var, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
+    (input, 0., momentum, running_mean, running_var, save_mean, save_var);
+  THCudaCheck(cudaGetLastError());
+  return std::make_tuple(save_mean_, save_var_);
+
 }
 
 } } // namespace at::native

@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
 import torch
 import torch.onnx
 from torch.autograd import Variable, Function
-from torch.nn import Module
+from torch.nn import Module, functional
 import torch.nn as nn
 
 import itertools
@@ -16,8 +16,6 @@ import os
 import shutil
 import sys
 import common_utils as common
-
-from test_pytorch_common import skipIfCI
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -64,6 +62,7 @@ class TestOperators(TestCase):
             m = f
         else:
             m = FuncModule(f, params)
+        m.eval()
         onnx_model_pbtxt = export_to_pbtxt(m, args, **kwargs)
         subname = kwargs.pop('subname', None)
         self.assertExpected(onnx_model_pbtxt, subname)
@@ -261,6 +260,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_indices(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
+
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -300,7 +303,6 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
 
-    @skipIfCI
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full_like(x, 2), x)
@@ -412,10 +414,17 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.atan(), x)
 
-    def test_flatten(self):
-        # Flatten is a special case of Reshape when the output is a 2-D tensor.
+    def test_view_flatten(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.view(x.size()[0], x.numel() // x.size()[0]), x)
+
+    def test_flatten(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.flatten(x), x)
+
+    def test_flatten2D(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
     def test_logsoftmax(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -488,12 +497,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4)
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
 
-    @skipIfCI
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.zeros_like(x), x)
 
-    @skipIfCI
     def test_ones_like(self):
         x = torch.randn(6, 10, requires_grad=True)
         self.assertONNX(lambda x: torch.ones_like(x), x)
@@ -514,6 +521,24 @@ class TestOperators(TestCase):
     def test_reducemin(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.min(x), x)
+
+    def test_erf(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: x.erf(), x)
+
+    def test_dropout(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
+
+    def test_nonzero(self):
+        x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
+        self.assertONNX(lambda x: torch.nonzero(x), x)
+
+    def test_stable_opset(self):
+        x = torch.randn(2, 3).float()
+        y = torch.randn(2, 3).float()
+        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=9)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

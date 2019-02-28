@@ -41,9 +41,10 @@ GetStats = C.get_stats
 operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
-has_gpu_support = C.has_gpu_support
+has_cuda_support = C.has_cuda_support
 has_hip_support = C.has_hip_support
-if has_gpu_support:
+has_gpu_support = C.has_gpu_support
+if has_cuda_support:
     GpuDeviceType = caffe2_pb2.CUDA
     NumCudaDevices = C.num_cuda_devices
     # This is a duplicate of NumCudaDevices. Remove
@@ -69,7 +70,7 @@ if has_hip_support:
         return np.asarray(C.get_hip_peer_access_pattern())
     GetDeviceProperties = C.get_device_properties
 
-if not has_gpu_support and not has_hip_support:
+if not has_gpu_support:
     # setting cuda as the default GpuDeviceType as some tests
     # like core, scope tests use GpuDeviceType even without gpu support
     GpuDeviceType = caffe2_pb2.CUDA

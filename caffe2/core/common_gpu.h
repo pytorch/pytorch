@@ -25,6 +25,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
+#include "c10/cuda/CUDAMacros.h"
 #include "c10/cuda/CUDAMathCompat.h"
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
@@ -94,10 +95,6 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 #endif // __GNUC__
 #endif // CUDA_VERSION >= 9000
 
-/**
- * The maximum number of GPUs that caffe2 recognizes.
- */
-#define CAFFE2_COMPILE_TIME_MAX_GPUS 16
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
  * Currently, according to NVidia documentation, each device can support a

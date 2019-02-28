@@ -32,7 +32,7 @@ class MeanOp final : public Operator<Context> {
     for (int i = 1; i < InputSize(); ++i) {
       if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
-            "Check failed: output->dims() == Input(i).dims().",
+            "Check failed: output->sizes() == Input(i).sizes().",
             "Description: Input #",
             i,
             ", input dimension:",

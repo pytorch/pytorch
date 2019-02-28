@@ -49,11 +49,11 @@ void SGD::step() {
 }
 
 void SGD::save(serialize::OutputArchive& archive) const {
-  detail::serialize(archive, "momentum_buffers", momentum_buffers);
+  optim::serialize(archive, "momentum_buffers", momentum_buffers);
 }
 
 void SGD::load(serialize::InputArchive& archive) {
-  detail::serialize(archive, "momentum_buffers", momentum_buffers);
+  optim::serialize(archive, "momentum_buffers", momentum_buffers);
 }
 } // namespace optim
 } // namespace torch

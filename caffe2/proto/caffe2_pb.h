@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 #include <caffe2/proto/caffe2.pb.h>
 

@@ -40,7 +40,7 @@ class SharedCache(dict):
     """dictionary from multiprocessing handles to StorageWeakRef"""
 
     def __init__(self):
-        # free_dead_references() is called if the len exceeds the currrent
+        # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
         self.lock = threading.Lock()
@@ -67,12 +67,13 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
-def rebuild_event(handle):
-    return torch.cuda.Event(_handle=handle)
+def rebuild_event(device, handle):
+    return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
 def reduce_event(event):
-    return (rebuild_event, (event.ipc_handle(),))
+    handle = event.ipc_handle()
+    return (rebuild_event, (event.device, handle))
 
 
 def rebuild_tensor(cls, storage, metadata):

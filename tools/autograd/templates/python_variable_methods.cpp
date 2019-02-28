@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
+#include "torch/csrc/cuda/Event.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -73,7 +74,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
       return wrap(self_.size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntList maps to both
+    // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
@@ -95,8 +96,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     return wrap(self_.stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntList strides = self_.strides();
-    // we can't do the normal wrapping here because IntList maps to both
+    IntArrayRef strides = self_.strides();
+    // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
@@ -148,7 +149,7 @@ static Tensor dispatch_contiguous(const Tensor & self) {
       auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
-      tracer_state->graph->appendNode(node);
+      tracer_state->graph->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
@@ -374,7 +375,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
   void* data = self_.data_ptr();
-  THCCachingAllocator_recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
+  c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");
@@ -479,6 +480,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("new_empty", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_empty(self_.type(), args, kwargs));
@@ -488,6 +490,7 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
 static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("new_full", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_full(self_.type(), args, kwargs));
@@ -497,6 +500,7 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("new_ones", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_ones(self_.type(), args, kwargs));
@@ -506,6 +510,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("new_tensor", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_tensor(self_.type(), args, kwargs));
@@ -515,6 +520,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("new_zeros", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_zeros(self_.type(), args, kwargs));

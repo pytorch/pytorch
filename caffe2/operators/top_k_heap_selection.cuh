@@ -72,7 +72,7 @@ __device__ inline void warpHeapInsert(K k, V v, K* keyHeap, V* valueHeap) {
   // log2(8 / 2) = 2 levels of interior nodes for heap size 8 (0 and 12)
   int i = 0;
 #pragma unroll
-  for (int levels = 0; levels < math::integerLog2(HeapSize / 2); ++levels) {
+  for (int levels = 0; levels < math::IntegerLog2(HeapSize / 2); ++levels) {
     int leftChild = i * 2 + 1;
     int rightChild = leftChild + 1;
     K leftKey = keyHeap[leftChild];

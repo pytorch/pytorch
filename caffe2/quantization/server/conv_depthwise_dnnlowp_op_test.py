@@ -29,6 +29,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
+        quantize_groupwise=st.booleans(),
         relu=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -42,6 +43,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
+        quantize_groupwise,
         relu,
         gc,
         dc,
@@ -64,6 +66,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            groupwise_quantization=quantize_groupwise,
             preserve_activation_sparsity=preserve_activation_sparsity,
             preserve_weight_sparsity=preserve_weight_sparsity,
         )
@@ -115,6 +118,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     inputs,
                     ["W_packed"],
                     group=group,
+                    quantize_groupwise=quantize_groupwise,
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
                     engine=engine,
@@ -135,6 +139,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
                 group=group,
+                quantize_groupwise=quantize_groupwise,
                 device_option=gc,
             )
             if do_dequantize or do_prepack_weight:
@@ -166,7 +171,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
 
     @given(
         stride=st.integers(1, 2),
-        size=st.integers(4, 12),
+        size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
         batch_size=st.integers(1, 2),
@@ -175,6 +180,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
+        quantize_groupwise=st.just(True),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_depthwise_3x3x3_conv(
@@ -188,6 +194,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
+        quantize_groupwise,
         gc,
         dc,
     ):
@@ -209,6 +216,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            groupwise_quantization=quantize_groupwise,
             preserve_activation_sparsity=preserve_activation_sparsity,
             preserve_weight_sparsity=preserve_weight_sparsity,
         )
@@ -250,6 +258,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     inputs,
                     ["W_packed"],
                     group=group,
+                    quantize_groupwise=quantize_groupwise,
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
                     engine=engine,
@@ -270,6 +279,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
                 group=group,
+                quantize_groupwise=quantize_groupwise,
                 device_option=gc,
             )
             if do_dequantize or do_prepack_weight:

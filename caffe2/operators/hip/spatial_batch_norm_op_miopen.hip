@@ -18,7 +18,7 @@
 #include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
-#include "caffe2/operators/hip/spatial_batch_norm_op_gpu_impl.cuh"
+#include "caffe2/operators/hip/spatial_batch_norm_op_impl.cuh"
 #include "caffe2/utils/math.h"
 
 const double MIOPEN_BN_MIN_EPSILON = 1e-6;
@@ -136,9 +136,9 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   T* Y_data = Y->template mutable_data<T>();
 
   // See if we need to reshape.
-  if (N > 0 && X.dims() != miopen_input_dims_) {
+  if (N > 0 && X.sizes() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
-    miopen_input_dims_ = X.dims().vec();
+    miopen_input_dims_ = X.sizes().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -277,8 +277,8 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.ndim(), 1);
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
-  if (N > 0 && X.dims() != miopen_input_dims_) {
-    miopen_input_dims_ = X.dims().vec();
+  if (N > 0 && X.sizes() != miopen_input_dims_) {
+    miopen_input_dims_ = X.sizes().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 

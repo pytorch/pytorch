@@ -23,18 +23,33 @@ using at::UndefinedTensorImpl;
  * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
+ private:
+  enum Unsafe { IDoWantAliasing };
+  Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
+
  protected:
   using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
   TensorImplPtr impl_;
 
+  void enforce_invariants();
+
  public:
   Tensor() : impl_() {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
-      : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
-    }
-  }
+
+  // caffe2::Tensor is explicitly marked as moveable-only because before
+  // the refactoring the class used to be a value type and a lot of user code
+  // is written this way. With PyTorch unification, caffe2::Tensor actually
+  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
+  // accidental mistakes when changing legacy code we keep caffe2::Tensor
+  // to have movable semantics.
+  //
+  // If you need to get a pointer to the same Tensor instance (not to be
+  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
+  // the same behavior as `at::Tensor a = b`.
+  Tensor(const Tensor&) = delete;
+  Tensor& operator=(const Tensor&) = delete;
+  Tensor(Tensor&&) = default;
+  Tensor& operator=(Tensor&&) = default;
 
   operator bool() const {
     return impl_.defined();
@@ -42,6 +57,10 @@ class CAFFE2_API Tensor final {
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  Tensor UnsafeSharedInstance() const {
+    return Tensor(*this, IDoWantAliasing);
   }
 
   /**
@@ -52,17 +71,11 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage(device),
+        Storage::create_legacy(device, TypeMeta()),
         c10::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
       )) {
   }
-
-  /**
-   * @brief Creates a caffe2 tensor from an ATen tensor
-   */
-  explicit Tensor(const at::Tensor& tensor)
-      : impl_(std::move(tensor.getIntrusivePtr())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -70,7 +83,7 @@ class CAFFE2_API Tensor final {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(at::IntList dims, DeviceType type) : Tensor(type) {
+  explicit Tensor(at::IntArrayRef dims, DeviceType type) : Tensor(type) {
     // TODO: here, we create a Storage
     // and immediately discard it in Resize() since
     // reset_tensor will be true and FreeMemory will be called,
@@ -79,10 +92,11 @@ class CAFFE2_API Tensor final {
   }
 
   // we want to preserve index information
-  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
+  explicit Tensor(at::IntArrayRef dims, at::Device device): Tensor(device) {
     Resize(dims);
   }
 
+  // TODO: remove?
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -97,8 +111,34 @@ class CAFFE2_API Tensor final {
     CopyFrom(src);
   }
 
-  explicit Tensor(C10Tensor tensor)
-      : impl_(std::move(tensor).impl()) {}
+  /**
+   * @brief Mutual conversion with at::Tensor
+   *
+   * The tensor will share the same instance (data, strides, sizes, etc) but
+   * a different subset of APIs would be available
+   */
+  explicit Tensor(const at::Tensor& tensor)
+      : impl_(std::move(tensor.getIntrusivePtr())) {
+    enforce_invariants();
+  }
+
+  explicit operator at::Tensor() const& {
+    return at::Tensor::wrap_tensor_impl(impl_);
+  }
+
+  explicit operator at::Tensor() && {
+    return at::Tensor::wrap_tensor_impl(std::move(impl_));
+  }
+
+  /**
+   * @brief Mutual conversion with C10Tensor
+   *
+   * The tensor will share the same instance (data, strides, sizes, etc) but
+   * a different subset of APIs would be available
+   */
+  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
+    enforce_invariants();
+  }
 
   explicit operator C10Tensor() const & {
     return C10Tensor(impl_);
@@ -106,6 +146,10 @@ class CAFFE2_API Tensor final {
 
   explicit operator C10Tensor() && {
     return C10Tensor(std::move(impl_));
+  }
+
+  bool is_same(const Tensor& other) const noexcept {
+    return impl_ == other.impl_;
   }
 
   Tensor Clone() const {
@@ -165,7 +209,7 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());
+    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
@@ -184,7 +228,7 @@ class CAFFE2_API Tensor final {
     if (impl_->dtype() != src.impl_->dtype()) {
       // NB: copy preserves device_type
       // This storage will get initialized by the mutable_data call below.
-      impl_->set_storage(at::Storage(impl_->device_type(), src.impl_->dtype()));
+      impl_->set_storage(at::Storage::create_legacy(impl_->device_type(), src.impl_->dtype()));
     }
     impl_->Resize(src.impl_->sizes());
 
@@ -312,12 +356,9 @@ class CAFFE2_API Tensor final {
     return ss.str();
   }
 
-  // NB: a.swap(b) is not equivalent to std::swap(a, b);
-  // swap method swaps the CONTENTS of the tensors, while std::swap
-  // swaps the POINTERS.
-  void swap(const Tensor& other) const noexcept {
-    // NB: use get() to get a non-const pointer!
-    std::swap(*impl_.get(), *other.impl_.get());
+  // To be deprecated
+  void ShareData(const Tensor& src) const {
+    impl_.get()->ShareData(*src.impl_.get());
   }
 
   /**
@@ -370,16 +411,20 @@ class CAFFE2_API Tensor final {
     return impl_;
   }
 
+  bool defined() const {
+    return impl_;
+  }
+
   /**
-   * Returns a const raw void* pointer of the underlying storage. mutable_data()
+   * Returns a raw void* pointer of the underlying storage. mutable_data()
    * or raw_mutable_data() must have been called prior to this function call.
    */
-  inline const void* raw_data() const {
+  inline void* raw_data() const {
     return impl_->data();
   }
 
   template <typename T>
-  inline const T* data() const {
+  inline T* data() const {
     return impl_.get()->data<T>();
   }
 
@@ -455,12 +500,7 @@ class CAFFE2_API Tensor final {
     return impl_->numel() * itemsize();
   }
 
-  inline at::IntList sizes() const {
-    return impl_.get()->sizes();
-  }
-
-  // To be deprecated
-  inline at::IntList dims() const {
+  inline at::IntArrayRef sizes() const {
     return impl_.get()->sizes();
   }
 
@@ -495,7 +535,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::IntList strides() const {
+  inline at::IntArrayRef strides() const {
     return impl_.get()->strides();
   }
 
@@ -569,7 +609,12 @@ class CAFFE2_API Tensor final {
   }
 };
 
-CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
+/**
+ * Reinitialize a Tensor to given dims and options if necessary, note that
+ * this will not do anything if the
+ * Tensor already has correct size and data type
+ */
+CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
 
 CAFFE2_API void ReinitializeAndCopyFrom(
     Tensor* t,
@@ -606,7 +651,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
+CAFFE2_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
 
 /**
  * @brief Creates a CPU tensor, and fills its contents with the given values.
@@ -615,9 +660,9 @@ CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
 // TODO: can be unified with at::from_blob when Tensor is merged and string
 // types are supported
 template <typename T>
-Tensor TensorCPUFromValues(at::IntList dims, at::ArrayRef<T> values) {
+Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
   Tensor r = empty(dims, at::device(CPU).dtype<T>());
-  CAFFE_ENFORCE_EQ(values.size(), r.size());
+  CAFFE_ENFORCE_EQ(values.size(), r.numel());
   CPUContext context;
   context.CopyItemsFromCPU(
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());

@@ -65,6 +65,7 @@ class CAFFE2_API Context {
       AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
     return *generator;
   }
+  bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
   bool hasMAGMA() const {
@@ -213,6 +214,20 @@ static inline bool hasCUDA() {
 
 static inline bool hasHIP() {
   return globalContext().hasHIP();
+}
+
+static inline size_t getNumGPUs() {
+  if (hasCUDA()) {
+    return detail::getCUDAHooks().getNumGPUs();
+  }
+  if (hasHIP()) {
+    return detail::getHIPHooks().getNumGPUs();
+  }
+  return 0;
+}
+
+static inline bool hasOpenMP() {
+  return globalContext().hasOpenMP();
 }
 
 static inline bool hasMKL() {

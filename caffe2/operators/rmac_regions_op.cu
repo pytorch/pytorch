@@ -163,7 +163,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   const auto& X = Input(0); // Input tensor
    // RoIs
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
 
@@ -174,7 +174,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
   // Compute number of regions
   int min_step = 1;
   int max_step = 6;
-  num_rois_.Resize(3); // num_rois, Wd, Hd
+  ReinitializeTensor(&num_rois_, {3}, at::dtype<int>().device(CUDA)); // num_rois, Wd, Hd
   NumRMACRegionsKernel<<<
       1,
       CAFFE_CUDA_NUM_THREADS,

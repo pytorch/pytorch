@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -64,7 +64,7 @@ Value* Method::emit_call_to(
     Method& callee,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs) {
-  JIT_ASSERT(!executor);
+  AT_ASSERT(!executor);
   std::stringstream failure_messages;
   if (auto result = try_emit_call_to(
           *graph(),
@@ -102,12 +102,14 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out) {
-  ExportModule(*this, out);
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
+  ExportModule(*this, out, extra_files);
 }
 
-void Module::save(const std::string& filename) {
-  ExportModule(*this, filename);
+void Module::save(
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) {
+  ExportModule(*this, filename, extra_files);
 }
 
 void Module::to_impl(

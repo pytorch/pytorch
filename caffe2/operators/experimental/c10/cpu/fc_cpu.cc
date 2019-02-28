@@ -1,5 +1,5 @@
 #include "caffe2/core/context.h"
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"
@@ -11,20 +11,26 @@ using caffe2::Tensor;
 
 namespace caffe2 {
 namespace {
+
+struct Cache final : public c10::KernelCache {
+  vector<int64_t> Y_shape_cache_;
+  at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
+};
+
 template <class DataType, class Context>
 void fc_op_cpu_impl(
-    const C10Tensor& X_,
-    const C10Tensor& W_,
-    const C10Tensor& b_,
-    const C10Tensor& Y_,
-    int axis,
-    int axis_w,
-    caffe2::ops::FullyConnected::Cache* cache,
-    BaseContext* context) {
-  Tensor X(X_);
-  Tensor W(W_);
-  Tensor b(b_);
-  Tensor Y(Y_);
+    const at::Tensor& X_,
+    const at::Tensor& W_,
+    const at::Tensor& b_,
+    const at::Tensor& Y_,
+    int64_t axis,
+    int64_t axis_w,
+    Cache* cache) {
+  Tensor X{C10Tensor(X_)};
+  Tensor W{C10Tensor(W_)};
+  Tensor b{C10Tensor(b_)};
+  Tensor Y{C10Tensor(Y_)};
+  CPUContext context;
 
   constexpr bool TransposeWeight = true;
 
@@ -94,19 +100,16 @@ void fc_op_cpu_impl(
       W.template data<DataType>(),
       0,
       Y.template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      static_cast<Context*>(&context),
       math_type);
   // Add bias term
   Tensor bias_multiplier(cache->bias_multiplier_);
-  if (bias_multiplier.numel() != M) {
-    // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier.Resize(M);
-    caffe2::math::Set<DataType, Context>(
-        M,
-        caffe2::convert::To<float, DataType>(1),
-        bias_multiplier.template mutable_data<DataType>(),
-        static_cast<Context*>(context));
-  }
+  ReinitializeTensor(&bias_multiplier, {M}, at::dtype<DataType>().device(CPU));
+  caffe2::math::Set<DataType, Context>(
+      M,
+      caffe2::convert::To<float, DataType>(1),
+      bias_multiplier.template mutable_data<DataType>(),
+      static_cast<Context*>(&context));
   caffe2::math::Gemm<DataType, Context, caffe2::DefaultEngine>(
       CblasNoTrans,
       CblasNoTrans,
@@ -118,7 +121,7 @@ void fc_op_cpu_impl(
       b.template data<DataType>(),
       1,
       Y.template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      static_cast<Context*>(&context),
       math_type);
 }
 } // namespace
@@ -126,16 +129,7 @@ void fc_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
-    .kernel(&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>)
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .withCache<caffe2::Cache>()
+    .kernel<decltype(caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

@@ -37,7 +37,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
   bool DoRunWithType() {
     // If we endup using it on GPU doing O(N) memcpy is probably not best :)
     // TODO: implement prefetching if it starts mattering (TF does it)
-    auto& data = OperatorBase::Input<int8::Int8TensorCPU>(DATA).t;
+    auto& data = (this->template Input<int8::Int8TensorCPU>(DATA)).t;
     auto& indices = Input(INDICES);
     auto* output = &Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
 

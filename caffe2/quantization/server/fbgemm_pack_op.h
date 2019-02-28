@@ -22,6 +22,7 @@ class FullyConnectedDNNLowPPackWeightOp final
 
  private:
   int axis_w_;
+  bool quantize_channelwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
 
   INPUT_TAGS(FILTER, BIAS);
@@ -53,6 +54,7 @@ class ConvDNNLowPPackWeightOp final
  private:
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
+  bool TakeGConvFastPath_();
 
   bool quantize_groupwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16

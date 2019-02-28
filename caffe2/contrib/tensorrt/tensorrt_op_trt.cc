@@ -161,7 +161,7 @@ bool TensorRTOp::RunOnDevice() {
   size_t N = 0;
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto tensor_dims = input_tensor.dims();
+    const auto tensor_dims = input_tensor.sizes();
     CAFFE_ENFORCE(!tensor_dims.empty(), "Input tensor cannot be empty");
     if (i == 0) {
       N = tensor_dims.front();
@@ -198,7 +198,7 @@ bool TensorRTOp::RunOnDevice() {
         // input, check input dimensions
         const auto& input_tensor = Input(input_idx++);
         const float* input_data = input_tensor.data<float>();
-        const auto tensor_dims = input_tensor.dims();
+        const auto tensor_dims = input_tensor.sizes();
         auto chw = CheckDims(dims, tensor_dims);
         bindings.push_back((void*)(input_data + offset * chw));
       } else {

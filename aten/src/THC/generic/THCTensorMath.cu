@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMath.cu"
 #else
 
+#include "ATen/cuda/CUDAContext.h"
+
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
@@ -266,10 +268,15 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<scalar_t> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimensionLegacyNoScalars)(state, self);
+  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim_noscalars = std::max<int>(1, num_dim);
   int64_t N = THCTensor_(nElement)(state, self);
 
-  THCudaLongTensor_resize2d(state, tensor, N, num_dim);
+  // this is a little awkward for scalars because we run thrust to count the number of zeros
+  // (which are necessary to get the correct size), but thrust just has an array API, so
+  // we need to basically threat the scalar as a 1-dimensional tensor (array) for
+  // the counting part.
+  THCudaLongTensor_resize2d(state, tensor, N, num_dim_noscalars);
   tensor = THCudaLongTensor_newContiguous(state, tensor);
   thrust::device_ptr<int64_t> tensor_data(THCudaLongTensor_data(state, tensor));
 
@@ -278,7 +285,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   typedef thrust::device_ptr<int64_t> Iter;
   strided_range<Iter> strided_tensor(tensor_data,
-                                     tensor_data+N*num_dim, num_dim);
+                                     tensor_data+N*num_dim_noscalars, num_dim_noscalars);
 
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -297,20 +304,22 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   int64_t num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
 
-  int64_t div = 1;
-  for (int dim = num_dim-1; dim >= 0; dim--) {
-    strided_range<Iter> stride_dim(tensor_data+dim,
-                                   tensor_data+N*num_dim, num_dim);
-    thrust::transform(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(stream),
-#endif
-      strided_tensor.begin(),
-      strided_tensor.end(),
-      stride_dim.begin(),
-      idx_functor(div, THTensor_sizeLegacyNoScalars(self, dim))
-    );
-    div *= THTensor_sizeLegacyNoScalars(self, dim);
+  if (num_nonzeros > 0 && num_dim > 0) {
+    int64_t div = 1;
+    for (int dim = num_dim-1; dim >= 0; dim--) {
+      strided_range<Iter> stride_dim(tensor_data+dim,
+                                     tensor_data+N*num_dim, num_dim);
+      thrust::transform(
+  #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+        thrust::cuda::par(thrustAlloc).on(stream),
+  #endif
+        strided_tensor.begin(),
+        strided_tensor.end(),
+        stride_dim.begin(),
+        idx_functor(div, THTensor_(size)(self, dim))
+      );
+      div *= THTensor_(size)(self, dim);
+    }
   }
 
   THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
@@ -334,7 +343,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     THCTensor_(resize1d)(state, self_, size);
     if (size > 0) {
       int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
       int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyFromDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
@@ -349,7 +358,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     if (size > 0) {
       int64_t stride0 = THCTensor_(stride)(state, self_, 0);
       int64_t stride1 = THCTensor_(stride)(state, self_, 1);
-      const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+      const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
       ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
       THCTensor_copyToDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>

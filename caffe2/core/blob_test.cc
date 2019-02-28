@@ -45,7 +45,7 @@ CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
   BlobTestFooSerializer() {}
-  ~BlobTestFooSerializer() {}
+  ~BlobTestFooSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.
@@ -583,6 +583,11 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.numel(), large_number * 100);
 }
 
+TEST(TensorTest, UndefinedTensor) {
+  Tensor x;
+  EXPECT_FALSE(x.defined());
+}
+
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
   int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
@@ -787,7 +792,7 @@ class VectorCursor : public db::Cursor {
   explicit VectorCursor(StringMap* data) : data_(data) {
     pos_ = 0;
   }
-  ~VectorCursor() {}
+  ~VectorCursor() override {}
   void Seek(const string& /* unused */) override {}
   void SeekToFirst() override {}
   void Next() override {
@@ -812,7 +817,7 @@ class VectorDB : public db::DB {
  public:
   VectorDB(const string& source, db::Mode mode)
       : DB(source, mode), name_(source) {}
-  ~VectorDB() {
+  ~VectorDB() override {
     data_.erase(name_);
   }
   void Close() override {}
@@ -944,7 +949,7 @@ struct DummyType {
 class DummyTypeSerializer : public BlobSerializerBase {
  public:
   DummyTypeSerializer() {}
-  ~DummyTypeSerializer() {}
+  ~DummyTypeSerializer() override {}
   void Serialize(
       const void* pointer,
       TypeMeta typeMeta,

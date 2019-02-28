@@ -1,4 +1,4 @@
-#include <c10/core/dispatch/KernelRegistration.h>
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/batch_gather.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
@@ -12,13 +12,13 @@ namespace {
 
 template <class TInd>
 void batch_gather_op_cpu_impl(
-    const C10Tensor& data_,
-    const C10Tensor& indices_,
-    const C10Tensor& output_,
-    BaseContext* context) {
-  Tensor data(data_);
-  Tensor indices(indices_);
-  Tensor output(output_);
+    const at::Tensor& data_,
+    const at::Tensor& indices_,
+    const at::Tensor& output_) {
+  Tensor data{C10Tensor(data_)};
+  Tensor indices{C10Tensor(indices_)};
+  Tensor output{C10Tensor(output_)};
+  CPUContext context;
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
@@ -49,8 +49,18 @@ void batch_gather_op_cpu_impl(
           data.size(1));
       auto src = src_base + idx * block_bytesize + batch * data_batch_bytesize;
       auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-      context->CopyItemsSameDevice(data.dtype(), block_size, src, dst);
+      context.CopyItemsSameDevice(data.dtype(), block_size, src, dst);
     }
+  }
+}
+
+void batch_gather_op_cpu(const at::Tensor& data,
+    const at::Tensor& indices,
+    const at::Tensor& output) {
+  switch (data.scalar_type()) {
+    case ScalarType::Int: return batch_gather_op_cpu_impl<int>(data, indices, output);
+    case ScalarType::Long: return batch_gather_op_cpu_impl<int64_t>(data, indices, output);
+    default: throw std::runtime_error(string() + "Unsupported dtype: " + toString(data.scalar_type()));
   }
 }
 } // namespace
@@ -58,24 +68,6 @@ void batch_gather_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
-    .kernel(&caffe2::batch_gather_op_cpu_impl<int64_t>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int64_t>()}});
-
-C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
-    .kernel(&caffe2::batch_gather_op_cpu_impl<int32_t>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<int32_t>()}});
+    .kernel<decltype(caffe2::batch_gather_op_cpu), &caffe2::batch_gather_op_cpu>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

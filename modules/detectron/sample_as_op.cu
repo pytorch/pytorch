@@ -80,9 +80,9 @@ bool SampleAsGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& L = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
 
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   // copy L to CPU:
   std::vector<int> labels(L.dim32(0));

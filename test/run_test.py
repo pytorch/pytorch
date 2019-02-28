@@ -28,6 +28,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'docs_coverage',
     'expecttest',
     'indexing',
     'indexing_cuda',
@@ -42,7 +43,9 @@ TESTS = [
     'thd_distributed',
     'torch',
     'type_info',
+    'type_hints',
     'utils',
+    'namedtuple_return_api',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -335,14 +338,14 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest']
+        executable += ['-m', 'pytest', '--durations=10']
     return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
-    """Find the index of the first or last occurrence of a given test/test module in the list of seleceted tests.
+    """Find the index of the first or last occurrence of a given test/test module in the list of selected tests.
 
-    This function is used to determine the indexes when slicing the list of selected tests when
+    This function is used to determine the indices when slicing the list of selected tests when
     ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
 
     :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests

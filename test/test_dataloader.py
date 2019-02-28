@@ -16,17 +16,21 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
-                          skipIfRocm, load_tests)
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
+                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                          load_tests)
 
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-    warnings.warn(
-        "psutil not found. Some crucial data loader tests relying on it (e.g., "
-        "TestDataLoader.test_proper_exit) will not run.")
+    err_msg = ("psutil not found. Some critical data loader tests relying on it "
+               "(e.g., TestDataLoader.test_proper_exit) will not run.")
+    if IS_PYTORCH_CI:
+        raise ImportError(err_msg)
+    else:
+        warnings.warn(err_msg)
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -45,7 +49,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 11.0
+JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -449,7 +453,6 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
@@ -483,7 +486,6 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
-    @skipIfRocm
     def test_timeout(self):
         if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
             targets = (_test_timeout, _test_timeout_pin_memory)
@@ -585,6 +587,33 @@ class TestDataLoader(TestCase):
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
 
+    def test_random_sampler_len_with_replacement(self):
+        from torch.utils.data import RandomSampler
+        # add 5 extra samples
+        num_samples = len(self.dataset) + 5
+        sampler = RandomSampler(self.dataset,
+                                replacement=True,
+                                num_samples=num_samples)
+        # test len method
+        self.assertEqual(num_samples, len(sampler))
+
+        # test with iteration
+        count_num_samples = sum(1 for _ in sampler)
+        self.assertEqual(num_samples, count_num_samples)
+
+        # test with dataloader, batch_size = 1
+        batch_size = 1
+        count_num_samples_in_data_loader = len(DataLoader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(num_samples, count_num_samples_in_data_loader)
+
+        # test with dataloader, batch_size = 6
+        batch_size = 6
+        count_num_samples_in_data_loader = len(DataLoader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
+                         count_num_samples_in_data_loader)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
@@ -608,7 +637,6 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -724,11 +752,11 @@ class TestDataLoader(TestCase):
                 # workers.
                 loader_setup_event.wait(timeout=JOIN_TIMEOUT)
                 if not loader_setup_event.is_set():
-                    fail_msg = desc + ': loader process failed to setup with given time'
+                    fail_msg = desc + ': loader process failed to setup within given time'
                     if loader_p.exception is not None:
                         self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
                     elif not loader_p.is_alive():
-                        self.fail(fail_msg + ', and exited with code {} but no exception'.format(loader_p.exitcode))
+                        self.fail(fail_msg + ', and exited with code {} but had no exception'.format(loader_p.exitcode))
                     else:
                         self.fail(fail_msg + ', and is still alive.')
 
@@ -738,10 +766,15 @@ class TestDataLoader(TestCase):
 
                 try:
                     loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
-                    self.assertFalse(loader_p.is_alive(), desc + ': loader process not terminated')
+                    if loader_p.is_alive():
+                        fail_msg = desc + ': loader process did not terminate'
+                        if loader_p.exception is not None:
+                            self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
+                        else:
+                            self.fail(fail_msg + ', and had no exception')
                     _, alive = psutil.wait_procs(worker_psutil_p, timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT))
                     if len(alive) > 0:
-                        self.fail(desc + ': worker process (pid(s) {}) not terminated'.format(
+                        self.fail(desc + ': worker process (pid(s) {}) did not terminate'.format(
                             ', '.join(str(p.pid) for p in alive)))
                     if exit_method is None:
                         self.assertEqual(loader_p.exitcode, 0)
@@ -873,7 +906,6 @@ class TestStringDataLoader(TestCase):
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for batch_ndx, (s, n) in enumerate(loader):
@@ -917,12 +949,77 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class NamedTupleDataset(Dataset):
+    from collections import namedtuple
+    Batch = namedtuple('Batch', ['data', 'label'])
+    Data = namedtuple('Data', ['positive', 'negative'])
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, ndx):
+        return self.Batch(data=self.Data(positive=ndx, negative=-ndx),
+                          label=str(ndx))
+
+
+class TestNamedTupleDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = NamedTupleDataset()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_collate_and_pin_memory_with_namedtuple(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for batch in loader:
+            self.assertIsInstance(batch, NamedTupleDataset.Batch)
+            self.assertIsInstance(batch.data, NamedTupleDataset.Data)
+
+
+class SimpleCustomBatch:
+    def __init__(self, data):
+        transposed_data = list(zip(*data))
+        self.inp = torch.stack(transposed_data[0], 0)
+        self.tgt = torch.stack(transposed_data[1], 0)
+
+    def pin_memory(self):
+        self.inp = self.inp.pin_memory()
+        self.tgt = self.tgt.pin_memory()
+        return self
+
+
+def collate_wrapper(batch):
+    return SimpleCustomBatch(batch)
+
+
+class TestCustomPinFn(TestCase):
+    def setUp(self):
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        self.dataset = TensorDataset(inps, tgts)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_batch_pin_worker(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, num_workers=1)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
 
 
 class TestWorkerQueueDataset(Dataset):

@@ -89,7 +89,6 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   std::vector<std::int32_t> Y_int32_;
   std::vector<dnnlowp::TensorQuantizationParams> filter_qparams_;
-  std::vector<float> filter_scales_;
   std::vector<std::int32_t> filter_zero_points_;
 
   std::vector<float> requantization_multipliers_;
@@ -102,6 +101,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
+  bool TakeGConvFastPath_();
 
   template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
   void DispatchFBGEMM_(
@@ -120,6 +120,9 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   std::shared_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
   // For depthwise 3x3x3 conv
   std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
+  // For small gconv
+  std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>>
+      Wq_gconv_packed_;
 
   // pre-computed biases and offsets
   std::shared_ptr<std::vector<std::int32_t>> b_quantized_;

@@ -270,6 +270,13 @@ class PoissonNLLLoss(_Loss):
         >>> target = torch.randn(5, 2)
         >>> output = loss(log_input, target)
         >>> output.backward()
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+          the same shape as the input
     """
     __constants__ = ['log_input', 'full', 'eps', 'reduction']
 
@@ -350,10 +357,10 @@ class KLDivLoss(_Loss):
 
 
     Shape:
-        - input: :math:`(N, *)` where `*` means, any number of additional
+        - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
-        - target: :math:`(N, *)`, same shape as the input
-        - output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
           the same shape as the input
 
     """
@@ -538,7 +545,7 @@ class BCEWithLogitsLoss(_Loss):
         l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
         + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
-    where :math:`p_n` is the positive weight of class :math:`n`.
+    where :math:`p_n` is the weight of the positive class for sample :math:`n` in the batch.
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
@@ -571,6 +578,8 @@ class BCEWithLogitsLoss(_Loss):
          - Input: :math:`(N, *)` where `*` means, any number of additional
            dimensions
          - Target: :math:`(N, *)`, same shape as the input
+         - Output: scalar. If `reduce` is False, then :math:`(N, *)`, same
+           shape as input.
 
      Examples::
 
@@ -640,8 +649,9 @@ class HingeEmbeddingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of dimensions. The sum operation
+          operates over all the elements.
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
     """
     __constants__ = ['margin', 'reduction']
@@ -697,7 +707,7 @@ class MultiLabelMarginLoss(_Loss):
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
-        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -797,8 +807,9 @@ class SoftMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Shape:
-        - Input: Tensor of arbitrary shape.
-        - Target: Same shape as input.
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If reduce is ``False``, then same shape as the input
 
     """
@@ -821,9 +832,9 @@ class CrossEntropyLoss(_WeightedLoss):
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
-    The `input` is expected to contain scores for each class.
+    The `input` is expected to contain raw, unnormalized scores for each class.
 
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
+     `input` has to be a Tensor of size either :math:`(minibatch, C)` or
     :math:`(minibatch, C, d_1, d_2, ..., d_K)`
     with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
@@ -938,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']
@@ -1195,6 +1206,11 @@ class CTCLoss(_Loss):
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Inputs:
         log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1207,7 +1223,6 @@ class CTCLoss(_Loss):
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
-
 
     Example::
 
@@ -1239,13 +1254,15 @@ class CTCLoss(_Loss):
     """
     __constants__ = ['blank', 'reduction']
 
-    def __init__(self, blank=0, reduction='mean'):
+    def __init__(self, blank=0, reduction='mean', zero_infinity=False):
         super(CTCLoss, self).__init__(reduction=reduction)
         self.blank = blank
+        self.zero_infinity = zero_infinity
 
     @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
-        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
+                          self.zero_infinity)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
