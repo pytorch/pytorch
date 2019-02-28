@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <ATen/CPUApplyUtils.h>
 
 void THTensor_(fill)(THTensor *r_, scalar_t value)
 {
@@ -126,11 +127,14 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #define IS_NONZERO(val) ((val)!=0)
 #endif
 
-  /* First Pass to determine size of subscripts */
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  if IS_NONZERO(*tensor_data) {
-                    ++numel;
-                  });
+  // First Pass to determine size of subscripts
+  at::CPU_tensor_apply1<scalar_t>(tensor, [&numel](scalar_t& val) {
+    if
+      IS_NONZERO(val) {
+        ++numel;
+      }
+  });
+
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
@@ -145,6 +149,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   int64_t *ii;
   int64_t *ss;
   std::fill(idx, idx+dimensions+1, 0);
+
   for (i = 0; i < dimensions; ++i) {
     sizes[dimensions - i - 1] = THTensor_(size)(tensor, i); // reverse order important
   }
@@ -153,26 +158,25 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   subscript_data = THLongTensor_data(subscript);
   auto subscript_strides = THTensor_stridesLegacyNoScalars(subscript);
   subscript_strides[0] -= subscript_strides[1] * tensor->dim();
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  if IS_NONZERO(*tensor_data) {
-                    ii = idx + dimensions;
-                    for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
-                      --ii;
-                      *subscript_data = *ii;
-                      subscript_data += subscript_strides[1];
-                    }
-                    subscript_data += subscript_strides[0];
-                  }
-                  ii = idx;
-                  ss = sizes;
-                  ++(*ii);
-                  while (*ii == *ss) {
-                    *ii = 0;
-                    ++ii;
-                    ++ss;
-                    ++(*ii);
-                  }
-                );
+  int64_t ss0 = subscript_strides[0];
+  int64_t ss1 = subscript_strides[1];
+  at::CPU_tensor_apply1<scalar_t>(
+        tensor, [&subscript_data,idx,sizes,ss0,ss1,dimensions](scalar_t& val) {
+        if IS_NONZERO(val) {
+          for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
+            *subscript_data = idx[dim];
+            subscript_data += ss1;
+          }
+          subscript_data += ss0;
+        }
+        int64_t pos = 0;
+        idx[pos] ++;
+        while (idx[pos] == sizes[pos]) {
+          idx[pos] = 0;
+          pos++;
+          idx[pos]++;
+        }
+      });
   delete [] sizes;
   delete [] idx;
 }

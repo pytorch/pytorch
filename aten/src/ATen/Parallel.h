@@ -94,11 +94,11 @@ intermediate results tensor and degree of parallelization.
 ident: identity for binary combination function sf. sf(ident, x) needs to return
 x.
 
-f: function for reduction over a chunk. f needs to be of signature scalar_t
-f(int64_t partial_begin, int64_t partial_end, scalar_t identifiy)
+f: function for reduction over a chunk. f needs to be of signature scalar_t_tempname
+f(int64_t partial_begin, int64_t partial_end, scalar_t_tempname identifiy)
 
 sf: function to combine two partial results. sf needs to be of signature
-scalar_t sf(scalar_t x, scalar_t y)
+scalar_t_tempname sf(scalar_t_tempname x, scalar_t_tempname y)
 
 For example, you might have a tensor of 10000 entires and want to sum together
 all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
@@ -114,20 +114,20 @@ two partial results and an identity.
 
 [1] https://software.intel.com/en-us/node/506154
 */
-template <class scalar_t, class F, class SF>
-inline scalar_t parallel_reduce(
+template <class scalar_t_tempname, class F, class SF>
+inline scalar_t_tempname parallel_reduce(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
-    const scalar_t ident,
+    const scalar_t_tempname ident,
     const F f,
     const SF sf) {
   if (get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
-    std::vector<scalar_t> results(num_results);
-    scalar_t* results_data = results.data();
+    std::vector<scalar_t_tempname> results(num_results);
+    scalar_t_tempname* results_data = results.data();
 #pragma omp parallel for if ((end - begin) >= grain_size)
     for (int64_t id = 0; id < num_results; id++) {
       int64_t i = begin + id * grain_size;

@@ -165,7 +165,20 @@ struct strided_tensor_iter_fixed {
           tensor.strides().data(),
           tensor.dim() * sizeof(int64_t));
     }
-    dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
+    dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.dim()));
+  }
+  strided_tensor_iter_fixed(TensorImpl* tensor, bool sort_strides = false)
+      : data_(tensor->mutable_data<T>()) {
+    std::memset(counter_, 0, sizeof(int64_t) * N);
+    if (tensor->dim() > 0) {
+      std::memcpy(
+          sizes_, tensor->sizes().data(), tensor->dim() * sizeof(int64_t));
+      std::memcpy(
+          strides_,
+          tensor->strides().data(),
+          tensor->dim() * sizeof(int64_t));
+    }
+    dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor->dim()));
   }
 };
 
@@ -192,6 +205,14 @@ struct strided_tensor_iter {
         strides_(tensor.strides().vec()) {
     dim_ = std::get<1>(collapse_dims(sizes_.data(), strides_.data(), dim_));
   }
+  strided_tensor_iter(TensorImpl* tensor)
+      : data_(tensor->mutable_data<T>()),
+        dim_(tensor->dim()),
+        counter_(dim_, 0),
+        sizes_(tensor->sizes().vec()),
+        strides_(tensor->strides().vec()) {
+    dim_ = std::get<1>(collapse_dims(sizes_.data(), strides_.data(), dim_));
+  }
 };
 
 inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
@@ -200,6 +221,17 @@ inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
   int64_t all_numel = tensors[0].numel();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].numel() != all_numel)
+      return false;
+  }
+  return true;
+}
+
+inline bool _all_equal_numel(at::ArrayRef<TensorImpl*> tensors) {
+  if (tensors.size() == 0)
+    return true;
+  int64_t all_numel = tensors[0]->numel();
+  for (size_t i = 1; i < tensors.size(); i++) {
+    if (tensors[i]->numel() != all_numel)
       return false;
   }
   return true;
@@ -228,6 +260,19 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)
+      return false;
+  return true;
+}
+
+inline bool _apply_preamble(ArrayRef<TensorImpl*> tensors) {
+  // checkBackend("CPU_tensor_apply", tensors, Backend::CPU); TODO
+  if (!_all_equal_numel(tensors))
+    return false;
+    // AT_ERROR(_all_equal_numel_error(tensors)); TODO
+
+  // An empty tensor has no elements
+  for (auto& t : tensors)
+    if (t->numel() == 0)
       return false;
   return true;
 }
@@ -424,6 +469,27 @@ inline void CPU_tensor_apply1(Tensor tensor1, const Op op) {
         strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
   } else {
     apply_op(tensor1.numel(), 0, op, strided_tensor_iter<scalar1>(tensor1));
+  }
+}
+
+template <typename scalar1, typename Op>
+inline void CPU_tensor_apply1(TensorImpl* tensor1, const Op op) {
+  if (!_apply_preamble({tensor1}))
+    return;
+  if (tensor1->is_contiguous()) {
+    apply_op(
+        tensor1->numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8, false>(tensor1, true));
+  } else if (tensor1->dim() < 8) {
+    apply_op(
+        tensor1->numel(),
+        0,
+        op,
+        strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
+  } else {
+    apply_op(tensor1->numel(), 0, op, strided_tensor_iter<scalar1>(tensor1));
   }
 }
 
