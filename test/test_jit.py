@@ -11595,13 +11595,15 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        nan = torch.tensor(float('nan'))
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
-        for f in funcs:
-            s = self.checkScript(f, (a, b))
-            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+        for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            inp1, inp2 = inputs
+            s = self.checkScript(f, (inp1, inp2))
+            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size'})
 
-            c = s(a, b)
+            c = s(inp1, inp2)
             c.sum().backward()
             graph = backward_graph(s)
             self.assertAllFused(graph)
