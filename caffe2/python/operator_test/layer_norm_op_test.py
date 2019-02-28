@@ -173,6 +173,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
     # Test case is using workspace.has_cuda_support and not workspace.has_gpu_support
     # to exclude it from HIP because tensor interop doesn't work for HIP tensors yet
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    @skipIfROCm
     @given(X=hu.tensor(min_dim=2))
     def test_layer_norm_op_pytorch_cuda(self, X):
         axis = np.random.randint(0, len(X.shape))
