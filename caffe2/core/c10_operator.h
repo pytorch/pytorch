@@ -133,7 +133,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if
  * you don't want to expose the operator for CUDA operations.
  */
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName) \
   namespace caffe2 {                              \
   namespace _c10_ops {                            \
