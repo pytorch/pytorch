@@ -128,6 +128,12 @@ bool isDifferentiable(Node* n) {
   if (differentiable_ops.find(n))
     return true;
 
+  if (n->matches(
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor")) {
+    auto train = n->get<bool>(attr::train).value();
+    return train;
+  }
+
   auto schema = n->maybeSchema();
   if (schema && hasGradientInfoForSchema(*schema)) {
     return true;

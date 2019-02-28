@@ -40,6 +40,8 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
+from torch._C import TensorType, TupleType, FloatType, IntType, \
+    ListType, StringType, DictType
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional
@@ -4272,6 +4274,74 @@ a")
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(script, [alpha, beta, x, y], optimize=False, outputs=outputs)
 
+    def test_resize_input_ops(self):
+        # resize_ and resize_as resize the input tensor. because our shape analysis
+        # is flow invariant, we set any Tensor that can alias a resized Tensor
+        # to the base Tensor Type, without size information.
+
+        # testing that value which is an input of a graph gets handled
+        def out_op_graph_input():
+            @torch.jit.script
+            def test(x, y, z):
+                torch.mul(x, y, out=z)
+                return z
+
+            torch._C._jit_pass_shape_analysis(
+                test.graph, (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            self.assertTrue(next(test.graph.outputs()).type() == TensorType.get())
+        out_op_graph_input()
+
+        def test_resize():
+            @torch.jit.script
+            def test(x):
+                after_resize_alias = torch.zeros([2])
+                for _i in range(5):
+                    b = x + 1
+                    f = [1]
+                    before_resize_alias = b.sub_(1)
+                    # for i in range(10):
+                    f.append(1)
+                    b.resize_(f)
+                    after_resize_alias = b.add_(1)
+                return after_resize_alias
+
+            g = test.graph
+            self.run_pass('constant_propagation', g)
+            torch._C._jit_pass_shape_analysis(
+                g, (torch.zeros(1, 1),), False)
+            resize_node = g.findNode("aten::resize_")
+            # first input and output of b.resize_ is b
+            self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
+            self.assertTrue(next(resize_node.outputs()).type() == TensorType.get())
+
+            # correctly propagates to b alias set
+            before_resize = g.findNode("aten::sub_")
+            self.assertTrue(next(before_resize.outputs()).type() == TensorType.get())
+
+            after_resize = g.findNode("aten::add_")
+            self.assertTrue(next(after_resize.outputs()).type() == TensorType.get())
+
+        test_resize()
+
+        def test_resize_as():
+            @torch.jit.script
+            def test(x):
+                b = torch.zeros([2, 2])
+                b.resize_as_(x)
+                return b
+
+            g = test.graph
+            self.run_pass('constant_propagation', g)
+            torch._C._jit_pass_shape_analysis(
+                g, (torch.zeros(1, 1),), False)
+
+            # x doesn't alias a resized op so it shouldn't be set to base Tensor type
+            self.assertTrue(next(g.inputs()).type() != TensorType.get())
+            # return is resized
+            self.assertTrue(next(g.outputs()).type() == TensorType.get())
+
+        test_resize_as()
+
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
         def test_view_shape_prop(a):
@@ -4293,7 +4363,8 @@ a")
         x = torch.randn(3, 1, 5, requires_grad=True)
         graph = torch.jit.script(fn).graph
         torch._C._jit_pass_shape_analysis(graph, (x,), False)
-        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
+        a = next(graph.outputs()).type().kind()
+        self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -11082,7 +11153,7 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
 
     # The following fail due to #12024.
-    # A prim::ListConstruct is involved and the indices get traced as DynamicType,
+    # A prim::ListConstruct is involved and the indices get traced as TensorType,
     # which always require_grad. This causes a crash in autodiff.
     'test___getitem___adv_index',
     'test___getitem___adv_index_beg',

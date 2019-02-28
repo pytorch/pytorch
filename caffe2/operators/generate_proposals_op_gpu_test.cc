@@ -8,10 +8,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_OPENCV
-#include <opencv2/opencv.hpp>
-#endif // CAFFE2_USE_OPENCV
-
 namespace caffe2 {
 
 static void AddLinSpacedInput(
