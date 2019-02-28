@@ -29,7 +29,7 @@ template <class Context>
 class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
