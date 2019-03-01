@@ -396,11 +396,11 @@ Tensor nonzero(const Tensor & self) {
   return at::legacy::th::_th_nonzero(self);
 }
 
-Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather_out(result, self, dim, index);
 }
 
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather(self, dim, index);
 }
 

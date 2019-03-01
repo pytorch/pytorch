@@ -340,8 +340,8 @@
 - name: frac(Tensor self)
   self: grad
 
-- name: gather(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)
+- name: gather(Tensor self, int64_t dim, Tensor index, bool sparse_grad)
+  self: "sparse_grad ? at::_gather_sparse_backward(self, dim, index, grad) : at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)"
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
