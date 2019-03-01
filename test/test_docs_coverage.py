@@ -75,46 +75,9 @@ class TestDocCoverage(unittest.TestCase):
                     everything.add(name[0][1])
         everything -= set(whitelist)
         # get symbols in tensor.py and _tensor_docs.py
+        classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         whitelist2 = []
-        everything2 = set()
-        pypath = os.path.join(path, '../torch/tensor.py')
-        with open(pypath, 'r') as f:
-            body = ast.parse(f.read()).body
-            for i in body:
-                if isinstance(i, _ast.ClassDef) and i.name != 'Tensor':
-                    break
-            body = i.body
-            for i in body:
-                if not isinstance(i, (_ast.FunctionDef, _ast.Assign)):
-                    continue
-                if isinstance(i, _ast.FunctionDef):
-                    name = i.name
-                    if name.startswith('_'):
-                        continue
-                    if getattr(torch.Tensor, name).__doc__:
-                        everything2.add(name)
-                else:
-                    for i in i.targets:
-                        if not isinstance(i, _ast.Name):
-                            continue
-                        name = i.id
-                        if name.startswith('_'):
-                            continue
-                        if getattr(torch.Tensor, name).__doc__:
-                            everything2.add(name)
-        pypath = os.path.join(path, '../torch/_tensor_docs.py')
-        with open(pypath, 'r') as f:
-            body = ast.parse(f.read()).body
-            for i in body:
-                if not isinstance(i, _ast.Expr):
-                    continue
-                i = i.value
-                if not isinstance(i, _ast.Call):
-                    continue
-                if i.func.id != 'add_docstr_all':
-                    continue
-                i = i.args[0].s
-                everything2.add(i)
+        everything2 = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
         everything2 -= set(whitelist2)
         # assert they are equal
         for p in everything:

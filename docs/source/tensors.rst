@@ -285,6 +285,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_set_to
    .. automethod:: is_shared
    .. automethod:: is_signed
+   .. automethod:: is_sparse
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: le

@@ -1203,6 +1203,13 @@ Args:
     accumulate (bool): whether to accumulate into self
 """)
 
+add_docstr_all('index_put',
+               r"""
+index_put(indices, value, accumulate=False) -> Tensor
+
+Out-place version of :meth:`~Tensor.index_put_`
+""")
+
 add_docstr_all('index_select',
                r"""
 index_select(dim, index) -> Tensor
