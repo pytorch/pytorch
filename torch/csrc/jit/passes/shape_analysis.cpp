@@ -392,7 +392,7 @@ class ShapePropagator {
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
     bool in_resize = false;
     for (auto v : vs) {
-      if (aliasDb_.mayAlias({v}, resized_alias_set)) {
+      if (aliasDb_.mayAlias(ValueSet{v}, resized_alias_set)) {
         setUnshapedType(v);
         in_resize = true;
       }
