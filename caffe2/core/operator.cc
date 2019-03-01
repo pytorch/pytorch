@@ -63,9 +63,10 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
     return 0;
   }
   if (inputs[0].isTensorList()) {
-    // if the first input is a tensor list, we get input tensors by indexing into that list.
-    // currently, this means that only tensors from that list are accessible as inputs.
-    // any hypothetical input tensors that come after the list are not accessible.
+    // if the first input is a tensor list, we get input tensors by indexing
+    // into that list. currently, this means that only tensors from that list
+    // are accessible as inputs. any hypothetical input tensors that come after
+    // the list are not accessible.
     return inputs[0].toTensorListRef().size();
   }
   // it's not a tensor list. Count the number of tensor inputs and return them.
@@ -73,7 +74,9 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
   bool found_nontensor = false;
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      AT_ASSERTM(!found_nontensor, "All tensor arguments must come before non-tensor arguments");
+      AT_ASSERTM(
+          !found_nontensor,
+          "All tensor arguments must come before non-tensor arguments");
       ++num_tensor_inputs;
     } else {
       found_nontensor = true;
@@ -81,7 +84,7 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
   }
   return num_tensor_inputs;
 }
-}
+} // namespace
 
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
