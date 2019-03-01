@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 namespace six {
 
@@ -43,7 +44,7 @@ inline THPObjectPtr maybeAsTuple(PyStructSequence *obj) {
   return THPObjectPtr(torch::utils::structseq_slice(obj, 0, Py_SIZE(obj)));
 #else
   Py_INCREF(obj);
-  return THPObjectPtr(obj);
+  return THPObjectPtr((PyObject *)obj);
 #endif
 }
 
