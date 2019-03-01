@@ -137,8 +137,6 @@ struct SchemaParser {
         auto text = tok.text();
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
-        } else if ("long" == text) {
-          return static_cast<int64_t>(at::kLong);
         } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {

@@ -199,13 +199,13 @@ def parse_arguments(args, func_variants, declaration, func_return):
         # If you change this, you also need to update [TensorOptions in script]
         # in the tracer code.
         # dtype is specified as an int64_t of at::ScalarType
-        {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
+        {'name': 'dtype', 'type': 'ScalarType?', 'is_nullable': False, 'annotation': None},
         # layout is specified as an int64_t of at::Layout
-        {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
+        {'name': 'layout', 'type': 'Layout?', 'is_nullable': False, 'annotation': None},
         # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-        {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+        {'name': 'device', 'type': 'Device?', 'is_nullable': False, 'annotation': None},
     ]
-    tensor_options_defaults = [['float', 'long'], ['strided'], ['\\"cpu\\"']]
+    tensor_options_defaults = [['None'], ['None'], ['None']]
 
     def compare_tensor_option(argument, tensor_option_argument):
         matches = True
