@@ -380,7 +380,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // TODO neither unions nor wildcards make sense on an input. We should
     // disallow them in function schema
     AT_ASSERT(!formal->isWildcard())
-    const auto& formalAlias = formal->set();
+    const auto& formalAlias = formal->beforeSet();
 
     // skip if we've already bound this alias
     if (formalToActual.count(formalAlias) != 0) {
@@ -419,13 +419,13 @@ void AliasDb::analyzeImpl(Node* node) {
       continue;
     }
 
-    for (const auto& formalAlias : formal->sets()) {
+    for (const auto& formalAlias : formal->beforeSets()) {
       // If we encounter an alias annotation that wasn't in the inputs:
       if (!formalToActual.count(formalAlias)) {
         // If this alias is not seen elsewhere and is the only annotation on
         // the output, it's equivalent to being fresh:
         //   e.g. foo(Tensor(a) self) -> Tensor(b)
-        if (formal->sets().size() == 1) {
+        if (formal->beforeSets().size() == 1) {
           giveFreshAlias(actual);
         }
         // Or it is the form of a|fresh, which we can ignore, taking the

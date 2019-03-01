@@ -122,6 +122,18 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::range(int n) -> int[]",
+        [](Stack& stack) {
+          int64_t n;
+          pop(stack, n);
+          std::vector<int64_t> elems(n);
+          for (int i = 0; i < n; i++) {
+            elems[i] = i;
+          }
+          push(stack, jit::IntList::create(elems));
+          return 0;
+        }),
+    Operator(
         "prim::Bool(Tensor a) -> bool",
         [](Stack& stack) {
           at::Tensor a;
@@ -1113,7 +1125,7 @@ int listSelect<Shared<BoolList>>(Stack& stack) {
   pop(stack, list, idx);
 
   auto element = getBoolItem(list->elements(), idx);
-  push(stack, std::move(element));
+  push(stack, element);
   return 0;
 }
 
@@ -1946,11 +1958,16 @@ at::Tensor cat(const std::vector<at::Tensor>& tensors) {
   return at::cat(tensors);
 }
 
+std::string get_first(const std::vector<std::vector<std::string>>& strings) {
+  return strings[0][0];
+}
+
 static auto reg4 =
     torch::jit::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",
             &leaky_relu)
-        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
+        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)
+        .op("_test::get_first", &get_first);
 
 } // namespace
 } // namespace jit
