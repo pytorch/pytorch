@@ -214,11 +214,11 @@
 - func: any(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: arange(Scalar end, TensorOptions options=[]) -> Tensor
+- func: arange(Scalar end, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: arange(Scalar start, Scalar end, TensorOptions options=[]) -> Tensor
+- func: arange(Scalar start, Scalar end, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: arange(Scalar start, Scalar end, Scalar step, TensorOptions options=[]) -> Tensor
+- func: arange(Scalar start, Scalar end, Scalar step, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: arange(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -335,9 +335,9 @@
     CPU: baddbmm_out_cpu
     CUDA: baddbmm_out_cuda
 
-- func: bartlett_window(int window_length, TensorOptions options=[]) -> Tensor
+- func: bartlett_window(int window_length, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: bartlett_window(int window_length, bool periodic, TensorOptions options=[]) -> Tensor
+- func: bartlett_window(int window_length, bool periodic, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
   matches_jit_signature: True
@@ -396,9 +396,9 @@
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
-- func: blackman_window(int window_length, TensorOptions options=[]) -> Tensor
+- func: blackman_window(int window_length, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: blackman_window(int window_length, bool periodic, TensorOptions options=[]) -> Tensor
+- func: blackman_window(int window_length, bool periodic, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
   matches_jit_signature: True
@@ -835,7 +835,7 @@
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
 
-- func: empty(int[] size, TensorOptions options=[]) -> Tensor
+- func: empty(int[] size, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   cpu_half: True
   dispatch:
     CPU: empty_cpu
@@ -947,9 +947,9 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
-- func: eye(int n, TensorOptions options=[]) -> Tensor
+- func: eye(int n, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: eye(int n, int m, TensorOptions options=[]) -> Tensor
+- func: eye(int n, int m, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: eye(int n, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -992,7 +992,7 @@
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
 
-- func: full(int[] size, Scalar fill_value, TensorOptions options=[]) -> Tensor
+- func: full(int[] size, Scalar fill_value, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: full(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1038,17 +1038,17 @@
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
 
-- func: hann_window(int window_length, TensorOptions options=[]) -> Tensor
+- func: hann_window(int window_length, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: hann_window(int window_length, bool periodic, TensorOptions options=[]) -> Tensor
+- func: hann_window(int window_length, bool periodic, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: hamming_window(int window_length, TensorOptions options=[]) -> Tensor
+- func: hamming_window(int window_length, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: hamming_window(int window_length, bool periodic, TensorOptions options=[]) -> Tensor
+- func: hamming_window(int window_length, bool periodic, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: hamming_window(int window_length, bool periodic, float alpha, TensorOptions options=[]) -> Tensor
+- func: hamming_window(int window_length, bool periodic, float alpha, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: hamming_window(int window_length, bool periodic, float alpha, float beta, TensorOptions options=[]) -> Tensor
+- func: hamming_window(int window_length, bool periodic, float alpha, float beta, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
   matches_jit_signature: True
@@ -1234,7 +1234,7 @@
 - func: fbgemm_is_cpu_supported() -> bool
   matches_jit_signature: True
 
-- func: linspace(Scalar start, Scalar end, int steps=100, TensorOptions options=[]) -> Tensor
+- func: linspace(Scalar start, Scalar end, int steps=100, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: linspace(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1318,7 +1318,7 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: logspace(Scalar start, Scalar end, int steps=100, TensorOptions options=[]) -> Tensor
+- func: logspace(Scalar start, Scalar end, int steps=100, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: logspace(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1663,7 +1663,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: ones(int[] size, TensorOptions options=[]) -> Tensor
+- func: ones(int[] size, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: ones(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1711,7 +1711,7 @@
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: rand(int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
+- func: rand(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: rand(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1726,11 +1726,11 @@
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: randint(int high, int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
+- func: randint(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: randint(int low, int high, int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
+- func: randint(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1756,7 +1756,7 @@
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: randn(int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
+- func: randn(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randn(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1771,7 +1771,7 @@
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: randperm(int n, *, Generator? generator, TensorOptions options=[]) -> Tensor
+- func: randperm(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randperm(int n, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1782,9 +1782,9 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
-- func: range(Scalar start, Scalar end, Scalar step=1, TensorOptions options=[]) -> Tensor
+- func: range(Scalar start, Scalar end, Scalar step=1, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: range(Scalar start, Scalar end, TensorOptions options=[]) -> Tensor
+- func: range(Scalar start, Scalar end, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: range(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -2400,7 +2400,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: zeros(int[] size, TensorOptions options=[]) -> Tensor
+- func: zeros(int[] size, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: zeros(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
