@@ -127,14 +127,6 @@ struct TORCH_API SimpleValue : public SugaredValue {
     return value_;
   }
 
- protected:
-  virtual TypePtr getExpectedTypeForAttr(
-      const SourceRange& loc,
-      const Method& m,
-      const ClassTypePtr& type,
-      const std::string& field,
-      const Value* newValue);
-
  private:
   Value* value_;
 };
@@ -200,23 +192,6 @@ struct TORCH_API ClassValue : public SugaredValue {
     return type_->str();
   }
 
-  ClassTypePtr type_;
-};
-
-// Represents an object during the definition of it's "__init__" function.
-// In __init__, assigning to a non-existent attribute will define is an
-// attribute of the class
-struct TORCH_API InitializingClassValue : public SimpleValue {
-  explicit InitializingClassValue(Value* v, ClassTypePtr type)
-      : SimpleValue(v), type_(std::move(type)) {}
-
- private:
-  TypePtr getExpectedTypeForAttr(
-      const SourceRange& loc,
-      const Method& m,
-      const ClassTypePtr& type,
-      const std::string& field,
-      const Value* newValue) override;
   ClassTypePtr type_;
 };
 
