@@ -177,8 +177,8 @@ struct TORCH_API BuiltinModule : public SugaredValue {
 };
 
 // Represents a user type, analagous to `int` or `dict`
-struct TORCH_API UserTypeValue : public SugaredValue {
-  UserTypeValue(UserTypePtr type) : type_(std::move(type)) {}
+struct TORCH_API ClassValue : public SugaredValue {
+  ClassValue(ClassTypePtr type) : type_(std::move(type)) {}
 
   // Call the type's constructor, as in:
   //    n = Foo(constructor_arg)
@@ -193,7 +193,7 @@ struct TORCH_API UserTypeValue : public SugaredValue {
     return type_->str();
   }
 
-  UserTypePtr type_;
+  ClassTypePtr type_;
 };
 
 // defines how a method obtained from a module behaves in script
@@ -209,11 +209,11 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    if (auto userType = dynamic_cast<SimpleValue*>(self_.get())) {
-      // If self_ is a user-defined type, then it will be expected as part of
+    if (auto classType = dynamic_cast<SimpleValue*>(self_.get())) {
+      // If self_ is a class, then it will be expected as part of
       // the schema. Add it to the front of the inputs.
       std::vector<NamedValue> inputsWithSelf;
-      inputsWithSelf.emplace_back(loc, userType->getValue());
+      inputsWithSelf.emplace_back(loc, classType->getValue());
       inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
       return std::make_shared<SimpleValue>(
           caller.emit_call_to(loc, method, inputsWithSelf, attributes));

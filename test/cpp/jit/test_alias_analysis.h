@@ -1,6 +1,7 @@
 #pragma once
 
 #include "test/cpp/jit/test_base.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
@@ -452,41 +453,110 @@ void testAliasAnalysis() {
   }
 }
 
-void testAliasTracker() {
-  auto graph = std::make_shared<Graph>();
-  const Value* a = graph->addInput();
-  const Value* b = graph->addInput();
-  const Value* c = graph->addInput();
-  const Value* d = graph->addInput();
-  const Value* e = graph->addInput();
-  const Value* f = graph->addInput();
-  const Value* g = graph->addInput();
-  const Value* wc = graph->addInput();
-
+void testWriteTracking() {
+  RegisterOperators reg({createOperator(
+      "foo::creates_alias(Tensor(a) x) -> Tensor(a)",
+      [](at::Tensor a) { return a; })});
+  const auto creates_alias = Symbol::fromQualString("foo::creates_alias");
+  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
   {
-    // test contains()
-    AliasTracker t;
-    t.makeFreshValue(a);
-    ASSERT_TRUE(t.contains(a));
-    ASSERT_FALSE(t.contains(b));
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // aten::add(%b, %b)
+    // aten::add_(%a, %b)
+    // foo::creates_alias(%a)
+    auto pureNode = graph->insert(aten::add, {b, b})->node();
+    auto writingNode = graph->insert(aten::add_, {a, b})->node();
+    auto node3 = graph->insert(creates_alias, {a})->node();
+    auto aAlias = node3->output();
+
+    graph->lint();
+
+    AliasDb aliasDb(graph);
+    ASSERT_TRUE(aliasDb.mayAlias(aAlias, a));
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{a}));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a, b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{aAlias}));
   }
+}
+
+void testWildcards() {
+  RegisterOperators reg({createOperator(
+                             "foo::returns_wildcard(Tensor a) -> Tensor(*)",
+                             [](at::Tensor a) { return a; }),
+                         createOperator(
+                             "foo::writes(Tensor(z!) a) -> Tensor(a)",
+                             [](at::Tensor a) { return a; })});
+  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
+  const auto writes = Symbol::fromQualString("foo::writes");
+
+  auto graph = std::make_shared<Graph>();
+  const auto a = graph->addInput();
+
+  const auto constant = graph->insertConstant(1);
+  const auto fresh = graph->insert(aten::rand, {constant});
+  const auto fresh2 = graph->insert(aten::rand, {constant});
+  const auto wildcard = graph->insert(returns_wildcard, {fresh});
+  const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
+
+  graph->lint();
+  AliasDb aliasDb(graph);
+
+  ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
+  ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+  ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
+  ASSERT_FALSE(aliasDb.mayAlias(
+      std::unordered_set<const Value*>({wildcard}),
+      std::unordered_set<const Value*>()));
+
+  // Test writes to wildcards
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{fresh}));
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{fresh2}));
+  ASSERT_TRUE(aliasDb.writesToAlias(
+      wildcardWrite, std::unordered_set<const Value*>{a}));
+}
+
+void testMemoryDAG() {
+  auto graph = std::make_shared<Graph>();
+  const Value* aValue = graph->addInput();
+  const Value* bValue = graph->addInput();
+  const Value* cValue = graph->addInput();
+  const Value* dValue = graph->addInput();
+  const Value* eValue = graph->addInput();
+  const Value* fValue = graph->addInput();
+  const Value* gValue = graph->addInput();
+
   {
     // a <- b <- c
     //      b <- d
     // a <- e
     // f <- e
     // g is by itself
-    // wc is a wildcard value
-    AliasTracker t;
-    t.makeFreshValue(a);
-    t.makeFreshValue(f);
-    t.makeFreshValue(g);
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    auto c = t.makeFreshValue(cValue);
+    auto d = t.makeFreshValue(dValue);
+    auto e = t.makeFreshValue(eValue);
+    auto f = t.makeFreshValue(fValue);
+    auto g = t.makeFreshValue(gValue);
     t.makePointerTo(b, a);
     t.makePointerTo(c, b);
     t.makePointerTo(d, b);
     t.makePointerTo(e, a);
     t.makePointerTo(e, f);
-    t.setWildcard(wc);
 
     /**
      * Test mayAlias()
@@ -506,59 +576,15 @@ void testAliasTracker() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
 
-    // Wildcards should alias everything
-    ASSERT_TRUE(t.mayAlias(wc, a));
-    ASSERT_TRUE(t.mayAlias(wc, b));
-    ASSERT_TRUE(t.mayAlias(wc, f));
-    ASSERT_TRUE(t.mayAlias(wc, g));
-
     /**
      * Test mayAlias() set interface
      */
-    std::multiset<const Value*> foo{c, c, d};
-    std::multiset<const Value*> bar{e, f};
-    std::unordered_set<const Value*> baz{f, g};
-    std::set<const Value*> containsWildcard{wc};
+    std::multiset<const Element*> foo{c, c, d};
+    std::multiset<const Element*> bar{e, f};
+    std::unordered_set<const Element*> baz{f, g};
     ASSERT_TRUE(t.mayAlias(foo, bar));
     ASSERT_TRUE(t.mayAlias(bar, baz));
     ASSERT_FALSE(t.mayAlias(foo, baz));
-    // wildcard stuff aliases everything
-    ASSERT_TRUE(t.mayAlias(containsWildcard, foo));
-    ASSERT_TRUE(t.mayAlias(containsWildcard, bar));
-    ASSERT_TRUE(t.mayAlias(containsWildcard, baz));
-
-    /**
-     * Test writer tracking
-     */
-    auto n1 = graph->appendNode(graph->create(prim::Undefined));
-    auto n2 = graph->appendNode(graph->create(prim::Undefined));
-    auto n3 = graph->appendNode(graph->create(prim::Undefined));
-    t.registerWrite(a, n1);
-    t.registerWrite(f, n2);
-    // We should report those writes accurately
-    ASSERT_TRUE(t.writesTo(n1, a));
-    ASSERT_TRUE(t.writesTo(n2, f));
-    ASSERT_FALSE(t.writesTo(n1, f));
-    ASSERT_FALSE(t.writesTo(n2, a));
-    // We should correctly report writes to aliases as well
-    ASSERT_TRUE(t.writesTo(n1, c));
-
-    // Check hasWriters()
-    ASSERT_TRUE(t.hasWriters(a));
-    // Aliases of written-to values should have writers
-    ASSERT_TRUE(t.hasWriters(b));
-    ASSERT_TRUE(t.hasWriters(d));
-    ASSERT_TRUE(t.hasWriters(e));
-    // Unique values not registered should be unaffected
-    ASSERT_FALSE(t.hasWriters(g));
-
-    // create a write to the wildcard set
-    t.registerWrite(wc, n3);
-    // Now everything may be written to
-    ASSERT_TRUE(t.hasWriters(g));
-    const auto& wildcardWriters = t.getWildcardWriters();
-    ASSERT_EQ(wildcardWriters.size(), 1);
-    ASSERT_EQ(*wildcardWriters.begin(), n3);
   }
 }
 } // namespace jit

@@ -2340,7 +2340,7 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(C, H \times r, W \times r)`.
+tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2384,15 +2384,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic` or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2428,16 +2430,18 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
+        mode (str): algorithm used for upsampling:
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic`, or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2616,7 +2620,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           the border for out-of-bound values. For location far away from the
           border, it will keep being reflected until becoming in bound, e.g.,
           (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 2.5``, then reflects by border ``1`` and becomes
+          becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
@@ -2628,9 +2632,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
-            'bilinear' | 'nearest'. Default: 'bilinear'
+            ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
-            'zeros' | 'border' | 'reflection'. Default: 'zeros'
+            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
 
     Returns:
         output (Tensor): output Tensor
@@ -2662,14 +2666,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 @weak_script
 def affine_grid(theta, size):
     # type: (Tensor, List[int]) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
+    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:
         theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`)
-                           Example: torch.Size((32, 3, 24, 24))
+        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+            Example: torch.Size((32, 3, 24, 24))
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
@@ -2710,10 +2714,12 @@ def pad(input, pad, mode='constant', value=0):
     .. include:: cuda_deterministic_backward.rst
 
     Args:
-        input (Tensor): `Nd` tensor
-        pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
-        value: fill value for 'constant' padding. Default: 0
+        input (Tensor): N-dimensional tensor
+        pad (tuple): m-elements tuple, where
+            :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
+        mode: ``'constant'``, ``'reflect'`` or ``'replicate'``.
+            Default: ``'constant'``
+        value: fill value for ``'constant'`` padding. Default: ``0``
 
     Examples::
 
