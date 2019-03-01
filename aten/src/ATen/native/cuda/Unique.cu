@@ -34,14 +34,14 @@ template <typename scalar_t>
     scalar_t* output_data = output.data<scalar_t>();
     Tensor inverse_indices;
     if (!return_inverse) {
-        inverse_indices = at::empty({0},  self.type().toScalarType(kLong));
+        inverse_indices = at::empty({0}, self.options().dtype(kLong));
         thrust::sort(policy, output_data, output_data + num_inp);
     } else {
-        Tensor sorted_indices = at::arange(0, num_inp, self.type().toScalarType(kLong));
+        Tensor sorted_indices = at::arange(0, num_inp, self.options().dtype(kLong));
         int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
         thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
-        Tensor inv_loc = at::empty({num_inp}, self.type().toScalarType(kLong));
-        inverse_indices = at::empty({num_inp}, self.type().toScalarType(kLong));
+        Tensor inv_loc = at::empty({num_inp}, self.options().dtype(kLong));
+        inverse_indices = at::empty({num_inp}, self.options().dtype(kLong));
         int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
         int64_t* inverse_indices_ptr = inverse_indices.data<int64_t>();
         thrust::adjacent_difference(policy, output_data, output_data + num_inp, inv_loc_ptr, [=] __device__ (scalar_t a, scalar_t b) -> int64_t { if (a != b) {return 1;} else { return 0; }});
@@ -73,7 +73,7 @@ template <typename scalar_t>
 
     scalar_t* input_flat_ptr = input_flat.data<scalar_t>();
 
-    Tensor indices = at::arange(0, input_flat.size(0), self.type().toScalarType(kLong));
+    Tensor indices = at::arange(0, input_flat.size(0), self.options().dtype(kLong));
     int64_t* indices_ptr = indices.data<int64_t>();
     int64_t numel = input_flat.size(1);
 
@@ -96,7 +96,7 @@ template <typename scalar_t>
 
     // get unique tensors
     scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();
-    Tensor input_sorted_indices = at::arange(0, input_sorted.size(0), self.type().toScalarType(kLong));
+    Tensor input_sorted_indices = at::arange(0, input_sorted.size(0), self.options().dtype(kLong));
     int64_t* input_sorted_indices_ptr = input_sorted_indices.data<int64_t>();
     auto last = thrust::unique(policy, input_sorted_indices_ptr, input_sorted_indices_ptr + input_sorted_indices.numel(),
       [=] __device__ (int64_t a, int64_t b) -> bool {
@@ -119,11 +119,11 @@ template <typename scalar_t>
     output = output.transpose(0, dim);
 
     // calculate inverse indices
-    Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
+    Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
     if (return_inverse) {
       int64_t size = self.size(dim);
       inverse_indices.resize_(size);
-      Tensor mask = at::empty(input_sorted.size(0), self.type().toScalarType(kLong));
+      Tensor mask = at::empty(input_sorted.size(0), self.options().dtype(kLong));
       mask[0] = 1;
       for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
         if (!at::equal(input_sorted[i], input_sorted[i+1])) {

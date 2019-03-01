@@ -202,10 +202,6 @@ struct CAFFE2_API Type {
     }
   }
 
-  operator TensorOptions() const {
-    return options();
-  }
-
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual Tensor abs(const Tensor & self) const = 0;

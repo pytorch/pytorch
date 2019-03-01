@@ -26,7 +26,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   int int_info = info.squeeze_().item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
-  auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
+  auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
     return std::make_tuple(-1., lu.diag(), int_info);
   } else {
@@ -44,7 +44,7 @@ Tensor det(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    return at::zeros({}, self.type());
+    return at::zeros({}, self.options());
   } else {
     return diag_U.prod().mul_(det_P);
   }
@@ -60,7 +60,7 @@ Tensor logdet(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
+    det = at::zeros({}, self.options());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
@@ -81,7 +81,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
+    det = at::zeros({}, self.options());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
@@ -153,7 +153,7 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return mat2.type().addmm(at::zeros({}, mat2.options()), self, mat2, 0, 1);
   }
   return at::legacy::th::_th_mm(self, mat2);
 }

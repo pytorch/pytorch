@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/functional.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/core/TensorOptions.h>
 
 #include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
@@ -31,17 +32,19 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
 }
 
 struct TypeAndSize {
-  TypeAndSize() : type(nullptr) {}
+  TypeAndSize() : backend(at::Backend::Undefined), dtype(caffe2::TypeMeta()) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
     : sizes(t.sizes().vec())
-    , type(&t.type()) {}
+    , backend(t.type().backend())
+    , dtype(t.dtype()) {}
 
-  Tensor zeros() { return at::zeros(sizes, *type); }
+  Tensor zeros() { return at::zeros(sizes, c10::TensorOptions(backend).dtype(dtype)); }
 
 private:
   std::vector<int64_t> sizes;
-  Type* type;
+  at::Backend backend;
+  caffe2::TypeMeta dtype;
 };
 
 ${autograd_function_declarations}

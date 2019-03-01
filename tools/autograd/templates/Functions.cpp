@@ -25,6 +25,7 @@ using at::Tensor;
 using at::Scalar;
 using at::IntArrayRef;
 using at::TensorList;
+using at::TensorOptions;
 
 namespace torch { namespace autograd { namespace generated {
 
@@ -711,7 +712,7 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
-                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const Type &type) {
+                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const TensorOptions options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
   // it's possible some of the grads are not defined (represents tensors of all 0s).
@@ -724,7 +725,7 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, type);
+      grads_all_defined[j] = at::zeros(grad_size, options);
     }
   }
 
@@ -733,13 +734,13 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
 }
 
 Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
-                      int64_t split_size, int64_t dim, IntArrayRef sizes, const Type &type) {
+                      int64_t split_size, int64_t dim, IntArrayRef sizes, const TensorOptions options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
   int64_t dim_size = sizes[dim];
   int64_t num_splits = grads.size();
   std::vector<int64_t> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] = split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sizes, type);
+  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
 }
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {

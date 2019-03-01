@@ -190,7 +190,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
 
 static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
-  Type& longType = src.type().toScalarType(kLong);
+  auto longOptions = src.options().dtype(kLong);
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -202,7 +202,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).toType(longType);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(longOptions);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -220,13 +220,13 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   // Compute the linear indices for the parts of the tensor not being indexed
   Tensor beforeIndex;
   if (emptyBefore > 0) {
-    auto index = at::arange(0, nElemBefore, longType) * strides[emptyBefore - 1];
+    auto index = at::arange(0, nElemBefore, longOptions) * strides[emptyBefore - 1];
     index = index.view(src.sizes().slice(0, emptyBefore));
     beforeIndex = unsqueezeN(index, 0, linearIndex.dim() + emptyAfter);
   }
   Tensor afterIndex;
   if (emptyAfter > 0) {
-    auto index = at::arange(0, nElemAfter, longType);
+    auto index = at::arange(0, nElemAfter, longOptions);
     index = index.view(src.sizes().slice(src.dim() - emptyAfter, emptyAfter));
     afterIndex = unsqueezeN(index, linearIndex.dim() + emptyBefore, 0);
   }

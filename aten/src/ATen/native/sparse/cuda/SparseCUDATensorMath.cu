@@ -35,8 +35,8 @@ using at::cuda::detail::getTensorInfo;
 
 namespace {
   IntTensor _to_csr_int(const LongTensor& rowIndices, int64_t dim, int64_t nnz) {
-    IntTensor csr = at::empty({dim+1}, CUDA(kInt));
-    IntTensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
+    IntTensor csr = at::empty({dim+1}, TensorOptions(kCPU).dtype(kInt));
+    IntTensor rowIndicesInt = at::empty({rowIndices.size(0)}, TensorOptions(kCPU).dtype(kInt));
     rowIndicesInt.copy_(rowIndices);
     sparse::cuda::Xcoo2csr(rowIndicesInt.data<int32_t>(), nnz, dim, csr.data<int32_t>());
     return csr;
@@ -210,7 +210,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   int64_t nnz = sparse._nnz();
 
-  LongTensor indices = at::empty({1, nnz}, CUDA(kLong));
+  LongTensor indices = at::empty({1, nnz}, TensorOptions(kCPU).dtype(kLong));
   // create values in column-major format to avoid copying in spaddmm
   Tensor values = at::empty({n, nnz}, dense.options());
   values.transpose_(0, 1);
@@ -447,7 +447,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
-  LongTensor resultNnz = at::empty({1}, CUDA(kLong));
+  LongTensor resultNnz = at::empty({1}, TensorOptions(kCPU).dtype(kLong));
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       t_values_.scalar_type(), "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
@@ -468,7 +468,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
       });
 
   // sync!  (surely there is a more idiomatic way to do this...)
-  LongTensor cpu_resultNnz = at::empty({1}, CPU(kLong));
+  LongTensor cpu_resultNnz = at::empty({1}, TensorOptions(kCPU).dtype(kLong));
   cpu_resultNnz.copy_(resultNnz);
   get_sparse_impl(r_)->set_nnz_and_narrow(cpu_resultNnz.accessor<int64_t, 1>()[0]);
 

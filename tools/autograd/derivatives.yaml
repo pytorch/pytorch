@@ -733,10 +733,10 @@
   self: index_select_backward(grad, dim, result1, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
-  self: split_backward(grads, split_size, dim, self.sizes(), self.type())
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
 - name: split_with_sizes(Tensor self, IntArrayRef split_sizes, int64_t dim)
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.type())
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self)
   self: grad / (2 * result)
