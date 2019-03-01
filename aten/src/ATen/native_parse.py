@@ -199,19 +199,27 @@ def parse_arguments(args, func_variants, declaration, func_return):
         # If you change this, you also need to update [TensorOptions in script]
         # in the tracer code.
         # dtype is specified as an int64_t of at::ScalarType
-        {'name': 'dtype', 'type': 'ScalarType?', 'is_nullable': False, 'annotation': None},
+        {'name': 'dtype', 'type': ['ScalarType', 'ScalarType?'], 'is_nullable': False, 'annotation': None},
         # layout is specified as an int64_t of at::Layout
-        {'name': 'layout', 'type': 'Layout?', 'is_nullable': False, 'annotation': None},
+        {'name': 'layout', 'type': ['Layout', 'Layout?'], 'is_nullable': False, 'annotation': None},
         # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-        {'name': 'device', 'type': 'Device?', 'is_nullable': False, 'annotation': None},
+        {'name': 'device', 'type': ['Device', 'Device?'], 'is_nullable': False, 'annotation': None},
     ]
-    tensor_options_defaults = [['None'], ['None'], ['None']]
+    tensor_options_defaults = [['c10::nullopt'], ['c10::nullopt'], ['c10::nullopt']]
 
     def compare_tensor_option(argument, tensor_option_argument):
         matches = True
         matches = matches and argument['name'] == tensor_option_argument['name']
-        matches = matches and argument['type'] == tensor_option_argument['type']
+        # print("--")
+        # print("declaration['name']")
+        # print(declaration['name'])
+        # print("tensor_option_argument['type']")
+        # print(tensor_option_argument['type'])
+        # print("argument['type']")
+        # print(argument['type'])
+        matches = matches and argument['type'] in tensor_option_argument['type']
         return matches
+
 
     def is_tensor_option(argument, tensor_options_arguments):
         is_in_it = False
@@ -236,8 +244,10 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 merged_argument = {'type': 'TensorOptions', 'name': 'options',
                                    'is_nullable': False, 'annotation': None}
                 for t_idx, t_arg in enumerate(tensor_options_representation):
-                    assert compare_tensor_option(tensor_options_arguments[t_idx], t_arg)
+                    assert compare_tensor_option(t_arg, tensor_options_arguments[t_idx])
                     if 'default' in t_arg:
+                        # print("t_arg['default']")
+                        # print(t_arg['default'])
                         assert t_arg['default'] in tensor_options_defaults[t_idx]
                         if 'default' not in merged_argument:
                             merged_argument['default'] = '{}'
