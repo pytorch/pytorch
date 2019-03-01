@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast, get_default_args
+from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
@@ -56,6 +56,7 @@ _enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
+_jit_script_class_compile = torch._C._jit_script_class_compile
 BatchTensor = torch._C._jit.BatchTensor
 
 Future = torch._C.Future
@@ -188,10 +189,11 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
-    *trace* of an execution, as well as the original return value.
+    *trace* of an execution, as well as the original return value. If return_inputs,
+    also returns the trace inputs as part of the tuple
 
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
@@ -214,7 +216,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -251,13 +253,14 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
         self._force_outplace = force_outplace
+        self._return_inputs = return_inputs
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -265,6 +268,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
@@ -275,7 +279,10 @@ class LegacyTracedModule(Module):
         except Exception:
             torch._C._tracer_abandon()
             raise
-        return trace, out
+        if self._return_inputs:
+            return trace, out, ret_inputs
+        else:
+            return trace, out
 
 
 def _clone_inputs(args):
@@ -712,17 +719,23 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
-def script(fn, optimize=True, _frames_up=0, _rcb=None):
+def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
-        return fn
+        return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn, is_method=False)
-    mod = ScriptModule()
-    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
+    if inspect.isclass(obj):
+        mod = ScriptClass(obj.__name__)
+        ast = get_jit_class_def(obj)
+        _jit_script_class_compile(mod, ast, _rcb)
+    else:
+        mod = ScriptModule()
+        ast = get_jit_def(obj)
+        _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
     # Forward docstrings
-    mod.__doc__ = fn.__doc__
+    mod.__doc__ = obj.__doc__
     return mod
+
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -744,7 +757,7 @@ def script_method(fn, _rcb=None):
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(frames_up=2)
-    ast = get_jit_ast(fn, is_method=True)
+    ast = get_jit_def(fn, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
 
@@ -1268,10 +1281,19 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 
+    class ScriptClass(ScriptModule):
+        def __init__(self, name):
+            super(ScriptClass, self).__init__()
+            self._name = name
+
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
             super(ScriptModule, self).__init__()
+
+    class ScriptClass(ScriptModule):
+        def __init__(self, name):
+            super(ScriptClass, self).__init__()
 
 
 def _get_weak_stubs(cls):
@@ -1495,6 +1517,7 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
     _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
+    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
 
     return _builtin_table
 

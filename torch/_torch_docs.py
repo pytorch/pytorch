@@ -1844,7 +1844,7 @@ Example::
 
 add_docstr(torch.gather,
            r"""
-gather(input, dim, index, out=None) -> Tensor
+gather(input, dim, index, out=None, sparse_grad=False) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -1865,6 +1865,7 @@ Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
     out (Tensor, optional): the destination tensor
+    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
 
 Example::
 
@@ -4269,7 +4270,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=None, descending=False, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -4311,6 +4312,38 @@ Example::
     tensor([[ 2,  0,  0,  1],
             [ 0,  1,  1,  2],
             [ 1,  2,  2,  0]])
+""")
+
+add_docstr(torch.argsort,
+           r"""
+argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+
+Returns the indices that sort a tensor along a given dimension in ascending
+order by value.
+
+This is the second value returned by :meth:`torch.sort`.  See its documentation
+for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int, optional): the dimension to sort along
+    descending (bool, optional): controls the sorting order (ascending or descending)
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+            [ 0.1598,  0.0788, -0.0745, -1.2700],
+            [ 1.2208,  1.0722, -0.7064,  1.2564],
+            [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+    >>> torch.argsort(a, dim=1)
+    tensor([[2, 0, 3, 1],
+            [3, 2, 1, 0],
+            [2, 1, 0, 3],
+            [3, 2, 1, 0]])
 """)
 
 add_docstr(torch.sparse_coo_tensor,
