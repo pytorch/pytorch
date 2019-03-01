@@ -81,7 +81,7 @@ endif(MSVC)
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
-option(BUILD_TORCH "Build Torch" OFF)
+option(BUILD_TORCH "Build Torch" ON)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
