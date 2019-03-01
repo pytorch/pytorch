@@ -14,6 +14,7 @@ import warnings
 import pickle
 import gzip
 import types
+import textwrap
 import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -7227,6 +7228,22 @@ class _TestTorchMixin(object):
         self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
+
+    def test_structseq_repr(self):
+        a = torch.arange(250).reshape(5, 5, 10)
+        expected = """
+        torch.return_types.max(
+        values=tensor([[ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49],
+                [ 90,  91,  92,  93,  94,  95,  96,  97,  98,  99],
+                [140, 141, 142, 143, 144, 145, 146, 147, 148, 149],
+                [190, 191, 192, 193, 194, 195, 196, 197, 198, 199],
+                [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]]),
+        indices=tensor([[4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]))"""
+        self.assertEqual(repr(a.max(1)), textwrap.dedent(expected).strip())
 
     def test_var_stability(self):
         tensor = torch.FloatTensor([2281.5, 2281.25])

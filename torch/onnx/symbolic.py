@@ -1,7 +1,7 @@
 import numbers
 
 import torch
-from torch._C import DynamicType, ListType, OptionalType
+from torch._C import TensorType, ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -38,11 +38,11 @@ import itertools
 # type information, note that there are several levels of Tensor types, defined
 # in aten/src/ATen/core/jit_type.h:
 #
-# DynamicType - This is a Tensor, but we don't know anything about its
+# TensorType - This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
-# UndefinedTensorType <: DynamicType - Denotes an undefined Tensor
-# TensorType <: DynamicType - Denotes a Tensor for which we know the scalar
+# UndefinedTensorType <: TensorType - Denotes an undefined Tensor
+# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
 #                             type and number of dimensions, but not the concrete
 #                             shapes. For example, appears as 'Float(*, *)' in
 #                             graph print-outs. Useful accessor methods include
@@ -55,7 +55,7 @@ import itertools
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (TensorType) which is better than relying on
+# on the number of dimensions (DimensionedTensorType) which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
@@ -1546,7 +1546,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # PackPadded operators cannot be optimized out.
     if batch_first:
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
+    if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary beacuse those operators expand to something that
