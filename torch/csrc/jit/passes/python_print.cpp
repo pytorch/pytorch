@@ -1061,16 +1061,16 @@ struct PythonPrintPass {
   void printMethod(
       script::Method& method,
       const std::unordered_map<IValue*, QualifiedNamePtr>&
-          extra_input_names) {
-    std::vector<std::string> input_names = fmap(
-        method.member_inputs(),
-        [&](IValue* slot) { return extra_input_names.at(slot)->str(); });
+          extra_ivalue_names) {
+    std::vector<std::string> ivalue_names = fmap(
+        method.initial_ivalues(),
+        [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
         method.getSchema().arguments(),
         [](const Argument& arg) { return arg.default_value(); });
-    printFunction(graph, name, defaults, input_names);
+    printFunction(graph, name, defaults, ivalue_names);
   }
   void printModule(script::Module& module) {
     std::unordered_map<IValue*, QualifiedNamePtr> parameter_names;

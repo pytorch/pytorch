@@ -325,7 +325,9 @@ struct ModuleValue : public SugaredValue {
       if (py::isinstance(
               attr, py::module::import("torch.jit").attr("Attribute"))) {
         // TODO: get the real type
-        TypePtr type = DictType::create(StringType::get(), TensorType::get());
+        TypePtr type =
+            py::cast<TypePtr>(py::module::import("torch.jit.annotations")
+                                  .attr("ann_to_type")(attr.attr("type")));
         module->register_attribute(
             field, type, toIValue(attr.attr("value"), type));
         auto v = module->find_attribute(field);
@@ -967,7 +969,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("member_inputs", &Method::member_inputs)
+      .def("initial_ivalues", &Method::initial_ivalues)
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {

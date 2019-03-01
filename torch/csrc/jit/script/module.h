@@ -64,17 +64,17 @@ struct Method {
         name_(std::move(name)),
         graph_(std::move(graph)),
         optimize(optimize),
-        member_inputs_(std::move(initial_members)),
+        initial_ivalues_(std::move(initial_members)),
         method_creator(std::move(method_creator)) {
-    AT_ASSERT(graph_->inputs().size() >= member_inputs_.size());
-    int i = graph_->inputs().size() - member_inputs_.size();
-    for (auto member : member_inputs_) {
-      member_input_index[member] = i++;
+    AT_ASSERT(graph_->inputs().size() >= initial_ivalues_.size());
+    int i = graph_->inputs().size() - initial_ivalues_.size();
+    for (auto member : initial_ivalues_) {
+      initial_ivalue_index[member] = i++;
     }
   }
 
   void run(Stack& stack) {
-    for (auto input : member_inputs_) {
+    for (auto input : initial_ivalues_) {
       push(stack, *input);
     }
     get_executor().run(stack);
@@ -91,7 +91,7 @@ struct Method {
   }
 
   std::shared_ptr<Graph> graph_for(Stack inputs) {
-    for (auto tp : member_inputs_) {
+    for (auto tp : initial_ivalues_) {
       inputs.emplace_back(*tp);
     }
     return get_executor().graphFor(inputs);
@@ -118,27 +118,27 @@ struct Method {
   TORCH_API void ensure_defined();
 
   size_t num_inputs() const {
-    return graph()->inputs().size() - member_inputs_.size();
+    return graph()->inputs().size() - initial_ivalues_.size();
   }
   TORCH_API Value* get_or_add_parameter(IValue* slot) {
     AT_ASSERT(slot->isTensor());
-    auto it = member_input_index.find(slot);
-    if (it != member_input_index.end()) {
+    auto it = initial_ivalue_index.find(slot);
+    if (it != initial_ivalue_index.end()) {
       return graph()->inputs().at(it->second);
     }
     // add it as a new parameter
-    member_inputs_.push_back(slot);
-    member_input_index[slot] = graph()->inputs().size();
+    initial_ivalues_.push_back(slot);
+    initial_ivalue_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
 
   TORCH_API Value* get_or_add_attribute(TypePtr type, IValue* slot) {
-    auto it = member_input_index.find(slot);
-    if (it != member_input_index.end()) {
+    auto it = initial_ivalue_index.find(slot);
+    if (it != initial_ivalue_index.end()) {
       return graph()->inputs().at(it->second);
     }
-    member_inputs_.push_back(slot);
-    member_input_index[slot] = graph()->inputs().size();
+    initial_ivalues_.push_back(slot);
+    initial_ivalue_index[slot] = graph()->inputs().size();
     return graph()->addInput()->setType(type);
   }
 
@@ -147,11 +147,11 @@ struct Method {
       bool with_grad = false) {
     auto retval = graph_->copy();
     Stack stack;
-    stack.reserve(inputs.size() + member_inputs_.size());
+    stack.reserve(inputs.size() + initial_ivalues_.size());
     for (at::Tensor& i : inputs) {
       stack.emplace_back(std::move(i));
     }
-    for (IValue* inp : member_inputs_) {
+    for (IValue* inp : initial_ivalues_) {
       stack.push_back(*inp);
     }
     const auto size = stack.size();
@@ -166,7 +166,7 @@ struct Method {
       bool with_grad = false,
       bool propagate = true) {
     auto retval = graph_->copy();
-    for (auto inp : member_inputs_) {
+    for (auto inp : initial_ivalues_) {
       if (inp->isTensor()) {
         inputs.push_back(inp->toTensor());
       }
@@ -202,8 +202,8 @@ struct Method {
     return retval;
   }
 
-  const std::vector<IValue*>& member_inputs() const {
-    return member_inputs_;
+  const std::vector<IValue*>& initial_ivalues() const {
+    return initial_ivalues_;
   }
 
   Method& setSchema(FunctionSchema schema_) {
@@ -326,16 +326,16 @@ struct Method {
   bool optimize;
 
   GraphExecutor executor; // for execution
-  // member_inputs are a list of additional arguments appended to graph that are
-  // inputs that come from the members of the Module or its submodules.
+  // initial_ivalues are a list of additional arguments appended to graph
+  // that are inputs that come from the members of the Module or its submodules.
   // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
-  std::vector<IValue*> member_inputs_;
+  std::vector<IValue*> initial_ivalues_;
 
-  // map from a at::Tensor* in member_inputs to the offset it appears at
+  // map from a IValue* in initial_ivalues to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
-  std::unordered_map<IValue*, size_t> member_input_index;
+  std::unordered_map<IValue*, size_t> initial_ivalue_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.
@@ -638,11 +638,12 @@ struct Module {
       names.pop_back();
     }
     for (auto& kv : methods) {
-      std::vector<IValue*> member_inputs;
-      for (auto& p : kv.value()->member_inputs()) {
-        member_inputs.push_back(parameter_remap.at(p));
+      std::vector<IValue*> initial_ivalues;
+      for (auto& p : kv.value()->initial_ivalues()) {
+        initial_ivalues.push_back(parameter_remap.at(p));
       }
-      curr->create_method(kv.key(), kv.value()->graph()->copy(), member_inputs);
+      curr->create_method(
+          kv.key(), kv.value()->graph()->copy(), initial_ivalues);
     }
   }
 
@@ -652,9 +653,9 @@ struct Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  // invariant: to ensure member_inputs of Methods stay valid,
+  // invariant: to ensure initial_ivalues of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
-  // removing them will allow member_inputs to point to invalid parameters
+  // removing them will allow initial_ivalues to point to invalid parameters
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
   torch::OrderedDict<std::string, NamedInput> parameters;
