@@ -19,7 +19,7 @@ class DistributedDataParallelCPU(Module):
     each node are averaged.
 
     This module could be used in conjunction with the DistributedSampler,
-    (see :class `torch.utils.data.distributed.DistributedSampler`)
+    (see :class:`~torch.utils.data.distributed.DistributedSampler`)
     which will load a subset of the original datset for each node with the same
     batch size. So strong scaling should be configured like this:
 
