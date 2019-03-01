@@ -393,20 +393,6 @@ PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setUserEnabledMKLDNN(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(PyBool_Check(arg), "set_enabled_mkldnn expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setUserEnabledMKLDNN(arg == Py_True);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_userEnabledMKLDNN(PyObject *_unused)
-{
-  if (at::globalContext().userEnabledMKLDNN()) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
-}
-
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -459,8 +445,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
-  {"_get_mkldnn_enabled", (PyCFunction)THPModule_userEnabledMKLDNN, METH_NOARGS, nullptr},
-  {"_set_mkldnn_enabled", (PyCFunction)THPModule_setUserEnabledMKLDNN, METH_O, nullptr}, 
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},

@@ -50,7 +50,7 @@ FILE(GLOB miopen_h "miopen/*.h")
 FILE(GLOB miopen_cpp "miopen/*.cpp")
 
 FILE(GLOB mkl_cpp "mkl/*.cpp")
-FILE(GLOB mkldnn_cpp "mkldnn/*.cpp" "mkldnn/detail/*.cpp")
+FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
 FILE(GLOB native_cpp "native/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")

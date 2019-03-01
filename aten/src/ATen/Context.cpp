@@ -76,16 +76,16 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
-bool Context::userEnabledMKLDNN() const {
-  return enabled_mkldnn;
-}
-
-void Context::setUserEnabledMKLDNN(bool e) {
-  enabled_mkldnn = e;
-}
-
 bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::hasMKLDNN() const {
+#if AT_MKLDNN_ENABLED()
   return true;
 #else
   return false;

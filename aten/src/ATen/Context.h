@@ -11,7 +11,6 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/MKLDNNHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -67,9 +66,7 @@ class CAFFE2_API Context {
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
-  bool hasMKLDNN() const {
-    return detail::getMKLDNNHooks().hasMKLDNN();
-  }
+  bool hasMKLDNN() const;
   bool hasLAPACK() const;
   bool hasMAGMA() const {
     return detail::getCUDAHooks().hasMAGMA();
@@ -129,8 +126,6 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  bool userEnabledMKLDNN() const;
-  void setUserEnabledMKLDNN(bool e);
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
@@ -155,7 +150,6 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
-  bool enabled_mkldnn = true;
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;

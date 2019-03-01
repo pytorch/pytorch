@@ -291,7 +291,7 @@ class RNNBase(Module):
     @property
     def use_transposed_weights(self):
         any_param = next(self.parameters()).data
-        return not any_param.is_cuda and torch._C.has_mkldnn and torch._C._get_mkldnn_enabled()
+        return not any_param.is_cuda and torch.has_mkldnn
 
 
 class RNN(RNNBase):
