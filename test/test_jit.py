@@ -724,7 +724,7 @@ class TestJit(JitTestCase):
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
-        self.assertTrue(len(trace.graph.nodes()) == 0)
+        self.assertTrue(len(list(trace.graph.nodes())) == 0)
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -11560,7 +11560,7 @@ class TestFuser(JitTestCase):
 
         ge = self.checkScript(fn, inputs)
         graph = ge.graph_for(*inputs)
-        self.assertAllfused(graph)
+        self.assertAllFused(graph)
         FileCheck().check("prim::ConstantChunk[chunks=3, dim=1]").run(str(graph))
 
     @staticmethod
@@ -11775,7 +11775,7 @@ class TestFuser(JitTestCase):
         z = torch.randn(4, 2, dtype=torch.float, device='cuda')
         ge = self.checkTrace(fn, (x, y, z))
         graph = ge.graph_for(x, y, z)
-        self.assertAllFused(s.graph_for(a, b), except_for={'aten::add'})
+        self.assertAllFused(graph, except_for={'aten::add'})
         FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @staticmethod
@@ -11984,7 +11984,7 @@ class TestFuser(JitTestCase):
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertTrue(len(forward_graph.nodes()) == 2)
+        self.assertTrue(len(list(forward_graph.nodes())) == 2)
         # Everything is differentiable but TupleConstruct return
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
