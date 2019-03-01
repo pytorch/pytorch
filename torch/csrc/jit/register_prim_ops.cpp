@@ -374,7 +374,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Undefined() -> Tensor",
+         "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
            return [](Stack& stack) {
              stack.emplace_back(at::Tensor());
@@ -458,7 +458,6 @@ RegisterOperators reg(
              return 0;
            };
          }),
-
      Operator(
          "prim::RaiseException(str msg) -> ()",
          [](Stack& stack) {
@@ -526,25 +525,23 @@ RegisterOperators reg(
              return 0;
            };
          }),
-
-     Operator(
-         prim::AnyDefined,
-         [](const Node* node) {
-           size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
-             bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
-               }
-             }
-             drop(stack, num_inputs);
-             stack.emplace_back(result);
-             return 0;
-           };
-         }),
-
+    Operator(
+        prim::AutogradAnyNonZero,
+        [](const Node* node) {
+          size_t num_inputs = node->inputs().size();
+          return [=](Stack& stack) {
+            bool result = false;
+            for (const IValue& t : last(stack, num_inputs)) {
+              if (t.toTensor().defined()) {
+                result = true;
+                break;
+              }
+            }
+            drop(stack, num_inputs);
+            stack.emplace_back(result);
+            return 0;
+          };
+        }),
      Operator(
          prim::AutogradAdd,
          [](const Node* node) {
