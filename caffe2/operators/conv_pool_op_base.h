@@ -149,13 +149,13 @@ class ConvPoolOpBase : public Operator<Context> {
     // Check kernel only if we are doing conv or pooling. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
     // need to clean this up.
-    if (operator_def.name().find("Conv") == 0 ||
-        operator_def.name().find("Pool") != std::string::npos) {
+    if (operator_def.type().find("Conv") != std::string::npos ||
+        operator_def.type().find("Pool") != std::string::npos) {
       for (int dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
-            kernel_[dim],
+            global_pooling_ || kernel_[dim],
             "If you are doing convolution or pooling, you will need to set "
             "explicitly the kernel size.");
       }
