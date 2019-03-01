@@ -220,7 +220,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
         matches = matches and argument['type'] in tensor_option_argument['type']
         return matches
 
-
     def is_tensor_option(argument, tensor_options_arguments):
         is_in_it = False
         for to_argument in tensor_options_arguments:
