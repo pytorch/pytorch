@@ -371,21 +371,7 @@ inline dim3 CAFFE_GET_BLOCKS_2D(const int N, const int /* M */) {
   return grid;
 }
 
-class DeviceGuard {
- public:
-  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
-    if (previous_ != newDevice) {
-      CaffeCudaSetDevice(newDevice);
-    }
-  }
-
-  ~DeviceGuard() noexcept {
-    CaffeCudaSetDevice(previous_);
-  }
-
- private:
-  int previous_;
-};
+using CUDAGuard = c10::cuda::CUDAGuard;
 
 template <typename T, int N>
 struct SimpleArray {
