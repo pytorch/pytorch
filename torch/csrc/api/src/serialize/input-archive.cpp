@@ -23,12 +23,18 @@ void InputArchive::read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  auto read_param = module_->find_parameter(key);
-  AT_CHECK(read_param != nullptr, "No such serialized tensor '", key, "'");
+  auto param = module_->find_parameter(key);
+  auto buffer = module_->find_buffer(key);
+  AT_CHECK(
+      param != nullptr || buffer != nullptr,
+      "No such serialized tensor '",
+      key,
+      "'");
   // clang-format off
+  auto read_param = is_buffer ? buffer : param;
   auto read_tensor = read_param->slot()->toTensor();
   AT_CHECK(
-      read_param->is_parameter == !is_buffer,
+      bool(buffer) == is_buffer,
       "Expected deserialized tensor for key '", key,
       "' to ", is_buffer ? "not " : "", "be a buffer, but it was not");
   // clang-format on

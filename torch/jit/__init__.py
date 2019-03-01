@@ -899,9 +899,7 @@ class OrderedParameterDict(OrderedDictWrapper):
         super(OrderedParameterDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if not is_buffer]
+        return [(name, param) for name, param in self.module._get_parameters()]
 
     def __setitem__(self, k, v):
         self.module._register_parameter(k, v, False)
@@ -920,12 +918,10 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if is_buffer]
+        return [(name, param) for name, param in self.module._get_buffers()]
 
     def __setitem__(self, k, v):
-        self.module._register_parameter(k, v, True)
+        self.module._register_buffer(k, v)
 
     def __contains__(self, k):
         return self.module._has_buffer(k)
@@ -933,7 +929,7 @@ class OrderedBufferDict(OrderedDictWrapper):
     def __getitem__(self, k):
         if k not in self:
             raise KeyError(k)
-        return self.module._get_parameter(k)
+        return self.module._get_buffer(k)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -1185,7 +1181,7 @@ if _enabled:
                 if attr == 'training':
                     if self._has_buffer('training'):
                         self.__dict__['training'] = value
-                        self._get_parameter('training').fill_(int(value))
+                        self._get_buffer('training').fill_(int(value))
                         return
                 ret = super(ScriptModule, self).__setattr__(attr, value)
                 value_type = _get_type(value)

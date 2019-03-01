@@ -369,13 +369,6 @@ struct NamedInput {
   NamedInput(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
         type(type),
-        is_parameter(false),
-        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
-
-  NamedInput(std::string name, IValue ivalue, bool is_parameter)
-      : name_(name),
-        type(TensorType::get()),
-        is_parameter(is_parameter),
         ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
 
   IValue* slot() const {
@@ -383,7 +376,6 @@ struct NamedInput {
   }
   const std::string name_;
   const TypePtr type;
-  bool is_parameter;
   std::unique_ptr<IValue> ivalue;
 };
 
@@ -392,6 +384,7 @@ struct Module {
   Module()
       : modules("Module"),
         parameters("Parameter"),
+        buffers("Buffers"),
         attributes("Attributes"),
         methods("Method"),
         optimize(true) {}
@@ -410,19 +403,26 @@ struct Module {
     return get_method("forward")(std::move(inputs));
   }
 
+  void register_buffer(const std::string& name, autograd::Variable v) {
+    if (auto b = buffers.find(name)) {
+      *b->slot() = v;
+      return;
+    }
+    buffers.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
+  }
   void register_parameter(
       const std::string& name,
       autograd::Variable v,
       bool is_buffer) {
-    bool is_parameter = !is_buffer;
-    if (auto p = parameters.find(name)) {
-      *p->slot() = v;
-      p->is_parameter = is_parameter;
+    if (is_buffer) {
+      register_buffer(name, std::move(v));
       return;
     }
-    parameters.insert(
-        name,
-        NamedInput(name, std::move(v), is_parameter));
+    if (auto p = parameters.find(name)) {
+      *p->slot() = v;
+      return;
+    }
+    parameters.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
   }
   void register_attribute(
       const std::string& name,
@@ -475,6 +475,9 @@ struct Module {
   autograd::Variable get_parameter(const std::string& name) const {
     return autograd::as_variable_ref(parameter_slot(name)->toTensor());
   }
+  autograd::Variable get_buffer(const std::string& name) const {
+    return autograd::as_variable_ref(buffers.find(name)->slot()->toTensor());
+  }
 
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
@@ -497,6 +500,10 @@ struct Module {
       const {
     return attributes;
   }
+  const torch::OrderedDict<std::string, NamedInput>& get_buffers()
+      const {
+    return buffers;
+  }
   const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
       const {
     return methods;
@@ -507,6 +514,9 @@ struct Module {
   }
   NamedInput* find_attribute(const std::string& name) {
     return attributes.find(name);
+  }
+  NamedInput* find_buffer(const std::string& name) {
+    return buffers.find(name);
   }
   NamedModule* find_module(const std::string& name) {
     return modules.find(name);
@@ -528,7 +538,7 @@ struct Module {
     for (auto& submod : get_modules()) {
       submod->module->train(on);
     }
-    register_parameter("training", torch::tensor(on ? 1 : 0, at::kLong), /*is_buffer=*/true);
+    register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
   }
   /// Calls train(false) to enable "eval" mode.
   /// Do not override this method, override `train()` instead.
@@ -537,7 +547,7 @@ struct Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_parameter("training")) {
+    if (auto p = find_buffer("training")) {
       return p->slot()->toTensor().item<int64_t>() == 1;
     }
     // We are in training mode by default
@@ -608,7 +618,13 @@ struct Module {
       curr->register_parameter(
           kv.key(),
           kv.value().slot()->toTensor(),
-          /*is_buffer=*/!kv.value().is_parameter);
+          /*is_buffer=*/false);
+      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+    }
+    for (auto& kv : buffers) {
+      curr->register_buffer(
+          kv.key(),
+          kv.value().slot()->toTensor());
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto& kv : modules) {
@@ -639,6 +655,7 @@ struct Module {
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
   torch::OrderedDict<std::string, NamedInput> parameters;
+  torch::OrderedDict<std::string, NamedInput> buffers;
   torch::OrderedDict<std::string, NamedInput> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;

@@ -22,6 +22,9 @@ struct ModuleAccessorValue : public script::SugaredValue {
     } else if (script::NamedInput* v = module->find_parameter(field)) {
       return std::make_shared<script::SimpleValue>(
           m.get_or_add_parameter(v->slot()));
+    } else if (script::NamedInput* v = module->find_buffer(field)) {
+      return std::make_shared<script::SimpleValue>(
+          m.get_or_add_parameter(v->slot()));
     } else if (script::Method* m = module->find_method(field)) {
       return std::make_shared<script::MethodValue>(shared_from_this(), *m);
     } else {

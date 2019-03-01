@@ -135,6 +135,10 @@ void createTensorToParameterNameMap(
     const script::NamedInput& param = elem.value();
     result[param.slot()] = QualifiedName::create(prefix, param.name_);
   }
+  for (const auto& elem : module.get_buffers()) {
+    const script::NamedInput& param = elem.value();
+    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+  }
   for (const auto& elem : module.get_attributes()) {
     const script::NamedInput& param = elem.value();
     result[param.slot()] = QualifiedName::create(prefix, param.name_);

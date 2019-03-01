@@ -219,10 +219,16 @@ void ScriptModuleDeserializer::convertModule(
     convertModule(sub_def);
     moduleStack_.pop_back();
   }
+  // std::cout << "There are " << module_def.parameters_size() << " params\n";
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
-    module->register_parameter(param_def.name(), tensor, param_def.is_buffer());
+    // std::cout << "Looking at parameter def " << param_def.name() << "\n";
+    if (param_def.is_buffer()) {
+      module->register_buffer(param_def.name(), tensor);
+    } else {
+      module->register_parameter(param_def.name(), tensor, false);
+    }
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

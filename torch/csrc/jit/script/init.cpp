@@ -258,9 +258,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     const auto& param_list = module_->get_parameters().items();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      if (param->is_parameter) {
-        params.push_back(caller.get_or_add_parameter(param->slot()));
-      }
+      params.push_back(caller.get_or_add_parameter(param->slot()));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -294,14 +292,14 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedInput* v = module->find_parameter(field);
+      NamedInput* v = module->find_buffer(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
         auto t =
             autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-        module->register_parameter("training", std::move(t), true);
-        v = module->find_parameter(field);
+        module->register_buffer("training", std::move(t));
+        v = module->find_buffer(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
@@ -313,6 +311,8 @@ struct ModuleValue : public SugaredValue {
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedInput* v = module->find_parameter(field)) {
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
+    } else if (NamedInput* v = module->find_buffer(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (auto value = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
@@ -601,6 +601,9 @@ static void gatherParametersAndBuffers(
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
   }
+  for (auto& param : m.get_buffers()) {
+    values.push_back(param->slot());
+  }
   for (const auto& sub : m.get_modules()) {
     gatherParametersAndBuffers(values, *sub->module);
   }
@@ -742,8 +745,10 @@ void initJitScriptBindings(PyObject* module) {
             self.register_attribute(name, type, toIValue(value, type));
           })
       .def("_register_module", &Module::register_module)
+      .def("_register_buffer", &Module::register_buffer)
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
+      .def("_get_buffer", &Module::get_buffer)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
@@ -763,29 +768,36 @@ void initJitScriptBindings(PyObject* module) {
             py::tuple result(parameters.size());
             for (size_t i = 0; i < parameters.size(); ++i) {
               auto& p = parameters[i];
-              py::tuple r(3);
+              py::tuple r(2);
               result[i] = std::make_tuple(
                   p.key(),
-                  autograd::as_variable_ref(p->slot()->toTensor()),
-                  !p->is_parameter);
+                  autograd::as_variable_ref(p->slot()->toTensor()));
+            }
+            return result;
+          })
+      .def(
+          "_get_buffers",
+          [](Module& self) -> py::tuple {
+            auto& buffers = self.get_buffers();
+            py::tuple result(buffers.size());
+            for (size_t i = 0; i < buffers.size(); ++i) {
+              auto& buffer = buffers[i];
+              py::tuple r(2);
+              result[i] = std::make_tuple(
+                  buffer.key(),
+                  autograd::as_variable_ref(buffer->slot()->toTensor()));
             }
             return result;
           })
       .def(
           "_has_parameter",
-          [](Module& self, const std::string& name) {
-            if (auto r = self.find_parameter(name)) {
-              return r->is_parameter;
-            }
-            return false;
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_parameter(name);
           })
       .def(
           "_has_buffer",
-          [](Module& self, const std::string& name) {
-            if (auto r = self.find_parameter(name)) {
-              return !r->is_parameter;
-            }
-            return false;
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_buffer(name);
           })
       .def(
           "_has_module",
