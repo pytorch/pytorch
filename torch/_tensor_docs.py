@@ -2030,7 +2030,10 @@ Args:
     index (LongTensor): the indices of elements to scatter,
       can be either empty or the same size of src.
       When empty, the operation returns identity
-    src (Tensor or float): the source element(s) to scatter
+    src (Tensor): the source element(s) to scatter,
+      incase `value` is not specified
+    value (float): the source element(s) to scatter,
+      incase `src` is not specified
 
 Example::
 
