@@ -83,9 +83,21 @@ def _copy_scriptmodule_methods(modules, module_copies, module_indices):
             replica._copy_method(method_name, param_list, module)
 
 
-def replicate(network, devices, detach=False):
+def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
+    if detach:
+        return comm.broadcast_coalesced(tensors, devices)
+    else:
+        # Use the autograd function to broadcast if not detach
+        if len(tensors) > 0:
+            tensor_copies = Broadcast.apply(devices, *tensors)
+            return [tensor_copies[i:i + len(tensors)]
+                    for i in range(0, len(tensor_copies), len(tensors))]
+        else:
+            return []
 
+
+def replicate(network, devices, detach=False):
     if not _replicatable_module(network):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
@@ -95,14 +107,22 @@ def replicate(network, devices, detach=False):
 
     params = list(network.parameters())
     param_indices = {param: idx for idx, param in enumerate(params)}
-    param_copies = Broadcast.apply(devices, *params)
-    if len(params) > 0:
-        param_copies = [param_copies[i:i + len(params)]
-                        for i in range(0, len(param_copies), len(params))]
+    param_copies = _broadcast_coalesced_reshape(params, devices, detach)
 
     buffers = list(network.buffers())
-    buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
-    buffer_copies = comm.broadcast_coalesced(buffers, devices)
+    buffers_rg = []
+    buffers_not_rg = []
+    for buf in buffers:
+        if buf.requires_grad and not detach:
+            buffers_rg.append(buf)
+        else:
+            buffers_not_rg.append(buf)
+
+    buffer_indices_rg = {buf: idx for idx, buf in enumerate(buffers_rg)}
+    buffer_indices_not_rg = {buf: idx for idx, buf in enumerate(buffers_not_rg)}
+
+    buffer_copies_rg = _broadcast_coalesced_reshape(buffers_rg, devices, detach=detach)
+    buffer_copies_not_rg = _broadcast_coalesced_reshape(buffers_not_rg, devices, detach=True)
 
     modules = list(network.modules())
     module_copies = [[] for device in devices]
@@ -148,15 +168,19 @@ def replicate(network, devices, detach=False):
                 param_idx = param_indices[param]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._parameters[key] = param_copies[j][param_idx].detach() \
-                        if detach else param_copies[j][param_idx]
+                    replica._parameters[key] = param_copies[j][param_idx]
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     replica._buffers[key] = None
             else:
-                buffer_idx = buffer_indices[buf]
+                if buf.requires_grad and not detach:
+                    buffer_copies = buffer_copies_rg
+                    buffer_idx = buffer_indices_rg[buf]
+                else:
+                    buffer_copies = buffer_copies_not_rg
+                    buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     replica._buffers[key] = buffer_copies[j][buffer_idx]

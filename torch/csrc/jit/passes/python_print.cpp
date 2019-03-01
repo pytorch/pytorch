@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -601,6 +601,61 @@ struct PythonPrintPass {
     }
   }
 
+  bool isLongLine(const std::string& str) {
+    return str.size() + level * 2 >= 40;
+  }
+
+  bool isLongInline(Node* node) {
+    return output_inline_.count(node) && isLongLine(useOf(node->output()));
+  }
+
+  bool isNonConstantInline(Value* input) {
+    return !isConstantLike(input->node()) &&
+        output_inline_.count(input->node());
+  }
+
+  // [reordering of inlines]
+  // We inline anything that is semantically legal to inline, but sometimes
+  // we find that these lines get too long. In that case we break the lines
+  /// and it  is important that we un-inline all the inputs preceeding the long
+  /// input:
+  //   r = foo(x.add_(b), some_long + expression)
+  //  wrong!
+  //   _0 = some_long + expression
+  //   r = foo(x.add_(b), _0) # wrong! _0 runs before mutating add_
+  // legal!
+  //   _0 = x.add_(b)
+  //   _1 = some_long + expression
+  //   r = foo(_0, _1)
+  void splitLongInlines(at::ArrayRef<Value*> inputs) {
+    size_t long_inline_slice = 0;
+    // find the last input that is too long
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (isLongInline(inputs[i]->node())) {
+        long_inline_slice = i + 1;
+      }
+    }
+    // un-inline everything through the last long line
+    // constants are ignored since long constants are never inlined in the
+    // first place
+    for (size_t i = 0; i < long_inline_slice; ++i) {
+      if (isNonConstantInline(inputs[i])) {
+        printOutputDefinition(inputs[i]->node(), useOf(inputs[i]));
+      }
+    }
+  }
+
+  void printOutputDefinition(Node* node, const std::string& str) {
+    assignValuesToTheirUniqueNames(node->outputs());
+    indent();
+    // Print outputs
+    if (node->outputs().size() > 0) {
+      printValueList(out, node->outputs());
+      out << " = ";
+    }
+    out << str << "\n";
+  }
+
   void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
@@ -613,6 +668,7 @@ struct PythonPrintPass {
         return;
       }
     }
+    splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -649,22 +705,17 @@ struct PythonPrintPass {
         std::stringstream ss;
         printRHS(ss, node);
 
-        // this node is safe to inline, so assign the output value
-        // to that expression directly
-        // guard against really long lines
-        if (output_inline_.count(node) > 0 &&
-            ss.str().size() + level * 2 < 40) {
+        // we prevent long constants from inlining here.
+        // it is not safe to do the same thing for non-constants here
+        // because of [reordering of inlines]
+        if (output_inline_.count(node) == 0 ||
+            (isConstantLike(node) && isLongLine(ss.str()))) {
+          printOutputDefinition(node, ss.str());
+        } else {
+          // this node is safe to inline, so assign the output value
+          // to that expression directly
           assignValue(node->output(), ss.str());
-          return;
         }
-        assignValuesToTheirUniqueNames(node->outputs());
-        indent();
-        // Print outputs
-        if (node->outputs().size() > 0) {
-          printValueList(out, node->outputs());
-          out << " = ";
-        }
-        out << ss.str() << "\n";
     }
   }
 
@@ -847,7 +898,7 @@ struct PythonPrintPass {
             [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
-      case prim::CreateUserObject:
+      case prim::CreateObject:
       case prim::SetAttr:
       case prim::GetAttr:
         throw std::runtime_error("NYI");
@@ -1094,7 +1145,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
-      prim::CreateUserObject,
+      prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,
   };

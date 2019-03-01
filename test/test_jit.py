@@ -40,6 +40,8 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
+from torch._C import TensorType, TupleType, FloatType, IntType, \
+    ListType, StringType, DictType
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional
@@ -1580,6 +1582,24 @@ class TestJit(JitTestCase):
         out_state = traced_model(x)
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
+
+    def test_export_no_reorder(self):
+        def func(a, b):
+            return a * b / (a - 2 * b) + b
+
+        recording_inputs = [torch.tensor([0.55619788169860839844], dtype=torch.float32, requires_grad=True),
+                            torch.tensor([0.25947844982147216797], dtype=torch.float32, requires_grad=True)]
+
+        ge1 = torch.jit.trace(func, recording_inputs, optimize=True)
+        ge2 = self.getExportImportCopy(ge1)
+
+        outputs_ge1 = ge1(*recording_inputs)
+        outputs_ge2 = ge2(*recording_inputs)
+
+        grad_ge1 = torch.autograd.grad(outputs_ge1, recording_inputs)
+        grad_ge2 = torch.autograd.grad(outputs_ge2, recording_inputs)
+        self.assertTrue(outputs_ge1 == outputs_ge2)
+        self.assertTrue(grad_ge1 == grad_ge2)
 
     def test_python_function(self):
         class MyFn(Function):
@@ -4274,6 +4294,74 @@ a")
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(script, [alpha, beta, x, y], optimize=False, outputs=outputs)
 
+    def test_resize_input_ops(self):
+        # resize_ and resize_as resize the input tensor. because our shape analysis
+        # is flow invariant, we set any Tensor that can alias a resized Tensor
+        # to the base Tensor Type, without size information.
+
+        # testing that value which is an input of a graph gets handled
+        def out_op_graph_input():
+            @torch.jit.script
+            def test(x, y, z):
+                torch.mul(x, y, out=z)
+                return z
+
+            torch._C._jit_pass_shape_analysis(
+                test.graph, (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            self.assertTrue(next(test.graph.outputs()).type() == TensorType.get())
+        out_op_graph_input()
+
+        def test_resize():
+            @torch.jit.script
+            def test(x):
+                after_resize_alias = torch.zeros([2])
+                for _i in range(5):
+                    b = x + 1
+                    f = [1]
+                    before_resize_alias = b.sub_(1)
+                    # for i in range(10):
+                    f.append(1)
+                    b.resize_(f)
+                    after_resize_alias = b.add_(1)
+                return after_resize_alias
+
+            g = test.graph
+            self.run_pass('constant_propagation', g)
+            torch._C._jit_pass_shape_analysis(
+                g, (torch.zeros(1, 1),), False)
+            resize_node = g.findNode("aten::resize_")
+            # first input and output of b.resize_ is b
+            self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
+            self.assertTrue(next(resize_node.outputs()).type() == TensorType.get())
+
+            # correctly propagates to b alias set
+            before_resize = g.findNode("aten::sub_")
+            self.assertTrue(next(before_resize.outputs()).type() == TensorType.get())
+
+            after_resize = g.findNode("aten::add_")
+            self.assertTrue(next(after_resize.outputs()).type() == TensorType.get())
+
+        test_resize()
+
+        def test_resize_as():
+            @torch.jit.script
+            def test(x):
+                b = torch.zeros([2, 2])
+                b.resize_as_(x)
+                return b
+
+            g = test.graph
+            self.run_pass('constant_propagation', g)
+            torch._C._jit_pass_shape_analysis(
+                g, (torch.zeros(1, 1),), False)
+
+            # x doesn't alias a resized op so it shouldn't be set to base Tensor type
+            self.assertTrue(next(g.inputs()).type() != TensorType.get())
+            # return is resized
+            self.assertTrue(next(g.outputs()).type() == TensorType.get())
+
+        test_resize_as()
+
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
         def test_view_shape_prop(a):
@@ -4295,7 +4383,8 @@ a")
         x = torch.randn(3, 1, 5, requires_grad=True)
         graph = torch.jit.script(fn).graph
         torch._C._jit_pass_shape_analysis(graph, (x,), False)
-        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
+        a = next(graph.outputs()).type().kind()
+        self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -4970,7 +5059,7 @@ a")
         @torch.jit.script
         def foo(a):
             return a.t()
-        s = Variable(torch.rand(10))
+        s = Variable(torch.rand(5, 5, 5))
         # XXX: this should stay quiet in stay propagation and only fail in the interpreter
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             foo(s)
@@ -11102,7 +11191,7 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
 
     # The following fail due to #12024.
-    # A prim::ListConstruct is involved and the indices get traced as DynamicType,
+    # A prim::ListConstruct is involved and the indices get traced as TensorType,
     # which always require_grad. This causes a crash in autodiff.
     'test___getitem___adv_index',
     'test___getitem___adv_index_beg',
@@ -12409,6 +12498,9 @@ graph(%x : Tensor):
   return (%1)
 ''')
 
+    def test_generic_list(self):
+        self.assertEqual(torch.ops._test.get_first([['hello']]), 'hello')
+
 
 class TestJitGeneratedAutograd(JitTestCase):
     pass
@@ -13198,7 +13290,7 @@ class TestAsync(JitTestCase):
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
+        with self.assertRaisesRegex(Exception, 'expects a tensor with <= 2 dimensions'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -13470,22 +13562,22 @@ class TestDataParallel(JitTestCase):
         self.assertEqual(first_forward, r1_forward)
 
 
-class TestUserType(JitTestCase):
+class TestClassType(JitTestCase):
     def test_get_with_method(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
-                def getFoo(self):
+                def getFooTest(self):
                     return self.foo
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
-                return foo.getFoo()
+                foo = FooTest(x)
+                return foo.getFooTest()
 
             input = torch.ones(2, 3)
             self.assertEqual(fn(input), input)
@@ -13494,13 +13586,13 @@ class TestUserType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return foo.foo
 
             input = torch.ones(2, 3)
@@ -13510,20 +13602,20 @@ class TestUserType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     # type: (int)
                     self.foo = x
 
-                def incFoo(self, y):
+                def incFooTest(self, y):
                     # type: (int)
                     self.foo = self.foo + y
 
             @torch.jit.script
             def fn(x):
                 # type: (int)
-                foo = Foo(x)
-                foo.incFoo(2)
+                foo = FooTest(x)
+                foo.incFooTest(2)
                 return foo.foo
 
             self.assertEqual(fn(1), 3)
@@ -13533,7 +13625,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
                         self.foo = 10  # should error since int != Tensor
@@ -13543,7 +13635,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13555,7 +13647,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13567,14 +13659,14 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         # type: (bool)
                         self.foo = x
 
                 @torch.jit.script
                 def fn(x):
-                    Foo(x)
+                    FooTest(x)
 
                 fn(2)
 
@@ -13583,27 +13675,27 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         if True:
                             self.attr = x
 
-    def test_user_type_as_param(self):
+    def test_class_type_as_param(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.attr = x
 
             @torch.jit.script
             def fn(foo):
-                # type: (Foo)
+                # type: (FooTest)
                 return foo.attr
 
             @torch.jit.script
             def fn2(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return fn(foo)
 
             input = torch.ones(1)
