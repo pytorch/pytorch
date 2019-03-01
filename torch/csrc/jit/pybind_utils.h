@@ -323,7 +323,6 @@ inline py::object toPyObject(IValue&& ivalue) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
     return std::move(py_dict);
-
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

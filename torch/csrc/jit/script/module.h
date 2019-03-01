@@ -384,7 +384,6 @@ struct Module {
   Module()
       : modules("Module"),
         parameters("Parameter"),
-        buffers("Buffers"),
         attributes("Attributes"),
         methods("Method"),
         optimize(true) {}
@@ -404,11 +403,12 @@ struct Module {
   }
 
   void register_buffer(const std::string& name, autograd::Variable v) {
-    if (auto b = buffers.find(name)) {
+    if (auto b = attributes.find(name)) {
+      AT_ASSERT(b->type->isSubtypeOf(TensorType::get()));
       *b->slot() = v;
       return;
     }
-    buffers.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
+    attributes.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
   }
   void register_parameter(
       const std::string& name,
@@ -476,7 +476,7 @@ struct Module {
     return autograd::as_variable_ref(parameter_slot(name)->toTensor());
   }
   autograd::Variable get_buffer(const std::string& name) const {
-    return autograd::as_variable_ref(buffers.find(name)->slot()->toTensor());
+    return autograd::as_variable_ref(attributes.find(name)->slot()->toTensor());
   }
 
   // each module owns its method. The reference returned here
@@ -500,10 +500,6 @@ struct Module {
       const {
     return attributes;
   }
-  const torch::OrderedDict<std::string, NamedInput>& get_buffers()
-      const {
-    return buffers;
-  }
   const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
       const {
     return methods;
@@ -516,7 +512,11 @@ struct Module {
     return attributes.find(name);
   }
   NamedInput* find_buffer(const std::string& name) {
-    return buffers.find(name);
+    auto b = attributes.find(name);
+    if (b && b->type->isSubtypeOf(TensorType::get())) {
+      return b;
+    }
+    return nullptr;
   }
   NamedModule* find_module(const std::string& name) {
     return modules.find(name);
@@ -621,11 +621,14 @@ struct Module {
           /*is_buffer=*/false);
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
-    for (auto& kv : buffers) {
+    for (auto& kv : attributes) {
+      if (!kv.value().type->isSubtypeOf(TensorType::get())) {
+        continue;
+      }
       curr->register_buffer(
           kv.key(),
           kv.value().slot()->toTensor());
-      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+      parameter_remap[kv.value().slot()] = curr->find_buffer(kv.key())->slot();
     }
     for (auto& kv : modules) {
       names.push_back(kv.key());
@@ -655,7 +658,6 @@ struct Module {
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
   torch::OrderedDict<std::string, NamedInput> parameters;
-  torch::OrderedDict<std::string, NamedInput> buffers;
   torch::OrderedDict<std::string, NamedInput> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;

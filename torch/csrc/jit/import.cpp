@@ -219,7 +219,7 @@ void ScriptModuleDeserializer::convertModule(
     convertModule(sub_def);
     moduleStack_.pop_back();
   }
-  // std::cout << "There are " << module_def.parameters_size() << " params\n";
+  std::cout << "There are " << module_def.parameters_size() << " params\n";
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
@@ -227,7 +227,7 @@ void ScriptModuleDeserializer::convertModule(
     if (param_def.is_buffer()) {
       module->register_buffer(param_def.name(), tensor);
     } else {
-      module->register_parameter(param_def.name(), tensor, false);
+      module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
   if (module_def.has_torchscript_arena()) {

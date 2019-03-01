@@ -644,11 +644,13 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def, false);
+    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
   }
-  for (const auto& elem : module.get_buffers()) {
-    torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def, true);
+  for (const auto& elem : module.get_attributes()) {
+    if (elem.value().type->isSubtypeOf(TensorType::get())) {
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
+    }
   }
 
   std::stringstream module_name;

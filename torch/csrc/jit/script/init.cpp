@@ -313,10 +313,10 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedInput* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (NamedInput* v = module->find_buffer(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
+    } else if (NamedInput* v = module->find_attribute(field)) {
+      return std::make_shared<SimpleValue>(
+          m.get_or_add_attribute(v->type, v->slot()));
     }
-
 
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
@@ -609,8 +609,10 @@ static void gatherParametersAndBuffers(
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
   }
-  for (auto& param : m.get_buffers()) {
-    values.push_back(param->slot());
+  for (auto& param : m.get_attributes()) {
+    if (param->type->isSubtypeOf(TensorType::get())) {
+      values.push_back(param->slot());
+    }
   }
   for (const auto& sub : m.get_modules()) {
     gatherParametersAndBuffers(values, *sub->module);
@@ -784,16 +786,18 @@ void initJitScriptBindings(PyObject* module) {
             return result;
           })
       .def(
-          "_get_buffers",
+          "_get_attributes",
           [](Module& self) -> py::tuple {
-            auto& buffers = self.get_buffers();
-            py::tuple result(buffers.size());
-            for (size_t i = 0; i < buffers.size(); ++i) {
-              auto& buffer = buffers[i];
-              py::tuple r(2);
+            auto& attributes = self.get_attributes();
+            py::tuple result(attributes.size());
+            for (size_t i = 0; i < attributes.size(); ++i) {
+              auto& buffer = attributes[i];
+              py::tuple r(3);
+              IValue v = *buffer->slot();
               result[i] = std::make_tuple(
                   buffer.key(),
-                  autograd::as_variable_ref(buffer->slot()->toTensor()));
+                  buffer->type,
+                  toPyObject(std::move(v)));
             }
             return result;
           })

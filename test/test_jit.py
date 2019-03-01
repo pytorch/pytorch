@@ -276,8 +276,8 @@ class JitTestCase(TestCase):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
                 c._register_parameter(name, v, False)
-            for name, v in m._get_buffers():
-                c._register_buffer(name, v)
+            for name, the_type, v in m._get_attributes():
+                c._register_attribute(name, the_type, v)
             for name, s in m._get_modules():
                 c._register_module(name, copy_structure_and_params(s))
             return c
@@ -2002,10 +2002,8 @@ class TestJit(JitTestCase):
                     torch.nn.BatchNorm2d(100),
                     torch.nn.BatchNorm2d(100, affine=False)]:
                 getattr(clazz, mode)()
-
                 input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
                     torch.randn(20, 100, 35, 45)
-
                 traced = torch.jit.trace(clazz, (input,))
                 imported = self.getExportImportCopy(traced)
                 x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
@@ -10550,7 +10548,7 @@ a")
         class M(torch.jit.ScriptModule):
             def __init__(self, table):
                 super(M, self).__init__()
-                self.table = table
+                self.table = torch.jit.Attribute(table, Dict[str, torch.Tensor])
                 self.x = torch.nn.Parameter(torch.tensor([100.0]))
 
             @torch.jit.script_method
