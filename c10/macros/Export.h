@@ -38,13 +38,18 @@
 #define C10_EXPORT
 #define C10_IMPORT
 #endif
+#define C10_EXPORT_ALIGNED(n) C10_EXPORT alignas(n)
+#define C10_IMPORT_ALIGNED(n) C10_IMPORT alignas(n)
 #else // _WIN32
 #if defined(__GNUC__)
 #define C10_EXPORT __attribute__((__visibility__("default")))
+#define C10_EXPORT_ALIGNED(n) __attribute__((__visibility__("default"), aligned(n)))
 #else // defined(__GNUC__)
 #define C10_EXPORT
+#define C10_EXPORT_ALIGNED(n) alignas(n)
 #endif // defined(__GNUC__)
 #define C10_IMPORT C10_EXPORT
+#define C10_IMPORT_ALIGNED(n) C10_EXPORT_ALIGNED(n)
 #endif // _WIN32
 
 // Definition of an adaptive XX_API macro, that depends on whether you are
@@ -65,8 +70,10 @@
 // This one is being used by libc10.so
 #ifdef C10_BUILD_MAIN_LIB
 #define C10_API C10_EXPORT
+#define C10_API_ALIGNED(n) C10_EXPORT_ALIGNED(n)
 #else
 #define C10_API C10_IMPORT
+#define C10_API_ALIGNED(n) C10_IMPORT_ALIGNED(n)
 #endif
 
 // This one is being used by libcaffe2.so

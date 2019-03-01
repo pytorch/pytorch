@@ -321,7 +321,7 @@ namespace detail {
 
 } // namespace detail
 
-struct alignas(2) Half {
+struct C10_API_ALIGNED(2) Half {
   unsigned short x;
 
   struct from_bits_t {};
