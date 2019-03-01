@@ -50,8 +50,9 @@ void SetTensorDescriptor(
 template <class Functor>
 class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -190,8 +191,9 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
 template <class Functor>
 class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(

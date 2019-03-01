@@ -13,8 +13,8 @@ namespace int8 {
 
 class Int8SliceOp final : public SliceOp<CPUContext> {
  public:
-  Int8SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : SliceOp(operator_def, ws) {}
+  template <class... Args>
+  explicit Int8SliceOp(Args&&... args) : SliceOp(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     if (InputSize() > 1) {

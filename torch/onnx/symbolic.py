@@ -1,7 +1,7 @@
 import numbers
 
 import torch
-from torch._C import DynamicType, ListType, OptionalType
+from torch._C import TensorType, ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -38,11 +38,11 @@ import itertools
 # type information, note that there are several levels of Tensor types, defined
 # in aten/src/ATen/core/jit_type.h:
 #
-# DynamicType - This is a Tensor, but we don't know anything about its
+# TensorType - This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
-# UndefinedTensorType <: DynamicType - Denotes an undefined Tensor
-# TensorType <: DynamicType - Denotes a Tensor for which we know the scalar
+# UndefinedTensorType <: TensorType - Denotes an undefined Tensor
+# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
 #                             type and number of dimensions, but not the concrete
 #                             shapes. For example, appears as 'Float(*, *)' in
 #                             graph print-outs. Useful accessor methods include
@@ -55,7 +55,7 @@ import itertools
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (TensorType) which is better than relying on
+# on the number of dimensions (DimensionedTensorType) which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
@@ -178,28 +178,33 @@ def _try_get_scalar_type(*args):
 # READ ME BEFORE EDITING _default_onnx_opset_version:
 #
 # The variable below controls which ONNX operator set version we are
-# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
-# change occurred in version 8.  As long as this variable < 8, you can
-# export models targeting the old behavior.  However, if you bump
+# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
+# change occurred in version 8. As long as this variable < 8, you can
+# export models targeting the old behavior. However, if you bump
 # this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# you MUST adjust any symbolic affected by breaking changes. The ONNX
 # spec publishes a *comprehensive* list of BC-breaking changes for every
 # operator revision at:
 #
 #   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
 #
 # Please be sure to go through and check all of our implementations here before
-# increasing this number.  This includes symbolic definitions NOT in this
+# increasing this number. This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
+#
+# Besides, opset_version can be specified in the invocation of export()
+# and export_to_pretty_string(), and _export_onnx_opset_version will be set
+# and the symbolic functions should check it to determine the behavior
+# of the exporter.
 
-_default_onnx_opset_version = 9
+_default_onnx_opset_version = 10
 _export_onnx_opset_version = _default_onnx_opset_version
 _onnx_stable_opsets = [9]
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _export_onnx_opset_version:
+    if opset_version == _default_onnx_opset_version:
         return
     if opset_version in _onnx_stable_opsets:
         _export_onnx_opset_version = opset_version
@@ -705,16 +710,49 @@ avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
-@parse_args('v', 'is')
-def adaptive_avg_pool2d(g, input, output_size):
-    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
-    return g.op("GlobalAveragePool", input)
+def _adaptive_pool(name, type, tuple_fn, fn=None):
+    @parse_args('v', 'is')
+    def symbolic_fn(g, input, output_size):
+        # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
+        # by executing a GlobalPool.
+        # It is also supported for cases where the output size is a factor of the input size.
+        # For these cases the stride and kernel size are uniform along all the indices of
+        # the same dimension, which makes it possible to export it to ONNX.
+        # for MaxPool, GlobalMaxPool does not return indices,
+        # so we try using max_poolxd_with_indices, and if it is not possible
+        # (input is not CompleteTensorType or output size not factor of input size)
+        # then we call GlobalAveragePool and return None for the indices
+        if output_size == [1] * len(output_size) and type == "AveragePool":
+            return g.op("GlobalAveragePool", input)
+        if input.type().kind() != "CompleteTensorType":
+            if output_size == [1] * len(output_size):
+                return g.op("GlobalMaxPool", input), None
+            return _unimplemented(name, 'input size not accesible')
+        dim = input.type().sizes()[2:]
+        # verify if output size % input size = 0 for all dim
+        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        if mod != [0] * len(mod):
+            if output_size == [1] * len(output_size):
+                return g.op("GlobalMaxPool", input), None
+            return _unimplemented(name, 'output size that are not factor of input size')
+        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        # call max_poolxd_with_indices to get indices in the output
+        if type == "MaxPool":
+            return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
+        output = g.op(type, input,
+                      kernel_shape_i=tuple_fn(k),
+                      strides_i=tuple_fn(k))
+        return output
+    return symbolic_fn
 
 
-@parse_args('v', 'is')
-def adaptive_max_pool2d(g, input, output_size):
-    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
-    return g.op("GlobalMaxPool", input), None
+adaptive_avg_pool1d = _adaptive_pool('adaptive_avg_pool1d', "AveragePool", _single)
+adaptive_avg_pool2d = _adaptive_pool('adaptive_avg_pool2d', "AveragePool", _pair)
+adaptive_avg_pool3d = _adaptive_pool('adaptive_avg_pool3d', "AveragePool", _triple)
+
+adaptive_max_pool1d = _adaptive_pool('adaptive_max_pool1d', "MaxPool", _single, max_pool1d_with_indices)
+adaptive_max_pool2d = _adaptive_pool('adaptive_max_pool2d', "MaxPool", _pair, max_pool2d_with_indices)
+adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, max_pool3d_with_indices)
 
 
 @parse_args('v', 'is', 'f')
@@ -1508,7 +1546,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # PackPadded operators cannot be optimized out.
     if batch_first:
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
+    if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary beacuse those operators expand to something that

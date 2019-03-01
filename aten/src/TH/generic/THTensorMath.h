@@ -2,9 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.h"
 #else
 
-TH_API void THTensor_(fill)(THTensor *r_, scalar_t value);
-TH_API void THTensor_(zero)(THTensor *r_);
-
 TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);

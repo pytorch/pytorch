@@ -24,10 +24,11 @@ class CodeTemplate(object):
     @staticmethod
     def from_file(filename):
         with open(filename, 'r') as f:
-            return CodeTemplate(f.read())
+            return CodeTemplate(f.read(), filename)
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, filename=""):
         self.pattern = pattern
+        self.filename = filename
 
     def substitute(self, env={}, **kwargs):
         def lookup(v):

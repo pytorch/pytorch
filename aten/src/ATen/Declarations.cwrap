@@ -38,6 +38,7 @@
   return: self
   cname: fill
   variants: function
+  cpu_half: True
   options:
     - arguments:
       - THTensor* self
@@ -1748,6 +1749,7 @@
   name: _th_zero_
   cname: zero
   return: self
+  cpu_half: True
   variants:
     - function
   arguments:
