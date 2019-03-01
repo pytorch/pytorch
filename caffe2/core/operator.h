@@ -220,7 +220,11 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
-    return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
+    if (isLegacyOperator()) {
+      return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
+    }
+
+    return OutputTensor(idx, dims, options)->UnsafeSharedInstance();
   }
 
   void SetOutputTensor(int idx, Tensor tensor) {
