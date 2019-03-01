@@ -243,7 +243,6 @@ struct PythonPrintPass {
     switch (n->kind()) {
       case prim::Constant:
       case prim::Undefined:
-      case prim::None:
         return true;
       default:
         return false;
@@ -594,18 +593,74 @@ struct PythonPrintPass {
     }
   }
 
+  bool isLongLine(const std::string& str) {
+    return str.size() + level * 2 >= 40;
+  }
+
+  bool isLongInline(Node* node) {
+    return output_inline_.count(node) && isLongLine(useOf(node->output()));
+  }
+
+  bool isNonConstantInline(Value* input) {
+    return !isConstantLike(input->node()) &&
+        output_inline_.count(input->node());
+  }
+
+  // [reordering of inlines]
+  // We inline anything that is semantically legal to inline, but sometimes
+  // we find that these lines get too long. In that case we break the lines
+  /// and it  is important that we un-inline all the inputs preceeding the long
+  /// input:
+  //   r = foo(x.add_(b), some_long + expression)
+  //  wrong!
+  //   _0 = some_long + expression
+  //   r = foo(x.add_(b), _0) # wrong! _0 runs before mutating add_
+  // legal!
+  //   _0 = x.add_(b)
+  //   _1 = some_long + expression
+  //   r = foo(_0, _1)
+  void splitLongInlines(at::ArrayRef<Value*> inputs) {
+    size_t long_inline_slice = 0;
+    // find the last input that is too long
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (isLongInline(inputs[i]->node())) {
+        long_inline_slice = i + 1;
+      }
+    }
+    // un-inline everything through the last long line
+    // constants are ignored since long constants are never inlined in the
+    // first place
+    for (size_t i = 0; i < long_inline_slice; ++i) {
+      if (isNonConstantInline(inputs[i])) {
+        printOutputDefinition(inputs[i]->node(), useOf(inputs[i]));
+      }
+    }
+  }
+
+  void printOutputDefinition(Node* node, const std::string& str) {
+    assignValuesToTheirUniqueNames(node->outputs());
+    indent();
+    // Print outputs
+    if (node->outputs().size() > 0) {
+      printValueList(out, node->outputs());
+      out << " = ";
+    }
+    out << str << "\n";
+  }
+
   void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
     if (node->kind() == prim::PythonOp) {
       auto value = static_cast<const PythonOp*>(node);
       if (enforce_importable_ && value->ignore_on_export) {
-          // Op has been marked as ignored, so insert an error in its place
-          indent();
-          out << "ops.prim.IgnoredPythonOp()\n";
-          return;
+        // Op has been marked as ignored, so insert an error in its place
+        indent();
+        out << "ops.prim.IgnoredPythonOp()\n";
+        return;
       }
     }
+    splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -642,22 +697,17 @@ struct PythonPrintPass {
         std::stringstream ss;
         printRHS(ss, node);
 
-        // this node is safe to inline, so assign the output value
-        // to that expression directly
-        // guard against really long lines
-        if (output_inline_.count(node) > 0 &&
-            ss.str().size() + level * 2 < 40) {
+        // we prevent long constants from inlining here.
+        // it is not safe to do the same thing for non-constants here
+        // because of [reordering of inlines]
+        if (output_inline_.count(node) == 0 ||
+            (isConstantLike(node) && isLongLine(ss.str()))) {
+          printOutputDefinition(node, ss.str());
+        } else {
+          // this node is safe to inline, so assign the output value
+          // to that expression directly
           assignValue(node->output(), ss.str());
-          return;
         }
-        assignValuesToTheirUniqueNames(node->outputs());
-        indent();
-        // Print outputs
-        if (node->outputs().size() > 0) {
-          printValueList(out, node->outputs());
-          out << " = ";
-        }
-        out << ss.str() << "\n";
     }
   }
 
@@ -705,6 +755,36 @@ struct PythonPrintPass {
     }
   }
 
+  void printNone(std::ostream& stmt, const Node* node) {
+    if (node->output()->type()->isSubtypeOf(NoneType::get())) {
+      stmt << "None";
+      return;
+    }
+    // XXX - when None has an Optional[T] type, we must ensure that type
+    // can be recovered on parsing. It cannot be recovered if it will be
+    // matched to schema with free variables. If it is used only in places
+    // where there is schema and the scheme has no free variables, then we
+    // can recover it without annotation. Otherwise, we annotate None with
+    // the right optional type
+    const auto& uses = node->output()->uses();
+    bool all_usable_schema =
+        std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+          if (auto schema = u.user->maybeSchema()) {
+            if (u.offset >= schema->arguments().size()) {
+              return false;
+            }
+            return !schema->arguments().at(u.offset).type()->hasFreeVariables();
+          }
+          return false;
+        });
+
+    if (all_usable_schema) {
+      stmt << "None";
+    } else {
+      stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
+    }
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(std::ostream& stmt, Node* node) {
     switch (node->kind()) {
@@ -721,42 +801,13 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
-      case prim::Constant: {
-        IValue v = toIValue(node->output()).value();
-        printConstant(stmt, v);
-      } break;
-      case prim::Undefined:
-      case prim::None: {
-        if (node->output()->type()->isSubtypeOf(NoneType::get())) {
-          stmt << "None";
-          break;
-        }
-        // XXX - when None has an Optional[T] type, we must ensure that type
-        // can be recovered on parsing. It cannot be recovered if it will be
-        // matched to schema with free variables. If it is used only in places
-        // where there is schema and the scheme has no free variables, then we
-        // can recover it without annotation. Otherwise, we annotate None with
-        // the right optional type
-        const auto& uses = node->output()->uses();
-        bool all_usable_schema =
-            std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-              if (auto schema = u.user->maybeSchema()) {
-                if (u.offset >= schema->arguments().size()) {
-                  return false;
-                }
-                return !schema->arguments()
-                            .at(u.offset)
-                            .type()
-                            ->hasFreeVariables();
-              }
-              return false;
-            });
-
-        if (all_usable_schema) {
-          stmt << "None";
+      case prim::Constant:
+      case prim::Undefined: {
+        if (node->kind() == prim::Constant && !node->mustBeNone()) {
+          IValue v = toIValue(node->output()).value();
+          printConstant(stmt, v);
         } else {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", None)";
+          printNone(stmt, node);
         }
       } break;
       case prim::ImplicitTensorToNum: {
@@ -801,10 +852,12 @@ struct PythonPrintPass {
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        if (node->inputs().size() == 0 &&
-            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", {})";
+        bool is_default_type =
+            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
+        if (node->inputs().size() == 0 && !is_default_type) {
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", {})";
         } else {
           printDict(stmt, node->inputs());
         }
@@ -837,6 +890,10 @@ struct PythonPrintPass {
             [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
+      case prim::CreateUserObject:
+      case prim::SetAttr:
+      case prim::GetAttr:
+        throw std::runtime_error("NYI");
       default: {
         Symbol kind = node->kind();
         if (kind.is_aten()) {
@@ -1072,7 +1129,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ListConstruct,
       prim::DictConstruct,
       prim::ListUnpack,
-      prim::None,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
@@ -1081,6 +1137,9 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::Undefined,
+      prim::CreateUserObject,
+      prim::GetAttr,
+      prim::SetAttr,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your

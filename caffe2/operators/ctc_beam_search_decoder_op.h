@@ -10,8 +10,9 @@ template <class Context>
 class CTCBeamSearchDecoderOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CTCBeamSearchDecoderOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit CTCBeamSearchDecoderOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     beam_width_ = this->template GetSingleArgument<int32_t>("beam_width", 10);
     prune_threshold_ =
         this->template GetSingleArgument<float>("prune_threshold", 0.001);
