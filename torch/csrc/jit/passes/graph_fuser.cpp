@@ -137,7 +137,7 @@ c10::optional<bool> isDefined(Value* tensor) {
     return true;
   }
   if (tensor->node()->mustBeNone() ||
-      tensor->node()->kind() == prim::Undefined) {
+      tensor->node()->kind() == prim::AutogradZero) {
     return false;
   }
   return {};
