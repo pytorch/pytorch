@@ -103,7 +103,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * In caffe2/operators/MyOperator.h:
  *
  * > C10_DECLARE_CAFFE2_OPERATOR(C10MyOperator) // C10MyOperator is the name
- * used by c10 for this operator
+ *                                              // used by c10 for this operator
  *
  * In caffe2/operators/MyOperator.cc
  *
@@ -111,27 +111,34 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * >    C10MyOperator,
  * >    (std::vector<c10::Argument>{
  * >      c10::Argument("input1"),
- * >      c10::Argument("input2", c10::IntType::get()),
- * >      c10::Argument("input3", c10::FloatType::get())
+ * >      c10::Argument("argument2", c10::IntType::get()),
+ * >      c10::Argument("argument3", c10::FloatType::get())
  * >    }), (std::vector<c10::Argument>{
  * >      c10::Argument("output1"),
  * >      c10::Argument("output2")
  * >    }),
  * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator
- * class template > )
+ * >                                           // class template
+ * > )
  *
  * In caffe2/operators/MyOperator.cu
  *
  * > C10_REGISTER_CAFFE2_OPERATOR_CUDA(C10MyOperator,
- * caffe2::MyOperator<caffe2::CUDAContext>)
+ *   caffe2::MyOperator<caffe2::CUDAContext>)
  *
  * Notes:
  * - all macros must be defined in the top level namespace, not in namespace
- * caffe2.
+ *   caffe2.
  * - all operators must call C10_DECLARE_CAFFE2_OPERATOR and
- * C10_REGISTER_CAFFE2_OPERATOR_CPU.
+ *   C10_REGISTER_CAFFE2_OPERATOR_CPU.
  * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if
- * you don't want to expose the operator for CUDA operations.
+ *   you don't want to expose the operator for CUDA operations.
+ * - caffe2 arguments must come after caffe2 inputs, in other words, any tensor
+ *   inputs must precede any non-tensor inputs.
+ *
+ * More complex use cases:
+ * - If your operator has a variable number of input tensors, make the first (!)
+ *   input an input of type TensorList. There must be no other tensor inputs.
  */
 #ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName) \
