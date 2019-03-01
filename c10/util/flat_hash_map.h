@@ -5,6 +5,7 @@
 // - replace size_t with uint64_t to fix it for 32bit
 // - add "GCC diagnostic" pragma to ignore -Wshadow
 // - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems to have issues with it otherwise
+// - fix compiler warnings in operator templated_iterator<const value_type>
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -506,7 +507,10 @@ public:
             return std::addressof(current->value);
         }
 
-        operator templated_iterator<const value_type>() const
+        // the template automatically disables the operator when value_type is already
+        // const, because that would cause a lot of compiler warnings otherwise.
+        template<class target_type = const value_type, class = typename std::enable_if<std::is_same<target_type, const value_type>::value && !std::is_same<target_type, value_type>::value>::type>
+        operator templated_iterator<target_type>() const
         {
             return { current };
         }
