@@ -1513,3 +1513,7 @@ struct power_of_two_std_hash : std::hash<T>
 };
 
 } // end namespace ska
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif
