@@ -222,7 +222,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::UserType:
+    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(
