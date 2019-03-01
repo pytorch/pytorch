@@ -863,7 +863,7 @@
 - func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
   device_guard: False
 
-- func: empty_strided(int[] size, int[] stride, *, TensorOptions options=[]) -> Tensor
+- func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   cpu_half: True
   dispatch:
     CPU: empty_strided_cpu
@@ -1707,9 +1707,9 @@
   matches_jit_signature: True
   variants: function, method
 
-- func: scalar_tensor(Scalar s, *, TensorOptions options=[]) -> Tensor
+- func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: rand(int[] size, *, TensorOptions options=[]) -> Tensor
+- func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: rand(int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
 
@@ -1724,11 +1724,11 @@
 
 - func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
-- func: randint(int high, int[] size, *, TensorOptions options=[]) -> Tensor
+- func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int high, int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
 
-- func: randint(int low, int high, int[] size, *, TensorOptions options=[]) -> Tensor
+- func: randint(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
 
@@ -1754,7 +1754,7 @@
 
 - func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
-- func: randn(int[] size, *, TensorOptions options=[]) -> Tensor
+- func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randn(int[] size, *, Generator? generator, TensorOptions options=[]) -> Tensor
 
@@ -1769,7 +1769,7 @@
 
 - func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
-- func: randperm(int n, *, TensorOptions options=[]) -> Tensor
+- func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randperm(int n, *, Generator? generator, TensorOptions options=[]) -> Tensor
 
@@ -2732,11 +2732,11 @@
 # the default would never make sense.
 - func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
 
-- func: sparse_coo_tensor(Tensor indices, Tensor values, *, TensorOptions options=[]) -> Tensor
+- func: sparse_coo_tensor(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: sparse_coo_tensor(Tensor indices, Tensor values, int[] size, *, TensorOptions options=[]) -> Tensor
+- func: sparse_coo_tensor(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
-- func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, TensorOptions options=[]) -> Tensor
+- func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
   dispatch:
