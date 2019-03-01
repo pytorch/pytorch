@@ -14,8 +14,9 @@ template <typename F, class Context>
 class ReshapeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ReshapeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ReshapeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         new_shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   bool RunOnDevice() override {

@@ -87,8 +87,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled &&
-          node->kind() != prim::None) {
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -182,7 +181,8 @@ EncoderBase::EncoderBase(
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.4");
+  // TODO: set the producer version using appropriate function call
+  model_proto_.set_producer_version("1.1");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -236,7 +236,7 @@ void EncoderBase::EncodeBlock(
   for (auto node : block->nodes()) {
     bool is_raw_export =
         operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::None && !is_raw_export) {
+    if (node->mustBeNone() && !is_raw_export) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -249,7 +249,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->kind() == prim::None && !is_raw_export) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());

@@ -110,8 +110,8 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_DEVICE __device__
 #define C10_HOST __host__
 // constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5) 
-// but 2048 for previous architectures. You'll get warnings if you exceed these constants. 
+// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
+// but 2048 for previous architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
 #if __CUDA_ARCH__ >= 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
@@ -121,17 +121,17 @@ constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 // CUDA_MAX_THREADS_PER_BLOCK is same for all architectures currently
 constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
 // CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block size.
-// 256 is a good number for this fallback and should give good occupancy and 
+// 256 is a good number for this fallback and should give good occupancy and
 // versatility across all architectures.
 constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // NOTE: if you are thinking of constexpr-ify the inputs to launch bounds, it
-//       turns out that although __launch_bounds__ can take constexpr, it 
-//       can't take a constexpr that has anything to do with templates. 
-//       Currently we use launch_bounds that depend on template arguments in 
-//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and 
+//       turns out that although __launch_bounds__ can take constexpr, it
+//       can't take a constexpr that has anything to do with templates.
+//       Currently we use launch_bounds that depend on template arguments in
+//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and
 //       C10_MIN_BLOCKS_PER_SM are kept as macros.
-// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU. 
-// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)), 
+// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU.
+// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
 // which will also properly respect limits on old architectures.
 #define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) : CUDA_THREADS_PER_BLOCK_FALLBACK)
 #define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) ? (blocks_per_sm) : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) / (threads_per_block))))
@@ -164,9 +164,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_MOBILE 1
 #elif (defined(__APPLE__) && TARGET_OS_MAC)
 #define C10_IOS 1
-#define C10_MOBILE 0
-#else
-#define C10_MOBILE 0
 #endif // ANDROID / IOS / MACOS
 
 // Portably determine if a type T is trivially copyable or not.
