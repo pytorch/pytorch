@@ -40,7 +40,7 @@ template <class Context>
 class DBExistsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -70,7 +70,7 @@ template <class Context>
 class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LoadOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit LoadOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -408,7 +408,7 @@ template <class Context>
 class SaveOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SaveOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit SaveOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -521,7 +521,7 @@ string FormatString(const string& pattern, Ts... values) {
 template <class Context>
 class CheckpointOp final : public Operator<Context> {
  public:
-  CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         db_pattern_(this->template GetSingleArgument<string>("db", "")),
         every_(this->template GetSingleArgument<int>("every", 1)),

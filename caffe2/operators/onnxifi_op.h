@@ -25,7 +25,7 @@ class OnnxifiOp final : public Operator<Context> {
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
+  OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();

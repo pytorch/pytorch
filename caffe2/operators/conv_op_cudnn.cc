@@ -12,7 +12,7 @@ namespace caffe2 {
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
-  CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         cudnn_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
@@ -432,7 +432,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
 
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
-  CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws) {}
 
   ~CudnnConvOp() override {}
@@ -453,7 +453,7 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
 class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
-  CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(

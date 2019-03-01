@@ -15,18 +15,16 @@ namespace caffe2 {
 template <typename T, class Context>
 class AveragedLoss final : public SumElementsOp<T, Context> {
  public:
-  template <class... Args>
-  explicit AveragedLoss(Args&&... args)
-      : SumElementsOp<T, Context>(std::forward<Args>(args)...) {}
+  AveragedLoss(const OperatorDef& operator_def, Workspace* ws)
+      : SumElementsOp<T, Context>(operator_def, ws, true) {}
   ~AveragedLoss() {}
 };
 
 template <typename T, class Context>
 class AveragedLossGradient final : public SumElementsGradientOp<T, Context> {
  public:
-  template <class... Args>
-  explicit AveragedLossGradient(Args&&... args)
-      : SumElementsGradientOp<T, Context>(std::forward<Args>(args)...) {}
+  AveragedLossGradient(const OperatorDef& operator_def, Workspace* ws)
+      : SumElementsGradientOp<T, Context>(operator_def, ws, true) {}
   ~AveragedLossGradient() {}
 };
 

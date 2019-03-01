@@ -10,9 +10,8 @@ namespace caffe2 {
 template <class Context>
 class MarginRankingCriterionOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit MarginRankingCriterionOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  MarginRankingCriterionOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws),
         OP_SINGLE_ARG(float, "margin", margin_, 1.0) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -25,9 +24,8 @@ class MarginRankingCriterionOp final : public Operator<Context> {
 template <class Context>
 class MarginRankingCriterionGradientOp final : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit MarginRankingCriterionGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  MarginRankingCriterionGradientOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws),
         OP_SINGLE_ARG(float, "margin", margin_, 1.0) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
