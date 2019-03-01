@@ -10294,9 +10294,21 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
-    def test_c10_layer_norm(self):
+    def test_c10_layer_norm_cpu(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
+        epsilon = 1e-4
+
+        expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
+        actual_norm, actual_mean, actual_stdev = \
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
+        torch.testing.assert_allclose(expected_norm, actual_norm)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU")
+    @skipIfRocm
+    def test_c10_layer_norm_cuda(self):
+        # test that we can call c10 ops and they return a reasonable result
+        X = torch.rand(5, 5, dtype=torch.float).cuda()
         epsilon = 1e-4
 
         expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
