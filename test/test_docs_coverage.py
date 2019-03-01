@@ -36,10 +36,10 @@ class TestDocCoverage(unittest.TestCase):
             'is_tensor', 'compiled_with_cxx11_abi', 'set_rng_state',
             'manual_seed'
         ]
-        everything = self.parse_rst('torch.rst', r1) - set(whitelist)
+        in_rst = self.parse_rst('torch.rst', r1) - set(whitelist)
         # get symbols in functional.py and _torch_docs.py
         whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate']
-        everything2 = set()
+        has_docstring = set()
         with open(pypath, 'r') as f:
             body = ast.parse(f.read()).body
             for i in body:
@@ -54,28 +54,25 @@ class TestDocCoverage(unittest.TestCase):
                 if i.value.id != 'torch':
                     continue
                 i = i.attr
-                everything2.add(i)
+                has_docstring.add(i)
             for p in dir(torch.functional):
                 if not p.startswith('_') and p[0].islower():
-                    everything2.add(p)
-            everything2 -= set(whitelist2)
+                    has_docstring.add(p)
+            has_docstring -= set(whitelist2)
         # assert they are equal
-        for p in everything:
-            self.assertIn(p, everything2, 'in torch.rst but not in python')
-        for p in everything2:
-            self.assertIn(p, everything, 'in python but not in torch.rst')
+        for p in in_rst:
+            self.assertIn(p, has_docstring, 'in torch.rst but not in python')
+        for p in has_docstring:
+            self.assertIn(p, in_rst, 'in python but not in torch.rst')
 
     def test_tensor(self):
-        # get symbols documented in tensors.rst
-        everything = self.parse_rst('tensors.rst', r2)
-        # get symbols in tensor.py and _tensor_docs.py
+        in_rst = self.parse_rst('tensors.rst', r2)
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
-        everything2 = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
-        # assert they are equal
-        for p in everything:
-            self.assertIn(p, everything2, 'in tensors.rst but not in python')
-        for p in everything2:
-            self.assertIn(p, everything, 'in python but not in tensors.rst')
+        has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
+        for p in in_rst:
+            self.assertIn(p, has_docstring, 'in tensors.rst but not in python')
+        for p in has_docstring:
+            self.assertIn(p, in_rst, 'in python but not in tensors.rst')
 
 
 if __name__ == '__main__':
