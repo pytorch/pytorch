@@ -155,7 +155,7 @@ class ConvPoolOpBase : public Operator<Context> {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
-            kernel_[dim],
+            global_pooling_ || kernel_[dim],
             "If you are doing convolution or pooling, you will need to set "
             "explicitly the kernel size.");
       }

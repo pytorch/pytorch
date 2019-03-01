@@ -21,9 +21,8 @@
 namespace caffe2 {
 class MIOPENPoolOp : public ConvPoolOpBase<HIPContext, true> {
  public:
-  template<class... Args>
-  explicit MIOPENPoolOp(Args&&... args)
-      : ConvPoolOpBase<HIPContext, true>(std::forward<Args>(args)...),
+  explicit MIOPENPoolOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<HIPContext, true>(operator_def, ws),
         poolWsSize_(0),
         poolWs_(nullptr),
         miopen_wrapper_(&context_),
