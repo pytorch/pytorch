@@ -338,31 +338,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline int InputSize() const {
-    if (isLegacyOperator()) {
-      return inputs_.size();
-    }
-    if (0 == ivalue_inputs_.size()) {
-      return 0;
-    }
-    if (ivalue_inputs_[0].isTensorList()) {
-      // if the first input is a tensor list, we get input tensors by indexing into that list.
-      // currently, this means that only tensors from that list are accessible as inputs.
-      // any hypothetical input tensors that come after the list are not accessible.
-      return ivalue_inputs_[0].toTensorListRef().size();
-    }
-    // it's not a tensor list. Count the number of tensor inputs and return them.
-    size_t num_tensor_inputs = 0;
-    bool found_nontensor = false;
-    for (const auto& input : ivalue_inputs_) {
-      if (input.isTensor()) {
-        AT_ASSERTM(!found_nontensor, "All tensor arguments must come before non-tensor arguments");
-        ++num_tensor_inputs;
-      } else {
-        found_nontensor = true;
-      }
-    }
-    return num_tensor_inputs;
+    return input_size_;
   }
+
   inline int OutputSize() const {
     if (isLegacyOperator()) {
       return outputs_.size();
@@ -579,6 +557,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // operator.
   vector<caffe2::Tensor> input_tensors_;
   vector<caffe2::Tensor> output_tensors_;
+
+  int input_size_;
 
   int net_position_{kNoNetPositionSet};
 
