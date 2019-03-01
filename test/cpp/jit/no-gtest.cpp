@@ -1,5 +1,6 @@
 #include <test/cpp/jit/test_alias_analysis.h>
 #include <test/cpp/jit/test_irparser.h>
+#include <test/cpp/jit/test_loop_unrolling.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 
@@ -42,8 +43,8 @@ std::string runJITCPPTests() {
   testAliasTracker();
   testNetDefConverter(out);
   testIRParser(out);
+  testLoopUnrolling(out);
   return out.str();
 }
-
 } // namespace jit
 } // namespace torch
