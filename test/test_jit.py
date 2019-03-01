@@ -47,8 +47,6 @@ import random
 from typing import List, Dict, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-from torch._C import DynamicType, ListType, OptionalType, NumberType, \
-    StringType
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -1642,27 +1640,35 @@ class TestJit(JitTestCase):
         fn(y)
 
     def test_decompose_addmm(self):
-        @torch.jit.script
-        def addmm(mat, mat1, mat2, alpha, beta):
-            a = mat.addmm(mat1, mat2)
-            b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
-            c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-            d = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
+        def does_decompose():
+            @torch.jit.script
+            def addmm(mat, mat1, mat2, alpha, beta):
+                a = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
+                b = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
-            return a + b + c + d
+                return a + b
 
-        mat = torch.randn(2, 2)
-        mat1 = torch.randn(2, 4)
-        mat2 = torch.randn(4, 2)
-        alpha = torch.FloatTensor([123.0])
-        beta = torch.FloatTensor([321.0])
+            mat = torch.randn(2, 2)
+            mat1 = torch.randn(2, 4)
+            mat2 = torch.randn(4, 2)
+            alpha = torch.FloatTensor([123.0])
+            beta = torch.FloatTensor([321.0])
 
-        out_ref = addmm(mat, mat1, mat2, alpha, beta)
-        self.run_pass('canonicalize_ops', addmm.graph)
-        out_test = addmm(mat, mat1, mat2, alpha, beta)
-        self.assertEqual(out_ref, out_test)
-        # first two addmm replaced
-        FileCheck().check_count("addmm", 2, exactly=True).run(str(addmm.graph))
+            out_ref = addmm(mat, mat1, mat2, alpha, beta)
+            self.run_pass('canonicalize_ops', addmm.graph)
+            out_test = addmm(mat, mat1, mat2, alpha, beta)
+            self.assertEqual(out_ref, out_test)
+            FileCheck().check_not("addmm").run(str(addmm.graph))
+
+        def doesnt_decompose():
+            @torch.jit.script
+            def addmm(mat, mat1, mat2, alpha, beta):
+                a = mat.addmm(mat1, mat2)
+                b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
+
+            orig = str(addm.graph)
+            self.run_pass('canonicalize_ops', addmm.graph)
+            self.assertTrue(orig == str(addmm.graph))
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
@@ -12030,8 +12036,9 @@ class TestFuser(JitTestCase):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
         graph = ge.graph_for(*inputs)
-        FileCheck().check_not("Chunk").check("FusionGroup").check_next("TupleConstruct") \
-            .check_next("return").run(str(graph))
+        FileCheck().check_not("Chunk").check_not("aten::add").check_not("aten::sigmoid") \
+            .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
+            .check_next("return").check_not("FusionGroup_1").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
