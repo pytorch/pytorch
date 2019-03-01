@@ -30,35 +30,18 @@ class TestDocCoverage(unittest.TestCase):
 
     def test_torch(self):
         # get symbols documented in torch.rst
-        whitelist = [
+        whitelist = {
             'set_printoptions', 'get_rng_state', 'is_storage', 'initial_seed',
             'set_default_tensor_type', 'load', 'save', 'set_default_dtype',
             'is_tensor', 'compiled_with_cxx11_abi', 'set_rng_state',
             'manual_seed'
-        ]
-        in_rst = self.parse_rst('torch.rst', r1) - set(whitelist)
+        }
+        in_rst = self.parse_rst('torch.rst', r1) - whitelist
         # get symbols in functional.py and _torch_docs.py
-        whitelist2 = ['product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate']
-        has_docstring = set()
-        with open(pypath, 'r') as f:
-            body = ast.parse(f.read()).body
-            for i in body:
-                if not isinstance(i, _ast.Expr):
-                    continue
-                i = i.value
-                if not isinstance(i, _ast.Call):
-                    continue
-                if i.func.id != 'add_docstr':
-                    continue
-                i = i.args[0]
-                if i.value.id != 'torch':
-                    continue
-                i = i.attr
-                has_docstring.add(i)
-            for p in dir(torch.functional):
-                if not p.startswith('_') and p[0].islower():
-                    has_docstring.add(p)
-            has_docstring -= set(whitelist2)
+        whitelist2 = {'product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate'}
+        has_docstring = set(a for a in dir(torch) if getattr(torch, a).__doc__ and not a.startswith('_'))
+        nn_functional = set(dir(torch.nn.functional))
+        has_docstring -= nn_functional | whitelist2
         # assert they are equal
         for p in in_rst:
             self.assertIn(p, has_docstring, 'in torch.rst but not in python')
