@@ -13,9 +13,8 @@ template <typename T, class Context>
 class NormalizeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit NormalizeOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  NormalizeOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws) {}
 
   bool RunOnDevice() override {
     const auto& x = Input(0);
@@ -43,9 +42,8 @@ template <typename T, class Context>
 class NormalizeGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit NormalizeGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  NormalizeGradientOp(const OperatorDef& def, Workspace* ws)
+      : Operator<Context>(def, ws) {}
 
   bool RunOnDevice() override {
     const auto& x = Input(0);

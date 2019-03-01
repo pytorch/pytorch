@@ -10,8 +10,9 @@ template <class Context>
 class ExpandDimsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ExpandDimsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ExpandDimsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
@@ -53,8 +54,9 @@ template <class Context>
 class SqueezeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SqueezeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SqueezeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
