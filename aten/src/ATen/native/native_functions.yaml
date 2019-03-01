@@ -1572,7 +1572,7 @@
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
-- func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int64_t count) -> (Tensor, Tensor)
+- func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
 
