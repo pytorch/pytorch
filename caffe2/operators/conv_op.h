@@ -14,7 +14,7 @@ template <typename T, class Context>
 class ConvOp final : public ConvPoolOpBase<Context, true> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context, true);
-  ConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context, true>(operator_def, ws), ws_(ws) {
     // Since this is the default convolution implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.

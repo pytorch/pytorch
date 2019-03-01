@@ -433,7 +433,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext, true> {
 
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
-  CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws) {}
 
   ~CudnnConvOp() override {}
@@ -454,7 +454,7 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
 class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
-  CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(

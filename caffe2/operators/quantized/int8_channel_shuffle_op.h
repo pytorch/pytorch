@@ -15,7 +15,7 @@ namespace int8 {
 
 class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext, false> {
  public:
-  Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext, false>(operator_def, ws),
         ws_(ws) {
     OPERATOR_NEEDS_FEATURE(

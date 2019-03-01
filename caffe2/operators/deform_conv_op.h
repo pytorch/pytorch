@@ -58,7 +58,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DeformConvOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws), ws_(ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
@@ -86,7 +86,7 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
  public:
   USE_DEFORMABLE_CONV_BASE_FUNCTIONS(T, Context);
 
-  DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws),
         no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
