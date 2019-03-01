@@ -118,9 +118,6 @@
 #include <THNN/generic/SoftShrink.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SparseLinear.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/IndexLinear.c>
 #include <TH/THGenerateFloatTypes.h>
 
