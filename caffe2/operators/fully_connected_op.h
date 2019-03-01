@@ -17,8 +17,9 @@ template <
 class FullyConnectedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FullyConnectedOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
@@ -164,8 +165,9 @@ template <
 class FullyConnectedGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FullyConnectedGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(

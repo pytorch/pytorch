@@ -24,9 +24,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
         if (iter->isTensor() && iter->toTensor().defined()) {
           *iter = unwrap(std::move(*iter).toTensor());
-        }
-
-        if (iter->isTensorList()) {
+        } else if (iter->isTensorList()) {
           for (auto& item : iter->toTensorList()->elements()) {
             item = unwrap(std::move(item));
           }

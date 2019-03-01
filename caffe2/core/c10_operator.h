@@ -140,6 +140,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
+#ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName) \
   namespace caffe2 {                              \
   namespace _c10_ops {                            \
@@ -215,3 +216,11 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
           at::DeviceType::HIP>>()                                              \
       .dispatchKey(CUDATensorId());                                            \
   }
+
+#else
+// Don't use c10 dispatcher on mobile because of binary size
+#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, Inputs, Outputs, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)
+#endif
