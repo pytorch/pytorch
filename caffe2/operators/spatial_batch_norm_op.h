@@ -19,8 +19,9 @@ class SpatialBNOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, false),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
@@ -281,8 +282,9 @@ class SpatialBNGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
@@ -323,7 +325,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(rstd.numel(), C);
 
     auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
-    at::IntList dscale_sizes, dbias_sizes;
+    at::IntArrayRef dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
       dscale_sizes = scale.sizes();
       dbias_sizes = scale.sizes();
@@ -392,7 +394,8 @@ class SpatialBNGradientOp : public Operator<Context> {
           dbias_data,
           alpha_data,
           beta_data,
-          gamma_data);
+          gamma_data,
+          dX_data);
     }
     ComputeXGradient<T>(
         N, C, HxW, dY_data, X_data, alpha_data, beta_data, gamma_data, dX_data);
@@ -431,7 +434,8 @@ class SpatialBNGradientOp : public Operator<Context> {
       T* dbias,
       T* alpha,
       T* beta,
-      T* gamma);
+      T* gamma,
+      T* scratch);
 
   template <typename T>
   void ComputeXGradient(
@@ -452,6 +456,7 @@ class SpatialBNGradientOp : public Operator<Context> {
   Tensor alpha_;
   Tensor beta_;
   Tensor gamma_;
+  Tensor ones_;
 
   INPUT_TAGS(
       INPUT,

@@ -12,6 +12,10 @@ from torch._C import _add_docstr
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
+#
+# NB: If you add a new method to Tensor, you must update
+# torch/__init__.py.in to add a type annotation for your method;
+# otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -251,12 +255,8 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
-    def argsort(self, dim=None, descending=False):
-        r"""See :func: `torch.argsort`"""
-        return torch.argsort(self, dim, descending)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
-        r"""See :func: `torch.norm`"""
+        r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def potrf(self, upper=True):
@@ -303,47 +303,28 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def index_add(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
-        """
-        return self.clone().index_add_(dim, index, tensor)
-
-    def index_copy(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
-        """
-        return self.clone().index_copy_(dim, index, tensor)
-
-    def index_fill(self, dim, index, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
-        """
-        return self.clone().index_fill_(dim, index, value)
-
-    def scatter(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
-        """
-        return self.clone().scatter_(dim, index, source)
-
-    def scatter_add(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
-        """
-        return self.clone().scatter_add_(dim, index, source)
-
-    def masked_scatter(self, mask, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
-        """
-        return self.clone().masked_scatter_(mask, tensor)
-
-    def masked_fill(self, mask, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
-        """
-        return self.clone().masked_fill_(mask, value)
-
     def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted, return_inverse, dim)
+        if dim is not None:
+            output, inverse_indices = torch._unique_dim(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = torch._unique(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
@@ -368,7 +349,7 @@ class Tensor(torch._C._TensorBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
     def __floordiv__(self, other):
         result = self / other

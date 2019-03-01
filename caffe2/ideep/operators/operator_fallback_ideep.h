@@ -159,9 +159,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           dtensor->CopyFrom(src);
         } else {
           dst->Reset(new Tensor(CPU));
-          auto dtensor = BlobGetMutableTensor(dst, CPU);
-          dtensor->Resize(src_dims);
-          dtensor->ShareData(src);
+          BlobSetTensor(dst, src.Alias());
         }
       }
     }

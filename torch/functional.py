@@ -4,6 +4,8 @@ from torch._six import inf
 from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
+from collections import Iterable
+from torch._utils import annotate
 from itertools import product
 import math
 import warnings
@@ -11,7 +13,6 @@ import warnings
 __all__ = [
     'argmax',
     'argmin',
-    'argsort',
     'btriunpack',
     'chain_matmul',
     'einsum',
@@ -141,7 +142,6 @@ Args:
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
     operands (list of Tensors): The operands to compute the Einstein sum of.
-           Note that the operands are passed as a list, not as individual arguments.
 
 Examples::
 
@@ -288,7 +288,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     expression:
 
     .. math::
-        X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
+        X[m, \omega] = \sum_{k = 0}^{\text{win\_length-1}}%
                             \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
                             \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
@@ -433,8 +433,19 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._C._VariableFunctions.unique(
-        input, sorted=sorted, return_inverse=return_inverse, dim=dim)
+    if dim is not None:
+        output, inverse_indices = torch._unique_dim(
+            input,
+            dim,
+            sorted=sorted,
+            return_inverse=return_inverse
+        )
+    else:
+        output, inverse_indices = torch._unique(
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+        )
     if return_inverse:
         return output, inverse_indices
     else:
@@ -558,39 +569,6 @@ def tensordot(a, b, dims=2):
     return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
 
 
-def argsort(input, dim=None, descending=False):
-    r"""Returns the indices that sort a tensor along a given dimension in ascending
-    order by value.
-
-    This is the second value returned by :meth:`torch.sort`.  See its documentation
-    for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int, optional): the dimension to sort along
-        descending (bool, optional): controls the sorting order (ascending or descending)
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
-                [ 0.1598,  0.0788, -0.0745, -1.2700],
-                [ 1.2208,  1.0722, -0.7064,  1.2564],
-                [ 0.0669, -0.2318, -0.8229, -0.9280]])
-
-
-        >>> torch.argsort(a, dim=1)
-        tensor([[2, 0, 3, 1],
-                [3, 2, 1, 0],
-                [2, 1, 0, 3],
-                [3, 2, 1, 0]])
-    """
-    if dim is None:
-        return torch.sort(input, -1, descending)[1]
-    return torch.sort(input, dim, descending)[1]
-
-
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
@@ -668,7 +646,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         >>> torch.norm(a, float('inf'))
         tensor(4.)
         >>> torch.norm(b, float('inf'))
-        tensor([4., 3., 4.])
+        tensor(4.)
         >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])

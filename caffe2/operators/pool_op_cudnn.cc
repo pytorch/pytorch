@@ -50,8 +50,9 @@ void SetTensorDescriptor(
 template <class Functor>
 class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -86,7 +87,7 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
     }
   }
 
-  ~CuDNNPoolOp() {
+  ~CuDNNPoolOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(X_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(Y_desc_));
     CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
@@ -100,12 +101,16 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
@@ -186,8 +191,9 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
 template <class Functor>
 class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -222,7 +228,7 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     }
   }
 
-  ~CuDNNPoolGradientOp() {
+  ~CuDNNPoolGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(X_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(Y_desc_));
     CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
@@ -238,7 +244,7 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
@@ -248,6 +254,10 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);

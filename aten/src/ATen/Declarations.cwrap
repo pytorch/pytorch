@@ -29,8 +29,8 @@
         - THTensor* self
         - THStorage* source
         - long storage_offset
-        - IntListSize size
-        - arg: IntList stride
+        - IntArrayRefSize size
+        - arg: IntArrayRef stride
           default: {}
 ]]
 [[
@@ -38,6 +38,7 @@
   return: self
   cname: fill
   variants: function
+  cpu_half: True
   options:
     - arguments:
       - THTensor* self
@@ -131,7 +132,7 @@
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: IntListSize size
+    - arg: IntArrayRefSize size
       long_args: True
 ]]
 [[
@@ -910,11 +911,6 @@
 [[
   name: _th_abs
   cname: abs
-  types:
-    - floating_point
-    - Long
-    - Int
-    - Short
   backends:
     - CPU
     - CUDA
@@ -959,7 +955,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -988,7 +983,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -1755,6 +1749,7 @@
   name: _th_zero_
   cname: zero
   return: self
+  cpu_half: True
   variants:
     - function
   arguments:
@@ -2777,7 +2772,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   return: self
   arguments:
@@ -2811,7 +2805,6 @@
 [[
   name: _th_geometric_
   backends:
-    - CPU
     - CUDA
   cname: geometric
   variants: function
@@ -2872,6 +2865,7 @@
   name: _th_cat
   cname: catArray
   variants: [function]
+  cpu_half: True
   return: self
   arguments:
     - arg: THTensor* self

@@ -147,7 +147,7 @@ __global__ void reflection_pad2d_backward_out_kernel(
 }
 
 void reflection_pad1d_out_template(
-    Tensor &output, const Tensor &input_, IntList padding) {
+    Tensor &output, const Tensor &input_, IntArrayRef padding) {
   AT_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
@@ -204,7 +204,7 @@ void reflection_pad1d_out_template(
 
 void reflection_pad1d_backward_out_template(
     Tensor & grad_input, const Tensor & grad_output_,
-    const Tensor & input, IntList padding) {
+    const Tensor & input, IntArrayRef padding) {
 
   AT_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
@@ -251,7 +251,7 @@ void reflection_pad1d_backward_out_template(
 }
 
 void reflection_pad2d_out_template(
-    Tensor &output, const Tensor &input_, IntList padding) {
+    Tensor &output, const Tensor &input_, IntArrayRef padding) {
   AT_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
@@ -325,7 +325,7 @@ void reflection_pad2d_out_template(
 
 void reflection_pad2d_backward_out_template(
     Tensor &grad_input, const Tensor &grad_output_,
-    const Tensor &input, IntList padding) {
+    const Tensor &input, IntArrayRef padding) {
   AT_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
   AT_CHECK(canUse32BitIndexMath(grad_output_),
@@ -384,12 +384,12 @@ void reflection_pad2d_backward_out_template(
 
 
 Tensor& reflection_pad1d_out_cuda(
-    Tensor& output, const Tensor& input, IntList padding) {
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
 
-Tensor reflection_pad1d_cuda(const Tensor& input, IntList padding) {
+Tensor reflection_pad1d_cuda(const Tensor& input, IntArrayRef padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
@@ -398,7 +398,7 @@ Tensor reflection_pad1d_cuda(const Tensor& input, IntList padding) {
 Tensor& reflection_pad1d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad1d_backward_out_template(
@@ -409,7 +409,7 @@ Tensor& reflection_pad1d_backward_out_cuda(
 Tensor reflection_pad1d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   auto grad_input = at::zeros_like(input);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
@@ -417,12 +417,12 @@ Tensor reflection_pad1d_backward_cuda(
 }
 
 Tensor& reflection_pad2d_out_cuda(
-    Tensor& output, const Tensor& input, IntList padding) {
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
 
-Tensor reflection_pad2d_cuda(const Tensor& input, IntList padding) {
+Tensor reflection_pad2d_cuda(const Tensor& input, IntArrayRef padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad2d_out_template(output, input, padding);
   return output;
@@ -431,7 +431,7 @@ Tensor reflection_pad2d_cuda(const Tensor& input, IntList padding) {
 Tensor& reflection_pad2d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad2d_backward_out_template(
@@ -442,7 +442,7 @@ Tensor& reflection_pad2d_backward_out_cuda(
 Tensor reflection_pad2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
-    IntList padding) {
+    IntArrayRef padding) {
   auto grad_input = at::zeros_like(input);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);

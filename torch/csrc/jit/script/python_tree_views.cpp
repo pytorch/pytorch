@@ -91,9 +91,13 @@ void initTreeViewBindings(PyObject* module) {
           "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
-      .def(py::init([](const Expr& type, const Ident& name) {
+      .def(py::init([](const Expr& type, const Ident& name, bool kwarg_only) {
         return Param::create(
-            name.range(), name, type, Maybe<Expr>::create(name.range()));
+            name.range(),
+            name,
+            type,
+            Maybe<Expr>::create(name.range()),
+            kwarg_only);
       }));
   py::class_<Attribute, TreeView>(m, "Attribute")
       .def(py::init([](const Ident& name, const Expr& value) {
@@ -115,6 +119,11 @@ void initTreeViewBindings(PyObject* module) {
       py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
         const auto& r = name.range();
         return Def::create(r, name, decl, wrap_list(r, std::move(body)));
+      }));
+  py::class_<ClassDef, TreeView>(m, "ClassDef")
+      .def(py::init([](const Ident& name, std::vector<Def> body) {
+        const auto& r = name.range();
+        return ClassDef::create(r, name, wrap_list(r, std::move(body)));
       }));
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
@@ -218,7 +227,6 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Select, Expr>(m, "Select")
       .def(py::init([](const Expr& expr, const Ident& field) {
-        const auto& r = expr.range();
         return Select::create(expr.range(), expr, field);
       }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
@@ -233,6 +241,15 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<TupleLiteral, Expr>(m, "TupleLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
         return TupleLiteral::create(range, wrap_list(range, std::move(args)));
+      }));
+  py::class_<DictLiteral, Expr>(m, "DictLiteral")
+      .def(py::init([](const SourceRange& range,
+                       std::vector<Expr> keys,
+                       std::vector<Expr> values) {
+        return DictLiteral::create(
+            range,
+            wrap_list(range, std::move(keys)),
+            wrap_list(range, std::move(values)));
       }));
   py::class_<Subscript, Expr>(m, "Subscript")
       .def(py::init([](const Expr& base, std::vector<Expr> subscript_exprs) {

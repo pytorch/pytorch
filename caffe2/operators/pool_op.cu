@@ -698,10 +698,10 @@ bool AveragePoolFunctor<CUDAContext>::
         const float* X,
         float* Y,
         CUDAContext* context) const {
-  const std::array<int, 2> dims = {N * C, HxW};
-  const int axis = 1;
+  const std::array<int, 2> X_dims = {N * C, HxW};
+  const std::array<int, 2> Y_dims = {N * C, 1};
   math::ReduceMean<float, CUDAContext>(
-      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+      2, X_dims.data(), Y_dims.data(), 1.0f, X, Y, context);
   return true;
 }
 
@@ -1756,10 +1756,10 @@ bool MaxPoolFunctor<CUDAContext>::
         const float* X,
         float* Y,
         CUDAContext* context) const {
-  const std::array<int, 2> dims = {N * C, HxW};
-  const int axis = 1;
+  const std::array<int, 2> X_dims = {N * C, HxW};
+  const std::array<int, 2> Y_dims = {N * C, 1};
   math::ReduceMax<float, CUDAContext>(
-      2, dims.data(), 1, &axis, 1.0f, X, Y, context);
+      2, X_dims.data(), Y_dims.data(), 1.0f, X, Y, context);
   return true;
 }
 
@@ -1773,10 +1773,10 @@ bool MaxPoolFunctor<CUDAContext>::
         const float* X,
         float* Y,
         CUDAContext* context) const {
-  const std::array<int, 3> dims = {N, HxW, C};
-  const int axis = 1;
+  const std::array<int, 3> X_dims = {N, HxW, C};
+  const std::array<int, 3> Y_dims = {N, 1, C};
   math::ReduceMax<float, CUDAContext>(
-      3, dims.data(), 1, &axis, 1.0f, X, Y, context);
+      3, X_dims.data(), Y_dims.data(), 1.0f, X, Y, context);
   return true;
 }
 

@@ -9,7 +9,7 @@
 #ifdef USE_CUDA
 #include <torch/csrc/cuda/comm.h>
 #endif
-#include <torch/csrc/utils/functional.h>
+#include <ATen/core/functional.h>
 
 #include <ATen/Device.h>
 #include <ATen/Parallel.h>

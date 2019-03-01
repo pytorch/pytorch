@@ -13,8 +13,9 @@ class SparseToDenseOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  SparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SparseToDenseOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         output_first_dim_(
             this->template GetSingleArgument<int>("output_first_dim", 0)) {}
 
@@ -107,8 +108,9 @@ class SparseToDenseOp final : public Operator<Context> {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
         Input(VALUES).dtype().name(),
-        "Consider adding it a type in the list DispatchHelper or implementing "
-        "a generic version (which won't work for duplicated indices though)");
+        "consider adding it as a type in the DispatchHelper list or "
+        "implementing a generic version (which won't work for "
+        "duplicated indices though)");
   }
 
  private:

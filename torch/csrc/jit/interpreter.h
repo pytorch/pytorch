@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 
 namespace at {
 class Tensor;
@@ -26,6 +26,8 @@ struct InterpreterStateImpl;
 struct Graph;
 struct Node;
 using Stack = std::vector<c10::IValue>;
+using c10::ivalue::Future;
+using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}

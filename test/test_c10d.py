@@ -842,6 +842,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
     @skip_if_not_multigpu
     def test_scatter_stress_cuda(self):
         inputs = [

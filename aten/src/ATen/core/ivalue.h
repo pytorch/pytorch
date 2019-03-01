@@ -3,10 +3,11 @@
 #include <condition_variable>
 #include <type_traits>
 
+#include <ATen/core/blob.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-#include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <ATen/core/Tensor.h>
@@ -65,7 +66,18 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   }
 };
 
+struct DictHash {
+  size_t operator()(const IValue& ivalue) const;
+};
+
+struct DictEqualTo {
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
+};
+
+using UnorderedMap = std::unordered_map<IValue, IValue, DictHash, DictEqualTo>;
+
 struct Future;
+struct GenericDict;
 
 struct CAFFE2_API Tuple : public List<IValue> {
   using List<IValue>::List;
@@ -79,6 +91,7 @@ using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
+struct UserObject;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -102,8 +115,10 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
+  _(GenericDict) \
   _(Future) \
-  _(Device)
+  _(Device) \
+  _(UserObject)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -298,6 +313,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
+  const ivalue::UnorderedMap& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -363,6 +379,31 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::GenericList> toGenericList() const & {
     AT_ASSERT(isGenericList());
     return toIntrusivePtr<ivalue::GenericList>();
+  }
+
+  // GenericDict
+  IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
+  IValue(ivalue::UnorderedMap v);
+  bool isGenericDict() const { return Tag::GenericDict == tag; }
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
+    AT_ASSERT(isGenericDict());
+    return moveToIntrusivePtr<ivalue::GenericDict>();
+  }
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const & {
+    AT_ASSERT(isGenericDict());
+    return toIntrusivePtr<ivalue::GenericDict>();
+  }
+
+  // UserType
+  IValue(c10::intrusive_ptr<ivalue::UserObject> v);
+  bool isUserObject() const { return tag == Tag::UserObject; }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() && {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
+  }
+  c10::intrusive_ptr<ivalue::UserObject> toUserObject() const & {
+    AT_ASSERT(isUserObject());
+    return toIntrusivePtr<ivalue::UserObject>();
   }
 
   // None
@@ -441,6 +482,7 @@ struct CAFFE2_API IValue final {
   template<typename T>
   T to() const &;
 
+  // ToOptional: convert a IValue to the Optional obj that accepts both T and None
   template<typename T>
   optional<T> toOptional();
 
@@ -636,6 +678,62 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   FutureError error;
 };
 
+// User-defined object.
+struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
+ public:
+  UserObject(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+    slots_.resize(numSlots);
+  }
+
+  static c10::intrusive_ptr<UserObject> create(
+      Symbol name,
+      size_t numSlots) {
+    return c10::make_intrusive<UserObject>(std::move(name), numSlots);
+  }
+
+  void setSlot(size_t slot, IValue v) {
+    slots_[slot] = v;
+  }
+
+  IValue getSlot(size_t slot) const {
+    return slots_.at(slot);
+  }
+
+  Symbol name() const {
+    return typename_;
+  }
+
+ private:
+  const Symbol typename_;
+  std::vector<IValue> slots_;
+};
+
+struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
+ private:
+  UnorderedMap elements_;
+
+ public:
+  GenericDict(UnorderedMap elements_)
+      : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<GenericDict> create(
+      UnorderedMap elements_) {
+    return c10::make_intrusive<GenericDict>(std::move(elements_));
+  }
+  const UnorderedMap& elements() const {
+    return elements_;
+  }
+  operator const UnorderedMap&() const {
+    return elements();
+  }
+
+  UnorderedMap& elements() {
+    return elements_;
+  }
+  operator UnorderedMap&() {
+    return elements();
+  }
+};
+
 #undef TORCH_FORALL_TAGS
 
 namespace detail {
@@ -680,7 +778,9 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
+DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
+DEFINE_TO(c10::intrusive_ptr<ivalue::UserObject>, toUserObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
@@ -693,6 +793,39 @@ DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
+
+template <typename T>
+struct _fake_type {};
+
+template <typename Elem>
+std::vector<Elem> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::vector<Elem>>) {
+  return fmap(ivalue->toGenericListRef(), [](IValue item_ivalue) { return item_ivalue.to<Elem>(); });
+}
+
+template <typename K, typename V>
+std::unordered_map<K, V> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::unordered_map<K, V>>) {
+  std::unordered_map<K, V> specialized_dict;
+
+  for (auto item : ivalue->toGenericDictRef()) {
+    specialized_dict[item.first.to<K>()] = item.second.to<V>();
+  }
+
+  return specialized_dict;
+}
+
+template <typename T>
+inline T IValue::to() && {
+  return generic_to(this, _fake_type<T>{});
+}
+
+template <typename T>
+inline T IValue::to() const& {
+  return generic_to(this, _fake_type<T>{});
+}
 
 // note: when adding a DEFINE_TO case here you should also add a
 // toX method to IValue. These named methods are much more discoverable
@@ -745,6 +878,17 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 inline IValue::IValue(std::vector<IValue> v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
+: tag(Tag::GenericDict), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(ivalue::UnorderedMap v)
+: IValue(ivalue::GenericDict::create(std::move(v))) {}
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::UserObject> v)
+: tag(Tag::UserObject), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -768,6 +912,11 @@ inline const std::vector<bool>& IValue::toBoolListRef() const {
 
 inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
+}
+
+inline const c10::ivalue::UnorderedMap& IValue::
+    toGenericDictRef() const {
+  return toGenericDict()->elements();
 }
 
 inline const std::string& IValue::toStringRef() const {
@@ -811,6 +960,31 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
         && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 }
-
-
 } // namespace c10
+
+inline size_t at::ivalue::DictHash::operator()(
+    const c10::IValue& ivalue) const {
+  if (ivalue.isInt()) {
+    return std::hash<int>()(ivalue.toInt());
+  } else if (ivalue.isString()) {
+    return std::hash<std::string>()(ivalue.toStringRef());
+  } else if (ivalue.isDouble()) {
+    return std::hash<double>()(ivalue.toDouble());
+  } else {
+    throw std::runtime_error("Can't hash IValues with this tag");
+  }
+}
+
+inline bool at::ivalue::DictEqualTo::operator()(
+    const c10::IValue& lhs,
+    const c10::IValue& rhs) const {
+  if (lhs.isInt()) {
+    return lhs.toInt() == rhs.toInt();
+  } else if (lhs.isString()) {
+    return lhs.toStringRef() == rhs.toStringRef();
+  } else if (lhs.isDouble()) {
+    return lhs.toDouble() == rhs.toDouble();
+  } else {
+    throw std::runtime_error("Can't compare IValues with this tag");
+  }
+}

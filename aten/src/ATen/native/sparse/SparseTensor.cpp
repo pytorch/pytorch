@@ -70,7 +70,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
@@ -86,9 +86,6 @@ SparseTensor new_sparse(const TensorOptions& options) {
 
 SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
   SparseTensor self = new_sparse(options);
-  AT_CHECK(size.size() != 0,
-    "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
-or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
@@ -110,7 +107,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntList size, const TensorOptions& options) {
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
 
@@ -287,14 +284,16 @@ SparseTensor dense_to_sparse(const Tensor& self){
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
-  AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  AT_CHECK(sparse_dim <= dims,
+  // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() > 0,
+  // but this would take some work and doesn't seem particularly useful.
+  AT_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
+  AT_CHECK(sparse_dim <= dims, 
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
 
   Tensor nz = self.nonzero().transpose(0, 1);
-  if (nz.numel() == 0) {
+  if (nz.size(1) == 0) {
     return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
   }
   LongTensor indices;
@@ -302,12 +301,20 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
     indices = nz.clone();
   } else {
     Tensor i = nz.narrow(0, 0, sparse_dim);
-    std::tie(indices, std::ignore) = at::unique_dim(i, 1);
+    std::tie(indices, std::ignore) = _unique_dim(i, 1);
     indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
   }
 
-  std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
-  Tensor values = self.index(ix).squeeze(0).clone();
+  Tensor values;
+  if (self.dim() > 0) {
+    std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+    values = self.index(ix).squeeze(0).clone();
+  } else {
+    AT_ASSERT(nz.sizes().equals({0, 1}));
+    // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
+    // Given sparse tensor invariants, values should be shape (1,)
+    values = self.unsqueeze(0).clone();
+  }
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
@@ -329,7 +336,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());
+  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {

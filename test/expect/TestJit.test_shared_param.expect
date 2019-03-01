@@ -1,7 +1,6 @@
-graph(%0 : Double(2, 2)
-      %1 : Double(2, 2)) {
+graph(%0 : Double(2, 2),
+      %1 : Double(2, 2)):
   %2 : Double(2, 2) = aten::mul(%0, %1), scope: MyModule
   %3 : int = prim::Constant[value=1](), scope: MyModule
   %4 : Double(2, 2) = aten::add(%2, %1, %3), scope: MyModule
-  return (%4);
-}
+  return (%4)
