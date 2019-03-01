@@ -265,8 +265,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
-   .. automethod:: index_add
    .. automethod:: index_add_
+   .. automethod:: index_add
    .. automethod:: index_copy_
    .. automethod:: index_copy
    .. automethod:: index_fill_
