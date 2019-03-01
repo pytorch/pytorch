@@ -16,9 +16,8 @@ namespace int8 {
 template <Activation Ac>
 class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
-  template<class... Args>
-  explicit Int8AveragePoolOp(Args&&... args)
-      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
+  explicit Int8AveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext, true>(operator_def, ws), ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC, "Int8 only supports NHWC order.");
   }
@@ -139,6 +138,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext, true> {
     return true;
   }
  private:
+  Workspace* ws_;
   // QNNPACK Average Pooling operator
   qnnp_operator_t qnnpackOperator_{nullptr};
   // QNNPACK Global Average Pooling operator

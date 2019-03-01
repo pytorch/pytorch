@@ -25,11 +25,11 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext, true> {
 
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
-  template<class... Args>
-  explicit ConvPoolDNNLowPOpBase(Args&&... args)
-      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...),
+  explicit ConvPoolDNNLowPOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext, true>(operator_def, ws),
         in_qparams_(InputSize()),
-        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
+        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)),
+        ws_(ws) {
 #ifdef _OPENMP
     if (FLAGS_caffe2_omp_num_threads > 0) {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
@@ -199,6 +199,8 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext, true> {
 
   std::unique_ptr<OpWrapper<FP32_OP, T>> fp32_op_;
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
+
+  Workspace* ws_;
 
   std::vector<T> out_temp_;
   // Buffer to store quantized output temporarily
