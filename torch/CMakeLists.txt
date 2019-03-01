@@ -177,6 +177,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/user_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
@@ -545,6 +546,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp

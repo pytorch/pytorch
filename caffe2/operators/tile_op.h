@@ -14,8 +14,9 @@ template <class Context>
 class TileOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
         axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileOp() {}
@@ -129,8 +130,9 @@ template <typename T, class Context>
 class TileGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TileGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TileGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
         axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileGradientOp() {}
