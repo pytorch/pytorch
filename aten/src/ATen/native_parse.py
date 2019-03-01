@@ -92,6 +92,10 @@ def type_argument_translations(arg):
         raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
                            "See [temp translations] for details.")
 
+    # Legacy type sanitization. TODO: Do we really need this?	
+    if t == 'Generator*':	
+        t = 'Generator *'	
+
     if not default:
         pass
     # This enables Tensor? x=None and translates to legacy

@@ -139,16 +139,16 @@ inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scal
 inline Tensor & Tensor::baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return type().baddbmm_(*this, batch1, batch2, beta, alpha);
 }
-inline Tensor Tensor::bernoulli(Generator* generator) const {
+inline Tensor Tensor::bernoulli(Generator * generator) const {
     return type().bernoulli(*this, generator);
 }
-inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator* generator) {
+inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
 }
-inline Tensor & Tensor::bernoulli_(double p, Generator* generator) {
+inline Tensor & Tensor::bernoulli_(double p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
 }
-inline Tensor Tensor::bernoulli(double p, Generator* generator) const {
+inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
     return type().bernoulli(*this, p, generator);
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
@@ -1036,31 +1036,31 @@ inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2,
 inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
     return type().addcdiv_(*this, tensor1, tensor2, value);
 }
-inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator* generator) {
+inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator) {
     return type().random_(*this, from, to, generator);
 }
-inline Tensor & Tensor::random_(int64_t to, Generator* generator) {
+inline Tensor & Tensor::random_(int64_t to, Generator * generator) {
     return type().random_(*this, to, generator);
 }
-inline Tensor & Tensor::random_(Generator* generator) {
+inline Tensor & Tensor::random_(Generator * generator) {
     return type().random_(*this, generator);
 }
-inline Tensor & Tensor::uniform_(double from, double to, Generator* generator) {
+inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) {
     return type().uniform_(*this, from, to, generator);
 }
-inline Tensor & Tensor::normal_(double mean, double std, Generator* generator) {
+inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) {
     return type().normal_(*this, mean, std, generator);
 }
-inline Tensor & Tensor::cauchy_(double median, double sigma, Generator* generator) {
+inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) {
     return type().cauchy_(*this, median, sigma, generator);
 }
-inline Tensor & Tensor::log_normal_(double mean, double std, Generator* generator) {
+inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) {
     return type().log_normal_(*this, mean, std, generator);
 }
-inline Tensor & Tensor::exponential_(double lambd, Generator* generator) {
+inline Tensor & Tensor::exponential_(double lambd, Generator * generator) {
     return type().exponential_(*this, lambd, generator);
 }
-inline Tensor & Tensor::geometric_(double p, Generator* generator) {
+inline Tensor & Tensor::geometric_(double p, Generator * generator) {
     return type().geometric_(*this, p, generator);
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
@@ -1186,7 +1186,7 @@ inline std::tuple<Tensor,Tensor,Tensor> Tensor::btrifact_with_info(bool pivot) c
 inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return type().btrisolve(*this, LU_data, LU_pivots);
 }
-inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator* generator) const {
+inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
     return type().multinomial(*this, num_samples, replacement, generator);
 }
 inline Tensor Tensor::lgamma() const {

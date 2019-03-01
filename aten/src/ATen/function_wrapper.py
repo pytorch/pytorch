@@ -207,6 +207,7 @@ TYPE_FORMAL_GENERIC = {
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
+    'THGenerator*': 'Generator *',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
@@ -222,6 +223,7 @@ DYNAMIC_TYPE = {
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
+    'THGenerator*': 'Generator*',
     'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
@@ -1198,7 +1200,7 @@ def create_derived(backend_type_env, declarations):
 
     def replace_with_null(argument):
         # type: (THFormal) -> bool
-        return (argument['type'] == 'Generator*' and
+        return (argument['type'] == 'THGenerator*' and
                 backend_type_env['Backend'] == 'CUDA')
 
     def requires_checked_cast(argument):
@@ -1254,7 +1256,7 @@ def create_derived(backend_type_env, declarations):
         if argument['name'] == 'device':
             return True
         return 'CUDA' in backend_type_env['Backend'] and (
-            option['mode'] == 'TH' and argument['type'] == 'Generator*')
+            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
 
     def get_arguments(arguments, option):
         # type: (List[THFormal], FunctionOption) -> List[str]
