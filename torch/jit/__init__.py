@@ -953,18 +953,6 @@ def _get_valid_constant(attr, v):
         """.format(type(v).__name__, attr, constants)))
 
 
-def _get_type(value):
-    if isinstance(value, dict):
-        for key in value:
-            key_type = _get_type(key)
-            value_type = _get_type(value[key])
-            return torch._C.DictType(key_type, value_type)
-    elif isinstance(value, torch.Tensor):
-        return torch._C.DynamicType.get()
-    elif isinstance(value, str):
-        return torch._C.StringType.get()
-
-
 def _create_methods_from_stubs(self, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
@@ -1161,18 +1149,6 @@ if _enabled:
                 return self.__getattr__('forward').graph
             return Module.__getattr__(self, attr)
 
-        def _is_attribute(self, attr, value):
-            containers = ['_parameters', '_modules', '_buffers']
-            if attr in containers:
-                return False
-            for container in containers:
-                if not hasattr(self, container):
-                    return False
-            for container in containers:
-                if attr in getattr(self, container):
-                    return False
-            return True
-
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
@@ -1183,11 +1159,7 @@ if _enabled:
                         self.__dict__['training'] = value
                         self._get_buffer('training').fill_(int(value))
                         return
-                ret = super(ScriptModule, self).__setattr__(attr, value)
-                value_type = _get_type(value)
-                if value_type and self._is_attribute(attr, value):
-                    self._register_attribute(attr, value_type, value)
-                return ret
+                return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
@@ -1575,6 +1547,13 @@ class _disable_tracing(object):
 def annotate(the_type, the_value):
     # noop in python
     return the_value
+
+
+class Attribute(object):
+    def __init__(self, value, the_type):
+        self.value = value
+        self.type = the_type
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

@@ -269,6 +269,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   std::shared_ptr<Module> module_;
 };
 
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -314,15 +315,22 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedInput* v = module->find_buffer(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (auto value = module->find_attribute(field)) {
-      return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(value->type, value->slot()));
     }
+
 
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
+      if (py::isinstance(
+              attr, py::module::import("torch.jit").attr("Attribute"))) {
+        // TODO: get the real type
+        TypePtr type = DictType::create(StringType::get(), TensorType::get());
+        module->register_attribute(
+            field, type, toIValue(attr.attr("value"), type));
+        auto v = module->find_attribute(field);
+        return toSimple(m.get_or_add_attribute(type, v->slot()));
+      }
       if (py::isinstance<py::function>(attr) &&
           py::hasattr(attr, "_is_parameter_list") &&
           py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
