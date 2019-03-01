@@ -48,7 +48,11 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
 const int BACKWARD_THREADS = 256;
 
 template <typename Dtype, typename AccType>
+#if defined (__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 4)
+#else
 C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 8)
+#endif
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
