@@ -172,7 +172,7 @@ struct ReduceConfig {
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, typename R>
-C10_LAUNCH_BOUNDS(nt, 4)
+C10_LAUNCH_BOUNDS_2(nt, 4)
 __global__ void reduce_kernel(R reduction) {
   reduction.run();
 }
@@ -410,7 +410,7 @@ struct ReduceOp {
 
     return is_last_block_done_shared;
   }
-  
+
   template <bool can_acc>
   C10_DEVICE arg_t accumulate_in_output(
     out_scalar_t* out, arg_t value,
