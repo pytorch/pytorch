@@ -27,6 +27,7 @@
 
 #include "c10/cuda/CUDAMacros.h"
 #include "c10/cuda/CUDAMathCompat.h"
+#include <c10/cuda/CUDAGuard.h>
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
