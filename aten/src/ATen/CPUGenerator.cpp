@@ -5,17 +5,20 @@ namespace at {
 
 namespace detail {
 
-// Global generator state and constants
+// Ensures default_gen_cpu is initialized once.
 static std::once_flag cpu_device_flag;
+
+// Default, global CPU generator.
 static std::unique_ptr<CPUGenerator> default_gen_cpu;
 
-/*
-* PyTorch maintains a collection of default generators that get
-* inialized once. The purpose of these default generator is to
-* maintain a running state of the pseudo random number generation. 
-* getDefaultCPUGenerator gets the default generator for a particular
-* device. Call once pattern to initialize default generator once.
-*/
+/**
+ * PyTorch maintains a collection of default generators that get
+ * initialized once. The purpose of these default generators is to
+ * maintain a global running state of the pseudo random number generation,
+ * when a user does not explicitly mention any generator.
+ * getDefaultCPUGenerator gets the default generator for a particular
+ * device.
+ */
 std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator() {
   std::call_once(cpu_device_flag, [&] {
     default_gen_cpu = c10::guts::make_unique<CPUGenerator>(default_rng_seed_val);
@@ -23,24 +26,24 @@ std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator() {
   return default_gen_cpu;
 }
 
-/*
-* Utility to create a CPUGenerator. Returns a unique_ptr
-*/
+/**
+ * Utility to create a CPUGenerator. Returns a unique_ptr
+ */
 std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
   return c10::guts::make_unique<CPUGenerator>(seed_val, Philox4_32_10(seed_val));
 }
 
-} //namespace detail
+} // namespace detail
 
-/*
-* CPUGenerator class implementation
-*/
+/**
+ * CPUGenerator class implementation
+ */
 CPUGenerator::CPUGenerator(uint64_t seed_in, Philox4_32_10 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)), current_seed_(seed_in), engine_(engine_in) {}
 
-/* 
-* Manually seeds the engine with the seed input
-*/
+/**
+ * Manually seeds the engine with the seed input
+ */
 void CPUGenerator::setCurrentSeed(uint64_t seed) {
   std::lock_guard<std::mutex> lock(mutex_);
   current_seed_ = seed;
@@ -48,8 +51,8 @@ void CPUGenerator::setCurrentSeed(uint64_t seed) {
 }
 
 /*
-* Gets the current seed of CPUGenerator.
-*/
+ * Gets the current seed of CPUGenerator.
+ */
 uint64_t CPUGenerator::getCurrentSeed() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return current_seed_;
