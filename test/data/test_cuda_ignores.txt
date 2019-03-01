@@ -43,6 +43,7 @@ torch.HalfTensor.inverse_
 torch.HalfTensor.is_contiguous_
 torch.HalfTensor.is_same_size_
 torch.HalfTensor.is_set_to_
+torch.HalfTensor.kthvalue_
 torch.HalfTensor.max_
 torch.HalfTensor.mean_
 torch.HalfTensor.min_
