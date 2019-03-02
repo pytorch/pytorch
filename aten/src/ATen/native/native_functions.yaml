@@ -57,6 +57,7 @@
     CUDA: _cudnn_rnn_backward
 
 - func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -861,6 +862,7 @@
   device_guard: False
 
 - func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
@@ -1001,6 +1003,7 @@
   matches_jit_signature: True
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -1672,6 +1675,7 @@
   matches_jit_signature: True
 
 - func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   matches_jit_signature: True
@@ -1723,6 +1727,7 @@
   matches_jit_signature: True
 
 - func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
@@ -1751,8 +1756,10 @@
   matches_jit_signature: True
 
 - func: randint_like(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
@@ -1768,6 +1775,7 @@
   matches_jit_signature: True
 
 - func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
@@ -2409,6 +2417,7 @@
   matches_jit_signature: True
 
 - func: zeros_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   matches_jit_signature: True
@@ -2731,6 +2740,7 @@
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 - func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
 
 - func: sparse_coo_tensor(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
@@ -2739,12 +2749,14 @@
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_sparse
     SparseCUDA: new_with_dims_sparse
   requires_tensor: True
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device) -> Tensor
+  matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_and_tensor_sparse
     SparseCUDA: new_with_dims_and_tensor_sparse
@@ -2949,6 +2961,7 @@
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
 - func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool non_blocking=False, bool copy=False) -> Tensor
+  matches_jit_signature: True
   variants: method
   device_guard: False
 
