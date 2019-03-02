@@ -6,6 +6,7 @@ import sys
 import subprocess
 import argparse
 from functools import reduce
+from itertools import chain
 
 from pyHIPIFY import hipify_python
 
@@ -70,6 +71,7 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
+    "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
 ignores = [
@@ -97,11 +99,11 @@ if not args.out_of_place_only:
         # These files use nvrtc, hip doesn't have equivalent
         "csrc/autograd/profiler.h",
         "csrc/autograd/profiler.cpp",
-        "csrc/cuda/cuda_check.h",
         # These files are compatible with both cuda and hip
         "csrc/autograd/engine.cpp"
     ]
-    for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
+    paths = ("torch", "tools")
+    for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
         for filename in files:
             if filename.endswith(".cpp") or filename.endswith(".h"):
                 source = os.path.join(root, filename)

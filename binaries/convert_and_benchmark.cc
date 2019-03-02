@@ -462,16 +462,24 @@ bool backendCudaSet(const string& backend) {
 
 void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
   if (backend != "builtin") {
-    string engine = backend == "nnpack"
-        ? "NNPACK"
-        : backend == "eigen" ? "EIGEN"
-                             : backend == "mkl" ? "MKLDNN"
-                                                : backend == "cuda"
-                    ? "CUDA"
-                    : backend == "dnnlowp" ? "DNNLOWP"
-                                           : backend == "dnnlowp_acc16"
-                            ? "DNNLOWP_ACC16"
-                            : backend == "default" ? "" : "NONE";
+    string engine;
+    if( backend == "nnpack" ) {
+      engine = "NNPACK";
+    } else if ( backend == "eigen" ) {
+      engine = "EIGEN";
+    } else if ( backend == "mkl" ) {
+      engine = "MKLDNN";
+    } else if ( backend == "cuda" ) {
+      engine = "CUDA";
+    } else if ( backend == "dnnlowp" ) {
+      engine = "DNNLOWP";
+    } else if ( backend == "dnnlowp_acc16" ) {
+      engine = "DNNLOWP_ACC16";
+    } else if ( backend == "default" ) {
+      engine = "";
+    } else {
+      engine = "NONE";
+    }
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def->op_size(); i++) {
       caffe2::OperatorDef* op_def = net_def->mutable_op(i);

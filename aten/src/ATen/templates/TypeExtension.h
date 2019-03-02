@@ -35,13 +35,8 @@ struct CAFFE2_API ${Type} : public TypeDefault {
   Allocator* allocator() const override;
   Device getDeviceFromPtr(void * data) const override;
   std::unique_ptr<Generator> generator() const override;
-
-  virtual ScalarType scalarType() const override;
-  virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
-  virtual const char * toString() const override;
   virtual size_t elementSizeInBytes() const override;
-  virtual TypeID ID() const override;
 
   ${type_method_declarations}
 };

@@ -292,6 +292,7 @@ OnnxExporter::get_special_operators() const {
           {"Greater", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Less", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
+          {"ElementwiseLinear", &OnnxExporter::CreateElementwiseLinearNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
           {"MaxPool", &OnnxExporter::CreateConvPoolNodes},
@@ -566,6 +567,61 @@ ConvertedResult OnnxExporter::CreateCastNodes(
         "' dtype is not supported");
   }
   attr->set_i(onnx_dtype);
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateElementwiseLinearNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  CAFFE_ENFORCE_EQ(def.input_size(), 3);
+  CAFFE_ENFORCE_GE(def.output_size(), 1);
+  const auto& x = def.input(0);
+  const auto& w = def.input(1);
+  const auto& b = def.input(2);
+  const auto& y = def.output(0);
+  CAFFE_ENFORCE_EQ(shapes.at(w).dims().size(), 1);
+  CAFFE_ENFORCE_EQ(shapes.at(b).dims().size(), 1);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+  std::unordered_map<std::string, const caffe2::Argument*> args;
+  for (const auto& a : def.arg()) {
+    args.emplace(a.name(), &a);
+  }
+
+  const auto& x_shape = shapes.at(x);
+  const auto it = args.find("axis");
+  const int64_t axis = it == args.end() ? 1 : it->second->i();
+  const bool need_reshape = axis + 1 != x_shape.dims().size();
+
+  auto fma_x_input = x;
+  if (need_reshape) {
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+    CAFFE_ENFORCE_EQ(shapes.at(w).dims(0), inner);
+    CAFFE_ENFORCE_EQ(shapes.at(b).dims(0), inner);
+
+    fma_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(
+        dummy_, std::vector<int64_t>{-1, shapes.at(w).dims(0)}));
+    nodes.emplace_back(
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {fma_x_input}));
+  }
+
+  const auto& mul_output = dummy_->NewDummyName();
+  nodes.emplace_back(
+      MakeNode("Mul", {fma_x_input, w}, {mul_output}, def.name()));
+
+  const auto& fma_y_output = need_reshape ? dummy_->NewDummyName() : y;
+  nodes.emplace_back(
+      MakeNode("Add", {mul_output, b}, {fma_y_output}, def.name()));
+
+  if (need_reshape) {
+    const auto shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {shape}));
+    nodes.emplace_back(MakeNode("Reshape", {fma_y_output, shape}, {y}));
+  }
+
   return result;
 }
 
