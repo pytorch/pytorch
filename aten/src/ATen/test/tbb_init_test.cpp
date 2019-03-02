@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/test/test_assert.h>
+#include <c10/core/TensorOptions.h>
 #include <thread>
 
 
@@ -9,7 +10,7 @@
 // will throw an exception when multiple threads call
 // their first parallel construct.
 void test(int given_num_threads) {
-  auto t = at::ones({1000 * 1000}, at::CPU(at::kFloat));
+  auto t = at::ones({1000 * 1000}, device(at::kCPU).dtype(at::kFloat));
   if (given_num_threads >= 0) {
     ASSERT(at::get_num_threads() == given_num_threads);
   } else {

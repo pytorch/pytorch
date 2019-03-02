@@ -21,29 +21,29 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 using namespace at;
 
-void TestResize(Type& type) {
-  auto a = at::empty({0}, type.options());
+void TestResize(TensorOptions &options) {
+  auto a = at::empty({0}, options);
   a.resize_({3, 4});
   ASSERT_EQ_RESOLVED(a.numel(), 12);
   a.resize_({5, 7});
   ASSERT_EQ_RESOLVED(a.numel(), 35);
 }
 
-void TestOnesAndDot(Type& type) {
-  Tensor b0 = ones({1, 1}, type);
+void TestOnesAndDot(TensorOptions &options) {
+  Tensor b0 = ones({1, 1}, options);
   ASSERT_EQ_RESOLVED((b0 + b0).sum().item<double>(), 2);
 
-  Tensor b1 = ones({1, 2}, type);
+  Tensor b1 = ones({1, 2}, options);
   ASSERT_EQ_RESOLVED((b1 + b1).sum().item<double>(), 4);
 
-  Tensor b = ones({3, 4}, type);
+  Tensor b = ones({3, 4}, options);
   ASSERT_EQ_RESOLVED((b + b).sum().item<double>(), 24);
   ASSERT_EQ_RESOLVED(b.numel(), 12);
   ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
 }
 
-void TestSort(Type& type) {
-  Tensor b = rand({3, 4}, type);
+void TestSort(TensorOptions &options) {
+  Tensor b = rand({3, 4}, options);
 
   auto z = b.sort(1);
   auto z_sorted = std::get<0>(z);
@@ -52,9 +52,9 @@ void TestSort(Type& type) {
   ASSERT_TRUE(isLT);
 }
 
-void TestRandperm(Type& type) {
-  if (type.backend() != Backend::CUDA) {
-    Tensor b = randperm(15, type);
+void TestRandperm(TensorOptions &options) {
+  if (options.backend() != Backend::CUDA) {
+    Tensor b = randperm(15, options);
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);
     bool isLE = (rv[0].item<float>() <= rv[1].item<float>());
@@ -67,19 +67,19 @@ void SendContext() {
   ss << "context: " << std::hex << (int64_t)&globalContext() << std::endl;
 }
 
-void TestAdd(Type& type) {
-  Tensor a = rand({3, 4}, type);
-  Tensor b = rand({3, 4}, type);
+void TestAdd(TensorOptions &options) {
+  Tensor a = rand({3, 4}, options);
+  Tensor b = rand({3, 4}, options);
   Tensor c = add(a, add(a, b));
   // TODO:0-dim Tensor d(3.f);
   Scalar d = 3.f;
   ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
 }
 
-void TestLoadsOfAdds(Type& type) {
+void TestLoadsOfAdds(TensorOptions &options) {
   auto begin = std::chrono::high_resolution_clock::now();
-  Tensor d = ones({3, 4}, type);
-  Tensor r = zeros({3, 4}, type);
+  Tensor d = ones({3, 4}, options);
+  Tensor r = zeros({3, 4}, options);
   for (auto i = 0; i < 100000; i++) {
     add_out(r, r, d);
   }
@@ -93,10 +93,10 @@ void TestLoadsOfAdds(Type& type) {
   ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
 }
 
-void TestLoadOfAddsWithCopy(Type& type) {
+void TestLoadOfAddsWithCopy(TensorOptions &options) {
   auto begin = std::chrono::high_resolution_clock::now();
-  Tensor d = ones({3, 4}, type);
-  Tensor r = zeros({3, 4}, type);
+  Tensor d = ones({3, 4}, options);
+  Tensor r = zeros({3, 4}, options);
   for (auto i = 0; i < 100000; i++) {
     r = add(r, d);
   }
@@ -110,54 +110,54 @@ void TestLoadOfAddsWithCopy(Type& type) {
   ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
 }
 
-void TestIsContiguous(Type& type) {
-  Tensor a = rand({3, 4}, type);
+void TestIsContiguous(TensorOptions &options) {
+  Tensor a = rand({3, 4}, options);
   ASSERT_TRUE(a.is_contiguous());
   a = a.transpose(0, 1);
   ASSERT_FALSE(a.is_contiguous());
 }
 
-void TestPermute(Type& type) {
-  Tensor a = rand({3, 4, 5}, type);
+void TestPermute(TensorOptions &options) {
+  Tensor a = rand({3, 4, 5}, options);
   Tensor b = a.permute({1, 2, 0});
   ASSERT_TRUE(b.sizes().equals({4, 5, 3}));
   ASSERT_TRUE(b.strides().equals({5, 1, 20}));
 }
 
-void TestMm(Type& type) {
-  Tensor a = rand({3, 4}, type);
-  Tensor b = rand({4}, type);
+void TestMm(TensorOptions &options) {
+  Tensor a = rand({3, 4}, options);
+  Tensor b = rand({4}, options);
   Tensor c = mv(a, b);
-  ASSERT_TRUE(c.equal(addmv(zeros({3}, type), a, b, 0, 1)));
+  ASSERT_TRUE(c.equal(addmv(zeros({3}, options), a, b, 0, 1)));
 }
 
-void TestSqueeze(Type& type) {
-  Tensor a = rand({2, 1}, type);
+void TestSqueeze(TensorOptions &options) {
+  Tensor a = rand({2, 1}, options);
   Tensor b = squeeze(a);
   ASSERT_EQ_RESOLVED(b.dim(), 1);
-  a = rand({1}, type);
+  a = rand({1}, options);
   b = squeeze(a);
   // TODO 0-dim squeeze
   ASSERT_TRUE(a[0].equal(b));
 }
 
-void TestCopy(Type& type) {
-  Tensor a = zeros({4, 3}, type);
-  Tensor e = rand({4, 3}, type);
+void TestCopy(TensorOptions &options) {
+  Tensor a = zeros({4, 3}, options);
+  Tensor e = rand({4, 3}, options);
   a.copy_(e);
   ASSERT_TRUE(a.equal(e));
 }
 
-void TestCopyBroadcasting(Type& type) {
-  Tensor a = zeros({4, 3}, type);
-  Tensor e = rand({3}, type);
+void TestCopyBroadcasting(TensorOptions &options) {
+  Tensor a = zeros({4, 3}, options);
+  Tensor e = rand({3}, options);
   a.copy_(e);
   for (int i = 0; i < 4; ++i) {
     ASSERT_TRUE(a[i].equal(e));
   }
 }
-void TestAbsValue(Type& type) {
-  Tensor r = at::abs(at::scalar_tensor(-3, type.options()));
+void TestAbsValue(TensorOptions &options) {
+  Tensor r = at::abs(at::scalar_tensor(-3, options));
   ASSERT_EQ_RESOLVED(r.item<int32_t>(), 3);
 }
 /*
@@ -173,32 +173,32 @@ std::cout << (a == 10.) << " -- should be 1" << std::endl;
 #endif
 */
 
-void TestAddingAValueWithScalar(Type& type) {
-  Tensor a = rand({4, 3}, type);
-  ASSERT_TRUE((ones({4, 3}, type) + a).equal(add(a, 1)));
+void TestAddingAValueWithScalar(TensorOptions &options) {
+  Tensor a = rand({4, 3}, options);
+  ASSERT_TRUE((ones({4, 3}, options) + a).equal(add(a, 1)));
 }
 
-void TestSelect(Type& type) {
-  Tensor a = rand({3, 7}, type);
+void TestSelect(TensorOptions &options) {
+  Tensor a = rand({3, 7}, options);
   auto a_13 = select(a, 1, 3);
   auto a_13_02 = select(select(a, 1, 3), 0, 2);
   ASSERT_TRUE(a[0][3].equal(a_13[0]));
   ASSERT_TRUE(a[2][3].equal(a_13_02));
 }
 
-void TestZeroDim(Type& type) {
-  Tensor a = at::scalar_tensor(4, type.options()); // rand(type, {1});
+void TestZeroDim(TensorOptions &options) {
+  Tensor a = at::scalar_tensor(4, options); // rand(options, {1});
 
-  Tensor b = rand({3, 4}, type);
+  Tensor b = rand({3, 4}, options);
   ASSERT_EQ_RESOLVED((a + a).dim(), 0);
   ASSERT_EQ_RESOLVED((1 + a).dim(), 0);
   ASSERT_EQ_RESOLVED((b + a).dim(), 2);
   ASSERT_EQ_RESOLVED((a + b).dim(), 2);
-  auto c = rand({3, 4}, type);
+  auto c = rand({3, 4}, options);
   ASSERT_EQ_RESOLVED(c[1][2].dim(), 0);
 
-  auto f = rand({3, 4}, type);
-  f[2] = zeros({4}, type);
+  auto f = rand({3, 4}, options);
+  f[2] = zeros({4}, options);
   f[1][0] = -1;
   ASSERT_EQ_RESOLVED(f[2][0].item<double>(), 0);
 }
@@ -263,8 +263,8 @@ void TestIndexingByZerodimTensor() {
   // Throw StartsWith("Can only index with tensors that are scalars (zero-dim)")
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
-void TestIndexingMixedDevice(Type& type) {
-  Tensor tensor = randn({20, 20}, type);
+void TestIndexingMixedDevice(TensorOptions &options) {
+  Tensor tensor = randn({20, 20}, options);
   Tensor index = arange(10, kLong).cpu();
   Tensor result = tensor.index({index});
   ASSERT_TRUE(result[0].equal(tensor[0]));
@@ -276,52 +276,54 @@ void TestDispatch() {
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
-void TestNegativeDim(Type& type) {
-  ASSERT_ANY_THROW(empty({5, -5, 5}, type.options()));
-  ASSERT_ANY_THROW(empty({5, -5, -5}, type.options()));
-  Tensor tensor = empty({5, 5}, type.options());
+void TestNegativeDim(TensorOptions &options) {
+  ASSERT_ANY_THROW(empty({5, -5, 5}, options));
+  ASSERT_ANY_THROW(empty({5, -5, -5}, options));
+  Tensor tensor = empty({5, 5}, options);
   ASSERT_ANY_THROW(tensor.reshape({-5, -5}));
 }
 
-void test(Type& type) {
-  TestResize(type);
-  TestOnesAndDot(type);
+void test(TensorOptions &options) {
+  TestResize(options);
+  TestOnesAndDot(options);
 
-  TestSort(type);
-  TestRandperm(type);
-  TestAdd(type);
-  TestLoadsOfAdds(type);
-  TestLoadOfAddsWithCopy(type);
-  TestIsContiguous(type);
-  TestPermute(type);
-  TestMm(type);
-  TestSqueeze(type);
-  TestCopy(type);
-  TestCopyBroadcasting(type);
-  TestAbsValue(type);
-  TestAddingAValueWithScalar(type);
-  TestSelect(type);
-  TestZeroDim(type);
+  TestSort(options);
+  TestRandperm(options);
+  TestAdd(options);
+  TestLoadsOfAdds(options);
+  TestLoadOfAddsWithCopy(options);
+  TestIsContiguous(options);
+  TestPermute(options);
+  TestMm(options);
+  TestSqueeze(options);
+  TestCopy(options);
+  TestCopyBroadcasting(options);
+  TestAbsValue(options);
+  TestAddingAValueWithScalar(options);
+  TestSelect(options);
+  TestZeroDim(options);
   TestTensorFromTH();
   TestToCFloat();
   TestToString();
   TestIndexingByScalar();
   TestIndexingByZerodimTensor();
-  TestIndexingMixedDevice(type);
+  TestIndexingMixedDevice(options);
   TestDispatch();
-  TestNegativeDim(type);
+  TestNegativeDim(options);
 }
 
 TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
-  test(CPU(kFloat));
+  auto options = device(kCPU).dtype(kFloat);
+  test(options);
 }
 
 TEST(BasicTest, BasicTestCUDA) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
-    test(CUDA(kFloat));
+    auto options = device(kCUDA).dtype(kFloat);
+    test(options);
   }
 }

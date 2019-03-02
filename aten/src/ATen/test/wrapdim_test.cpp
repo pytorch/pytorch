@@ -3,30 +3,30 @@
 #include <ATen/ATen.h>
 
 using namespace at;
-void TestSimpleCase(Type& T) {
-  auto a = randn({2, 3, 4, 5}, T);
+void TestSimpleCase(TensorOptions& options) {
+  auto a = randn({2, 3, 4, 5}, options);
   ASSERT_TRUE(a.prod(-4).equal(a.prod(0)));
   ASSERT_TRUE(a.prod(3).equal(a.prod(-1)));
 }
 
-void TestExpressionSpecification(Type& T) {
-  auto a = randn({2, 3, 4, 5}, T);
+void TestExpressionSpecification(TensorOptions& options) {
+  auto a = randn({2, 3, 4, 5}, options);
   ASSERT_TRUE(a.unsqueeze(-5).equal(a.unsqueeze(0)));
   ASSERT_TRUE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
 
   // can unsqueeze scalar
-  auto b = randn(1, T);
+  auto b = randn(1, options);
   b.unsafeGetTensorImpl()->maybe_zero_dim(true);
   ASSERT_TRUE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
 }
 
-void TestEmptyTensor(Type& T) {
-  auto a = randn(0, T);
-  ASSERT_TRUE(a.prod(0).equal(at::ones({}, T)));
+void TestEmptyTensor(TensorOptions& options) {
+  auto a = randn(0, options);
+  ASSERT_TRUE(a.prod(0).equal(at::ones({}, options)));
 }
 
-void TestScalarVs1Dim1Size(Type& T) {
-  auto a = randn(1, T);
+void TestScalarVs1Dim1Size(TensorOptions& options) {
+  auto a = randn(1, options);
   ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
   a.unsafeGetTensorImpl()->maybe_zero_dim(true);
   ASSERT_EQ(a.dim(), 0);
@@ -35,10 +35,10 @@ void TestScalarVs1Dim1Size(Type& T) {
 
 TEST(TestWrapdim, TestWrapdim) {
   manual_seed(123);
-  Type& T = CPU(kFloat);
+  auto options = device(kCPU).dtype(kFloat);
 
-  TestSimpleCase(T);
-  TestEmptyTensor(T);
-  TestScalarVs1Dim1Size(T);
-  TestExpressionSpecification(T);
+  TestSimpleCase(options);
+  TestEmptyTensor(options);
+  TestScalarVs1Dim1Size(options);
+  TestExpressionSpecification(options);
 }

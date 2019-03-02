@@ -23,23 +23,23 @@ void fill_tensor(int64_t scalar, Tensor& t_) {
 // write the same type as we read (using a0, ..., aX-1) and we once write to
 // double (using a4 as a target). We also exercise on a zero_dim and empty
 // tensor.
-void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
-  auto zero_dim = at::empty({}, type);
+void test(TensorOptions &options, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
+  auto zero_dim = at::empty({}, options);
   zero_dim.fill_(2);
   zero_dim.exp_();
   AT_DISPATCH_FLOATING_TYPES(zero_dim.scalar_type(), "test0", [&] {
     ASSERT(zero_dim.data<scalar_t>()[0] == std::exp(2));
   });
 
-  auto empty_t = at::empty({0}, type);
+  auto empty_t = at::empty({0}, options);
   empty_t.fill_(3);
   empty_t.exp_();
 
-  auto a0 = at::empty({0}, type.options());
-  auto a1 = at::empty({0}, type.options());
-  auto a2 = at::empty({0}, type.options());
-  auto a3 = at::empty({0}, type.options());
-  auto a4 = at::empty({0}, at::TensorOptions(kCPU).dtype(kDouble));
+  auto a0 = at::empty({0}, options);
+  auto a1 = at::empty({0}, options);
+  auto a2 = at::empty({0}, options);
+  auto a3 = at::empty({0}, options);
+  auto a4 = at::empty({0}, device(kCPU).dtype(kDouble));
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
   for (size_t i = 0; i < tensors.size(); i++) {
@@ -109,35 +109,41 @@ void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
 // apply utils test 2-dim small contiguous
 TEST(ApplyUtilsTest, Contiguous2D) {
   manual_seed(123);
-  test(CPU(kDouble), {2, 1}, -1, -1);
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {2, 1}, -1, -1);
 }
 
 // apply utils test 2-dim small
 TEST(ApplyUtilsTest, Small2D) {
   manual_seed(123);
-  test(CPU(kDouble), {2, 1});
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {2, 1});
 }
 
 // apply utils test 2-dim
 TEST(ApplyUtilsTest, _2D) {
   manual_seed(123);
-  test(CPU(kDouble), {20, 10});
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {20, 10});
 }
 
 // apply utils test 3-dim
 TEST(ApplyUtilsTest, _3D) {
   manual_seed(123);
-  test(CPU(kDouble), {3, 4, 2});
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {3, 4, 2});
 }
 
 // apply utils test 3-dim medium
 TEST(ApplyUtilsTest, Medium3D) {
   manual_seed(123);
-  test(CPU(kDouble), {3, 40, 2});
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {3, 40, 2});
 }
 
 // apply utils test 10-dim
 TEST(ApplyUtilsTest, _10D) {
   manual_seed(123);
-  test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
+  auto options = device(kCPU).dtype(kDouble);
+  test(options, {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

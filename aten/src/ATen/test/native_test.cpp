@@ -69,8 +69,8 @@ void TestStack(Type& T, Tensor& t) {
 }
 
 // size / stride
-void TestSize(Type& T, Tensor& t) {
-  auto scalar = randn({}, T);
+void TestSize(TensorOptions& options, Tensor& t) {
+  auto scalar = randn({}, options);
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
   ASSERT_ANY_THROW(scalar.size(0));
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
@@ -80,17 +80,17 @@ void TestSize(Type& T, Tensor& t) {
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
   ASSERT_ANY_THROW(scalar.stride(-1));
 
-  auto empty = randn({0}, T);
+  auto empty = randn({0}, options);
   ASSERT_EQ(empty.size(0), 0);
   ASSERT_EQ(empty.size(-1), 0);
   ASSERT_EQ(empty.stride(0), 1);
   ASSERT_EQ(empty.stride(-1), 1);
 }
 
-void TestMatmul(Type& T, Tensor& t, Type& AccT) {
-  auto scalar = randn({}, T);
-  auto d1 = randn({3}, T);
-  auto d2 = randn({2, 3}, T);
+void TestMatmul(TensorOptions& options, Tensor& t, Type& AccT) {
+  auto scalar = randn({}, options);
+  auto d1 = randn({3}, options);
+  auto d2 = randn({2, 3}, options);
 
   // 0-d
   // Throw StartsWith("both arguments to matmul need to be at least 1D")
@@ -101,20 +101,20 @@ void TestMatmul(Type& T, Tensor& t, Type& AccT) {
   // 1-d
   ASSERT_ALLCLOSE(d1.matmul(d1), d1.dot(d1));
   ASSERT_ALLCLOSE(d2.matmul(d1), d2.mv(d1));
-  auto d1o = randn({2}, T);
+  auto d1o = randn({2}, options);
   ASSERT_ALLCLOSE(d1o.matmul(d2), d1o.unsqueeze(0).mm(d2).squeeze(0));
 
   // 2-d
-  auto d2o = randn({3, 5}, T);
+  auto d2o = randn({3, 5}, options);
   ASSERT_ALLCLOSE(d2.matmul(d2o), d2.mm(d2o));
 
   // > 2-d, 1-d
-  auto d3 = randn({5, 2, 3}, T);
+  auto d3 = randn({5, 2, 3}, options);
   ASSERT_ALLCLOSE(
       d3.matmul(d1), d3.bmm(d1.view({1, 3, 1}).expand({5, 3, 1})).view({5, 2}));
   ASSERT_ALLCLOSE(d1o.matmul(d3), d1o.expand({5, 1, 2}).bmm(d3).view({5, 3}));
 
-  auto d5 = randn({3, 2, 4, 2, 3}, T);
+  auto d5 = randn({3, 2, 4, 2, 3}, options);
   ASSERT_ALLCLOSE(
       d5.matmul(d1),
       d5.view({24, 2, 3})
@@ -131,8 +131,8 @@ void TestMatmul(Type& T, Tensor& t, Type& AccT) {
   // selected empirically.
   double atol = 1e-04;
   double rtol = 1e-06;
-  d2 = randn({3, 4}, T);
-  d2o = randn({4, 2}, T);
+  d2 = randn({3, 4}, options);
+  d2o = randn({4, 2}, options);
   auto result = d5.matmul(d2).toType(AccT);
 
   auto d5Acc = d5.toType(AccT);
@@ -146,7 +146,7 @@ void TestMatmul(Type& T, Tensor& t, Type& AccT) {
       d2o.expand({24, 4, 2}).bmm(d5.view({24, 2, 3})).view({3, 2, 4, 4, 3}));
 
   // > 2-d, > 2-d
-  auto d5o = randn({2, 1, 2, 4, 3, 2}, T);
+  auto d5o = randn({2, 1, 2, 4, 3, 2}, options);
   auto d5_bmm_view =
       d5.expand({2, 3, 2, 4, 2, 3}).contiguous().view({48, 2, 3});
   auto d5o_bmm_view =
@@ -155,41 +155,40 @@ void TestMatmul(Type& T, Tensor& t, Type& AccT) {
       d5.matmul(d5o), d5_bmm_view.bmm(d5o_bmm_view).view({2, 3, 2, 4, 2, 2}));
 
   // non-expandable case
-  auto d5wrong = randn({2, 4, 2, 4, 3, 2}, T);
+  auto d5wrong = randn({2, 4, 2, 4, 3, 2}, options);
   // Throw Contains("must match the size")
   ASSERT_ANY_THROW(d5.matmul(d5wrong));
 }
 
-void TestStandardGammaGrad(Type& T, Tensor& t) {
+void TestStandardGammaGrad(TensorOptions& options, Tensor& t) {
   // check empty
-  auto empty = ones({0}, T);
+  auto empty = ones({0}, options);
   ASSERT_EQUAL(empty, at::_standard_gamma_grad(empty, empty));
 
   // check scalar equals one element
-  auto one_scalar = ones({}, T).mul(5);
-  auto one_with_dim = ones({1}, T).mul(5);
+  auto one_scalar = ones({}, options).mul(5);
+  auto one_with_dim = ones({1}, options).mul(5);
   ASSERT_ALLCLOSE(
       at::_standard_gamma_grad(one_scalar, one_scalar),
       at::_standard_gamma_grad(one_with_dim, one_with_dim).sum());
 
   // check mixing types
-  auto t1 = randn({3, 4}, T);
-  auto t2 = randn({3, 4}, T).toType(kDouble);
+  auto t1 = randn({3, 4}, options);
+  auto t2 = randn({3, 4}, options).toType(kDouble);
   // Throw StartsWith("expected scalar type")
   ASSERT_ANY_THROW(at::_standard_gamma_grad(t1, t2));
 }
 
-void TestWhere(Type& T, Tensor& t) {
+void TestWhere(TensorOptions& options, Tensor& t) {
   // empty
-  auto empty = ones({0}, T);
-  auto& bT = T.toScalarType(ScalarType::Byte);
-  auto empty_byte = ones({0}, bT);
+  auto empty = ones({0}, options);
+  auto empty_byte = ones({0}, options.dtype(kByte));
   ASSERT_EQUAL(empty, at::where(empty_byte, empty, empty));
 
   // check scalar equals one element
-  auto x_scalar = ones({}, T).mul(5);
-  auto y_scalar = ones({}, T).mul(7);
-  auto cond_scalar = zeros({}, bT);
+  auto x_scalar = ones({}, options).mul(5);
+  auto y_scalar = ones({}, options).mul(7);
+  auto cond_scalar = zeros({}, options.dtype(kByte));
   auto x_1d = x_scalar.unsqueeze(0);
   auto y_1d = y_scalar.unsqueeze(0);
   auto cond_1d = cond_scalar.unsqueeze(0);
@@ -198,27 +197,29 @@ void TestWhere(Type& T, Tensor& t) {
       at::where(cond_1d, x_1d, y_1d));
 }
 
-void test(Type& T, Type& AccT) {
-  auto t = randn({3, 3}, T);
+void test(Type& T, TensorOptions &options, Type& AccT) {
+  auto t = randn({3, 3}, options);
   TestSplit(T, t);
   TestChunk(T, t);
   TestStack(T, t);
-  TestSize(T, t);
-  TestMatmul(T, t, AccT);
-  TestStandardGammaGrad(T, t);
-  TestWhere(T, t);
+  TestSize(options, t);
+  TestMatmul(options, t, AccT);
+  TestStandardGammaGrad(options, t);
+  TestWhere(options, t);
 }
 
 TEST(TestNative, NativeTestCPU) {
   manual_seed(123);
 
-  test(CPU(kFloat), CPU(kDouble));
+  auto options = device(kCPU).dtype(kFloat);
+  test(CPU(kFloat), options, CPU(kDouble));
 }
 
 TEST(TestNative, NativeTestGPU) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
-    test(CUDA(kFloat), CUDA(kDouble));
+    auto options = device(kCUDA).dtype(kFloat);
+    test(CUDA(kFloat), options, CUDA(kDouble));
   }
 }

@@ -11,7 +11,7 @@ TEST(TestUndefined, UndefinedTest) {
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
-  Tensor ft = ones({1}, CPU(kFloat));
+  Tensor ft = ones({1}, device(kCPU).dtype(kFloat));
 
   std::stringstream ss;
   ss << und << std::endl;
@@ -43,7 +43,7 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.toBackend(Backend::CPU));
   ASSERT_ANY_THROW(ft.toBackend(Backend::Undefined));
 
-  Tensor to_move = ones({1}, CPU(kFloat));
+  Tensor to_move = ones({1}, device(kCPU).dtype(kFloat));
   Tensor m(std::move(to_move));
   ASSERT_FALSE(to_move.defined());
   ASSERT_EQ(to_move.unsafeGetTensorImpl(), UndefinedTensorImpl::singleton());

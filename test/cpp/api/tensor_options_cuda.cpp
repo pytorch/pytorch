@@ -60,7 +60,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
+  options = empty(5, device(kCUDA).dtype(kDouble).layout(kSparse)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (torch::cuda::device_count() > 1) {

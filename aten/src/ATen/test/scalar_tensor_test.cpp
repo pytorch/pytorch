@@ -42,13 +42,13 @@ bool should_expand(const IntArrayRef &from_size, const IntArrayRef &to_size) {
   return true;
 }
 
-void test(Type &T) {
+void test(TensorOptions &options) {
   std::vector<std::vector<int64_t>> sizes = {{}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
-    auto t = ones(*s, T);
+    auto t = ones(*s, options);
     ASSERT_EQ((size_t)t.dim(), s->size());
     ASSERT_EQ((size_t)t.ndimension(), s->size());
     ASSERT_TRUE(t.sizes().equals(*s));
@@ -61,16 +61,16 @@ void test(Type &T) {
     ASSERT_NO_THROW(ss << t << std::endl);
 
     // set_
-    auto t2 = ones(*s, T);
+    auto t2 = ones(*s, options);
     t2.set_();
-    require_equal_size_dim(t2, ones({0}, T));
+    require_equal_size_dim(t2, ones({0}, options));
 
     // unsqueeze
     ASSERT_EQ(t.unsqueeze(0).dim(), t.dim() + 1);
 
     // unsqueeze_
     {
-      auto t2 = ones(*s, T);
+      auto t2 = ones(*s, options);
       auto r = t2.unsqueeze_(0);
       ASSERT_EQ(r.dim(), t.dim() + 1);
     }
@@ -93,12 +93,12 @@ void test(Type &T) {
         }
       }
       auto result = t.squeeze();
-      require_equal_size_dim(result, ones(size_without_ones, T));
+      require_equal_size_dim(result, ones(size_without_ones, options));
     }
 
     {
       // squeeze_ (with dimension argument)
-      auto t2 = ones(*s, T);
+      auto t2 = ones(*s, options);
       if (t2.dim() == 0 || t2.sizes()[0] == 1) {
         ASSERT_EQ(t2.squeeze_(0).dim(), std::max<int64_t>(t.dim() - 1, 0));
       } else {
@@ -110,7 +110,7 @@ void test(Type &T) {
 
     // squeeze_ (with no dimension argument)
     {
-      auto t2 = ones(*s, T);
+      auto t2 = ones(*s, options);
       std::vector<int64_t> size_without_ones;
       for (auto size : *s) {
         if (size != 1) {
@@ -118,14 +118,14 @@ void test(Type &T) {
         }
       }
       auto r = t2.squeeze_();
-      require_equal_size_dim(t2, ones(size_without_ones, T));
+      require_equal_size_dim(t2, ones(size_without_ones, options));
     }
 
     // reduce (with dimension argument and with 1 return argument)
     if (t.numel() != 0) {
       ASSERT_EQ(t.sum(0).dim(), std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      ASSERT_TRUE(t.sum(0).equal(at::zeros({}, T)));
+      ASSERT_TRUE(t.sum(0).equal(at::zeros({}, options)));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
@@ -153,8 +153,8 @@ void test(Type &T) {
     for (auto rhs_it = sizes.begin(); rhs_it != sizes.end(); ++rhs_it) {
       // is_same_size should only match if they are the same shape
       {
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(*lhs_it, options);
+        auto rhs = ones(*rhs_it, options);
         if (*lhs_it != *rhs_it) {
           ASSERT_FALSE(lhs.is_same_size(rhs));
           ASSERT_FALSE(rhs.is_same_size(lhs));
@@ -162,15 +162,15 @@ void test(Type &T) {
       }
       // forced size functions (resize_, resize_as, set_)
       {// resize_
-       {auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
+       {auto lhs = ones(*lhs_it, options);
+      auto rhs = ones(*rhs_it, options);
       lhs.resize_(*rhs_it);
       require_equal_size_dim(lhs, rhs);
     }
     // resize_as_
     {
-      auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
+      auto lhs = ones(*lhs_it, options);
+      auto rhs = ones(*rhs_it, options);
       lhs.resize_as_(rhs);
       require_equal_size_dim(lhs, rhs);
     }
@@ -178,15 +178,15 @@ void test(Type &T) {
     {
       {
         // with tensor
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(*lhs_it, options);
+        auto rhs = ones(*rhs_it, options);
         lhs.set_(rhs);
         require_equal_size_dim(lhs, rhs);
       }
       {
         // with storage
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(*lhs_it, options);
+        auto rhs = ones(*rhs_it, options);
         lhs.set_(rhs.storage());
         // should not be dim 0 because an empty storage is dim 1; all other
         // storages aren't scalars
@@ -194,8 +194,8 @@ void test(Type &T) {
       }
       {
         // with storage, offset, sizes, strides
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(*lhs_it, options);
+        auto rhs = ones(*rhs_it, options);
         lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
         require_equal_size_dim(lhs, rhs);
       }
@@ -204,8 +204,8 @@ void test(Type &T) {
 
   // view
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
+    auto lhs = ones(*lhs_it, options);
+    auto rhs = ones(*rhs_it, options);
     auto rhs_size = *rhs_it;
     TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
                    ASSERT_NE(lhs.numel(), rhs.numel()),
@@ -215,8 +215,8 @@ void test(Type &T) {
 
   // take
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = zeros(*rhs_it, T).toType(ScalarType::Long);
+    auto lhs = ones(*lhs_it, options);
+    auto rhs = zeros(*rhs_it, options).toType(ScalarType::Long);
     TRY_CATCH_ELSE(auto result = lhs.take(rhs), ASSERT_EQ(lhs.numel(), 0);
                    ASSERT_NE(rhs.numel(), 0),
                    require_equal_size_dim(result, rhs));
@@ -224,8 +224,8 @@ void test(Type &T) {
 
   // ger
   {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
+    auto lhs = ones(*lhs_it, options);
+    auto rhs = ones(*rhs_it, options);
     TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
                    ASSERT_TRUE(
                        (lhs.numel() == 0 || rhs.numel() == 0 ||
@@ -240,9 +240,9 @@ void test(Type &T) {
 
   // expand
   {
-    auto lhs = ones(*lhs_it, T);
+    auto lhs = ones(*lhs_it, options);
     auto lhs_size = *lhs_it;
-    auto rhs = ones(*rhs_it, T);
+    auto rhs = ones(*rhs_it, options);
     auto rhs_size = *rhs_it;
     bool should_pass = should_expand(lhs_size, rhs_size);
     TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
@@ -258,7 +258,7 @@ void test(Type &T) {
       TRY_CATCH_ELSE(lhs.add_(rhs),
                      ASSERT_FALSE(should_pass_inplace),
                      ASSERT_TRUE(should_pass_inplace);
-                     require_equal_size_dim(lhs, ones(*lhs_it, T)););
+                     require_equal_size_dim(lhs, ones(*lhs_it, options)););
     }
   }
 }
@@ -267,13 +267,15 @@ void test(Type &T) {
 
 TEST(TestScalarTensor, TestScalarTensorCPU) {
   manual_seed(123);
-  test(CPU(kFloat));
+  auto options = device(kCPU).dtype(kFloat);
+  test(options);
 }
 
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
-    test(CUDA(kFloat));
+    auto options = device(kCUDA).dtype(kFloat);
+    test(options);
   }
 }
