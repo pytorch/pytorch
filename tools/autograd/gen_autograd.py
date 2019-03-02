@@ -194,13 +194,40 @@ def gen_autograd(aten_path, out, autograd_dir):
     gen_variable_type(out, aten_decls, template_path)
 
     # Generate Functions.h/cpp
-    from .gen_autograd_functions import gen_autograd_functions
-    gen_autograd_functions(
+    from .gen_autograd_functions import gen_autograd_functions_lib
+    gen_autograd_functions_lib(
         out, autograd_functions, template_path)
 
     # Load deprecated signatures
     deprecated = load_deprecated_signatures(
         aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
+
+    # Generate variable_factories.h
+    from .gen_variable_factories import gen_variable_factories
+    gen_variable_factories(out, aten_decls, template_path)
+
+
+def gen_autograd_python(aten_path, out, autograd_dir):
+
+    # TODO Deduplicate these four variable assignments
+
+    aten_decls = load_aten_declarations(aten_path)
+
+    # Parse and load derivatives.yaml
+    from .load_derivatives import load_derivatives
+    autograd_functions = load_derivatives(
+        os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+
+    template_path = os.path.join(autograd_dir, 'templates')
+
+    # Load deprecated signatures
+    deprecated = load_deprecated_signatures(
+        aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
+
+    # Generate Functions.h/cpp
+    from .gen_autograd_functions import gen_autograd_functions_python
+    gen_autograd_functions_python(
+        out, autograd_functions, template_path)
 
     # Generate Python bindings
     from . import gen_python_functions
@@ -210,10 +237,6 @@ def gen_autograd(aten_path, out, autograd_dir):
         out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_nn_functions(
         out, aten_decls, template_path)
-
-    # Generate variable_factories.h
-    from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(out, aten_decls, template_path)
 
 
 def main():
