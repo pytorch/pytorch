@@ -190,5 +190,5 @@ class TorchIntegration(hu.HypothesisTestCase):
                 torch.tensor(scores).cuda(), torch.tensor(bbox_deltas).cuda(),
                 torch.tensor(im_info).cuda(), torch.tensor(anchors).cuda(),
                 2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0)
-        torch.testing.assert_allclose(rois, a)
-        torch.testing.assert_allclose(rois_probs, b)
+        torch.testing.assert_allclose(rois, a.cpu())
+        torch.testing.assert_allclose(rois_probs, b.cpu())
