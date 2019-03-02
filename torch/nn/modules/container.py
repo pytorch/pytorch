@@ -3,7 +3,6 @@ from collections import OrderedDict
 from torch._six import container_abcs
 from itertools import islice
 import operator
-from types import LambdaType
 
 import torch
 from .module import Module
