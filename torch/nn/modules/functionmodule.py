@@ -13,7 +13,7 @@ class FunctionModule(Module):
         
     def __repr__(self):
         name = self.fun.__name__
-        sig_str = signature(name).__str__()
+        sig_str = signature(self.fun).__str__()
         return 'Callable {0}, signature {1}'.format(name, sig_str)
     
     def forward(self, *args, **kwargs):
