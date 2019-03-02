@@ -24,8 +24,11 @@ namespace caffe2 {
 template <typename T, class Context>
 class UpsampleBilinearOp final : public Operator<Context> {
  public:
-  UpsampleBilinearOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), width_scale_(1), height_scale_(1) {
+  template <class... Args>
+  explicit UpsampleBilinearOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        width_scale_(1),
+        height_scale_(1) {
     if (HasArgument("width_scale")) {
       width_scale_ = static_cast<T>(
           this->template GetSingleArgument<float>("width_scale", 1));
@@ -49,8 +52,11 @@ class UpsampleBilinearOp final : public Operator<Context> {
 template <typename T, class Context>
 class UpsampleBilinearGradientOp final : public Operator<Context> {
  public:
-  UpsampleBilinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), width_scale_(1), height_scale_(1) {
+  template <class... Args>
+  explicit UpsampleBilinearGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        width_scale_(1),
+        height_scale_(1) {
     width_scale_ = static_cast<T>(
         this->template GetSingleArgument<float>("width_scale", 1));
     height_scale_ = static_cast<T>(

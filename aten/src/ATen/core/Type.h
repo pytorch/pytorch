@@ -78,8 +78,24 @@ enum class TypeID {
   SparseCUDAInt,
   SparseCUDALong,
   SparseCUDAShort,
-  MSNPU,
-  XLA,
+  MSNPUBool,
+  MSNPUByte,
+  MSNPUChar,
+  MSNPUDouble,
+  MSNPUFloat,
+  MSNPUInt,
+  MSNPULong,
+  MSNPUShort,
+  MSNPUHalf,
+  XLABool,
+  XLAByte,
+  XLAChar,
+  XLADouble,
+  XLAFloat,
+  XLAInt,
+  XLALong,
+  XLAShort,
+  XLAHalf,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,
@@ -546,7 +562,7 @@ struct CAFFE2_API Type {
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
-  virtual Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
+  virtual Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) const = 0;
   virtual Tensor addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor addcdiv(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) const = 0;

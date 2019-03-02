@@ -534,6 +534,12 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
+    def test_stable_opset(self):
+        x = torch.randn(2, 3).float()
+        y = torch.randn(2, 3).float()
+        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=9)
+
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS

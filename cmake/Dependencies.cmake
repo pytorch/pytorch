@@ -744,7 +744,12 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      IF(CUDNN_STATIC_LINKAGE)
+	LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+	  caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+      ELSE()
+	list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -806,8 +811,8 @@ if(USE_ROCM)
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    foreach(hcc_amdgpu_target ${HCC_AMDGPU_TARGET})
-      list(APPEND HIP_HCC_FLAGS -amdgpu-target=${hcc_amdgpu_target})
+    foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
+      list(APPEND HIP_HCC_FLAGS --amdgpu-target=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
@@ -1041,8 +1046,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi)
 
   include_directories(${ONNX_INCLUDE_DIRS})
+  include_directories(${FOXI_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
@@ -1052,7 +1059,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
-  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
+  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -1314,7 +1321,6 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(AT_CUDA_ENABLED 0)
   else()
     SET(AT_CUDA_ENABLED 1)
-    find_package(CUDA 5.5 REQUIRED)
   endif()
 
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)

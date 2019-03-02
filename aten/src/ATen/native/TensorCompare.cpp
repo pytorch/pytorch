@@ -34,14 +34,6 @@ namespace at { namespace native {
 DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
-Tensor index_select_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
-  Tensor res = at::zeros(sizes, grad.options());
-  if (!keepdim && sizes.size() > 0) {
-    return res.scatter_(dim, indices.unsqueeze(dim), grad.unsqueeze(dim));
-  }
-  return res.scatter_(dim, indices, grad);
-}
-
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
 }
@@ -103,26 +95,6 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
     where_cpu<scalar_t>(ret, condition, self, other);
   });
   return ret;
-}
-
-std::tuple<Tensor, Tensor> kthvalue(const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::kthvalue_out(values, indices, self, k, dim, keepdim);
-}
-
-std::tuple<Tensor &,Tensor &> kthvalue_out(Tensor& values, Tensor& indices,
-                                           const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "kthvalue only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "kthvalue")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(values, indices);
-  } else {
-    return at::legacy::th::_th_kthvalue_out(values, indices, self, k, dim, keepdim);
-  }
 }
 
 std::tuple<Tensor, Tensor> median(const Tensor& self, int64_t dim, bool keepdim) {
