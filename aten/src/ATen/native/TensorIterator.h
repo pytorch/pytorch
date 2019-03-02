@@ -68,7 +68,7 @@ struct CAFFE2_API OperandInfo {
   OperandInfo() {}
   OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
     : tensor(t), backend(backend), dtype(dtype) {
-      if (t.defined() && (backend != Backend::Undefined || dtype != ScalarType::Undefined)) {
+      if (t.defined() && (backend == Backend::Undefined || dtype == ScalarType::Undefined)) {
         this->backend = t.type().backend();
         this->dtype = t.scalar_type();
       }

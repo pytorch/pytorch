@@ -182,7 +182,7 @@ void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
-      AT_ASSERTM(!op.is_type_defined(), "no type for operand", i);
+      AT_ASSERTM(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.dtype);
       op.stride_bytes = compatible_stride(element_size);
 
