@@ -1196,6 +1196,9 @@
   variants: function, method
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: kthvalue_out_cpu
+    CUDA: kthvalue_out_cuda
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   matches_jit_signature: True
