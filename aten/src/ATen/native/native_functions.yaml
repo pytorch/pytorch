@@ -2294,7 +2294,7 @@
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
 # _s_where derivative.
-- func: where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+- func: where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function, method
 
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
