@@ -216,7 +216,7 @@ def smoothl1loss_double_backwards(ctx, ggI):
     small_error_mask = small_error_mask.type_as(ggI)
 
     gI = small_error_mask * ggI * gO / div_factor
-    ggO = (ggI * (input_sub_target * small_error_mask + large_error_pos_mask - large_error_neg_mask)).sum() / div_factor
+    ggO = (ggI * (input_sub_target / beta * small_error_mask + large_error_pos_mask - large_error_neg_mask)).sum() / div_factor
 
     return gI, None, ggO, None, None, None
 
