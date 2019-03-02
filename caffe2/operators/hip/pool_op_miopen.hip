@@ -139,9 +139,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext, true> {
 
 class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext, true> {
  public:
-  template<class... Args>
-  explicit MIOPENPoolGradientOp(Args&&... args)
-      : ConvPoolOpBase<HIPContext, true>(std::forward<Args>(args)...),
+  explicit MIOPENPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<HIPContext, true>(operator_def, ws),
         poolWsSize_(0),
         poolWs_(nullptr),
         miopen_wrapper_(&context_),
