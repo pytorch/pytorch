@@ -87,6 +87,9 @@ def type_argument_translations(arg):
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
+    elif re.match(r'std::array', t):
+        raise RuntimeError("Please use array notation, e.g. bool[3] and not std::aray. "
+                           "See [temp translations] for details.")
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
