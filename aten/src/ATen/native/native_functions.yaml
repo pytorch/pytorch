@@ -1668,6 +1668,7 @@
   matches_jit_signature: True
 
 - func: rand(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: rand_like(Tensor self) -> Tensor
   matches_jit_signature: True
@@ -1686,11 +1687,13 @@
   matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int high) -> Tensor
   matches_jit_signature: True
@@ -1710,6 +1713,7 @@
   matches_jit_signature: True
 
 - func: randn(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
 
 - func: randn_like(Tensor self) -> Tensor
   matches_jit_signature: True
@@ -1724,6 +1728,7 @@
   matches_jit_signature: True
 
 - func: randperm(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
@@ -3603,12 +3608,14 @@
   variants: method, function
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  matches_jit_signature: True
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   matches_jit_signature: True
   variants: method, function
 
 - func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  matches_jit_signature: True
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   matches_jit_signature: True
@@ -3657,6 +3664,7 @@
   variants: method, function
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
+  matches_jit_signature: True
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   matches_jit_signature: True
@@ -4041,6 +4049,7 @@
   python_module: nn
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
@@ -4064,6 +4073,7 @@
   python_module: nn
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
+  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
@@ -4372,6 +4382,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
@@ -4401,6 +4412,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
@@ -4773,6 +4785,7 @@
   python_module: nn
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
@@ -4780,6 +4793,7 @@
   python_module: nn
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
