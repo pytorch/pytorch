@@ -403,14 +403,11 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
-    foa = open('/tmp/aaa', 'w')
-    fob = open('/tmp/bbb', 'w')
-
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, foa, fob, decl['should_match_schema']),
+            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
                                                  op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
@@ -455,7 +452,7 @@ def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
 
 
-def match_signature(decl, constructed_string, should_match_schema, foa, fob):
+def match_signature(decl, constructed_string, should_match_schema):
     # If matches_jit_signature has been specified the signature constructed from the
     # declared attributes should match the raw string passed through. In the
     # case of native_functions.yaml, func should match the generated signature,
@@ -466,20 +463,11 @@ def match_signature(decl, constructed_string, should_match_schema, foa, fob):
             decl['schema_string'] + ' is flagged as JIT signature compliant' + \
             ', but does not match the signature ' + constructed_string
         return decl['schema_string']
-    else:
-        if should_match_schema:
-            # foa.write(constructed_string + "\n")
-            import Levenshtein
-            if 'schema_string' in decl and len(decl['schema_string']) > 0:
-                d = Levenshtein.distance(constructed_string, decl['schema_string'])
-                foa.write(str(d) + "\t" + constructed_string + "\t" + decl['schema_string'] + "\n")
-                if d == 0:
-                    fob.write(decl['schema_string'] + "\n")
 
     return constructed_string
 
 
-def signature(decl, foa, fob, should_match_schema=True):
+def signature(decl, should_match_schema=True):
     def format_arg(arg):
         name = arg['name']
         typ = jit_type_of(arg)
@@ -522,7 +510,7 @@ def signature(decl, foa, fob, should_match_schema=True):
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
-    return match_signature(decl, constructed_string, should_match_schema, foa, fob)
+    return match_signature(decl, constructed_string, should_match_schema)
 
 
 def main():
