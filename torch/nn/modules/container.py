@@ -540,14 +540,3 @@ class ParameterDict(Module):
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
-   
-class LambdaModule(Module):
-    def __init__(self, lambda_fun):
-        super(LambdaModule, self).__init__()
-        if not isinstance(lambda_fun, LambdaType):
-            raise TypeError("LambdaModule argument type should be a lambda ;"
-                            " is " + type(lambda_fun).__name__")
-        self.lambda_fun = lambda_fun
-
-    def forward(self, x):
-        return self.lambda_fun(x)
