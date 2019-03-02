@@ -33,8 +33,8 @@ void testClassParser() {
 
   const auto classType = ClassType::get("FooTest");
   ASSERT_TRUE(classType);
-  classType->numAttributes() == 1;
-  classType->getAttributeSlot("x") == 0;
+  ASSERT_TRUE(classType->numAttributes() == 1);
+  ASSERT_TRUE(classType->getAttributeSlot("x") == 0);
   auto method = classType->getMethod("get_x");
   ASSERT_TRUE(method);
 }
