@@ -53,7 +53,9 @@ TYPE_MAP = {
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
     'Layout': 'Layout',
+    'Layout?': 'Layout?',
     'Device': 'Device',
+    'Device?': 'Device?',
     'ScalarType': 'ScalarType',
     'ScalarType?': 'ScalarType?',
     'int64_t': 'int',
@@ -90,10 +92,13 @@ def jit_type_of(arg):
 
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
+# TODO: Device? and Layout? need toOptional?
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
+    'Device?': '{}.toDevice()',
     'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
+    'Layout?': '{}.toLayout()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -338,19 +343,34 @@ def gen_jit_dispatch(declarations, out, template_path):
             return [arg]
         assert decl.get('tensor_options_arg_index') != i
         decl['tensor_options_arg_index'] = i
-        return [
+        tensor_options_expansion = [
             # XXX - until we actually have first-class interpreter types for these
             # concepts, the default values to be encoded in Tensors
             # If you change this, you also need to update [TensorOptions in script]
             # in the tracer code.
             # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
+            {'name': 'dtype', 'simple_type': 'ScalarType'},
             # layout is specified as an int64_t of at::Layout
-            {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
+            {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-            {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '\\"cpu\\"'},
+            {'name': 'device', 'simple_type': 'Device'},
         ]
+        # if decl['name'] == '_sparse_coo_tensor_unsafe':
+        #     import pdb; pdb.set_trace()
+        if 'default' in arg:
+            tensor_options_expansion[0]['simple_type'] += '?'
+            tensor_options_expansion[1]['simple_type'] += '?'
+            tensor_options_expansion[2]['simple_type'] += '?'
+            tensor_options_expansion[0]['default'] = 'None'
+            tensor_options_expansion[1]['default'] = 'None'
+            tensor_options_expansion[2]['default'] = 'None'
+        if 'default' in arg and arg['default'] == 'at::kLong':
+            tensor_options_expansion[0]['default'] = 'long'
+        if 'kwarg_only' in arg and arg['kwarg_only']:
+            tensor_options_expansion[0]['kwarg_only'] = True
+            tensor_options_expansion[1]['kwarg_only'] = True
+            tensor_options_expansion[2]['kwarg_only'] = True
+        return tensor_options_expansion
 
     additional_jit_decls = []
 
@@ -383,11 +403,14 @@ def gen_jit_dispatch(declarations, out, template_path):
     num_shards = 3
     shards = [[] for _ in range(num_shards)]
 
+    foa = open('/tmp/aaa', 'w')
+    fob = open('/tmp/bbb', 'w')
+
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+            shards[x].append(OPERATOR.substitute(signature=signature(decl, foa, fob, decl['should_match_schema']),
                                                  op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
@@ -432,7 +455,7 @@ def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
 
 
-def match_signature(decl, constructed_string, should_match_schema):
+def match_signature(decl, constructed_string, should_match_schema, foa, fob):
     # If matches_jit_signature has been specified the signature constructed from the
     # declared attributes should match the raw string passed through. In the
     # case of native_functions.yaml, func should match the generated signature,
@@ -443,11 +466,20 @@ def match_signature(decl, constructed_string, should_match_schema):
             decl['schema_string'] + ' is flagged as JIT signature compliant' + \
             ', but does not match the signature ' + constructed_string
         return decl['schema_string']
+    else:
+        if should_match_schema:
+            # foa.write(constructed_string + "\n")
+            import Levenshtein
+            if 'schema_string' in decl and len(decl['schema_string']) > 0:
+                d = Levenshtein.distance(constructed_string, decl['schema_string'])
+                foa.write(str(d) + "\t" + constructed_string + "\t" + decl['schema_string'] + "\n")
+                if d == 0:
+                    fob.write(decl['schema_string'] + "\n")
 
     return constructed_string
 
 
-def signature(decl, should_match_schema=True):
+def signature(decl, foa, fob, should_match_schema=True):
     def format_arg(arg):
         name = arg['name']
         typ = jit_type_of(arg)
@@ -490,7 +522,7 @@ def signature(decl, should_match_schema=True):
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
-    return match_signature(decl, constructed_string, should_match_schema)
+    return match_signature(decl, constructed_string, should_match_schema, foa, fob)
 
 
 def main():
