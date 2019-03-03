@@ -44,7 +44,7 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None, reserve_param_name=False):
+           operator_export_type=None, opset_version=None, retain_param_name=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -96,7 +96,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
-        reserve_param_name (bool, default is False): reserve the names of the parameter
+        retain_param_name (bool, default is False): retain the names of the parameter
             in the state dict during export
     """
     if aten or export_raw_ir:
@@ -110,7 +110,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
-            reserve_param_name=reserve_param_name)
+            retain_param_name=retain_param_name)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -216,7 +216,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
-                    reserve_param_name=False):
+                    retain_param_name=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -239,7 +239,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
-        if reserve_param_name:
+        if retain_param_name:
             graph_inputs = list(graph.inputs())
             user_input_num = len(graph_inputs) - len(state_dict)
             param_names = list(state_dict.keys())
@@ -268,7 +268,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None, reserve_param_name=False):
+                            opset_version=None, retain_param_name=False):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -278,13 +278,13 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
-                                    opset_version, reserve_param_name)
+                                    opset_version, retain_param_name)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-                             google_printer=False, opset_version=None, reserve_param_name=False):
+                             google_printer=False, opset_version=None, retain_param_name=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -292,7 +292,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
-                                               example_outputs, propagate, reserve_param_name)
+                                               example_outputs, propagate, retain_param_name)
 
     return graph._pretty_print_onnx(params, opset_version, False, operator_export_type, google_printer)
 
@@ -304,7 +304,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None, reserve_param_name=False):
+            opset_version=None, retain_param_name=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -313,7 +313,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                                                training, input_names,
                                                output_names, operator_export_type,
                                                example_outputs, propagate,
-                                               reserve_param_name)
+                                               retain_param_name)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

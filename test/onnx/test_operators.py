@@ -552,7 +552,7 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
 
-    def test_reserve_param_name(self):
+    def test_retain_param_name(self):
         class MyModule(Module):
             def __init__(self):
                 super(MyModule, self).__init__()
@@ -565,7 +565,7 @@ class TestOperators(TestCase):
                 return self.fc2(self.fc1(x))
 
         x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), reserve_param_name=True)
+        self.assertONNX(MyModule(), (x,), retain_param_name=True)
 
 
 if __name__ == '__main__':
