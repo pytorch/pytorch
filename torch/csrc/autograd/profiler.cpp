@@ -24,15 +24,17 @@ thread_local std::shared_ptr<ProfilerInvocationState> invocation_state =
     std::make_shared<ProfilerInvocationState>();
 
 thread_local std::shared_ptr<RangeEventList> event_list;
+thread_local ProfilerInvocationState* associated_invocation_state = invocation_state.get();
 
 RangeEventList& getEventList() {
-  if (!event_list) {
+  if (!event_list || associated_invocation_state != invocation_state.get()) {
     std::lock_guard<std::mutex> guard(invocation_state->mutex);
     event_list = std::make_shared<RangeEventList>();
     if (thread_id == -1) {
       thread_id = next_thread_id++;
     }
     invocation_state->all_event_lists.emplace_front(event_list);
+    associated_invocation_state = invocation_state.get();
   }
   return *event_list;
 }
