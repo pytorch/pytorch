@@ -30,8 +30,6 @@ class RMSprop(Optimizer):
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
-        if not 0.0 <= momentum:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= alpha:
@@ -70,7 +68,7 @@ class RMSprop(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     state['square_avg'] = torch.zeros_like(p.data)
-                    if group['momentum'] > 0:
+                    if group['momentum'] != 0:
                         state['momentum_buffer'] = torch.zeros_like(p.data)
                     if group['centered']:
                         state['grad_avg'] = torch.zeros_like(p.data)
@@ -92,7 +90,7 @@ class RMSprop(Optimizer):
                 else:
                     avg = square_avg.sqrt().add_(group['eps'])
 
-                if group['momentum'] > 0:
+                if group['momentum'] != 0:
                     buf = state['momentum_buffer']
                     buf.mul_(group['momentum']).addcdiv_(grad, avg)
                     p.data.add_(-group['lr'], buf)
