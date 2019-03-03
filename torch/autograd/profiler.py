@@ -177,13 +177,13 @@ class profile(object):
         self.entered = True
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
-        torch.autograd._enable_profiler(profiler_kind)
+        self.old_state = torch.autograd._enable_profiler(profiler_kind)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        records = torch.autograd._disable_profiler()
+        records = torch.autograd._disable_profiler(self.old_state)
         self.function_events = EventList(parse_cpu_trace(records))
         return False
 

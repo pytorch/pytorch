@@ -15,6 +15,7 @@ using namespace torch::jit;
 
 JIT_TEST(ADFormulas)
 JIT_TEST(Attributes)
+JIT_TEST(AutogradProfiler)
 JIT_TEST(Blocks)
 JIT_TEST(CodeTemplate)
 JIT_TEST(ControlFlow)

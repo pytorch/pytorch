@@ -217,12 +217,19 @@ struct TORCH_API RecordFunction {
   }
 };
 
+struct ProfilerInvocationState {
+  ProfilerState state = ProfilerState::Disabled;
+  std::mutex mutex;
+  std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+};
+
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerState new_state);
-TORCH_API thread_event_lists disableProfiler();
-
+TORCH_API std::shared_ptr<ProfilerInvocationState> enableProfiler(
+    ProfilerState new_state);
+TORCH_API thread_event_lists
+disableProfiler(std::shared_ptr<ProfilerInvocationState> orig_state);
 
 // Usage:
 //   {
@@ -240,6 +247,8 @@ private:
   std::unique_ptr<std::ofstream> file_;
   std::ostream& out_;
   void processEvents(const std::vector<Event*>& events);
+
+  std::shared_ptr<ProfilerInvocationState> old_state;
 };
 
 

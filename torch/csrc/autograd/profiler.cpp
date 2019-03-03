@@ -20,12 +20,6 @@ TORCH_API void registerCUDAMethods(CUDAStubs* stubs) {
 std::atomic<int> next_thread_id{0};
 thread_local int thread_id = -1;
 
-struct ProfilerInvocationState {
-  ProfilerState state = ProfilerState::Disabled;
-  std::mutex mutex;
-  std::list<std::shared_ptr<RangeEventList>> all_event_lists;
-};
-
 thread_local std::shared_ptr<ProfilerInvocationState> invocation_state =
     std::make_shared<ProfilerInvocationState>();
 
@@ -126,7 +120,8 @@ RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
   pushRangeImpl<const char*>(name, ", seq=", current_sequence_nr);
 }
 
-void enableProfiler(ProfilerState new_state) {
+std::shared_ptr<ProfilerInvocationState> enableProfiler(
+    ProfilerState new_state) {
   AT_ASSERT(new_state != ProfilerState::Disabled);
   if (new_state == ProfilerState::NVTX && !cuda_stubs->enabled())
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
@@ -135,6 +130,9 @@ void enableProfiler(ProfilerState new_state) {
     throw std::runtime_error(
         "can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
+  // invocation_state->state = new_state;
+  auto old_invocation_state = invocation_state;
+  invocation_state = std::make_shared<ProfilerInvocationState>();
   invocation_state->state = new_state;
 
   if (invocation_state->state == ProfilerState::CUDA) {
@@ -155,29 +153,32 @@ void enableProfiler(ProfilerState new_state) {
     });
   }
   mark("__start_profile", false);
+
+  return old_invocation_state;
 }
 
-thread_event_lists disableProfiler() {
+thread_event_lists disableProfiler(
+    std::shared_ptr<ProfilerInvocationState> orig_state) {
   if (invocation_state->state == ProfilerState::Disabled) {
     throw std::runtime_error("can't disable profiler when it's not running");
   }
-  ProfilerState old_state = invocation_state->state;
+  auto old_state = invocation_state;
   mark("__stop_profile");
-  invocation_state->state = ProfilerState::Disabled;
-  if (old_state == ProfilerState::NVTX) {
+  invocation_state = orig_state;
+  if (old_state->state == ProfilerState::NVTX) {
     return thread_event_lists();
   } else {
     thread_event_lists result;
-    std::lock_guard<std::mutex> guard(invocation_state->mutex);
-    for (auto it = invocation_state->all_event_lists.begin();
-         it != invocation_state->all_event_lists.end();) {
+    std::lock_guard<std::mutex> guard(old_state->mutex);
+    for (auto it = old_state->all_event_lists.begin();
+         it != old_state->all_event_lists.end();) {
       auto & list = *it;
       result.emplace_back(list->consolidate());
       // GC lists that are not held by any threads
       if (list.use_count() == 1) {
         auto current_it = it;
         ++it;
-        invocation_state->all_event_lists.erase(current_it);
+        old_state->all_event_lists.erase(current_it);
       } else {
         ++it;
       }
@@ -230,11 +231,11 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerState::CPU);
+  old_state = enableProfiler(ProfilerState::CPU);
 }
 
 RecordProfile::~RecordProfile() {
-  thread_event_lists event_lists = disableProfiler();
+  thread_event_lists event_lists = disableProfiler(old_state);
   std::vector<Event*> events;
   for(auto& l : event_lists) {
     for(auto& e : l) {
