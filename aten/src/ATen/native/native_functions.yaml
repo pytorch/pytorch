@@ -861,6 +861,7 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, TensorOptions options=[]) -> Tensor
+  cpu_half: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
