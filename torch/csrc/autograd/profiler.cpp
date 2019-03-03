@@ -16,18 +16,22 @@ TORCH_API void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs = stubs;
 }
 
+// Assign all threads contiguous integer IDs so we can keep track of them
+std::atomic<uint16_t> next_thread_id{0};
+thread_local uint16_t thread_id = -1;
+
 ProfilerState state = ProfilerState::Disabled;
-uint16_t next_thread_id = 0;
 std::mutex all_event_lists_mutex;
 std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
-thread_local uint16_t thread_id;
 
 RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
+    if (thread_id == -1) {
+      thread_id = next_thread_id++;
+    }
     all_event_lists.emplace_front(event_list);
   }
   return *event_list;
