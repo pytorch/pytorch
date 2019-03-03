@@ -26,7 +26,8 @@ struct ProfilerInvocationState {
   std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 };
 
-thread_local std::shared_ptr<ProfilerInvocationState> invocation_state = std::make_shared<ProfilerInvocationState>();
+thread_local std::shared_ptr<ProfilerInvocationState> invocation_state =
+    std::make_shared<ProfilerInvocationState>();
 
 thread_local std::shared_ptr<RangeEventList> event_list;
 
@@ -129,12 +130,14 @@ void enableProfiler(ProfilerState new_state) {
   AT_ASSERT(new_state != ProfilerState::Disabled);
   if (new_state == ProfilerState::NVTX && !cuda_stubs->enabled())
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
-  if (invocation_state->state != ProfilerState::Disabled && new_state != invocation_state->state) {
-      throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
+  if (invocation_state->state != ProfilerState::Disabled &&
+      new_state != invocation_state->state) {
+    throw std::runtime_error(
+        "can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
   invocation_state->state = new_state;
 
-  if(invocation_state->state == ProfilerState::CUDA) {
+  if (invocation_state->state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording syncrhonization events
     for(int i = 0; i < 5; i++) {
@@ -166,7 +169,8 @@ thread_event_lists disableProfiler() {
   } else {
     thread_event_lists result;
     std::lock_guard<std::mutex> guard(invocation_state->mutex);
-    for (auto it = invocation_state->all_event_lists.begin(); it != invocation_state->all_event_lists.end();) {
+    for (auto it = invocation_state->all_event_lists.begin();
+         it != invocation_state->all_event_lists.end();) {
       auto & list = *it;
       result.emplace_back(list->consolidate());
       // GC lists that are not held by any threads
