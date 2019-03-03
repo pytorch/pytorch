@@ -26,6 +26,19 @@ thread_local std::shared_ptr<ProfilerInvocationState> invocation_state =
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local ProfilerInvocationState* associated_invocation_state = invocation_state.get();
 
+WorkerPushProfileState::WorkerPushProfileState(std::shared_ptr<ProfilerInvocationState> st) {
+  old_state = invocation_state;
+  invocation_state = st;
+}
+
+WorkerPushProfileState::~WorkerPushProfileState() {
+  invocation_state = old_state;
+}
+
+std::shared_ptr<ProfilerInvocationState> currState() {
+  return invocation_state;
+}
+
 RangeEventList& getEventList() {
   if (!event_list || associated_invocation_state != invocation_state.get()) {
     std::lock_guard<std::mutex> guard(invocation_state->mutex);

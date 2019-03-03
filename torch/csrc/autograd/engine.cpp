@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
@@ -61,7 +62,10 @@ struct FunctionTask {
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
     , fn(std::move(fn))
-    , inputs(std::move(inputs)) {}
+    , inputs(std::move(inputs))
+    , profiler_state(profiler::currState()) {}
+
+  std::shared_ptr<profiler::ProfilerInvocationState> profiler_state;
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
@@ -245,6 +249,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop();
+    profiler::WorkerPushProfileState profile_state_guard(task.profiler_state);
     if (task.fn && !task.base->has_error.load()) {
       GradMode::set_enabled(task.base->grad_mode);
       try {

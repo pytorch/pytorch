@@ -252,5 +252,14 @@ private:
 };
 
 
+struct WorkerPushProfileState {
+  WorkerPushProfileState(std::shared_ptr<ProfilerInvocationState> st);
+  ~WorkerPushProfileState();
+
+  std::shared_ptr<ProfilerInvocationState> old_state;
+};
+
+std::shared_ptr<ProfilerInvocationState> currState();
+
 } // namespace profiler
 }} // namespace torch::autograd
