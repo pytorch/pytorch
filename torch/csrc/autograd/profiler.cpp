@@ -40,6 +40,7 @@ std::shared_ptr<ProfilerInvocationState> currState() {
 }
 
 RangeEventList& getEventList() {
+  // TODO: this won't work with interleaved computation
   if (!event_list || associated_invocation_state != invocation_state.get()) {
     std::lock_guard<std::mutex> guard(invocation_state->mutex);
     event_list = std::make_shared<RangeEventList>();

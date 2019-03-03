@@ -886,6 +886,7 @@ InterpreterState::InterpreterState(
 
 void InterpreterContinuation::operator()() {
   autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  autograd::profiler::WorkerPushProfileState profile_state_guard(profiler_state);
   state.runAsync(stack);
 }
 } // namespace jit

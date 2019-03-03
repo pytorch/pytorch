@@ -6,6 +6,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
 
+#include <torch/csrc/autograd/profiler.h>
+
 namespace at {
 class Tensor;
 }
@@ -76,7 +78,8 @@ struct Suspend : public std::exception {
 
 struct InterpreterContinuation {
   InterpreterContinuation(InterpreterState state_, Stack stack_, bool grad_mode_enabled_)
-      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_) {}
+      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_),
+         profiler_state(autograd::profiler::currState()) {}
 
   void operator()();
 
@@ -84,6 +87,8 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   bool grad_mode_enabled;
+
+  std::shared_ptr<autograd::profiler::ProfilerInvocationState> profiler_state;
 };
 } // namespace jit
 } // namespace torch
