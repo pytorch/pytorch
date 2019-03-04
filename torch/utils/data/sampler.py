@@ -50,9 +50,9 @@ class RandomSampler(Sampler):
     def __init__(self, data_source, replacement=False, num_samples=None):
         self.data_source = data_source
         self.replacement = replacement
-        self._num_samples = num_samples
+        self.num_samples = num_samples
 
-        if self._num_samples is not None and replacement is False:
+        if self.num_samples is not None and replacement is False:
             raise ValueError("With replacement=False, num_samples should not be specified, "
                              "since a random permute will be performed.")
 
@@ -66,9 +66,9 @@ class RandomSampler(Sampler):
     @property
     def num_samples(self):
         # dataset size might change at runtime
-        if self._num_samples is None:
+        if self.num_samples is None:
             return len(self.data_source)
-        return self._num_samples
+        return self.num_samples
 
     def __iter__(self):
         n = len(self.data_source)
