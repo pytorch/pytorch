@@ -426,6 +426,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
+    def test_isnan(self):
+        x = torch.tensor([1, float('nan'), 2])
+        self.assertONNX(lambda x: torch.isnan(x), x)
+
     def test_logsoftmax(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(nn.LogSoftmax(dim=3), x)

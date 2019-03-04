@@ -1618,3 +1618,10 @@ def flatten(g, input, start_dim, end_dim):
 @parse_args('v')
 def nonzero(g, input):
     return g.op('NonZero', input)
+
+
+@parse_args('v')
+def isnan(g, input):
+    output = g.op('IsNaN', input)
+    output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    return output
