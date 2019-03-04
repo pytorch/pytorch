@@ -9,6 +9,7 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(EnforceFinite, FunctionSchema(
     "_c10_experimental::EnforceFinite",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("input")
     }), (std::vector<c10::Argument>{

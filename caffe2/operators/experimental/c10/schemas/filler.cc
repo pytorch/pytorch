@@ -13,6 +13,7 @@ namespace ops {
 // TODO Parse schema strings instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(ConstantFill, FunctionSchema(
     "_c10_experimental::ConstantFill",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),
@@ -26,6 +27,7 @@ C10_DEFINE_OP_SCHEMA(ConstantFill, FunctionSchema(
 ));
 C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
     "_c10_experimental::ConstantFill",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),
@@ -39,6 +41,7 @@ C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
     "_c10_experimental::ConstantFill",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),
@@ -51,6 +54,7 @@ C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
     "_c10_experimental::ConstantFill",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),
@@ -63,6 +67,7 @@ C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorInt64Fill, FunctionSchema(
     "_c10_experimental::ConstantFill",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),
