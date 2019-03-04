@@ -8371,7 +8371,7 @@ a")
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
         self.assertTrue(len(list(traced_fn.graph.inputs())) == 1)
-        FileCheck().check("aten::mm").check('aten::add').run(str(traced_fn.graph))
+        FileCheck().check("aten::mm").check("aten::add").run(str(traced_fn.graph))
 
     def test_call_traced_fn_from_tracing_fn(self):
         @_trace(torch.rand(3, 4))
