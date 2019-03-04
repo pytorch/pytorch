@@ -44,9 +44,9 @@ C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominat
   while (b != 0) {
       a %= b;
       // swap(a,b)
-      a ^= b;
-      b ^= a;
-      a ^= b;
+      size_t tmp = a;
+      a = b;
+      b = tmp;
   }
   
   // a is now the GCD
@@ -568,7 +568,7 @@ struct AccumulationBuffer {
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
-    if (out_t_size > acc_t_size) {
+    if (out_t_size >= acc_t_size) {
       // reusing output buffer for accumulation.
       acc_ptr_ = (char*)out_ptr;
       numerator_ = 1;
@@ -707,7 +707,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  assert(can_use_32bit_indexing);
+  AT_ASSERT(can_use_32bit_indexing);
   auto output_calc = make_output_calculator<uint32_t>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
   auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t>(
