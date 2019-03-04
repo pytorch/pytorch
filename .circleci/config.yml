@@ -3005,6 +3005,7 @@ jobs:
   smoke_macos_libtorch_2.7_cpu:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
+      LIBTORCH_VARIANT: "macos"
     <<: *smoke_mac_test
 
 
