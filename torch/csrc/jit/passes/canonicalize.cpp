@@ -12,8 +12,8 @@ std::shared_ptr<Graph> Canonicalize(
     const std::shared_ptr<Graph>& graph,
     bool keep_unique_names) {
   auto r = std::make_shared<Graph>(graph->current_scope());
-  std::unordered_map<Value*, Value*> rn_env;
-  auto rn_fn = [&](Value* v) { return rn_env.at(v); };
+  std::unordered_map<const Value*, Value*> rn_env;
+  auto rn_fn = [&](const Value* v) { return rn_env.at(v); };
   for (auto* input : graph->inputs()) {
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);

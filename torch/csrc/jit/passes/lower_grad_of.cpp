@@ -17,7 +17,7 @@ void LowerGradOf(Graph& g) {
       auto if_stat =
           g.insertNode(g.create(prim::If, {cond}, it->outputs().size()));
       if_stat->addBlock()->cloneFrom(
-          it->blocks().at(0), [](Value* v) { return v; });
+          it->blocks().at(0), [](const Value* v) { return const_cast<Value*>(v); });
       auto else_block = if_stat->addBlock();
       auto undef = g.createUndefined()
                        ->insertBefore(else_block->return_node())

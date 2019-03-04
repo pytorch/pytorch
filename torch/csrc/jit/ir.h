@@ -221,7 +221,7 @@ struct Value {
   //          %5 = h(%6, %6)
   TORCH_API void replaceAllUsesWith(Value* newValue);
 
-  TORCH_API Value* copyMetadata(Value* from);
+  TORCH_API Value* copyMetadata(const Value* from);
 };
 
 struct Node {
@@ -803,7 +803,7 @@ struct Node {
   // of a node in another graph. It should allocate a new instance of the same
   // concrete type as 'this', but in graph 'g' which might be different
   // than graph_
-  virtual Node* allocNewInstance(Graph* g) {
+  virtual Node* allocNewInstance(Graph* g) const {
     return new Node(g, kind());
   }
   // create a copy of all properties of Node s into this.
@@ -811,7 +811,7 @@ struct Node {
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
   //
-  TORCH_API virtual void cloneFrom(Node* s);
+  TORCH_API virtual void cloneFrom(const Node* s);
 };
 
 struct Block {
@@ -904,7 +904,7 @@ struct Block {
   // to the inputs, nodes, and outputs of this block
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
-  TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
+  TORCH_API void cloneFrom(const Block* src, std::function<Value*(const Value*)> value_map);
 
  private:
   void reIndexTopology();
@@ -1068,8 +1068,8 @@ struct Graph {
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
   TORCH_API Node* createClone(
-      Node* n,
-      const std::function<Value*(Value*)>& value_map,
+      const Node* n,
+      const std::function<Value*(const Value*)>& value_map,
       bool copy_blocks = true);
 
 
@@ -1149,7 +1149,7 @@ struct Graph {
   TORCH_API std::ostream& prettyPrint(std::ostream& out);
   TORCH_API void dumpPretty();
 
-  TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::shared_ptr<Graph> copy() const;
 
  private:
   TORCH_API void freeNode(Node* n);
@@ -1251,8 +1251,8 @@ struct PythonOp : public Node {
   std::vector<THPObjectPtr> scalar_args;
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
-  void cloneFrom(Node* other_) override = 0;
-  Node* allocNewInstance(Graph* g) override = 0;
+  void cloneFrom(const Node* other_) override = 0;
+  Node* allocNewInstance(Graph* g) const override = 0;
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics

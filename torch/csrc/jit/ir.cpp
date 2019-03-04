@@ -582,9 +582,9 @@ void Block::reIndexTopology() {
   }
 }
 
-void Block::cloneFrom(Block* src, std::function<Value*(Value*)> value_map) {
-  std::unordered_map<Value*, Value*> local_map;
-  auto env = [&](Value* v) {
+void Block::cloneFrom(const Block* src, std::function<Value*(const Value*)> value_map) {
+  std::unordered_map<const Value*, Value*> local_map;
+  auto env = [&](const Value* v) {
     auto it = local_map.find(v);
     if (it != local_map.end()) {
       return it->second;
@@ -626,9 +626,9 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
+std::shared_ptr<Graph> Graph::copy() const {
   auto new_g = std::make_shared<Graph>();
-  auto env = [](Value* v) -> Value* {
+  auto env = [](const Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
@@ -699,7 +699,7 @@ Value* Value::setUniqueName(const std::string& name) {
   return this;
 }
 
-Value* Value::copyMetadata(Value* from) {
+Value* Value::copyMetadata(const Value* from) {
   setType(from->type());
   if (from->hasUniqueName()) {
     setUniqueName(from->uniqueName());
@@ -935,7 +935,7 @@ void Node::destroy() {
   graph_->freeNode(this);
 }
 
-void Node::cloneFrom(Node* s) {
+void Node::cloneFrom(const Node* s) {
   setSourceLocation(s->getSourceLocation());
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
@@ -1296,8 +1296,8 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
 }
 
 Node* Graph::createClone(
-    Node* n,
-    const std::function<Value*(Value*)>& value_map,
+    const Node* n,
+    const std::function<Value*(const Value*)>& value_map,
     bool copy_blocks) {
   // n can be from a different graph
   Node* r = n->allocNewInstance(this);
@@ -1378,8 +1378,8 @@ std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs) {
-  std::unordered_map<Value*, Value*> value_map;
-  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  std::unordered_map<const Value*, Value*> value_map;
+  auto value_map_func = [&](const Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
     value_map[callee.inputs()[i]] = inputs[i];

@@ -18,8 +18,8 @@ class ToBatch {
   std::unordered_map<Value*, std::vector<Value*>> batch_map;
   // mapping from input in original graph to new input in new graph - used in
   // createClone
-  std::unordered_map<Value*, Value*> rn_env;
-  std::function<Value*(Value*)> rn_fn = [this](Value* v) {
+  std::unordered_map<const Value*, Value*> rn_env;
+  std::function<Value*(const Value*)> rn_fn = [this](const Value* v) {
     return rn_env.at(v);
   };
 

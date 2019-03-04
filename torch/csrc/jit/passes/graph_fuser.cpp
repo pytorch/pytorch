@@ -304,7 +304,7 @@ struct GraphFuser {
     auto producer_subgraph = &getSubgraph(producer_group);
 
     // Initialize a map of inner graph values to outer graph values
-    std::unordered_map<Value*, Value*> inner_to_outer;
+    std::unordered_map<const Value*, Value*> inner_to_outer;
     auto inner_inputs = producer_subgraph->inputs();
     auto outer_inputs = producer_group->inputs();
     for (size_t i = 0; i < inner_inputs.size(); ++i) {
@@ -314,7 +314,7 @@ struct GraphFuser {
     // Clone all nodes
     for (auto inner : producer_subgraph->nodes()) {
       Node* outer = block_->owningGraph()->createClone(
-          inner, [&](Value* k) -> Value* { return inner_to_outer.at(k); });
+          inner, [&](const Value* k) -> Value* { return inner_to_outer.at(k); });
       outer->insertBefore(producer_group);
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
@@ -362,7 +362,7 @@ struct GraphFuser {
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
-    std::unordered_map<Value*, Value*> inputs_map;
+    std::unordered_map<const Value*, Value*> inputs_map;
     size_t i = 0;
     size_t tensor_insert_idx = 0;
     AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
@@ -398,7 +398,7 @@ struct GraphFuser {
           // directly in the body of the fused group.
           AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
-              subgraph.createClone(input->node(), [](Value*) -> Value* {
+              subgraph.createClone(input->node(), [](const Value*) -> Value* {
                 throw std::runtime_error("unexpected input");
               });
           subgraph.insertNode(in_const);
@@ -408,7 +408,7 @@ struct GraphFuser {
     }
     // copy n into the graph, remapping its inputs to internal nodes
     Node* in_graph = subgraph.createClone(
-        n, [&](Value* k) -> Value* { return inputs_map[k]; });
+        n, [&](const Value* k) -> Value* { return inputs_map[k]; });
     // if n's outputs are already inputs to the fusion group,
     // we need to remove them because n is now inside the fusion group.
     //

@@ -927,7 +927,7 @@ static value_list getReverseCaptures(Gradient& grad_desc) {
 // and replicate, and so it's better to just copy them into the reverse graph,
 // without polluting the output lists unnecessarily.
 static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
-  static const auto err = [](Value*) -> Value* {
+  static const auto err = [](const Value*) -> Value* {
     throw std::runtime_error("unexpected input");
   };
   auto& graph = *grad_desc.f;
@@ -1125,7 +1125,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // afterward inputs: [output vjps][temporary vjps][captures]
   // construct a map from captured 'value' to the index in the input list
   // used to extract this block into its own function
-  std::unordered_map<Value*, size_t> capture_to_formal_index;
+  std::unordered_map<const Value*, size_t> capture_to_formal_index;
   const auto& add_capture = [&](Value* captured) {
     capture_to_formal_index[captured] = reverse_block->inputs().size();
     reverse_block->addInput()->copyMetadata(captured);
@@ -1136,7 +1136,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     add_capture(graph.outputs()[offset]);
 
   grad_desc.df = std::make_shared<Graph>();
-  grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
+  grad_desc.df->block()->cloneFrom(reverse_block, [&](const Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
   // reverse_node was just to hold onto reverse_block in a debuggable way

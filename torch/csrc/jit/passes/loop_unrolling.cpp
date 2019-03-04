@@ -56,12 +56,13 @@ void inlineBody(Node* loop) {
   auto body = loop->blocks().at(0);
   WithInsertPoint insert_point_guard{loop};
 
-  std::unordered_map<Value*, Value*> value_map;
-  auto get_value = [&](Value* v) {
+  std::unordered_map<const Value*, Value*> value_map;
+  auto get_value = [&](const Value* v) {
     auto it = value_map.find(v);
-    if (it != value_map.end())
+    if (it != value_map.end()) {
       return it->second;
-    return v;
+    }
+    return const_cast<Value*>(v);
   };
 
   // Loop node has extra (max_iters, initial_cond) inputs,
@@ -96,12 +97,13 @@ void repeatBody(Block* body, int64_t times) {
   auto graph = body->owningGraph();
   WithInsertPoint insert_point_guard{body};
 
-  std::unordered_map<Value*, Value*> value_map;
-  auto get_value = [&](Value* v) {
+  std::unordered_map<const Value*, Value*> value_map;
+  auto get_value = [&](const Value* v) {
     auto it = value_map.find(v);
-    if (it != value_map.end())
+    if (it != value_map.end()) {
       return it->second;
-    return v;
+    }
+    return const_cast<Value*>(v);
   };
 
   for (int64_t i = 1; i < times; ++i) {
@@ -185,7 +187,7 @@ void unroll(Node* loop) {
 
   // Clone the loop before we unroll it. The clone will become the epilogue.
   Node* loop_epilogue =
-      graph->createClone(loop, [](Value* v) { return v; })->insertAfter(loop);
+      graph->createClone(loop, [](const Value* v) { return const_cast<Value*>(v); })->insertAfter(loop);
   for (size_t i = 0; i < loop->outputs().size(); ++i) {
     loop->outputs()[i]->replaceAllUsesWith(loop_epilogue->outputs()[i]);
     loop_epilogue->replaceInput(i + 2, loop->outputs()[i]);

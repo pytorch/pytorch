@@ -13,7 +13,7 @@ TORCH_API void BlockToONNX(
     Block* old_block,
     Block* new_block,
     ::torch::onnx::OperatorExportTypes operator_export_type,
-    std::unordered_map<Value*, Value*> env);
+    std::unordered_map<const Value*, Value*> env);
 
 } // namespace jit
 } // namespace torch

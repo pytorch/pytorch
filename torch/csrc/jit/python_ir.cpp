@@ -133,9 +133,9 @@ struct ConcretePythonOp : public PythonOp {
       return getPythonName(pyobj.get());
     }
   }
-  void cloneFrom(Node* other_) override {
+  void cloneFrom(const Node* other_) override {
     Node::cloneFrom(other_);
-    auto other = other_->cast<PythonOp>();
+    auto other = const_cast<Node*>(other_)->cast<PythonOp>();
     this->cconv = other->cconv;
     Py_INCREF(other->pyobj.get());
     this->pyobj = THPObjectPtr(other->pyobj.get());
@@ -144,7 +144,7 @@ struct ConcretePythonOp : public PythonOp {
       this->scalar_args.emplace_back(sa.get());
     }
   }
-  Node* allocNewInstance(Graph* g) override {
+  Node* allocNewInstance(Graph* g) const override {
     return new ConcretePythonOp(g);
   }
   // recover the autograd.Function instance, if this PythonOp's function
@@ -348,7 +348,7 @@ void initPythonIRBindings(PyObject* module_) {
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
             return g.createClone(
-                n, [&](Value* e) { return fn(e).cast<Value*>(); });
+                n, [&](const Value* e) { return fn(e).cast<Value*>(); });
           })
       .GS(appendNode)
       .GS(prependNode)

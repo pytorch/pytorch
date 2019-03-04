@@ -43,7 +43,7 @@ std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
-  std::unordered_map<Value*, Value*> env;
+  std::unordered_map<const Value*, Value*> env;
   removePrintOps(graph);
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
@@ -53,7 +53,7 @@ void BlockToONNX(
     Block* old_block,
     Block* new_block,
     ::torch::onnx::OperatorExportTypes operator_export_type,
-    std::unordered_map<Value*, Value*> env) {
+    std::unordered_map<const Value*, Value*> env) {
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
 
@@ -61,7 +61,7 @@ void BlockToONNX(
   py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
 
   // Returns a node that n maps to in the new graph
-  auto envFn = [&env](Value* n) -> Value* {
+  auto envFn = [&env](const Value* n) -> Value* {
     auto it = env.find(n);
     AT_CHECK(it != env.end(), "Dangling node reference");
     AT_CHECK(it->second, "Unused node was subsequently used");

@@ -771,13 +771,13 @@ struct to_ir {
     Node* unpack_context =
         subgraph->insertNode(subgraph->create(prim::TupleUnpack, {context}, 0));
 
-    std::unordered_map<Value*, Value*> captures;
-    auto env = [&](Value* v) -> Value* {
+    std::unordered_map<const Value*, Value*> captures;
+    auto env = [&](const Value* v) -> Value* {
       auto it = captures.find(v);
       if (it != captures.end()) {
         return it->second;
       }
-      pack_context->addInput(v);
+      pack_context->addInput(const_cast<Value*>(v));
       Value* r = unpack_context->addOutput()->copyMetadata(v);
       captures[v] = r;
       return r;
@@ -2678,12 +2678,12 @@ void lambdaLiftFork(Node* fork_node) {
 
   // Make sure we capture everything in the new graph.
   // The uncaptured values will be added to the fork signature.
-  std::unordered_map<Value*, Value*> uncaptures_map;
-  auto env = [&](Value* v) -> Value* {
+  std::unordered_map<const Value*, Value*> uncaptures_map;
+  auto env = [&](const Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
       uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-      fork_node->addInput(v);
+      fork_node->addInput(const_cast<Value*>(v));
     }
     return uncaptures_map[v];
   };

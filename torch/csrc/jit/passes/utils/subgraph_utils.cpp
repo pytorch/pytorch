@@ -54,7 +54,7 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   auto subgraph = getSubgraph(subgraphNode);
 
   // Map from values in the surrounding graph to inputs in the subgraph
-  std::unordered_map<Value*, Value*> inputsMap;
+  std::unordered_map<const Value*, Value*> inputsMap;
 
   AT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
   size_t idx = 0;
@@ -86,7 +86,7 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
 
   // Merge the node into the graph
   auto mergedNode = subgraph->insertNode(
-      subgraph->createClone(toMerge, [&](Value* v) { return inputsMap[v]; }));
+      subgraph->createClone(toMerge, [&](const Value* v) { return inputsMap[v]; }));
 
   // If n's outputs were inputs to `group`, remove them since we just merged
   // n in.
@@ -148,7 +148,7 @@ std::vector<Value*> inlineGraph(
   // Clone all nodes
   for (auto inner : subgraph->nodes()) {
     Node* outer = outerGraph->createClone(
-        inner, [&](Value* k) -> Value* { return innerToOuter.at(k); });
+        inner, [&](const Value* k) -> Value* { return innerToOuter.at(k); });
     outer->insertBefore(insertBefore);
     const auto innerOutputs = inner->outputs();
     const auto outerOutputs = outer->outputs();
