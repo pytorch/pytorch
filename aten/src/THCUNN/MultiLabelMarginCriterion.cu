@@ -12,7 +12,7 @@
 
 template <typename Dtype, typename Acctype>
 #if defined(__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS(MULTILABELMARGIN_THREADS)
+C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
 #endif
 __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output,
                                                                    Dtype *input,
@@ -82,7 +82,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
 
 template <typename Dtype, typename Acctype>
 #if defined(__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS(MULTILABELMARGIN_THREADS)
+C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
 #endif
 __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gradInput,
                                                                       Dtype *gradOutput,
