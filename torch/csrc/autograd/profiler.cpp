@@ -40,14 +40,12 @@ std::shared_ptr<ProfilerInvocationState> currState() {
 }
 
 RangeEventList& getEventList() {
-  // TODO: this won't work with interleaved computation
   if (!event_list || associated_invocation_state != invocation_state.get()) {
     std::lock_guard<std::mutex> guard(invocation_state->mutex);
-    event_list = std::make_shared<RangeEventList>();
     if (thread_id == -1) {
       thread_id = next_thread_id++;
     }
-    invocation_state->all_event_lists.emplace_front(event_list);
+    event_list = invocation_state->all_event_lists[thread_id];
     associated_invocation_state = invocation_state.get();
   }
   return *event_list;
@@ -188,7 +186,7 @@ thread_event_lists disableProfiler(
     std::lock_guard<std::mutex> guard(old_state->mutex);
     for (auto it = old_state->all_event_lists.begin();
          it != old_state->all_event_lists.end();) {
-      auto & list = *it;
+      auto & list = it->second;
       result.emplace_back(list->consolidate());
       // GC lists that are not held by any threads
       if (list.use_count() == 1) {

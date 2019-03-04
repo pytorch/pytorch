@@ -220,7 +220,8 @@ struct TORCH_API RecordFunction {
 struct ProfilerInvocationState {
   ProfilerState state = ProfilerState::Disabled;
   std::mutex mutex;
-  std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+  std::unordered_map<int, std::shared_ptr<RangeEventList>> all_event_lists;
+
 };
 
 using thread_event_lists = std::vector<std::vector<Event>>;
