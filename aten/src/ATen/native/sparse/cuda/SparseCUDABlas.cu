@@ -70,9 +70,7 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
   auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, nnz, m, csrrowptr,
-    TH_INDEX_BASE ? CUSPARSE_INDEX_BASE_ONE : CUSPARSE_INDEX_BASE_ZERO
-  ));
+  CUSPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, nnz, m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
 }
 
 cusparseOperation_t convertTransToCusparseOperation(char trans) {
@@ -122,9 +120,6 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = setCUDASparseStream();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-#if TH_INDEX_BASE == 1
-  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
-#endif
   CUSPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
 }
 
@@ -146,9 +141,6 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = setCUDASparseStream();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-#if TH_INDEX_BASE == 1
-  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
-#endif
   CUSPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
   // TODO: I think this leaks the matrix descriptor.  Proper fix is to create
   // real descriptor classes
@@ -190,9 +182,6 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
   auto handle = setCUDASparseStream();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-#if TH_INDEX_BASE == 1
-  cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
-#endif
   CUSPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
   // TODO: I think this leaks the matrix descriptor.
 }
