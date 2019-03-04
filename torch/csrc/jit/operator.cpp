@@ -316,7 +316,8 @@ struct OperatorRegistry {
       AT_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
-          name);
+          name,
+          ". Do you have to update a set of hardcoded JIT ops?");
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;
