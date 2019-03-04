@@ -725,8 +725,8 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
-        const auto type = userType->type_;
+      if (auto classType = dynamic_cast<ClassValue*>(self.get())) {
+        const auto type = classType->type_;
         Value* new_input =
             block->addInput()->setUniqueName(name)->setType(type);
         environment_stack->setVar((*it).ident().range(), name, new_input);

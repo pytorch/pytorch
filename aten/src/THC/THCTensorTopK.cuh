@@ -361,7 +361,7 @@ __device__ void radixSelect(DataType* data,
 }
 
 template <typename T, typename IndexType, int Dim, bool Order>
-C10_LAUNCH_BOUNDS(1024)
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(TensorInfo<T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
